@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from loguru import logger
@@ -10,10 +13,15 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
     ChatBadRequestError,
+    ChatConfigurationError,
     ChatProviderError,
     ChatRateLimitError,
 )
-from tldw_Server_API.app.core.exceptions import NetworkError, RetryExhaustedError
+from tldw_Server_API.app.core.exceptions import (
+    NetworkError,
+    RetryExhaustedError,
+    raise_detached_error,
+)
 
 _ERROR_UTILS_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -25,6 +33,94 @@ _ERROR_UTILS_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     re.error,
 )
+
+_PRIVACY_SAFE_PROVIDER_ERRORS: ContextVar[bool] = ContextVar(
+    "privacy_safe_provider_errors",
+    default=False,
+)
+
+
+@contextmanager
+def provider_error_privacy_scope(enabled: bool) -> Iterator[None]:
+    """Temporarily select metadata-only provider error handling for this call."""
+
+    token = _PRIVACY_SAFE_PROVIDER_ERRORS.set(bool(enabled))
+    try:
+        yield
+    finally:
+        _PRIVACY_SAFE_PROVIDER_ERRORS.reset(token)
+
+
+def provider_errors_are_privacy_safe() -> bool:
+    """Return whether the current provider call must avoid upstream detail."""
+
+    return _PRIVACY_SAFE_PROVIDER_ERRORS.get()
+
+
+def _bounded_log_label(value: Any) -> str:
+    """Return a bounded label safe for provider-failure metadata."""
+
+    normalized = "".join(
+        character
+        for character in str(value or "").strip().lower()
+        if character.isalnum() or character in ".-_"
+    )[:64]
+    return normalized or "unknown"
+
+
+def log_provider_failure(
+    provider: Any,
+    exc: BaseException,
+    *,
+    phase: str,
+    status_code: int | None = None,
+) -> None:
+    """Log bounded upstream failure metadata without URLs, bodies, or exception text."""
+
+    if status_code is None and isinstance(exc, Exception):
+        try:
+            status_code = get_http_status_from_exception(exc)
+        except Exception:  # noqa: BLE001 - logging must never replace the provider failure
+            status_code = None
+    logger.error(
+        "{} provider failure phase={} error_type={} upstream_status={}",
+        _bounded_log_label(provider),
+        _bounded_log_label(phase),
+        _bounded_log_label(type(exc).__name__),
+        status_code if isinstance(status_code, int) else "unknown",
+    )
+
+
+def build_sanitized_chat_error(
+    provider: str,
+    *,
+    status_code: int | None = None,
+    auth_statuses: tuple[int, ...] = (401, 403),
+    rate_limit_statuses: tuple[int, ...] = (429,),
+    bad_request_statuses: tuple[int, ...] = (400, 404, 422),
+    treat_other_4xx_as_bad_request: bool = True,
+) -> ChatAPIError:
+    """Build one typed public error without reflecting untrusted upstream text."""
+
+    safe_provider = _bounded_log_label(provider)
+    if status_code in auth_statuses:
+        return ChatAuthenticationError(
+            provider=safe_provider,
+            status_code=status_code or 401,
+        )
+    if status_code in rate_limit_statuses:
+        return ChatRateLimitError(provider=safe_provider)
+    if status_code in bad_request_statuses or (
+        treat_other_4xx_as_bad_request
+        and status_code is not None
+        and 400 <= status_code < 500
+    ):
+        return ChatBadRequestError(provider=safe_provider)
+    if status_code is not None and 500 <= status_code < 600:
+        return ChatProviderError(provider=safe_provider, status_code=status_code)
+    if status_code is None:
+        return ChatProviderError(provider=safe_provider)
+    return ChatAPIError(provider=safe_provider, status_code=status_code)
 
 
 def get_http_status_from_exception(exc: Exception) -> int | None:
@@ -175,6 +271,77 @@ def log_http_400_body(provider: str, exc: Exception, parsed_body: Any = None, ma
     logger.warning(f"{provider or 'unknown'}: upstream 400 response metadata: {metadata_text}")
 
 
+def log_provider_failure_metadata(
+    provider: str,
+    exc: Exception,
+    *,
+    phase: str = "request",
+) -> None:
+    """Log an upstream failure without response or exception text."""
+
+    try:
+        status = get_http_status_from_exception(exc)
+    except _ERROR_UTILS_NONCRITICAL_EXCEPTIONS:
+        status = None
+    logger.error(
+        "{} provider {} failed: status={} error_type={}",
+        provider or "unknown",
+        phase,
+        status,
+        type(exc).__name__,
+    )
+
+
+def privacy_safe_chat_error(provider: str, exc: Exception) -> ChatAPIError:
+    """Return a typed provider error containing no upstream body or exception text."""
+
+    resolved_provider = str(getattr(exc, "provider", None) or provider or "unknown")
+    status_code = get_http_status_from_exception(exc)
+    if isinstance(exc, ChatAuthenticationError) or status_code in {401, 403}:
+        safe: ChatAPIError = ChatAuthenticationError(
+            provider=resolved_provider,
+            message="Provider authentication failed.",
+        )
+    elif isinstance(exc, ChatRateLimitError) or status_code == 429:
+        safe = ChatRateLimitError(
+            provider=resolved_provider,
+            message="Provider rate limit exceeded.",
+        )
+    elif isinstance(exc, ChatBadRequestError) or status_code in {400, 404, 422}:
+        safe = ChatBadRequestError(
+            provider=resolved_provider,
+            message="Provider rejected the request.",
+        )
+    elif isinstance(exc, ChatConfigurationError):
+        safe = ChatConfigurationError(
+            provider=resolved_provider,
+            message="Provider configuration is unavailable.",
+        )
+    elif isinstance(exc, ChatProviderError) or (
+        status_code is not None and status_code >= 500
+    ):
+        safe = ChatProviderError(
+            provider=resolved_provider,
+            message="Provider request failed.",
+            status_code=status_code or 502,
+        )
+    else:
+        safe = ChatAPIError(
+            provider=resolved_provider,
+            message="Provider request failed.",
+            status_code=status_code or 500,
+        )
+
+    retry_after = getattr(exc, "retry_after", None)
+    if retry_after is None:
+        headers = getattr(getattr(exc, "response", None), "headers", None)
+        if isinstance(headers, Mapping):
+            retry_after = headers.get("Retry-After") or headers.get("retry-after")
+    if retry_after is not None:
+        safe.retry_after = retry_after
+    return safe
+
+
 def raise_chat_error_from_http(
     provider: str,
     exc: Exception,
@@ -184,9 +351,8 @@ def raise_chat_error_from_http(
     bad_request_statuses: tuple[int, ...] = (400, 404, 422),
     treat_other_4xx_as_bad_request: bool = True,
 ) -> None:
-    """Normalize HTTP status errors into ChatAPIError subclasses."""
+    """Raise a detached, typed error without reflecting upstream response text."""
     status_code = get_http_status_from_exception(exc)
-    message: str = ""
     response = getattr(exc, "response", None)
     parsed_body = None
 
@@ -196,41 +362,34 @@ def raise_chat_error_from_http(
         except _ERROR_UTILS_NONCRITICAL_EXCEPTIONS:
             parsed_body = None
         log_http_400_body(provider, exc, parsed_body)
-        if isinstance(parsed_body, dict):
-            err_obj = parsed_body.get("error")
-            if isinstance(err_obj, dict) and isinstance(err_obj.get("message"), str):
-                message = err_obj.get("message") or ""
-            elif isinstance(err_obj, str):
-                message = err_obj
-            elif isinstance(parsed_body.get("message"), str):
-                message = parsed_body.get("message") or ""
-        if not message:
-            message = get_http_error_text(exc)
-        metadata = _safe_http_error_metadata(parsed_body, str(message) if message else None)
+        metadata = _safe_http_error_metadata(parsed_body)
         try:
             metadata_text = json.dumps(metadata, ensure_ascii=True, sort_keys=True)
         except _ERROR_UTILS_NONCRITICAL_EXCEPTIONS:
             metadata_text = "{}"
-        logger.error(f"{provider or 'unknown'} HTTP error response (status {status_code}) metadata: {metadata_text}")
+        logger.error(
+            f"{_bounded_log_label(provider)} HTTP error response "
+            f"status={status_code if isinstance(status_code, int) else 'unknown'} "
+            f"metadata={metadata_text}"
+        )
     else:
-        logger.error(f"{provider or 'unknown'} HTTP error with no response payload: {exc}")
-        message = get_http_error_text(exc)
+        log_provider_failure(
+            provider,
+            exc,
+            phase="http_response",
+            status_code=status_code,
+        )
 
-    if not message:
-        message = f"{provider} API error" if provider else "API error"
-
-    if status_code in auth_statuses:
-        raise ChatAuthenticationError(provider=provider or None, message=message)
-    if status_code in rate_limit_statuses:
-        raise ChatRateLimitError(provider=provider or None, message=message)
-    if status_code in bad_request_statuses or (
-        treat_other_4xx_as_bad_request and status_code is not None and 400 <= status_code < 500
-    ):
-        raise ChatBadRequestError(provider=provider or None, message=message)
-    if status_code is not None and 500 <= status_code < 600:
-        raise ChatProviderError(provider=provider or None, message=message, status_code=status_code)
-
-    raise ChatAPIError(provider=provider or None, message=message, status_code=status_code or 500)
+    raise_detached_error(
+        build_sanitized_chat_error(
+            provider,
+            status_code=status_code,
+            auth_statuses=auth_statuses,
+            rate_limit_statuses=rate_limit_statuses,
+            bad_request_statuses=bad_request_statuses,
+            treat_other_4xx_as_bad_request=treat_other_4xx_as_bad_request,
+        )
+    )
 
 
 def is_network_error(exc: Exception) -> bool:

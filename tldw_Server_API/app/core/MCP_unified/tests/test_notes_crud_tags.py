@@ -108,7 +108,7 @@ async def test_notes_crud_and_tags_flow():
     fake_db = FakeNotesDB()
     mod._open_db = lambda ctx: fake_db  # type: ignore[attr-defined]
 
-    ctx = SimpleNamespace(metadata={"roles": []})
+    ctx = SimpleNamespace(user_id="1", metadata={"roles": []})
 
     created = await mod.execute_tool(
         "notes.create",
@@ -149,8 +149,8 @@ async def test_notes_delete_permanent_requires_admin():
     fake_db = FakeNotesDB()
     mod._open_db = lambda ctx: fake_db  # type: ignore[attr-defined]
 
-    user_ctx = SimpleNamespace(metadata={"roles": []})
-    admin_ctx = SimpleNamespace(metadata={"roles": ["admin"]})
+    user_ctx = SimpleNamespace(user_id="1", metadata={"roles": []})
+    admin_ctx = SimpleNamespace(user_id="1", metadata={"roles": ["admin"]})
 
     created = await mod.execute_tool(
         "notes.create",

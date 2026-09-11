@@ -1,9 +1,14 @@
-from tldw_Server_API.app.core.Chat import chat_service
+"""Tests for LLM-backed article extraction behavior."""
+
+from __future__ import annotations
+
+from typing import Any
+
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import extract_article_with_pipeline
 
 
-def test_llm_extraction_parses_code_fenced_json(monkeypatch):
-    def _fake_call(**_kwargs):
+def test_llm_extraction_parses_code_fenced_json(install_extraction_dependencies) -> None:
+    def _fake_call(**_kwargs: Any) -> dict[str, Any]:
         return {
             "choices": [
                 {
@@ -16,7 +21,7 @@ def test_llm_extraction_parses_code_fenced_json(monkeypatch):
             "model": "gpt-test",
         }
 
-    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fake_call)
+    install_extraction_dependencies(_fake_call)
 
     result = extract_article_with_pipeline(
         "<html><body><p>Body</p></body></html>",
@@ -31,8 +36,8 @@ def test_llm_extraction_parses_code_fenced_json(monkeypatch):
     assert result.get("llm_usage", {}).get("prompt_tokens") == 3
 
 
-def test_llm_extraction_strict_json_rejects_extras(monkeypatch):
-    def _fake_call(**_kwargs):
+def test_llm_extraction_strict_json_rejects_extras(install_extraction_dependencies) -> None:
+    def _fake_call(**_kwargs: Any) -> dict[str, Any]:
         return {
             "choices": [
                 {
@@ -45,7 +50,7 @@ def test_llm_extraction_strict_json_rejects_extras(monkeypatch):
             "model": "gpt-test",
         }
 
-    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fake_call)
+    install_extraction_dependencies(_fake_call)
 
     result = extract_article_with_pipeline(
         "<html><body><p>Body</p></body></html>",
@@ -55,4 +60,4 @@ def test_llm_extraction_strict_json_rejects_extras(monkeypatch):
     )
 
     assert result["extraction_successful"] is False
-    assert "strict_json_failed" in (result.get("llm_error") or "")
+    assert result.get("llm_error") == "strict_json_failed"

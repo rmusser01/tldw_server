@@ -1,5 +1,10 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { configure, fireEvent, render, screen, waitFor } from "@testing-library/react"
+
+// The wizard's step transitions render a heavy antd tree; waitFor/findBy at
+// testing-library's 1s default race them on loaded CI runners (#2911).
+// Environments are per test file under vitest, so this cannot leak.
+configure({ asyncUtilTimeout: 15_000 })
 import { message } from "antd"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -96,7 +101,13 @@ const trackerItem = (overrides: Record<string, unknown> = {}) => ({
   ...overrides
 })
 
-describe("FamilyGuardrailsWizard", () => {
+// Suite-scoped timeout: these tests walk a multi-step antd wizard through
+// many userEvent interactions under jsdom (0.6-2s of act() flushing each),
+// so several legitimately take 5-12s and flake at Vitest's 5s default as a
+// function of runner load. Same pattern as sidepanel-flashcards and
+// OverviewTab.quick-setup; describe options keep it from leaking to other
+// files.
+describe("FamilyGuardrailsWizard", { timeout: 60_000 }, () => {
   const originalMatchMedia = window.matchMedia
   const originalClipboard = Object.getOwnPropertyDescriptor(window.navigator, "clipboard")
 
@@ -385,8 +396,11 @@ describe("FamilyGuardrailsWizard", () => {
     render(<FamilyGuardrailsWizard />)
 
     await startNewHousehold()
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(
         screen.getByText(
           "Use each guardian's existing account user ID (the one used to sign in)."
@@ -394,8 +408,11 @@ describe("FamilyGuardrailsWizard", () => {
       ).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(
         screen.getByText(
           "Existing accounts need a sign-in user ID. Invite-new dependents can be provisioned by email or via a guardian copy link in the tracker."
@@ -1109,8 +1126,11 @@ describe("FamilyGuardrailsWizard", () => {
   it("blocks continue when guardians use duplicate user IDs", async () => {
     render(<FamilyGuardrailsWizard />)
 
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(
         screen.getByText("Add every guardian who can manage alerts and safety settings.")
       ).toBeInTheDocument()
@@ -1142,8 +1162,11 @@ describe("FamilyGuardrailsWizard", () => {
     try {
       render(<FamilyGuardrailsWizard />)
 
-      fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
       await waitFor(() => {
+        // Retry the navigation click with the assertion: loaded CI
+        // runners can swallow a single click during re-render (#2911).
+        const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+        if (_advance) fireEvent.click(_advance)
         expect(
           screen.getByText("Add every guardian who can manage alerts and safety settings.")
         ).toBeInTheDocument()
@@ -1174,8 +1197,11 @@ describe("FamilyGuardrailsWizard", () => {
   it("shows concrete duplicate guardian user IDs inline", async () => {
     render(<FamilyGuardrailsWizard />)
 
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(
         screen.getByText("Add every guardian who can manage alerts and safety settings.")
       ).toBeInTheDocument()
@@ -1201,8 +1227,11 @@ describe("FamilyGuardrailsWizard", () => {
     render(<FamilyGuardrailsWizard />)
 
     fireEvent.click(screen.getByRole("radio", { name: "Caregiver/Institutional" }))
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(
         screen.getByText("Add every caregiver who can manage alerts and safety settings.")
       ).toBeInTheDocument()
@@ -1275,8 +1304,11 @@ describe("FamilyGuardrailsWizard", () => {
     render(<FamilyGuardrailsWizard />)
 
     fireEvent.click(screen.getByRole("radio", { name: "Caregiver/Institutional" }))
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(
         screen.getByText("Add every caregiver who can manage alerts and safety settings.")
       ).toBeInTheDocument()
@@ -1326,13 +1358,19 @@ describe("FamilyGuardrailsWizard", () => {
       ).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(screen.getByText("Apply a template first, then customize if needed.")).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(
         screen.getByText("Choose how caregivers receive moderation context when alerts trigger.")
       ).toBeInTheDocument()
@@ -1392,15 +1430,21 @@ describe("FamilyGuardrailsWizard", () => {
     render(<FamilyGuardrailsWizard />)
 
     fireEvent.click(screen.getByRole("radio", { name: "Caregiver/Institutional" }))
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(
         screen.getByText("Add every caregiver who can manage alerts and safety settings.")
       ).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(
         screen.getByText(
           "Create or link dependent accounts here. User IDs are required for invitation and acceptance."
@@ -1435,30 +1479,42 @@ describe("FamilyGuardrailsWizard", () => {
     fireEvent.change(screen.getAllByPlaceholderText("Child account user ID")[0], {
       target: { value: "alex-kid" }
     })
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(screen.getByText("Apply a template first, then customize if needed.")).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(
         screen.getByText("Choose how caregivers receive moderation context when alerts trigger.")
       ).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(screen.getByRole("heading", { name: "Invite + Acceptance Tracker" })).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
+    // Retry the click together with the assertion: on loaded CI runners the
+    // step re-renders around the click and can swallow it, so a single
+    // fireEvent followed by a plain wait never converges (#2911).
     await waitFor(() => {
+      const advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (advance) fireEvent.click(advance)
       expect(screen.getByRole("heading", { name: "Review + Activate" })).toBeInTheDocument()
       expect(screen.getByText("Caregivers:")).toBeInTheDocument()
     })
-    },
-    15000
+    }
   )
 
   it("requires complete dependent rows before allowing continue", async () => {
@@ -1772,8 +1828,11 @@ describe("FamilyGuardrailsWizard", () => {
       ).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(screen.getByText("Apply a template first, then customize if needed.")).toBeInTheDocument()
     })
     expect(
@@ -1936,8 +1995,11 @@ describe("FamilyGuardrailsWizard", () => {
   it("auto-applies guardian bulk input when continuing without explicit apply", async () => {
     render(<FamilyGuardrailsWizard />)
 
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(
         screen.getByText("Add every guardian who can manage alerts and safety settings.")
       ).toBeInTheDocument()
@@ -1981,8 +2043,11 @@ describe("FamilyGuardrailsWizard", () => {
     render(<FamilyGuardrailsWizard />)
 
     fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
-    fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
     await waitFor(() => {
+      // Retry the navigation click with the assertion: loaded CI
+      // runners can swallow a single click during re-render (#2911).
+      const _advance = screen.queryByRole("button", { name: /Save & Continue/i })
+      if (_advance) fireEvent.click(_advance)
       expect(
         screen.getByText("Create or link dependent accounts here. User IDs are required for invitation and acceptance.")
       ).toBeInTheDocument()

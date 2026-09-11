@@ -17,6 +17,26 @@ from uuid import uuid4
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.postgres_profile_version_schema import (
+    ensure_postgres_profile_version_sync,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_candidate_schema import (
+    PROFILE_CANDIDATE_TABLES,
+    profile_candidate_schema_is_valid,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_user_sync_boundary import (
+    _guard_authnz_sync_backend,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_version import (
+    PROFILE_VISIBLE_USER_FIELDS,
+    ProfileVersionNotFound,
+    VersionedUserWriteGateway,
+)
+from tldw_Server_API.app.core.AuthNZ.sqlite_profile_version_schema import (
+    remediate_sqlite_profile_version_schema,
+    sqlite_profile_version_connection_invalid,
+)
+
 # Local imports
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
@@ -94,9 +114,9 @@ class UserDatabase:
 
         # Use provided backend or create from config
         if backend:
-            self.backend = backend
+            raw_backend = backend
         elif config:
-            self.backend = DatabaseBackendFactory.create_backend(config)
+            raw_backend = DatabaseBackendFactory.create_backend(config)
         else:
             # Default to SQLite with Users.db
             default_sqlite_path = (
@@ -109,10 +129,13 @@ class UserDatabase:
                 backend_type=BackendType.SQLITE,
                 sqlite_path=str(default_sqlite_path)
             )
-            self.backend = DatabaseBackendFactory.create_backend(config)
+            raw_backend = DatabaseBackendFactory.create_backend(config)
 
-        # Initialize schema if needed
+        # Schema/bootstrap is a narrow, non-serving maintenance phase. The
+        # managed runtime boundary is installed only after it succeeds.
+        self.backend = raw_backend
         self._initialize_schema()
+        self.backend = _guard_authnz_sync_backend(raw_backend)
 
         logger.info(
             "UserDatabase initialized backend={} target={} client_id={}",
@@ -168,10 +191,14 @@ class UserDatabase:
                 with open(schema_path, encoding='utf-8') as f:
                     schema_sql = f.read()
                 schema_statements = self._split_sql_statements(schema_sql)
-                logger.info(f"Database schema loaded from {schema_path}")
+                logger.info("Database schema loaded from packaged schema file")
                 loaded_from_file = True
             except Exception as exc:  # noqa: BLE001
-                logger.error(f"Failed to read schema file {schema_path}: {exc}")
+                logger.bind(
+                    operation="schema_file_read",
+                    backend=self.backend.backend_type.value,
+                    exception_type=type(exc).__name__,
+                ).error("Failed to read user database schema file")
 
         if not schema_statements:
             logger.warning(
@@ -189,14 +216,32 @@ class UserDatabase:
                 try:
                     self._apply_schema_statements(fallback_statements)
                 except Exception as fallback_exc:  # noqa: BLE001
+                    logger.bind(
+                        operation="schema_fallback_apply",
+                        backend=self.backend.backend_type.value,
+                        exception_type=type(fallback_exc).__name__,
+                    ).error("Required user database schema fallback failed")
                     raise UserDatabaseError(
-                        f"Required schema initialization failed after fallback: {fallback_exc}"
-                    ) from fallback_exc
+                        "Required schema initialization failed after fallback"
+                    ) from None
             else:
+                logger.bind(
+                    operation="schema_apply",
+                    backend=self.backend.backend_type.value,
+                    exception_type=type(exc).__name__,
+                ).error("Required user database schema initialization failed")
                 raise UserDatabaseError(
-                    f"Required schema initialization failed: {exc}"
-                ) from exc
+                    "Required schema initialization failed"
+                ) from None
 
+        if self.backend.backend_type == BackendType.SQLITE:
+            self._ensure_sqlite_profile_version_schema()
+        elif self.backend.backend_type == BackendType.POSTGRESQL:
+            with self.backend.transaction() as connection:
+                ensure_postgres_profile_version_sync(
+                    self.backend,
+                    connection=connection,
+                )
         self._ensure_core_columns()
         self._seed_default_data()
 
@@ -248,14 +293,21 @@ class UserDatabase:
                 if existing.rows:
                     raise DuplicateUserError("Username or email already exists")
 
-                # Insert user
-                self.backend.execute(
-                    """
-                    INSERT INTO users (uuid, username, email, password_hash, metadata)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (user_uuid, username, email, password_hash, metadata),
-                    connection=conn,
+                gateway = VersionedUserWriteGateway(
+                    "postgres"
+                    if self.backend.backend_type == BackendType.POSTGRESQL
+                    else "sqlite"
+                )
+                gateway.insert_user_sync(
+                    self.backend,
+                    conn,
+                    values={
+                        "uuid": user_uuid,
+                        "username": username,
+                        "email": email,
+                        "password_hash": password_hash,
+                        "metadata": metadata,
+                    },
                 )
                 # Retrieve ID using UUID to support backends without lastrowid
                 user_lookup = self.backend.execute(
@@ -301,7 +353,12 @@ class UserDatabase:
             emsg = str(e).lower()
             if ("duplicate" in emsg) or ("unique" in emsg) or ("already exists" in emsg):
                 raise DuplicateUserError("Username or email already exists") from e
-            raise UserDatabaseError(f"Failed to create user: {e}") from e
+            logger.bind(
+                operation="create_user",
+                backend=self.backend.backend_type.value,
+                exception_type=type(e).__name__,
+            ).error("Failed to create user")
+            raise UserDatabaseError("Failed to create user") from None
 
     def get_user(self, user_id: Optional[int] = None, username: Optional[str] = None,
                  email: Optional[str] = None) -> Optional[dict[str, Any]]:
@@ -370,11 +427,13 @@ class UserDatabase:
             allowed_fields = ['email', 'is_active', 'is_verified', 'metadata']
             set_clause = []
             values = []
+            accepted_fields: list[str] = []
 
             for field, value in updates.items():
                 if field in allowed_fields:
                     set_clause.append(f"{field} = ?")
                     values.append(value if field != 'metadata' else json.dumps(value))
+                    accepted_fields.append(field)
 
             if not set_clause:
                 return False
@@ -384,21 +443,49 @@ class UserDatabase:
             query_template = "UPDATE users SET {set_clause_sql}, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
             query = query_template.format_map(locals())  # nosec B608
 
-            result = self.backend.execute(query, tuple(values), connection=conn)
-
-            success = False
-            if self.backend.backend_type == BackendType.SQLITE:
-                try:
-                    change_result = self.backend.execute(
-                        "SELECT changes() AS changes",
-                        connection=conn,
-                    )
-                    changes = change_result.rows[0].get("changes", 0) if change_result.rows else 0
-                    success = bool(changes)
-                except _USERDB_NONCRITICAL_EXCEPTIONS:
-                    success = False
+            backend_name = (
+                "postgres"
+                if self.backend.backend_type == BackendType.POSTGRESQL
+                else "sqlite"
+            )
+            if backend_name == "postgres":
+                query = query.replace("?", "%s")
+            visible_fields = tuple(
+                field for field in accepted_fields if field in PROFILE_VISIBLE_USER_FIELDS
+            )
+            try:
+                write_result = VersionedUserWriteGateway(
+                    backend_name
+                ).execute_update_sync(
+                    self.backend,
+                    conn,
+                    user_id=user_id,
+                    profile_visible_fields=visible_fields,
+                    statement=query,
+                    parameters=tuple(values),
+                )
+            except ProfileVersionNotFound:
+                return False
+            if visible_fields:
+                success = bool(write_result.affected_user_ids)
+            elif backend_name == "sqlite":
+                change_result = self.backend.execute(
+                    "SELECT changes() AS changes",
+                    connection=conn,
+                )
+                changes = (
+                    change_result.rows[0].get("changes", 0)
+                    if change_result.rows
+                    else 0
+                )
+                success = bool(changes)
             else:
-                success = result.rowcount > 0
+                existing = self.backend.execute(
+                    "SELECT 1 FROM users WHERE id = %s",
+                    (user_id,),
+                    connection=conn,
+                )
+                success = bool(existing.rows)
 
             if success:
                 self._audit_log('user_updated', user_id, None, updates, connection=conn)
@@ -496,7 +583,10 @@ class UserDatabase:
                 return True
 
             except _USERDB_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Failed to assign role: {e}")
+                logger.bind(
+                    operation="assign_role",
+                    exception_type=type(e).__name__,
+                ).error("Failed to assign role")
                 return False
 
     def revoke_role(self, user_id: int, role_name: str, revoked_by: Optional[int] = None) -> bool:
@@ -778,16 +868,24 @@ class UserDatabase:
                     user_agent: Optional[str] = None) -> bool:
         """Record a successful login."""
         with self.backend.transaction() as conn:
-            self.backend.execute(
-                """
-                UPDATE users
-                SET last_login = CURRENT_TIMESTAMP,
-                    failed_login_attempts = 0,
-                    locked_until = NULL
-                WHERE id = ?
-                """,
-                (user_id,),
-                connection=conn,
+            backend_name = (
+                "postgres"
+                if self.backend.backend_type == BackendType.POSTGRESQL
+                else "sqlite"
+            )
+            placeholder = "%s" if backend_name == "postgres" else "?"
+            VersionedUserWriteGateway(backend_name).execute_update_sync(
+                self.backend,
+                conn,
+                user_id=user_id,
+                profile_visible_fields=("last_login",),
+                statement=(
+                    "UPDATE users SET last_login = CURRENT_TIMESTAMP, "
+                    "failed_login_attempts = 0, locked_until = NULL "
+                    # Placeholder is closed over the detected backend; values stay bound.
+                    f"WHERE id = {placeholder}"  # nosec B608
+                ),
+                parameters=(user_id,),
             )
 
             self._audit_log('login_success', user_id, None,
@@ -883,7 +981,10 @@ class UserDatabase:
                 connection=connection,
             )
         except _USERDB_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to create audit log: {e}")
+            logger.bind(
+                operation="create_audit_log",
+                exception_type=type(e).__name__,
+            ).error("Failed to create audit log")
 
     # ------------------------------------------------------------------------------------------------------------------
     # Internal helpers for schema/bootstrap
@@ -909,6 +1010,27 @@ class UserDatabase:
                 finally:
                     cursor.close()
 
+    def _ensure_sqlite_profile_version_schema(self) -> None:
+        """Own canonical anchor remediation during raw SQLite bootstrap."""
+        pool = self.backend.get_pool()
+        try:
+            connection = pool.get_connection()
+            remediate_sqlite_profile_version_schema(connection)
+        except BaseException as exc:
+            if sqlite_profile_version_connection_invalid(exc):
+                with contextlib.suppress(Exception):
+                    pool.clear_thread_local_connection()
+            if not isinstance(exc, Exception):
+                raise
+            logger.bind(
+                operation="profile_version_schema_readiness",
+                backend="sqlite",
+                exception_type=type(exc).__name__,
+            ).error("Required users.profile_version schema validation failed")
+            raise UserDatabaseError(
+                "Required users.profile_version schema validation failed"
+            ) from None
+
     def _default_schema_statements(self) -> list[str]:
         if self.backend.backend_type == BackendType.POSTGRESQL:
             return self._default_schema_statements_postgres()
@@ -920,7 +1042,7 @@ class UserDatabase:
             """
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                uuid TEXT UNIQUE NOT NULL,
+                uuid TEXT UNIQUE NOT NULL DEFAULT (lower(hex(randomblob(16)))),
                 username TEXT UNIQUE NOT NULL CHECK (length(username) <= 255),
                 email TEXT UNIQUE NOT NULL CHECK (length(email) <= 255),
                 password_hash TEXT NOT NULL,
@@ -928,11 +1050,115 @@ class UserDatabase:
                 is_active INTEGER NOT NULL DEFAULT 1,
                 is_verified INTEGER NOT NULL DEFAULT 0,
                 is_superuser INTEGER NOT NULL DEFAULT 0,
+                email_verified INTEGER NOT NULL DEFAULT 0,
+                two_factor_enabled INTEGER NOT NULL DEFAULT 0,
+                role TEXT NOT NULL DEFAULT 'user',
+                storage_quota_mb INTEGER NOT NULL DEFAULT 5120,
+                storage_used_mb REAL NOT NULL DEFAULT 0,
                 failed_login_attempts INTEGER NOT NULL DEFAULT 0,
                 locked_until TIMESTAMP,
                 last_login TIMESTAMP,
+                email_verified_at TIMESTAMP,
+                two_factor_secret TEXT,
+                totp_secret TEXT,
+                backup_codes TEXT,
+                created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                password_changed_at TIMESTAMP,
+                profile_version TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%f000Z', 'now')),
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS organizations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uuid TEXT UNIQUE,
+                name TEXT UNIQUE NOT NULL,
+                slug TEXT UNIQUE,
+                owner_user_id INTEGER,
+                is_active INTEGER DEFAULT 1,
+                metadata TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS teams (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                org_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                slug TEXT,
+                description TEXT,
+                is_active INTEGER DEFAULT 1,
+                metadata TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (org_id, name),
+                FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS org_members (
+                org_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                role TEXT DEFAULT 'member',
+                status TEXT DEFAULT 'active',
+                added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (org_id, user_id),
+                FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS team_members (
+                team_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                role TEXT DEFAULT 'member',
+                status TEXT DEFAULT 'active',
+                added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (team_id, user_id),
+                FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS user_config_overrides (
+                user_id INTEGER NOT NULL,
+                key TEXT NOT NULL,
+                value_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_by INTEGER,
+                updated_by INTEGER,
+                PRIMARY KEY (user_id, key),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS org_config_overrides (
+                org_id INTEGER NOT NULL,
+                key TEXT NOT NULL,
+                value_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_by INTEGER,
+                updated_by INTEGER,
+                PRIMARY KEY (org_id, key),
+                FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS team_config_overrides (
+                team_id INTEGER NOT NULL,
+                key TEXT NOT NULL,
+                value_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_by INTEGER,
+                updated_by INTEGER,
+                PRIMARY KEY (team_id, key),
+                FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)",
@@ -1050,9 +1276,8 @@ class UserDatabase:
     @staticmethod
     def _default_schema_statements_postgres() -> list[str]:
         return [
-            "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
             """
-            CREATE TABLE IF NOT EXISTS users (
+            CREATE TABLE IF NOT EXISTS public.users (
                 id BIGSERIAL PRIMARY KEY,
                 uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
                 username VARCHAR(255) UNIQUE NOT NULL,
@@ -1062,15 +1287,114 @@ class UserDatabase:
                 is_active BOOLEAN NOT NULL DEFAULT TRUE,
                 is_verified BOOLEAN NOT NULL DEFAULT FALSE,
                 is_superuser BOOLEAN NOT NULL DEFAULT FALSE,
+                email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+                two_factor_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                role TEXT NOT NULL DEFAULT 'user',
+                storage_quota_mb INTEGER NOT NULL DEFAULT 5120,
+                storage_used_mb DOUBLE PRECISION NOT NULL DEFAULT 0,
                 failed_login_attempts INTEGER NOT NULL DEFAULT 0,
                 locked_until TIMESTAMPTZ,
                 last_login TIMESTAMPTZ,
+                email_verified_at TIMESTAMPTZ,
+                two_factor_secret TEXT,
+                totp_secret TEXT,
+                backup_codes TEXT,
+                created_by BIGINT REFERENCES public.users(id) ON DELETE SET NULL,
+                password_changed_at TIMESTAMPTZ,
+                profile_version TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
-            "CREATE INDEX IF NOT EXISTS idx_users_username ON users (username)",
-            "CREATE INDEX IF NOT EXISTS idx_users_email ON users (email)",
+            """
+            CREATE TABLE IF NOT EXISTS public.organizations (
+                id BIGSERIAL PRIMARY KEY,
+                uuid TEXT UNIQUE,
+                name TEXT UNIQUE NOT NULL,
+                slug TEXT UNIQUE,
+                owner_user_id BIGINT REFERENCES public.users(id) ON DELETE SET NULL,
+                is_active BOOLEAN DEFAULT TRUE,
+                metadata JSONB,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS public.teams (
+                id BIGSERIAL PRIMARY KEY,
+                org_id BIGINT NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                slug TEXT,
+                description TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                metadata JSONB,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (org_id, name)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS public.org_members (
+                org_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                role TEXT DEFAULT 'member',
+                status TEXT DEFAULT 'active',
+                added_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (org_id, user_id),
+                FOREIGN KEY (org_id) REFERENCES public.organizations(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS public.team_members (
+                team_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                role TEXT DEFAULT 'member',
+                status TEXT DEFAULT 'active',
+                added_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (team_id, user_id),
+                FOREIGN KEY (team_id) REFERENCES public.teams(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS public.user_config_overrides (
+                user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+                key TEXT NOT NULL,
+                value_json TEXT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_by BIGINT,
+                updated_by BIGINT,
+                PRIMARY KEY (user_id, key)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS public.org_config_overrides (
+                org_id BIGINT NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+                key TEXT NOT NULL,
+                value_json TEXT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_by BIGINT,
+                updated_by BIGINT,
+                PRIMARY KEY (org_id, key)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS public.team_config_overrides (
+                team_id BIGINT NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+                key TEXT NOT NULL,
+                value_json TEXT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_by BIGINT,
+                updated_by BIGINT,
+                PRIMARY KEY (team_id, key)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_users_username ON public.users (username)",
+            "CREATE INDEX IF NOT EXISTS idx_users_email ON public.users (email)",
             """
             CREATE TABLE IF NOT EXISTS roles (
                 id BIGSERIAL PRIMARY KEY,
@@ -1098,7 +1422,7 @@ class UserDatabase:
             """,
             """
             CREATE TABLE IF NOT EXISTS user_roles (
-                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
                 role_id BIGINT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
                 granted_by BIGINT,
                 expires_at TIMESTAMPTZ,
@@ -1107,7 +1431,7 @@ class UserDatabase:
             """,
             """
             CREATE TABLE IF NOT EXISTS user_permissions (
-                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
                 permission_id BIGINT NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
                 granted BOOLEAN NOT NULL DEFAULT TRUE,
                 granted_by BIGINT,
@@ -1119,7 +1443,7 @@ class UserDatabase:
             CREATE TABLE IF NOT EXISTS registration_codes (
                 id BIGSERIAL PRIMARY KEY,
                 code TEXT UNIQUE NOT NULL,
-                created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+                created_by BIGINT REFERENCES public.users(id) ON DELETE SET NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMPTZ,
                 max_uses INTEGER NOT NULL DEFAULT 1,
@@ -1132,7 +1456,7 @@ class UserDatabase:
             CREATE TABLE IF NOT EXISTS registration_code_usage (
                 id BIGSERIAL PRIMARY KEY,
                 code_id BIGINT NOT NULL REFERENCES registration_codes(id) ON DELETE CASCADE,
-                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
                 ip_address TEXT,
                 user_agent TEXT,
                 used_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -1142,8 +1466,8 @@ class UserDatabase:
             CREATE TABLE IF NOT EXISTS auth_audit_log (
                 id BIGSERIAL PRIMARY KEY,
                 event_type TEXT NOT NULL,
-                user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-                target_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+                user_id BIGINT REFERENCES public.users(id) ON DELETE SET NULL,
+                target_user_id BIGINT REFERENCES public.users(id) ON DELETE SET NULL,
                 details JSONB,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
@@ -1281,9 +1605,13 @@ class UserDatabase:
         except UserDatabaseError:
             raise
         except Exception as exc:  # noqa: BLE001
+            logger.bind(
+                operation="rbac_seed_verification",
+                exception_type=type(exc).__name__,
+            ).error("Required RBAC seed verification failed")
             raise UserDatabaseError(
-                f"Required RBAC seed verification failed: {exc}"
-            ) from exc
+                "Required RBAC seed verification failed"
+            ) from None
 
 
 #
@@ -1312,18 +1640,34 @@ class UserDatabase:
                 if 'is_superuser' not in column_names:
                     user_step = "users.is_superuser"
                     self.backend.execute("ALTER TABLE users ADD COLUMN is_superuser INTEGER DEFAULT 0")
+                if 'profile_version' not in column_names:
+                    raise UserDatabaseError(
+                        "Required users.profile_version schema validation failed"
+                    )
+                user_step = "profile candidate source tables"
+                with self.backend.transaction() as conn:
+                    for statement in self._profile_candidate_table_statements_sqlite():
+                        self.backend.execute(statement, connection=conn)
+                    self._validate_profile_candidate_tables_sqlite(
+                        connection=conn,
+                    )
                 user_step = "users.uuid backfill"
-                self.backend.execute(
-                    """
-                    UPDATE users
-                    SET uuid = lower(hex(randomblob(4))) || '-' ||
-                               lower(hex(randomblob(2))) || '-' ||
-                               lower(hex(randomblob(2))) || '-' ||
-                               lower(hex(randomblob(2))) || '-' ||
-                               lower(hex(randomblob(6)))
-                    WHERE uuid IS NULL OR uuid = ''
-                    """
-                )
+                missing_uuid_rows = self.backend.execute(
+                    "SELECT id FROM users WHERE uuid IS NULL OR uuid = ''"
+                ).rows
+                gateway = VersionedUserWriteGateway("sqlite")
+                maintenance_executor = _guard_authnz_sync_backend(self.backend)
+                with self.backend.transaction() as conn:
+                    for row in missing_uuid_rows:
+                        user_id = int(row["id"] if isinstance(row, dict) else row[0])
+                        gateway.execute_update_sync(
+                            maintenance_executor,
+                            conn,
+                            user_id=user_id,
+                            profile_visible_fields=("uuid",),
+                            statement="UPDATE users SET uuid = ? WHERE id = ?",
+                            parameters=(str(uuid4()), user_id),
+                        )
                 user_step = "users.uuid unique index"
                 self.backend.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_uuid ON users(uuid)")
                 user_step = "users.failed_login_attempts backfill"
@@ -1335,44 +1679,65 @@ class UserDatabase:
                     "UPDATE users SET locked_until = NULL WHERE locked_until IS NULL"
                 )
             elif self.backend.backend_type == BackendType.POSTGRESQL:
-                user_step = "pgcrypto extension"
-                self.backend.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
                 user_step = "users.uuid"
-                self.backend.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS uuid UUID")
+                self.backend.execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS uuid UUID")
                 user_step = "users.metadata"
-                self.backend.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS metadata JSONB")
+                self.backend.execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS metadata JSONB")
                 user_step = "users.failed_login_attempts"
-                self.backend.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER DEFAULT 0")
+                self.backend.execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER DEFAULT 0")
                 user_step = "users.locked_until"
-                self.backend.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ")
+                self.backend.execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ")
                 user_step = "users.is_superuser"
-                self.backend.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superuser BOOLEAN DEFAULT FALSE")
-                try:
-                    user_step = "users.uuid backfill"
-                    self.backend.execute("UPDATE users SET uuid = gen_random_uuid() WHERE uuid IS NULL")
-                except _USERDB_NONCRITICAL_EXCEPTIONS:
-                    user_step = "users.uuid text backfill"
-                    self.backend.execute("UPDATE users SET uuid = gen_random_uuid()::text WHERE uuid IS NULL")
+                self.backend.execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS is_superuser BOOLEAN DEFAULT FALSE")
+                user_step = "profile candidate source tables"
+                with self.backend.transaction() as conn:
+                    for statement in self._profile_candidate_table_statements_postgres():
+                        self.backend.execute(statement, connection=conn)
+                    self._validate_profile_candidate_tables_postgres(
+                        connection=conn,
+                    )
+                user_step = "users.uuid backfill"
+                missing_uuid_rows = self.backend.execute(
+                    "SELECT id FROM public.users WHERE uuid IS NULL"
+                ).rows
+                gateway = VersionedUserWriteGateway("postgres")
+                maintenance_executor = _guard_authnz_sync_backend(self.backend)
+                with self.backend.transaction() as conn:
+                    for row in missing_uuid_rows:
+                        user_id = int(row["id"] if isinstance(row, dict) else row[0])
+                        gateway.execute_update_sync(
+                            maintenance_executor,
+                            conn,
+                            user_id=user_id,
+                            profile_visible_fields=("uuid",),
+                            statement="UPDATE public.users SET uuid = %s WHERE id = %s",
+                            parameters=(str(uuid4()), user_id),
+                        )
                 user_step = "users.uuid not null"
-                self.backend.execute("ALTER TABLE users ALTER COLUMN uuid SET NOT NULL")
+                self.backend.execute("ALTER TABLE public.users ALTER COLUMN uuid SET NOT NULL")
                 try:
                     user_step = "users.uuid default"
-                    self.backend.execute("ALTER TABLE users ALTER COLUMN uuid SET DEFAULT gen_random_uuid()")
+                    self.backend.execute("ALTER TABLE public.users ALTER COLUMN uuid SET DEFAULT gen_random_uuid()")
                 except _USERDB_NONCRITICAL_EXCEPTIONS:
                     user_step = "users.uuid text default"
-                    self.backend.execute("ALTER TABLE users ALTER COLUMN uuid SET DEFAULT (gen_random_uuid()::text)")
+                    self.backend.execute("ALTER TABLE public.users ALTER COLUMN uuid SET DEFAULT (gen_random_uuid()::text)")
                 user_step = "users.failed_login_attempts backfill"
                 self.backend.execute(
-                    "UPDATE users SET failed_login_attempts = 0 WHERE failed_login_attempts IS NULL"
+                    "UPDATE public.users SET failed_login_attempts = 0 WHERE failed_login_attempts IS NULL"
                 )
                 user_step = "users.locked_until backfill"
                 self.backend.execute(
-                    "UPDATE users SET locked_until = NULL WHERE locked_until IS NULL"
+                    "UPDATE public.users SET locked_until = NULL WHERE locked_until IS NULL"
                 )
         except Exception as exc:  # noqa: BLE001
+            logger.bind(
+                operation="user_schema_normalization",
+                step=user_step,
+                exception_type=type(exc).__name__,
+            ).error("Required user schema normalization failed")
             raise UserDatabaseError(
-                f"Required user schema normalization failed at {user_step}: {exc}"
-            ) from exc
+                f"Required user schema normalization failed at {user_step}"
+            ) from None
 
         registration_step = "registration_codes table inspection"
         try:
@@ -1392,6 +1757,262 @@ class UserDatabase:
                     """
                 )
         except Exception as exc:  # noqa: BLE001
+            logger.bind(
+                operation="registration_schema_normalization",
+                step=registration_step,
+                exception_type=type(exc).__name__,
+            ).error("Required registration_codes normalization failed")
             raise UserDatabaseError(
-                f"Required registration_codes normalization failed at {registration_step}: {exc}"
-            ) from exc
+                "Required registration_codes normalization failed at "
+                f"{registration_step}"
+            ) from None
+
+    @staticmethod
+    def _profile_candidate_table_statements_sqlite() -> tuple[str, ...]:
+        statements = UserDatabase._default_schema_statements_sqlite()
+        return tuple(
+            statement
+            for table_name in PROFILE_CANDIDATE_TABLES
+            for statement in statements
+            if f"CREATE TABLE IF NOT EXISTS {table_name} " in statement
+        )
+
+    @staticmethod
+    def _profile_candidate_table_statements_postgres() -> tuple[str, ...]:
+        statements = UserDatabase._default_schema_statements_postgres()
+        return tuple(
+            statement
+            for table_name in PROFILE_CANDIDATE_TABLES
+            for statement in statements
+            if f"CREATE TABLE IF NOT EXISTS public.{table_name} " in statement
+        )
+
+    def _validate_profile_candidate_tables_sqlite(
+        self,
+        *,
+        connection: Any | None = None,
+    ) -> None:
+        def execute(query: str, params: Any = None) -> Any:
+            if connection is None:
+                return self.backend.execute(query, params)
+            return self.backend.execute(query, params, connection=connection)
+
+        columns_by_table: dict[str, dict[str, dict[str, Any]]] = {}
+        primary_keys_by_table: dict[str, tuple[str, ...]] = {}
+        unique_keys_by_table: dict[str, set[tuple[str, ...]]] = {}
+        foreign_keys_by_table: dict[
+            str,
+            set[tuple[str, str, str, str, str]],
+        ] = {}
+        for table_name in PROFILE_CANDIDATE_TABLES:
+            table_info = execute(
+                f'PRAGMA table_info("{table_name}")'  # nosec B608
+            ).rows
+            columns_by_table[table_name] = {
+                str(row["name"] if isinstance(row, dict) else row[1]): {
+                    "data_type": row["type"] if isinstance(row, dict) else row[2],
+                    "not_null": bool(
+                        row["notnull"] if isinstance(row, dict) else row[3]
+                    )
+                    or int(row["pk"] if isinstance(row, dict) else row[5]) > 0,
+                    "default": (
+                        row["dflt_value"] if isinstance(row, dict) else row[4]
+                    ),
+                }
+                for row in table_info
+            }
+            primary_keys_by_table[table_name] = tuple(
+                str(row["name"] if isinstance(row, dict) else row[1])
+                for row in sorted(
+                    table_info,
+                    key=lambda row: int(
+                        row["pk"] if isinstance(row, dict) else row[5]
+                    ),
+                )
+                if int(row["pk"] if isinstance(row, dict) else row[5]) > 0
+            )
+            unique_rows = execute(
+                "SELECT index_list.name AS index_name, "
+                "index_info.name AS column_name, index_info.seqno "
+                "FROM pragma_index_list(?) AS index_list "
+                "JOIN pragma_index_info(index_list.name) AS index_info "
+                "WHERE index_list.[unique] = 1 AND index_list.origin <> 'pk' "
+                "ORDER BY index_list.name, index_info.seqno",
+                (table_name,),
+            ).rows
+            unique_columns: dict[str, list[tuple[int, str]]] = {}
+            for row in unique_rows:
+                index_name = str(
+                    row["index_name"] if isinstance(row, dict) else row[0]
+                )
+                unique_columns.setdefault(index_name, []).append(
+                    (
+                        int(row["seqno"] if isinstance(row, dict) else row[2]),
+                        str(
+                            row["column_name"]
+                            if isinstance(row, dict)
+                            else row[1]
+                        ),
+                    )
+                )
+            unique_keys_by_table[table_name] = {
+                tuple(column for _position, column in sorted(index_columns))
+                for index_columns in unique_columns.values()
+            }
+            foreign_keys = execute(
+                f'PRAGMA foreign_key_list("{table_name}")'  # nosec B608
+            ).rows
+            foreign_keys_by_table[table_name] = {
+                (
+                    str(row["from"] if isinstance(row, dict) else row[3]),
+                    "main",
+                    str(row["table"] if isinstance(row, dict) else row[2]),
+                    str(row["to"] if isinstance(row, dict) else row[4]),
+                    str(row["on_delete"] if isinstance(row, dict) else row[6]),
+                )
+                for row in foreign_keys
+            }
+
+        if not profile_candidate_schema_is_valid(
+            backend="sqlite",
+            columns=columns_by_table,
+            primary_keys=primary_keys_by_table,
+            unique_keys=unique_keys_by_table,
+            foreign_keys=foreign_keys_by_table,
+        ):
+            raise UserDatabaseError(
+                "Required profile candidate schema validation failed"
+            )
+
+    def _validate_profile_candidate_tables_postgres(
+        self,
+        *,
+        connection: Any | None = None,
+    ) -> None:
+        def execute(query: str, params: Any = None) -> Any:
+            if connection is None:
+                return self.backend.execute(query, params)
+            return self.backend.execute(query, params, connection=connection)
+
+        placeholders = ", ".join("%s" for _ in PROFILE_CANDIDATE_TABLES)
+        table_filter = f"({placeholders})"
+        columns = execute(
+            "SELECT table_name, column_name, data_type, is_nullable, "
+            "column_default, is_identity, identity_generation "
+            "FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name IN "
+            + table_filter,  # nosec B608 -- only fixed-count placeholders are appended.
+            PROFILE_CANDIDATE_TABLES,
+        ).rows
+        columns_by_table: dict[str, dict[str, dict[str, Any]]] = {
+            table_name: {} for table_name in PROFILE_CANDIDATE_TABLES
+        }
+        for row in columns:
+            columns_by_table[str(row["table_name"])][str(row["column_name"])] = {
+                "data_type": row["data_type"],
+                "not_null": str(row["is_nullable"]).upper() == "NO",
+                "default": row["column_default"],
+                "is_identity": row["is_identity"],
+                "identity_generation": row["identity_generation"],
+            }
+
+        primary_keys = execute(
+            "SELECT tc.table_name, kcu.column_name, kcu.ordinal_position "
+            "FROM information_schema.table_constraints AS tc "
+            "JOIN information_schema.key_column_usage AS kcu "
+            "ON tc.constraint_name = kcu.constraint_name "
+            "AND tc.constraint_schema = kcu.constraint_schema "
+            "WHERE tc.table_schema = 'public' "
+            "AND tc.constraint_type = 'PRIMARY KEY' "
+            "AND tc.table_name IN "
+            + table_filter  # nosec B608 -- only fixed-count placeholders are appended.
+            + " "
+            "ORDER BY tc.table_name, kcu.ordinal_position",
+            PROFILE_CANDIDATE_TABLES,
+        ).rows
+        primary_keys_by_table: dict[str, list[tuple[int, str]]] = {
+            table_name: [] for table_name in PROFILE_CANDIDATE_TABLES
+        }
+        for row in primary_keys:
+            primary_keys_by_table[str(row["table_name"])].append(
+                (int(row["ordinal_position"]), str(row["column_name"]))
+            )
+
+        unique_rows = execute(
+            "SELECT tc.table_name, tc.constraint_name, kcu.column_name, "
+            "kcu.ordinal_position FROM information_schema.table_constraints AS tc "
+            "JOIN information_schema.key_column_usage AS kcu "
+            "ON tc.constraint_name = kcu.constraint_name "
+            "AND tc.constraint_schema = kcu.constraint_schema "
+            "WHERE tc.table_schema = 'public' "
+            "AND tc.constraint_type = 'UNIQUE' AND tc.table_name IN "
+            + table_filter,  # nosec B608 -- only fixed-count placeholders are appended.
+            PROFILE_CANDIDATE_TABLES,
+        ).rows
+        unique_columns: dict[tuple[str, str], list[tuple[int, str]]] = {}
+        for row in unique_rows:
+            key = (str(row["table_name"]), str(row["constraint_name"]))
+            unique_columns.setdefault(key, []).append(
+                (int(row["ordinal_position"]), str(row["column_name"]))
+            )
+        unique_keys_by_table: dict[str, set[tuple[str, ...]]] = {
+            table_name: set() for table_name in PROFILE_CANDIDATE_TABLES
+        }
+        for (table_name, _constraint_name), index_columns in unique_columns.items():
+            unique_keys_by_table[table_name].add(
+                tuple(column for _position, column in sorted(index_columns))
+            )
+
+        foreign_keys = execute(
+            "SELECT tc.table_name, kcu.column_name, "
+            "ccu.table_schema AS foreign_table_schema, "
+            "ccu.table_name AS foreign_table_name, "
+            "ccu.column_name AS foreign_column_name, rc.delete_rule "
+            "FROM information_schema.table_constraints AS tc "
+            "JOIN information_schema.key_column_usage AS kcu "
+            "ON tc.constraint_name = kcu.constraint_name "
+            "AND tc.constraint_schema = kcu.constraint_schema "
+            "JOIN information_schema.referential_constraints AS rc "
+            "ON tc.constraint_name = rc.constraint_name "
+            "AND tc.constraint_schema = rc.constraint_schema "
+            "JOIN information_schema.constraint_column_usage AS ccu "
+            "ON rc.unique_constraint_name = ccu.constraint_name "
+            "AND rc.unique_constraint_schema = ccu.constraint_schema "
+            "WHERE tc.table_schema = 'public' "
+            "AND tc.constraint_type = 'FOREIGN KEY' "
+            "AND tc.table_name IN "
+            + table_filter,  # nosec B608 -- only fixed-count placeholders are appended.
+            PROFILE_CANDIDATE_TABLES,
+        ).rows
+        foreign_keys_by_table: dict[
+            str,
+            set[tuple[str, str, str, str, str]],
+        ] = {table_name: set() for table_name in PROFILE_CANDIDATE_TABLES}
+        for row in foreign_keys:
+            foreign_keys_by_table[str(row["table_name"])].add(
+                (
+                    str(row["column_name"]),
+                    str(row["foreign_table_schema"]),
+                    str(row["foreign_table_name"]),
+                    str(row["foreign_column_name"]),
+                    str(row["delete_rule"]),
+                )
+            )
+
+        normalized_primary_keys = {
+            table_name: tuple(
+                column
+                for _position, column in sorted(primary_keys_by_table[table_name])
+            )
+            for table_name in PROFILE_CANDIDATE_TABLES
+        }
+        if not profile_candidate_schema_is_valid(
+            backend="postgres",
+            columns=columns_by_table,
+            primary_keys=normalized_primary_keys,
+            unique_keys=unique_keys_by_table,
+            foreign_keys=foreign_keys_by_table,
+        ):
+            raise UserDatabaseError(
+                "Required profile candidate schema validation failed"
+            )

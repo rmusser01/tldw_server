@@ -19,9 +19,11 @@ async def get_watchlists_db_for_user(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="User identification failed")
     try:
         db = WatchlistsDatabase.for_user(user_id=current_user.id)
-        # Defensive: ensure schema exists for this user's DB in test/minimal app contexts
+        # Defensive: ensure schema exists for this user's DB in test/minimal app
+        # contexts. Uses the de-duplicated path -- ensure_schema() itself issues
+        # ~60 DDL statements and this runs on every request.
         try:
-            db.ensure_schema()
+            db.ensure_schema_once()
         except Exception as schema_error:
             # Best-effort; creation may have already occurred or be gated by init
             logger.debug(

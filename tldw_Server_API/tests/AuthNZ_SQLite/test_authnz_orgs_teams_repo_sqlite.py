@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -28,28 +30,12 @@ async def test_authnz_orgs_teams_repo_membership_sqlite(tmp_path, monkeypatch):
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    # Create two users for org/team membership
-    async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active)
-            VALUES (?, ?, ?, 1)
-            """,
-            ("owner", "owner@example.com", "x"),
-        )
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active)
-            VALUES (?, ?, ?, 1)
-            """,
-            ("member", "member@example.com", "x"),
-        )
-
-    owner_id = await pool.fetchval(
-        "SELECT id FROM users WHERE username = ?", ("owner",)
+    # Create two users for org/team membership through the guarded write path.
+    owner_id = await create_authnz_test_user(
+        pool, username="owner", email="owner@example.com"
     )
-    member_id = await pool.fetchval(
-        "SELECT id FROM users WHERE username = ?", ("member",)
+    member_id = await create_authnz_test_user(
+        pool, username="member", email="member@example.com"
     )
 
     repo = AuthnzOrgsTeamsRepo(pool)

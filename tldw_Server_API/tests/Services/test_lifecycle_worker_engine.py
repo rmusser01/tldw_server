@@ -664,13 +664,9 @@ async def test_engine_stopped_name_diagnostics_publish_diagnostic_names() -> Non
 
     await engine.stop_phase(session, ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN)
 
-    assert session.stopped_names_by_phase[ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN] == {
-        "internal_background_worker"
-    }
+    assert session.stopped_names_by_phase[ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN] == {"internal_background_worker"}
     assert session.stopped_or_quiesced_names == {"internal_background_worker"}
-    assert app.state._tldw_shutdown_stopped_background_worker_names == [
-        "legacy_background_worker"
-    ]
+    assert app.state._tldw_shutdown_stopped_background_worker_names == ["legacy_background_worker"]
 
 
 @pytest.mark.unit
@@ -815,11 +811,54 @@ async def test_engine_shutdown_timeout_or_failure_does_not_block_remaining_worke
     await engine.stop_phase(session, ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN)
 
     assert stopped == ["healthy"]
-    assert session.stopped_names_by_phase[ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN] == {
-        "healthy_worker"
-    }
+    assert session.stopped_names_by_phase[ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN] == {"healthy_worker"}
     assert session.stopped_or_quiesced_names == {"healthy_worker"}
     assert session.app.state._tldw_shutdown_stopped_background_worker_names == ["healthy_worker"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_engine_cancel_fallback_is_bounded_when_worker_suppresses_cancellation() -> None:
+    from tldw_Server_API.app.services.lifecycle_worker_engine import (
+        LifecycleWorkerEngine,
+    )
+
+    cancellation_seen = asyncio.Event()
+    release_worker = asyncio.Event()
+
+    async def stubborn_worker(
+        _context: WorkerLifecycleContext,
+        stop_event: asyncio.Event,
+    ) -> None:
+        await stop_event.wait()
+        while not release_worker.is_set():
+            try:
+                await release_worker.wait()
+            except asyncio.CancelledError:
+                cancellation_seen.set()
+
+    worker = _stop_event_spec(
+        name="stubborn_worker",
+        task_name="stubborn-worker-task",
+        factory=stubborn_worker,
+        timeout_sec=0.01,
+    )
+    engine = LifecycleWorkerEngine()
+    session = await engine.start(_context(), [worker])
+    worker_task = session.handles_by_name[worker.name].task
+    assert worker_task is not None
+    shutdown_task = asyncio.create_task(engine.stop_phase(session, ShutdownPhase.JOB_POLLER_QUIESCE))
+
+    try:
+        await asyncio.wait_for(cancellation_seen.wait(), timeout=0.5)
+        done, _ = await asyncio.wait({shutdown_task}, timeout=1.25)
+
+        assert shutdown_task in done
+        assert not worker_task.done()
+        assert worker.name not in session.stopped_or_quiesced_names
+    finally:
+        release_worker.set()
+        await asyncio.gather(shutdown_task, worker_task, return_exceptions=True)
 
 
 @pytest.mark.unit

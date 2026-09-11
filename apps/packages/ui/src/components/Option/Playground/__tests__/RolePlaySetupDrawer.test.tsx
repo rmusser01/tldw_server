@@ -97,19 +97,23 @@ vi.mock("antd", () => ({
     open,
     title,
     children,
+    footer,
     onClose
   }: {
     open?: boolean
     title?: React.ReactNode
     children: React.ReactNode
+    footer?: React.ReactNode
     onClose?: () => void
   }) =>
     open ? (
-      <section role="dialog" aria-label={String(title || "Role-play setup")}>
+      <section role="dialog" aria-label={String(title || "Role-play setup")}
+        onKeyDown={(event) => { if (event.key === "Escape") onClose?.() }}>
         <button type="button" onClick={onClose}>
           Close drawer
         </button>
         {children}
+        {footer}
       </section>
     ) : null,
   Button: React.forwardRef<HTMLButtonElement, {
@@ -432,10 +436,10 @@ describe("RolePlaySetupDrawer", () => {
     const { returnFocusRef } = renderDrawer({ onClose })
 
     await screen.findByText(/1 detail/)
-    fireEvent.keyDown(document, { key: "Escape" })
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Role-play setup" }), { key: "Escape" })
 
     expect(onClose).toHaveBeenCalledTimes(1)
-    expect(document.activeElement).toBe(returnFocusRef.current)
+    await waitFor(() => expect(document.activeElement).toBe(returnFocusRef.current))
   })
 
   it("shows only role-play relevant saved setups", async () => {

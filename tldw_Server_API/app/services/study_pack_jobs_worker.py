@@ -105,10 +105,7 @@ async def _should_cancel(
     status = str(current.get("status") or "").strip().lower()
     if status == "cancelled":
         return True
-    if current.get("cancel_requested_at"):
-        jm.finalize_cancelled(job_id, reason=str(current.get("cancellation_reason") or "requested"))
-        return True
-    return False
+    return bool(current.get("cancel_requested_at"))
 
 
 async def run_study_pack_jobs_worker(stop_event: asyncio.Event | None = None) -> None:

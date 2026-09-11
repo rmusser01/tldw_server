@@ -25,6 +25,11 @@ from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     parse_structured_output,
 )
 
+from .runtime_provider_call import (
+    attach_runtime_provider_credentials,
+    await_runtime_bound_provider_call,
+)
+
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -249,6 +254,8 @@ async def classify_query(
     llm_provider: str = "openai",
     llm_model: str | None = None,
     timeout_sec: float = 10.0,
+    credential_runtime: Any = None,
+    stage_metadata: dict[str, Any] | None = None,
 ) -> QueryClassification:
     """Classify a query to determine search routing and reformulation.
 
@@ -261,6 +268,8 @@ async def classify_query(
         llm_provider: LLM provider name (e.g., "openai", "anthropic").
         llm_model: Optional model override (defaults to provider's default).
         timeout_sec: Maximum seconds to wait for LLM response.
+        credential_runtime: Optional request-scoped provider credential runtime.
+        stage_metadata: Optional runtime-only trust metadata output.
 
     Returns:
         QueryClassification with routing decisions and reformulated query.
@@ -293,9 +302,22 @@ async def classify_query(
         }
         if model:
             call_kwargs["model"] = model
+        credential_handle = None
+        if credential_runtime is not None:
+            credential_handle = await credential_runtime.resolve(provider, model=model)
+            call_kwargs.update(
+                api_key=credential_handle.api_key,
+                app_config=credential_handle.app_config,
+                credentials_resolved=True,
+            )
+            attach_runtime_provider_credentials(call_kwargs, credential_handle)
 
         raw_response = await asyncio.wait_for(
-            perform_chat_api_call_async(**call_kwargs),
+            await_runtime_bound_provider_call(
+                perform_chat_api_call_async(**call_kwargs),
+                credential_runtime=credential_runtime,
+                credential_handle=credential_handle,
+            ),
             timeout=timeout_sec,
         )
 
@@ -318,11 +340,16 @@ async def classify_query(
 
         if not response_text.strip():
             logger.warning("Empty LLM response for query classification, falling back to heuristic")
+            if credential_runtime is not None and stage_metadata is not None:
+                stage_metadata.update(
+                    failure_code="provider_unavailable",
+                    verification_available=False,
+                )
             return _heuristic_classify(query, chat_history)
 
         parsed = _parse_classification_response(response_text)
 
-        return QueryClassification(
+        classification = QueryClassification(
             skip_search=bool(parsed.get("skip_search", False)),
             search_local_db=bool(parsed.get("search_local_db", True)),
             search_web=bool(parsed.get("search_web", False)),
@@ -333,13 +360,26 @@ async def classify_query(
             confidence=float(parsed.get("confidence", 0.7)),
             reasoning=str(parsed.get("reasoning", "")),
         )
+        if credential_runtime is not None and stage_metadata is not None:
+            stage_metadata.pop("failure_code", None)
+            stage_metadata["verification_available"] = True
+        return classification
 
     except Exception as exc:
         logger.warning(
             "LLM query classification failed ({exc_type}), falling back to heuristic",
             exc_type=type(exc).__name__,
         )
-        return _heuristic_classify(query, chat_history)
+        fallback = _heuristic_classify(query, chat_history)
+        if credential_runtime is not None:
+            fallback.confidence = min(fallback.confidence, 0.5)
+            fallback.reasoning = "provider_unavailable"
+            if stage_metadata is not None:
+                stage_metadata.update(
+                    failure_code="provider_unavailable",
+                    verification_available=False,
+                )
+        return fallback
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +405,8 @@ async def reformulate_query(
     llm_provider: str = "openai",
     llm_model: str | None = None,
     timeout_sec: float = 8.0,
+    credential_runtime: Any = None,
+    stage_metadata: dict[str, Any] | None = None,
 ) -> str:
     """Reformulate a conversational follow-up into a standalone query.
 
@@ -374,6 +416,8 @@ async def reformulate_query(
         llm_provider: LLM provider name.
         llm_model: Optional model override.
         timeout_sec: Maximum seconds to wait for LLM response.
+        credential_runtime: Optional request-scoped provider credential runtime.
+        stage_metadata: Optional runtime-only trust metadata output.
 
     Returns:
         A standalone, self-contained query string.
@@ -412,9 +456,22 @@ async def reformulate_query(
         }
         if model:
             call_kwargs["model"] = model
+        credential_handle = None
+        if credential_runtime is not None:
+            credential_handle = await credential_runtime.resolve(provider, model=model)
+            call_kwargs.update(
+                api_key=credential_handle.api_key,
+                app_config=credential_handle.app_config,
+                credentials_resolved=True,
+            )
+            attach_runtime_provider_credentials(call_kwargs, credential_handle)
 
         raw_response = await asyncio.wait_for(
-            perform_chat_api_call_async(**call_kwargs),
+            await_runtime_bound_provider_call(
+                perform_chat_api_call_async(**call_kwargs),
+                credential_runtime=credential_runtime,
+                credential_handle=credential_handle,
+            ),
             timeout=timeout_sec,
         )
 
@@ -436,9 +493,17 @@ async def reformulate_query(
 
         reformulated = response_text.strip()
         if reformulated and len(reformulated) >= 3:
+            if credential_runtime is not None and stage_metadata is not None:
+                stage_metadata.pop("failure_code", None)
+                stage_metadata["verification_available"] = True
             return reformulated
 
         logger.warning("Empty or too-short reformulation result, returning original query")
+        if credential_runtime is not None and stage_metadata is not None:
+            stage_metadata.update(
+                failure_code="provider_unavailable",
+                verification_available=False,
+            )
         return query
 
     except Exception as exc:
@@ -446,6 +511,11 @@ async def reformulate_query(
             "Query reformulation failed ({exc_type}), returning original query",
             exc_type=type(exc).__name__,
         )
+        if credential_runtime is not None and stage_metadata is not None:
+            stage_metadata.update(
+                failure_code="provider_unavailable",
+                verification_available=False,
+            )
         return query
 
 
@@ -458,6 +528,8 @@ async def classify_and_reformulate(
     chat_history: list[dict[str, str]] | None = None,
     llm_provider: str = "openai",
     llm_model: str | None = None,
+    credential_runtime: Any = None,
+    stage_metadata: dict[str, Any] | None = None,
 ) -> QueryClassification:
     """Classify query and ensure standalone_query is properly reformulated.
 
@@ -471,16 +543,38 @@ async def classify_and_reformulate(
         chat_history: Optional conversation history.
         llm_provider: LLM provider name.
         llm_model: Optional model override.
+        credential_runtime: Optional request-scoped provider credential runtime.
+        stage_metadata: Optional runtime-only trust metadata output.
 
     Returns:
         QueryClassification with fully resolved standalone_query.
     """
+    def _merge_stage_trust(update: dict[str, Any]) -> None:
+        if stage_metadata is None or not update:
+            return
+        if (
+            update.get("verification_available") is False
+            or stage_metadata.get("verification_available") is not False
+        ):
+            stage_metadata.update(update)
+
+    classification_stage_metadata: dict[str, Any] = {}
+    runtime_kwargs = (
+        {
+            "credential_runtime": credential_runtime,
+            "stage_metadata": classification_stage_metadata,
+        }
+        if credential_runtime is not None
+        else {}
+    )
     classification = await classify_query(
         query=query,
         chat_history=chat_history,
         llm_provider=llm_provider,
         llm_model=llm_model,
+        **runtime_kwargs,
     )
+    _merge_stage_trust(classification_stage_metadata)
 
     # If chat history exists and the standalone_query is still the same as
     # the original (classification might not have reformulated properly),
@@ -490,12 +584,23 @@ async def classify_and_reformulate(
         follow_up_indicators = {"it", "they", "this", "that", "those", "these", "its", "their"}
         query_words = set(query.lower().split())
         if query_words & follow_up_indicators:
+            reformulation_stage_metadata: dict[str, Any] = {}
+            reformulation_runtime_kwargs = (
+                {
+                    "credential_runtime": credential_runtime,
+                    "stage_metadata": reformulation_stage_metadata,
+                }
+                if credential_runtime is not None
+                else {}
+            )
             reformulated = await reformulate_query(
                 query=query,
                 chat_history=chat_history,
                 llm_provider=llm_provider,
                 llm_model=llm_model,
+                **reformulation_runtime_kwargs,
             )
             classification.standalone_query = reformulated
+            _merge_stage_trust(reformulation_stage_metadata)
 
     return classification

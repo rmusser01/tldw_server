@@ -10,6 +10,13 @@ from fastapi import HTTPException, Request
 from loguru import logger
 from starlette.requests import ClientDisconnect
 
+from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
+    StandaloneHtmlAdmissionError,
+    drain_guarded_request,
+    install_shallow_request_receive_guard,
+    match_standalone_request_route,
+)
+
 from ..config import get_config
 from ..environment import is_test_mode
 from .ip_filter import enforce_ip_allowlist as _enforce_ip_allowlist
@@ -126,7 +133,14 @@ def _is_client_certificate_valid(headers: Mapping[str, str], remote_addr: str | 
 async def enforce_http_security(request: Request) -> None:
     """Run all HTTP-layer guards in sequence."""
     await _enforce_ip_allowlist(request)
-    await enforce_request_body_limit(request)
+    route = match_standalone_request_route(request.method, request.url.path)
+    if route is not None and route.mode == "generic_mcp":
+        install_shallow_request_receive_guard(request, mode="mcp")
+    try:
+        await enforce_request_body_limit(request)
+    except StandaloneHtmlAdmissionError as exc:
+        await drain_guarded_request(request)
+        raise HTTPException(status_code=exc.status_code, detail=exc.code) from None
     enforce_client_certificate(request)
     # No further checks here; reserved for future guards
     return None

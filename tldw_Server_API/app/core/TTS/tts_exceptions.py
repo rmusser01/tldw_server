@@ -242,10 +242,13 @@ def provider_error(message: str, provider: str, error_code: Optional[str] = None
 
 
 def network_error(provider: str, original_error: Exception, **kwargs) -> TTSNetworkError:
-    """Create a network error with standard format"""
-    details = kwargs.get("details", {})
-    details["original_error"] = str(original_error)
-    return TTSNetworkError(str(original_error), provider=provider, error_code="NETWORK_ERROR", details=details)
+    """Create a bounded network error without copying provider response data."""
+    return TTSNetworkError(
+        f"Network request failed for {provider}",
+        provider=provider,
+        error_code="NETWORK_ERROR",
+        details={"error_type": type(original_error).__name__},
+    )
 
 
 def auth_error(provider: str, message: str, **kwargs) -> TTSAuthenticationError:
@@ -300,11 +303,15 @@ def categorize_error(error: Exception) -> str:
         return "timeout"
     elif isinstance(error, TTSRateLimitError):
         return "rate_limit"
+    elif isinstance(error, TTSQuotaExceededError):
+        return "quota"
     elif isinstance(error, TTSAuthenticationError):
         return "authentication"
     elif isinstance(error, TTSProviderBusyError):
         return "provider_busy"
-    elif isinstance(error, (TTSProviderUnavailableError, TTSProviderError)):
+    elif isinstance(error, TTSProviderUnavailableError):
+        return "provider_unavailable"
+    elif isinstance(error, TTSProviderError):
         return "provider_error"
     elif isinstance(error, (TTSValidationError, TTSInvalidInputError, TTSTextTooLongError)):
         return "validation"

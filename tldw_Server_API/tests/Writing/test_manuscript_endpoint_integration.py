@@ -49,6 +49,24 @@ def client(tmp_path, monkeypatch):
 PREFIX = "/api/v1/writing/manuscripts"
 
 
+@pytest.mark.parametrize("path,expected_status", [
+    ("/scenes/missing-scene", 404),
+    ("/projects/missing-project/characters", 200),
+    ("/projects/missing-project/world-info", 200),
+])
+@pytest.mark.parametrize("expected_user", [None, "1", "999"])
+def test_agent_context_reads_enforce_optional_expected_user(
+    client: TestClient, path: str, expected_status: int, expected_user: str | None
+) -> None:
+    """Reject stale identity before reading manuscript data, preserving unscoped callers."""
+    headers = {} if expected_user is None else {"X-TLDW-Expected-User-ID": expected_user}
+    response = client.get(f"{PREFIX}{path}", headers=headers)
+    assert response.status_code == (412 if expected_user == "999" else expected_status), response.text
+    if expected_user == "999":
+        assert response.json()["detail"]["code"] == "request_config_scope_changed"
+        assert response.headers["cache-control"] == "no-store"
+
+
 def test_full_manuscript_crud(client: TestClient):
     """Full lifecycle: create project -> part -> chapter -> scene -> structure -> update -> search -> delete."""
 

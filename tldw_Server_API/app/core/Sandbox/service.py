@@ -212,6 +212,7 @@ class SandboxService:
         self._bg_executor_lock = threading.RLock()
         self._bg_executor: ThreadPoolExecutor | None = None
         self._bg_executor_workers = 0
+        self._background_pending_run_ids: set[str] = set()
         self._snapshots = SnapshotManager(
             storage_path=os.getenv("SANDBOX_SNAPSHOT_PATH")
         )
@@ -509,6 +510,7 @@ class SandboxService:
             executor = self._bg_executor
             self._bg_executor = None
             self._bg_executor_workers = 0
+            self._background_pending_run_ids.clear()
         if executor is not None:
             with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
                 executor.shutdown(wait=False, cancel_futures=True)
@@ -696,6 +698,16 @@ class SandboxService:
     def _admit_run_starting(self, run_id: str) -> RunStatus | None:
         max_active_runs = self._effective_max_concurrent_runs()
         lease_seconds = self._effective_claim_lease_seconds()
+        claimed = self._orch.try_claim_run(
+            run_id,
+            worker_id=self._claim_worker_id,
+            lease_seconds=lease_seconds,
+        )
+        if claimed is None:
+            # Another worker may have claimed or started the run while this
+            # callback waited in the bounded executor. Fail closed: observing
+            # its status does not grant this callback permission to execute.
+            return None
         max_active_per_user = self._effective_active_limit("SANDBOX_ACTIVE_MAX_PER_USER", "SANDBOX_ACTIVE_MAX_PER_USER")
         max_active_per_persona = self._effective_active_limit("SANDBOX_ACTIVE_MAX_PER_PERSONA", "SANDBOX_ACTIVE_MAX_PER_PERSONA")
         max_active_per_workspace = self._effective_active_limit("SANDBOX_ACTIVE_MAX_PER_WORKSPACE", "SANDBOX_ACTIVE_MAX_PER_WORKSPACE")
@@ -723,7 +735,7 @@ class SandboxService:
                 return None
             owner = str(getattr(current, "claim_owner", "") or "").strip()
             if current.phase != RunPhase.queued or owner != self._claim_worker_id:
-                return current
+                return None
             now_monotonic = time.monotonic()
             if now_monotonic >= next_renew:
                 with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
@@ -2002,6 +2014,10 @@ class SandboxService:
         else:
             spec = _prepare_spec_for_enqueue(spec)
             status = self._orch.enqueue_run(user_id=user_id, spec=spec, spec_version=spec_version, idem_key=idem_key, body=raw_body)
+        if status.phase != RunPhase.queued:
+            # A newly created run is always queued. Any later phase came from
+            # an idempotent replay and must not schedule another execution.
+            return status
         # Configure stdin caps in hub if interactive is requested (spec 1.1)
         try:
             interactive = bool(spec.interactive) if getattr(spec, "interactive", None) is not None else False
@@ -2036,17 +2052,8 @@ class SandboxService:
                 execute_enabled = bool(getattr(app_settings, "SANDBOX_ENABLE_EXECUTION", False))
         except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS:
             execute_enabled = False
-        if execute_enabled:
-            lease_seconds = self._effective_claim_lease_seconds()
-            claimed = self._orch.try_claim_run(
-                status.id,
-                worker_id=self._claim_worker_id,
-                lease_seconds=lease_seconds,
-            )
-            if claimed is None:
-                existing = self._orch.get_run(status.id)
-                return existing or status
-            status = claimed
+        background_worker = None
+        background_failure_reason = None
         if execute_enabled and spec.runtime == RuntimeType.docker:
             try:
                 env_bg = os.getenv("SANDBOX_BACKGROUND_EXECUTION")
@@ -2116,11 +2123,8 @@ class SandboxService:
                         except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
                             logger.warning(f"Background docker execution failed: {e}")
                             self._mark_run_failed(status, reason="docker_failed")
-                    try:
-                        self._submit_background_worker(_worker)
-                    except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
-                        logger.warning(f"Background docker submission failed: {e}")
-                        self._mark_run_failed(status, reason="docker_failed")
+                    background_worker = _worker
+                    background_failure_reason = "docker_failed"
                 else:
                     dr = DockerRunner()
                     ws = self._orch.get_session_workspace_path(spec.session_id) if spec.session_id else None
@@ -2208,11 +2212,8 @@ class SandboxService:
                         except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
                             logger.warning(f"Firecracker background execution failed: {e}")
                             self._mark_run_failed(status, reason="firecracker_failed")
-                    try:
-                        self._submit_background_worker(_worker_fc)
-                    except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
-                        logger.warning(f"Firecracker background submission failed: {e}")
-                        self._mark_run_failed(status, reason="firecracker_failed")
+                    background_worker = _worker_fc
+                    background_failure_reason = "firecracker_failed"
                 else:
                     # Foreground
                     fr = FirecrackerRunner()
@@ -2310,11 +2311,8 @@ class SandboxService:
                         except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
                             logger.warning(f"Lima background execution failed: {e}")
                             self._mark_run_failed(status, reason="lima_failed")
-                    try:
-                        self._submit_background_worker(_worker_lima)
-                    except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
-                        logger.warning(f"Lima background submission failed: {e}")
-                        self._mark_run_failed(status, reason="lima_failed")
+                    background_worker = _worker_lima
+                    background_failure_reason = "lima_failed"
                 else:
                     # Foreground
                     ws = self._orch.get_session_workspace_path(spec.session_id) if spec.session_id else None
@@ -2419,11 +2417,6 @@ class SandboxService:
                 artifacts[pattern] = b""
             if artifacts:
                 self._orch.store_artifacts(status.id, artifacts)
-        # Attach canonical policy hash for metadata consistency
-        try:
-            status.policy_hash = compute_policy_hash(self.policy.cfg)
-        except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS:
-            status.policy_hash = None  # type: ignore[assignment]
         # Keep phase/status fields contract-safe and persist before returning so
         # POST response fields match subsequent GET/cross-node reads.
         now = datetime.utcnow()
@@ -2438,10 +2431,45 @@ class SandboxService:
                 status.finished_at = now
             if status.exit_code is None and status.phase == RunPhase.completed:
                 status.exit_code = 0
-        try:
-            self._orch.update_run(status.id, status)
-        except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as _e:
-            logger.debug(f"sandbox: update_run(final) skipped: {_e}")
+        if background_worker is None:
+            try:
+                self._orch.update_run(status.id, status)
+            except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as _e:
+                logger.debug(f"sandbox: update_run(final) skipped: {_e}")
+        else:
+            run_id = status.id
+            with self._bg_executor_lock:
+                if run_id in self._background_pending_run_ids:
+                    return self._orch.get_run(run_id) or status
+                self._background_pending_run_ids.add(run_id)
+
+            def _guarded_background_worker() -> None:
+                try:
+                    background_worker()
+                finally:
+                    with self._bg_executor_lock:
+                        self._background_pending_run_ids.discard(run_id)
+
+            try:
+                # Enqueueing already persisted the queued run. Do not write
+                # that stale snapshot again: another node may have admitted it
+                # while this request prepared its response.
+                self._submit_background_worker(_guarded_background_worker)
+            except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
+                with self._bg_executor_lock:
+                    self._background_pending_run_ids.discard(run_id)
+                logger.warning(f"Background execution submission failed: {e}")
+                failure_claim = self._orch.try_claim_run(
+                    run_id,
+                    worker_id=f"{self._claim_worker_id}:submission-failure",
+                    lease_seconds=self._effective_claim_lease_seconds(),
+                )
+                if failure_claim is not None:
+                    self._mark_run_failed(
+                        failure_claim,
+                        reason=background_failure_reason or "execution_failed",
+                    )
+                status = self._orch.get_run(run_id) or failure_claim or status
         return status
 
     def get_run(self, run_id: str) -> RunStatus | None:

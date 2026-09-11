@@ -252,6 +252,25 @@ class TestFileSystemStorageExistsAndDelete:
         asyncio.run(_test())
 
     @pytest.mark.unit
+    def test_delete_tolerates_another_cleaner_removing_the_file(self, storage_backend: FileSystemStorage, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A file disappearing during deletion is reported as already absent."""
+        from tldw_Server_API.app.core.Storage import filesystem_storage
+
+        async def _test() -> None:
+            """Exercise deletion while another cleaner removes the same file."""
+            path = await storage_backend.store("user1", 1, "file.pdf", b"data")
+
+            async def concurrent_remove(full_path: Path) -> None:
+                """Remove the file before reporting the competing deletion's missing-file error."""
+                full_path.unlink()
+                raise FileNotFoundError(str(full_path))
+
+            monkeypatch.setattr(filesystem_storage.aiofiles.os, "remove", concurrent_remove)
+            assert await storage_backend.delete(path) is False
+
+        asyncio.run(_test())
+
+    @pytest.mark.unit
     def test_delete_cleans_empty_directories(self, storage_backend):
         """Test that delete removes empty parent directories."""
         async def _test():

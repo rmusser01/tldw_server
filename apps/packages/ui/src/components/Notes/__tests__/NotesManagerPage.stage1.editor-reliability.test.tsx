@@ -4,6 +4,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", () => ({
+  useNotesGraphAuthorityScope: () => "test-notes-authority"
+}))
+
 const {
   mockBgRequest,
   mockMessageSuccess,

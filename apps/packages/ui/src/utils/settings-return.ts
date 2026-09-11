@@ -1,4 +1,6 @@
 const SETTINGS_RETURN_TO_KEY = "tldw:settingsReturnTo"
+export const SETTINGS_NAVIGATION_REQUEST_EVENT =
+  "tldw:settings-navigation-request"
 export const SETTINGS_HISTORY_ID_PARAM = "settingsHistoryId"
 export const SETTINGS_SERVER_CHAT_ID_PARAM = "settingsServerChatId"
 export const RESEARCH_RETURN_RUN_ID_PARAM = "researchReturnRunId"
@@ -9,6 +11,39 @@ const SETTINGS_RETURN_URL_BASE = "https://tldw.local"
 export type SettingsReturnChatContext = {
   historyId?: string | null
   serverChatId?: string | null
+}
+
+export type SettingsNavigationRequestDetail = {
+  destination: string
+}
+
+export const requestSettingsNavigation = (destination: string): boolean => {
+  if (typeof window === "undefined") return true
+  return window.dispatchEvent(new CustomEvent<SettingsNavigationRequestDetail>(
+    SETTINGS_NAVIGATION_REQUEST_EVENT,
+    { cancelable: true, detail: { destination } }
+  ))
+}
+
+export const resolveSettingsNavigationUrl = (
+  destination: string,
+  currentUrl: string
+): string | null => {
+  try {
+    const current = new URL(currentUrl)
+    const route = new URL(destination, current)
+    if (route.protocol !== current.protocol || route.host !== current.host) {
+      return null
+    }
+    if (!current.hash.startsWith("#/")) return route.href
+    if (route.pathname === current.pathname && route.hash.startsWith("#/")) {
+      return route.href
+    }
+    current.hash = `#${route.pathname}${route.search}${route.hash}`
+    return current.href
+  } catch {
+    return null
+  }
 }
 
 const toNormalizedId = (value?: string | null): string | null => {

@@ -30,6 +30,31 @@ class ApprovalRequiredError(PermissionError):
         self.approval = approval or {}
 
 
+@dataclass(frozen=True, slots=True)
+class AuthenticatedExecutionScope:
+    """Explicit server-authenticated active organization/team replay scope."""
+
+    active_org_id: int | None = None
+    active_team_id: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.active_org_id is None and self.active_team_id is None:
+            raise ValueError("Authenticated execution scope requires at least one active ID")
+        for value in (self.active_org_id, self.active_team_id):
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError("Active scope IDs must be positive non-boolean integers")
+
+    def canonical_object(self) -> dict[str, JsonValue]:
+        """Return the canonical scope object, omitting absent dimensions."""
+
+        payload: dict[str, JsonValue] = {}
+        if self.active_org_id is not None:
+            payload["active_org_id"] = self.active_org_id
+        if self.active_team_id is not None:
+            payload["active_team_id"] = self.active_team_id
+        return payload
+
+
 class RequestContext:
     """Context for request processing.
 
@@ -46,7 +71,13 @@ class RequestContext:
         session_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         db_paths: dict[str, str] | None = None,
+        server_auth_scope: AuthenticatedExecutionScope | None = None,
     ):
+        if server_auth_scope is not None and not isinstance(
+            server_auth_scope,
+            AuthenticatedExecutionScope,
+        ):
+            raise TypeError("server_auth_scope must be an AuthenticatedExecutionScope or None")
         self.request_id = request_id
         self.user_id = user_id
         self.client_id = client_id
@@ -54,6 +85,7 @@ class RequestContext:
         self.metadata = metadata or {}
         self.start_time = datetime.now(timezone.utc)
         self.db_paths = dict(db_paths or {})
+        self.server_auth_scope = server_auth_scope
         # Build a bound logger for this request
         self.logger = logger.bind(
             request_id=request_id,
@@ -139,18 +171,71 @@ def _has_trusted_compat_claims(context: RequestContext) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class PreparedToolCall:
-    """Prepared tool execution context reused by nested tool orchestration."""
+    """HMAC-bound prepared execution state reused by nested orchestration.
+
+    ``tool_def`` and ``scope_payload`` are detached observer compatibility
+    views. Security decisions must use ``policy`` and the signed snapshots,
+    never these freshly decoded dictionaries.
+    """
 
     tool_name: str
     tool_args: Any
     module: BaseModule
     module_id: str | None
-    tool_def: dict[str, Any] | None
-    is_write: bool | None
+    policy: PreparedExecutionPolicy
+    arguments_snapshot: CanonicalJsonSnapshot
+    tool_definition_snapshot: CanonicalJsonSnapshot
+    scope_reporting_snapshot: CanonicalJsonSnapshot
     normalized_idempotency_key: str | None
+    normalized_idempotency_key_digest: str
     idempotency_cache_key: str | None
     arguments_hash: str | None
     context_fingerprint: str
+    idempotency_scope_fingerprint: str
     integrity_tag: str
     context: RequestContext
-    scope_payload: dict[str, Any] | None = None
+
+    @property
+    def tool_def(self) -> dict[str, Any] | None:
+        """Return a fresh observer-only tool-definition copy."""
+
+        from .tool_execution.canonical import (
+            TOOL_DEFINITION_MAX_BYTES,
+            decode_canonical_json_object_or_none,
+        )
+
+        return decode_canonical_json_object_or_none(
+            self.tool_definition_snapshot.encoded,
+            max_bytes=TOOL_DEFINITION_MAX_BYTES,
+        )
+
+    @property
+    def scope_payload(self) -> dict[str, Any] | None:
+        """Return a fresh observer-only scope-reporting copy."""
+
+        from .tool_execution.canonical import (
+            SCOPE_REPORTING_MAX_BYTES,
+            decode_canonical_json_object_or_none,
+        )
+
+        return decode_canonical_json_object_or_none(
+            self.scope_reporting_snapshot.encoded,
+            max_bytes=SCOPE_REPORTING_MAX_BYTES,
+        )
+
+    @property
+    def is_write(self) -> bool:
+        """Return the immutable prepared effect for compatibility observers."""
+
+        return self.policy.effect == "write"
+
+
+# Resolve public postponed annotations only after the shared protocol types are
+# initialized; tool_execution package setup imports RequestContext back here.
+from .tool_execution.canonical import JsonValue as JsonValue  # noqa: E402
+from .tool_execution.models import (  # noqa: E402
+    CanonicalJsonSnapshot as CanonicalJsonSnapshot,
+)
+from .tool_execution.models import (  # noqa: E402
+    PreparedExecutionPolicy as PreparedExecutionPolicy,
+)

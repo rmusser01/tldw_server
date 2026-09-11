@@ -1,13 +1,13 @@
-from pathlib import Path
 import asyncio
+from pathlib import Path
 
 import pyotp
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.mfa_service import MFAService
+from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
-
 
 pytestmark = pytest.mark.integration
 
@@ -46,12 +46,15 @@ async def test_mfa_end_to_end_flow(tmp_path: Path):
                 await pool.execute(f"ALTER TABLE users ADD COLUMN {column} {decl}")
 
         async with pool.transaction() as conn:
-            await conn.execute(
-                """
-                INSERT INTO users (id, username, email, password_hash, is_active)
-                VALUES (?, ?, ?, ?, 1)
-                """,
-                (1, "alice", "alice@example.com", "hashed-password"),
+            await VersionedUserWriteGateway("sqlite").insert_user(
+                conn,
+                values={
+                    "id": 1,
+                    "username": "alice",
+                    "email": "alice@example.com",
+                    "password_hash": "hashed-password",
+                    "is_active": 1,
+                },
             )
 
         assert await service.enable_mfa(user_id=1, secret=secret, backup_codes=backup_codes)
@@ -136,12 +139,15 @@ async def test_backup_code_consumption_is_atomic_under_concurrency(tmp_path: Pat
                 await pool.execute(f"ALTER TABLE users ADD COLUMN {column} {decl}")
 
         async with pool.transaction() as conn:
-            await conn.execute(
-                """
-                INSERT INTO users (id, username, email, password_hash, is_active)
-                VALUES (?, ?, ?, ?, 1)
-                """,
-                (7, "bob", "bob@example.com", "hashed-password"),
+            await VersionedUserWriteGateway("sqlite").insert_user(
+                conn,
+                values={
+                    "id": 7,
+                    "username": "bob",
+                    "email": "bob@example.com",
+                    "password_hash": "hashed-password",
+                    "is_active": 1,
+                },
             )
 
         assert await service.enable_mfa(user_id=7, secret=secret, backup_codes=backup_codes)
@@ -197,12 +203,15 @@ async def test_mfa_secret_and_backup_codes_survive_key_rotation(tmp_path: Path):
                 await pool.execute(f"ALTER TABLE users ADD COLUMN {column} {decl}")
 
         async with pool.transaction() as conn:
-            await conn.execute(
-                """
-                INSERT INTO users (id, username, email, password_hash, is_active)
-                VALUES (?, ?, ?, ?, 1)
-                """,
-                (42, "rotating", "rotate@example.com", "hashed-password"),
+            await VersionedUserWriteGateway("sqlite").insert_user(
+                conn,
+                values={
+                    "id": 42,
+                    "username": "rotating",
+                    "email": "rotate@example.com",
+                    "password_hash": "hashed-password",
+                    "is_active": 1,
+                },
             )
 
         assert await service_primary.enable_mfa(

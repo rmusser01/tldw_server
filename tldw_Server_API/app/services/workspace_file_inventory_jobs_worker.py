@@ -265,13 +265,7 @@ async def _should_cancel(job: dict[str, Any], *, job_manager: JobManager) -> boo
         return False
     if str(current.get("status") or "").strip().lower() == "cancelled":
         return True
-    if current.get("cancel_requested_at"):
-        job_manager.finalize_cancelled(
-            int(job["id"]),
-            reason=str(current.get("cancellation_reason") or "requested"),
-        )
-        return True
-    return False
+    return bool(current.get("cancel_requested_at"))
 
 
 async def run_workspace_file_inventory_jobs_worker(stop_event: asyncio.Event | None = None) -> None:

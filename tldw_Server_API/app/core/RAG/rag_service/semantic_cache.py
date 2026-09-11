@@ -9,18 +9,140 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import math
 import os
 import re
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Optional, cast
 
 import numpy as np
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    reject_provider_call_credentials,
+)
+
 from .advanced_cache import CacheEntry
+from .types import Document
+
+_RETRIEVAL_CACHE_METADATA = {
+    "kind": "retrieval_documents",
+    "schema_version": 1,
+}
+_UNSUPPORTED = object()
+_GENERATION_METADATA_KEYS = frozenset(
+    {
+        "answer",
+        "generated_answer",
+        "generation_model",
+        "generation_provider",
+        "generation_prompt",
+        "verification_report",
+    }
+)
+
+
+def _json_safe_value(value: Any) -> Any:
+    """Clone supported JSON values without stringifying unknown objects."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return _UNSUPPORTED
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Enum):
+        return _json_safe_value(value.value)
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        cloned: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or key in _GENERATION_METADATA_KEYS:
+                continue
+            safe_item = _json_safe_value(item)
+            if safe_item is not _UNSUPPORTED:
+                cloned[key] = safe_item
+        return cloned
+    if isinstance(value, (list, tuple)):
+        cloned_items = []
+        for item in value:
+            safe_item = _json_safe_value(item)
+            if safe_item is not _UNSUPPORTED:
+                cloned_items.append(safe_item)
+        return cloned_items
+    if isinstance(value, np.generic):
+        return _json_safe_value(value.item())
+    return _UNSUPPORTED
+
+
+def _wire_document(document: Any) -> Optional[dict[str, Any]]:
+    """Convert a supported retrieval document to an isolated JSON-safe mapping."""
+    if isinstance(document, Document):
+        document_id = document.id
+        content = document.content
+        score = document.score
+        metadata = document.metadata
+        source = document.source
+    elif isinstance(document, Mapping):
+        document_id = document.get("id")
+        content = document.get("content")
+        score = document.get("score", 0.0)
+        metadata = document.get("metadata")
+        source = document.get("source")
+    else:
+        return None
+
+    if not isinstance(content, str):
+        return None
+    safe_id = _json_safe_value(document_id)
+    if safe_id is _UNSUPPORTED:
+        return None
+    safe_metadata = _json_safe_value(metadata if isinstance(metadata, Mapping) else {})
+    if not isinstance(safe_metadata, dict):
+        safe_metadata = {}
+    safe_source = _json_safe_value(source)
+    if safe_source is not _UNSUPPORTED and safe_source is not None:
+        safe_metadata.setdefault("source", safe_source)
+    try:
+        safe_score = float(score or 0.0)
+    except (TypeError, ValueError):
+        safe_score = 0.0
+    if not math.isfinite(safe_score):
+        safe_score = 0.0
+    return {
+        "id": safe_id,
+        "content": content,
+        "metadata": safe_metadata,
+        "score": safe_score,
+    }
+
+
+def _sanitize_retrieval_payload(value: Any) -> Optional[Any]:
+    """Return only cloned retrieval documents and fixed cache metadata."""
+    legacy_list = isinstance(value, list)
+    if legacy_list:
+        raw_documents = value
+    elif isinstance(value, Mapping) and isinstance(value.get("documents"), list):
+        raw_documents = value["documents"]
+    else:
+        return None
+
+    documents = [
+        wire
+        for document in raw_documents
+        if (wire := _wire_document(document)) is not None
+    ]
+    if not documents:
+        return None
+    if legacy_list:
+        return documents
+    return {
+        "documents": documents,
+        "metadata": dict(_RETRIEVAL_CACHE_METADATA),
+    }
 
 
 @dataclass
@@ -236,16 +358,22 @@ class SemanticCache:
             if key in self._cache:
                 entry = self._cache[key]
                 if not entry.is_expired():
-                    entry.access()
-                    self._hits += 1
-                    self._exact_hits += 1
-                    self._emit_counter("rag_cache_hits_total")
-                    # Avoid logging raw query text; use hash + length for traceback without leakage
-                    try:
-                        logger.debug(f"Exact cache hit for key={key} (len={len(query)})")
-                    except (AttributeError, TypeError, ValueError):
-                        logger.debug("Exact cache hit")
-                    return entry.value
+                    safe_value = _sanitize_retrieval_payload(entry.value)
+                    if safe_value is None:
+                        del self._cache[key]
+                        self._embeddings.pop(key, None)
+                    else:
+                        entry.value = safe_value
+                        entry.access()
+                        self._hits += 1
+                        self._exact_hits += 1
+                        self._emit_counter("rag_cache_hits_total")
+                        # Avoid logging raw query text; use hash + length for traceback without leakage
+                        try:
+                            logger.debug(f"Exact cache hit for key={key} (len={len(query)})")
+                        except (AttributeError, TypeError, ValueError):
+                            logger.debug("Exact cache hit")
+                        return _sanitize_retrieval_payload(safe_value)
                 else:
                     # Remove expired entry
                     del self._cache[key]
@@ -268,15 +396,21 @@ class SemanticCache:
                     with self._lock:
                         if similar_key in self._cache:
                             entry = self._cache[similar_key]
-                            entry.access()
-                            self._hits += 1
-                            self._semantic_hits += 1
-                            self._emit_counter("rag_cache_hits_total")
-                            # Log similar cache key and similarity without raw query
-                            logger.info(
-                                f"Semantic cache hit (similarity={similarity:.3f}) for key={similar_key}"
-                            )
-                            return entry.value
+                            safe_value = _sanitize_retrieval_payload(entry.value)
+                            if safe_value is None:
+                                del self._cache[similar_key]
+                                self._embeddings.pop(similar_key, None)
+                            else:
+                                entry.value = safe_value
+                                entry.access()
+                                self._hits += 1
+                                self._semantic_hits += 1
+                                self._emit_counter("rag_cache_hits_total")
+                                # Log similar cache key and similarity without raw query
+                                logger.info(
+                                    f"Semantic cache hit (similarity={similarity:.3f}) for key={similar_key}"
+                                )
+                                return _sanitize_retrieval_payload(safe_value)
 
         with self._lock:
             self._misses += 1
@@ -299,6 +433,10 @@ class SemanticCache:
             ttl: Time-to-live in seconds
             metadata: Optional metadata to store
         """
+        reject_provider_call_credentials(value)
+        value = _sanitize_retrieval_payload(value)
+        if value is None:
+            return
         key = self._generate_key(query)
 
         # Generate embedding for semantic matching
@@ -449,8 +587,11 @@ class SemanticCache:
 
                 # Convert cache entries to serializable format
                 for key, entry in self._cache.items():
+                    safe_value = _sanitize_retrieval_payload(entry.value)
+                    if safe_value is None:
+                        continue
                     state["cache"][key] = {
-                        "value": entry.value,  # Note: Complex objects may need special handling
+                        "value": safe_value,
                         "query": entry.query,
                         "timestamp": entry.created_at,
                         "ttl": entry.ttl,
@@ -466,7 +607,7 @@ class SemanticCache:
 
                 # Save main state as JSON
                 with open(self.persist_path, 'w') as f:
-                    json.dump(state, f, indent=2)
+                    json.dump(state, f, indent=2, allow_nan=False)
 
                 logger.info(f"Saved semantic cache state ({len(self._cache)} entries)")
         except (OSError, RuntimeError, TypeError, ValueError) as e:
@@ -489,10 +630,13 @@ class SemanticCache:
 
                 # Restore cache entries
                 for key, entry_data in state.get("cache", {}).items():
+                    safe_value = _sanitize_retrieval_payload(entry_data.get("value"))
+                    if safe_value is None:
+                        continue
                     created_at = entry_data.get("created_at", entry_data.get("timestamp", time.time()))
                     last_accessed = entry_data.get("last_accessed", entry_data.get("last_access", created_at))
                     entry = SemanticCacheEntry(
-                        value=entry_data["value"],
+                        value=safe_value,
                         created_at=created_at,
                         last_accessed=last_accessed,
                         ttl=entry_data.get("ttl"),
@@ -615,11 +759,26 @@ _SHARED_CACHES: dict[tuple[type[SemanticCache], str, float, Optional[int], Optio
 _DEFAULT_CACHE_DIR: Optional[Path] = None
 
 
-def _normalize_namespace(namespace: Optional[str]) -> str:
+def _raw_namespace(namespace: Optional[str]) -> str:
+    """Return the canonical raw namespace used for identity hashing."""
     raw = str(namespace).strip() if namespace is not None else ""
-    if not raw:
-        return "default"
-    return re.sub(r"[^A-Za-z0-9_.-]", "_", raw)
+    return raw or "default"
+
+
+def _namespace_digest(raw_namespace: str) -> str:
+    """Return a short case-sensitive digest for a raw namespace."""
+    return hashlib.sha256(raw_namespace.encode("utf-8")).hexdigest()[:12]
+
+
+def _readable_namespace_prefix(raw_namespace: str) -> str:
+    """Return a filesystem-safe readable prefix for a raw namespace."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", raw_namespace) or "default"
+
+
+def _normalize_namespace(namespace: Optional[str]) -> str:
+    raw = _raw_namespace(namespace)
+    readable = _readable_namespace_prefix(raw)
+    return f"{readable}-{_namespace_digest(raw)}"
 
 
 def _normalize_namespace_key_for_filename(namespace_key: str, max_length: int = 64) -> str:
@@ -629,13 +788,12 @@ def _normalize_namespace_key_for_filename(namespace_key: str, max_length: int = 
     This protects against unexpected characters and excessively long filenames,
     even if callers pass an untrusted or unnormalized value.
     """
-    # Reuse the existing namespace normalization to enforce the allowed character set.
-    normalized = _normalize_namespace(namespace_key)
-    # Truncate to keep filenames reasonably small and avoid filesystem issues.
-    if len(normalized) > max_length:
-        normalized = normalized[:max_length]
-    # As a final safeguard, ensure we never return an empty string.
-    return normalized or "default"
+    raw = _raw_namespace(namespace_key)
+    readable = _readable_namespace_prefix(raw)
+    digest = _namespace_digest(raw)
+    prefix_length = max(0, max_length - len(digest) - 1)
+    prefix = readable[:prefix_length]
+    return f"{prefix}-{digest}" if prefix else digest[:max_length]
 
 
 def _resolve_default_cache_dir() -> Optional[Path]:
@@ -803,9 +961,10 @@ def get_shared_cache(
     embedding_model: Optional[Any] = None,
     namespace: Optional[str] = None,
 ) -> SemanticCache:
+    raw_namespace = _raw_namespace(namespace)
     namespace_key = _normalize_namespace(namespace)
-    persist_path = persist_path or _default_persist_path(namespace_key)
-    persist_path = _sanitize_persist_path(persist_path, namespace_key)
+    persist_path = persist_path or _default_persist_path(raw_namespace)
+    persist_path = _sanitize_persist_path(persist_path, raw_namespace)
     if persist_path:
         with contextlib.suppress(OSError):
             Path(persist_path).parent.mkdir(parents=True, exist_ok=True)
@@ -815,17 +974,14 @@ def get_shared_cache(
     with _SHARED_CACHE_LOCK:
         cache = _SHARED_CACHES.get(cache_key)
         if cache is None:
-            try:
-                cache = cache_cls(
-                    max_size=max_size or 1000,
-                    similarity_threshold=similarity_threshold,
-                    ttl=ttl,
-                    persist_path=persist_path,
-                    embedding_model=embedding_model,
-                    namespace=namespace,
-                )
-            except TypeError:
-                cache = cache_cls(similarity_threshold=similarity_threshold)
+            cache = cache_cls(
+                max_size=max_size or 1000,
+                similarity_threshold=similarity_threshold,
+                ttl=ttl,
+                persist_path=persist_path,
+                embedding_model=embedding_model,
+                namespace=namespace,
+            )
             _SHARED_CACHES[cache_key] = cache
     return cache
 

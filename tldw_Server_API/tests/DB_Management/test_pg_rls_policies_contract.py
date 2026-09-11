@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends import pg_rls_policies as rls_module
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
     build_chacha_rls_sql,
@@ -86,6 +87,381 @@ def test_chacha_rls_includes_workspace_resource_memberships_tenant_policy():
     assert "client_id = current_setting('app.current_user_id', true)" in sql
 
 
+def test_chacha_rls_isolates_clone_visible_workspace_graph_by_parent_owner():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    owner = "current_setting('app.current_user_id', true)"
+
+    assert "CREATE POLICY workspaces_tenant_isolation ON workspaces" in sql
+    assert f"workspaces.client_id = {owner}" in sql
+    for table in (
+        "workspace_sources",
+        "workspace_notes",
+        "workspace_artifacts",
+        "workspace_artifact_versions",
+    ):
+        assert f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY" in sql
+        assert f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY" in sql
+        assert f"CREATE POLICY {table}_tenant_isolation ON {table}" in sql
+        assert f"workspace.id = {table}.workspace_id" in sql
+        assert f"workspace.client_id = {owner}" in sql
+
+    membership_policy = sql.split(
+        "CREATE POLICY workspace_resource_memberships_tenant_isolation "
+        "ON workspace_resource_memberships",
+        1,
+    )[1].split(";", 1)[0]
+    assert f"workspace_resource_memberships.client_id = {owner}" in membership_policy
+    assert "workspace.id = workspace_resource_memberships.workspace_id" in membership_policy
+    assert f"workspace.client_id = {owner}" in membership_policy
+
+
+def test_shared_workspace_chat_rls_is_guarded_forced_and_canonical() -> None:
+    policy_statements = rls_module.build_shared_workspace_chat_rls_sql()
+    policy_sql = " ".join("\n".join(policy_statements).split())
+    canonical_sql = "\n".join(build_chacha_rls_sql())
+
+    for table in (
+        "shared_workspace_chat_threads",
+        "shared_workspace_chat_requests",
+    ):
+        assert f"to_regclass('{table}')" in policy_sql
+        assert f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY" in policy_sql
+        assert f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY" in policy_sql
+        assert f"DROP POLICY IF EXISTS {table}_tenant_isolation ON {table}" in policy_sql
+        assert f"CREATE POLICY {table}_tenant_isolation ON {table}" in policy_sql
+    for statement in policy_statements:
+        assert canonical_sql.count(statement) == 1
+
+
+def test_shared_workspace_chat_rls_checks_recipient_conversation_thread_and_messages() -> None:
+    sql = " ".join("\n".join(rls_module.build_shared_workspace_chat_rls_sql()).split())
+    owner = "current_setting('app.current_user_id', true)"
+    thread_policy = sql.split(
+        "CREATE POLICY shared_workspace_chat_threads_tenant_isolation "
+        "ON shared_workspace_chat_threads",
+        1,
+    )[1].split("$thread_policy$", 1)[0]
+    request_policy = sql.split(
+        "CREATE POLICY shared_workspace_chat_requests_tenant_isolation "
+        "ON shared_workspace_chat_requests",
+        1,
+    )[1].split("$request_policy$", 1)[0]
+
+    assert "USING (" in thread_policy
+    assert "WITH CHECK (" in thread_policy
+    for clause in (
+        f"shared_workspace_chat_threads.recipient_user_id = {owner}",
+        "conversation.id = shared_workspace_chat_threads.conversation_id",
+        f"conversation.client_id = {owner}",
+        "conversation.client_id = shared_workspace_chat_threads.recipient_user_id",
+        "conversation.deleted = false",
+    ):
+        assert thread_policy.count(clause) == 2
+
+    assert "USING (" in request_policy
+    assert "WITH CHECK (" in request_policy
+    for clause in (
+        f"shared_workspace_chat_requests.recipient_user_id = {owner}",
+        "thread.recipient_user_id = shared_workspace_chat_requests.recipient_user_id",
+        "thread.share_id = shared_workspace_chat_requests.share_id",
+        "thread.conversation_id = shared_workspace_chat_requests.conversation_id",
+        "conversation.id = shared_workspace_chat_requests.conversation_id",
+        f"conversation.client_id = {owner}",
+        "conversation.client_id = shared_workspace_chat_requests.recipient_user_id",
+        "conversation.deleted = false",
+        "user_message.id = shared_workspace_chat_requests.user_message_id",
+        "user_message.conversation_id = shared_workspace_chat_requests.conversation_id",
+        f"user_message.client_id = {owner}",
+        "user_message.client_id = shared_workspace_chat_requests.recipient_user_id",
+        "assistant_message.id = shared_workspace_chat_requests.assistant_message_id",
+        "assistant_message.conversation_id = shared_workspace_chat_requests.conversation_id",
+        f"assistant_message.client_id = {owner}",
+        "assistant_message.client_id = shared_workspace_chat_requests.recipient_user_id",
+    ):
+        assert request_policy.count(clause) == 2
+
+
+def test_chacha_rls_includes_exact_moodboard_and_studio_tenant_policies():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    owner = "current_setting('app.current_user_id', true)"
+    dataset = "current_setting('app.current_dataset_id', true)"
+
+    expected_relationship_checks = {
+        "moodboards": (),
+        "moodboard_notes": (
+            "board.owner_user_id = moodboard_notes.owner_user_id",
+            "board.dataset_id = moodboard_notes.dataset_id",
+            "board.id = moodboard_notes.moodboard_id",
+            "note.id = moodboard_notes.note_id",
+            "note.client_id = moodboard_notes.owner_user_id",
+        ),
+        "note_studio_documents": (
+            "note.id = note_studio_documents.note_id",
+            "note.client_id = note_studio_documents.owner_user_id",
+            "note_studio_documents.source_note_id IS NULL",
+            "source_note.id = note_studio_documents.source_note_id",
+            "source_note.client_id = note_studio_documents.owner_user_id",
+        ),
+    }
+    for table, relationship_checks in expected_relationship_checks.items():
+        assert f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY" in sql
+        assert f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY" in sql
+        policy = sql.split(
+            f"CREATE POLICY {table}_tenant_isolation ON {table}", 1
+        )[1].split(";", 1)[0]
+        assert policy.count(f"{table}.owner_user_id = {owner}") == 2
+        assert policy.count(f"{table}.dataset_id = {dataset}") == 2
+        assert "USING (" in policy
+        assert "WITH CHECK (" in policy
+        using, with_check = policy.split("WITH CHECK", 1)
+        for clause in relationship_checks:
+            assert clause in using
+            assert clause in with_check
+
+
+def test_chacha_rls_scopes_graph_projection_state_and_allows_unresolved_targets():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+
+    assert "CREATE POLICY note_graph_note_state_tenant_isolation" in sql
+    state_policy = sql.split(
+        "CREATE POLICY note_graph_note_state_tenant_isolation ON note_graph_note_state",
+        1,
+    )[1].split(";", 1)[0]
+    assert "owner_user_id = current_setting('app.current_user_id', true)" in state_policy
+    policy = sql.split(
+        "CREATE POLICY note_wikilink_edges_tenant_isolation ON note_wikilink_edges",
+        1,
+    )[1].split(";", 1)[0]
+    assert "source_note.id = note_wikilink_edges.source_note_id" in policy
+    assert "source_note.client_id = current_setting('app.current_user_id', true)" in policy
+    assert "target_note.id = note_wikilink_edges.target_note_id" not in policy
+
+
+def test_chacha_rls_includes_web_clipper_owner_read_and_write_policies():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    owner = "client_id = current_setting('app.current_user_id', true)"
+
+    for table in (
+        "note_clipper_documents",
+        "note_clipper_workspace_placements",
+    ):
+        assert f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY" in sql
+        assert f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY" in sql
+        policy = sql.split(
+            f"CREATE POLICY {table}_tenant_isolation ON {table}", 1
+        )[1].split(";", 1)[0]
+        assert "USING (" in policy
+        assert "WITH CHECK (" in policy
+        assert policy.count(owner) >= 2
+
+
+def test_chacha_web_clipper_rls_derives_owner_from_every_endpoint():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    owner = "current_setting('app.current_user_id', true)"
+    expected_endpoint_checks = {
+        "note_clipper_documents": (
+            "note.id = note_clipper_documents.note_id",
+            f"note.client_id = {owner}",
+        ),
+        "note_clipper_workspace_placements": (
+            "document.client_id = note_clipper_workspace_placements.client_id",
+            "document.clip_id = note_clipper_workspace_placements.clip_id",
+            "document.note_id = note_clipper_workspace_placements.source_note_id",
+            "workspace.id = note_clipper_workspace_placements.workspace_id",
+            f"workspace.client_id = {owner}",
+            "note.id = note_clipper_workspace_placements.source_note_id",
+            f"note.client_id = {owner}",
+        ),
+    }
+
+    for table, checks in expected_endpoint_checks.items():
+        policy = sql.split(
+            f"CREATE POLICY {table}_tenant_isolation ON {table}", 1
+        )[1].split(";", 1)[0]
+        using, with_check = policy.split("WITH CHECK", 1)
+        for check in checks:
+            assert check in using
+            assert check in with_check
+
+
+def test_chacha_rls_covers_every_notes_organization_resource_and_derived_table():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    tables = (
+        "chacha_keywords",
+        "keyword_collections",
+        "note_folders",
+        "note_keywords",
+        "conversation_keywords",
+        "collection_keywords",
+        "note_folder_memberships",
+        "note_folder_source_memberships",
+        "note_folder_source_keys",
+        "note_folder_sync_suppressions",
+    )
+
+    for table in tables:
+        assert f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY" in sql
+        assert f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY" in sql
+        assert f"CREATE POLICY {table}_tenant_isolation ON {table}" in sql
+
+    for table in ("chacha_keywords", "keyword_collections", "note_folders"):
+        policy = sql.split(
+            f"CREATE POLICY {table}_tenant_isolation ON {table}", 1
+        )[1].split(";", 1)[0]
+        assert "USING (client_id = current_setting('app.current_user_id', true))" in policy
+        assert "WITH CHECK (client_id = current_setting('app.current_user_id', true))" in policy
+
+
+def test_chacha_notes_organization_link_rls_derives_owner_from_every_endpoint():
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    owner = "current_setting('app.current_user_id', true)"
+    expected_endpoint_checks = {
+        "note_keywords": (
+            "note.id = note_keywords.note_id",
+            f"note.client_id = {owner}",
+            "keyword.id = note_keywords.keyword_id",
+            f"keyword.client_id = {owner}",
+        ),
+        "conversation_keywords": (
+            "conversation.id = conversation_keywords.conversation_id",
+            f"conversation.client_id = {owner}",
+            "keyword.id = conversation_keywords.keyword_id",
+            f"keyword.client_id = {owner}",
+        ),
+        "collection_keywords": (
+            "collection.id = collection_keywords.collection_id",
+            f"collection.client_id = {owner}",
+            "keyword.id = collection_keywords.keyword_id",
+            f"keyword.client_id = {owner}",
+        ),
+        "note_folder_memberships": (
+            "note.id = note_folder_memberships.note_id",
+            f"note.client_id = {owner}",
+            "folder.id = note_folder_memberships.folder_id",
+            f"folder.client_id = {owner}",
+        ),
+        "note_folder_source_memberships": (
+            "note.id = note_folder_source_memberships.note_id",
+            f"note.client_id = {owner}",
+            "folder.id = note_folder_source_memberships.folder_id",
+            f"folder.client_id = {owner}",
+        ),
+        "note_folder_source_keys": (
+            "folder.id = note_folder_source_keys.folder_id",
+            f"folder.client_id = {owner}",
+        ),
+        "note_folder_sync_suppressions": (
+            "note.id = note_folder_sync_suppressions.note_id",
+            f"note.client_id = {owner}",
+            "folder.id = note_folder_sync_suppressions.folder_id",
+            f"folder.client_id = {owner}",
+        ),
+    }
+
+    for table, checks in expected_endpoint_checks.items():
+        policy = sql.split(
+            f"CREATE POLICY {table}_tenant_isolation ON {table}", 1
+        )[1].split(";", 1)[0]
+        assert "USING (" in policy
+        assert "WITH CHECK (" in policy
+        for check in checks:
+            assert check in policy
+
+
+def test_chacha_notes_link_rls_checks_owner_and_both_note_endpoints() -> None:
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    policy = sql.split(
+        "CREATE POLICY note_edges_tenant_isolation ON note_edges", 1
+    )[1].split(";", 1)[0]
+    owner = "current_setting('app.current_user_id', true)"
+
+    assert "USING (" in policy
+    assert "WITH CHECK (" in policy
+    for clause in (
+        f"note_edges.user_id = {owner}",
+        "source_note.id = note_edges.from_note_id",
+        f"source_note.client_id = {owner}",
+        "target_note.id = note_edges.to_note_id",
+        f"target_note.client_id = {owner}",
+    ):
+        assert policy.count(clause) == 2
+
+
+def test_chacha_note_attachment_rls_checks_registry_and_note_owner_for_reads_and_writes() -> None:
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    policy = sql.split(
+        "CREATE POLICY note_attachments_tenant_isolation ON note_attachments", 1
+    )[1].split(";", 1)[0]
+    owner = "current_setting('app.current_user_id', true)"
+
+    assert "ALTER TABLE IF EXISTS note_attachments ENABLE ROW LEVEL SECURITY" in sql
+    assert "ALTER TABLE IF EXISTS note_attachments FORCE ROW LEVEL SECURITY" in sql
+    assert "USING (" in policy
+    assert "WITH CHECK (" in policy
+    for clause in (
+        f"note_attachments.client_id = {owner}",
+        "note.id = note_attachments.note_id",
+        f"note.client_id = {owner}",
+        "note.client_id = note_attachments.client_id",
+    ):
+        assert policy.count(clause) == 2
+
+
+def test_chacha_note_task_graph_rls_checks_scope_and_owned_parents_for_reads_and_writes() -> None:
+    sql = " ".join("\n".join(build_chacha_rls_sql()).split())
+    owner = "current_setting('app.current_user_id', true)"
+    dataset = "current_setting('app.current_dataset_id', true)"
+
+    for table in (
+        "note_tasks",
+        "task_note_projections",
+        "task_events",
+        "task_event_read_state",
+        "note_task_reconciliation_state",
+        "task_projection_drifts",
+    ):
+        assert f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY" in sql
+        assert f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY" in sql
+        policy = sql.split(
+            f"CREATE POLICY {table}_tenant_isolation ON {table}", 1
+        )[1].split(";", 1)[0]
+        assert "USING (" in policy
+        assert "WITH CHECK (" in policy
+        assert policy.count(f"{table}.owner_user_id = {owner}") == 2
+        assert policy.count(f"{table}.dataset_id = {dataset}") == 2
+
+    authority_policy = sql.split(
+        "CREATE POLICY note_task_scope_authority_tenant_isolation "
+        "ON note_task_scope_authority",
+        1,
+    )[1].split(";", 1)[0]
+    assert authority_policy.count(
+        f"note_task_scope_authority.owner_user_id = {owner}"
+    ) == 2
+    assert "current_dataset_id" not in authority_policy
+
+    task_policy = sql.split(
+        "CREATE POLICY note_tasks_tenant_isolation ON note_tasks", 1
+    )[1].split(";", 1)[0]
+    for clause in (
+        "note.id = note_tasks.note_id",
+        "note.client_id = note_tasks.owner_user_id",
+        f"note.client_id = {owner}",
+    ):
+        assert task_policy.count(clause) == 2
+
+    read_state_policy = sql.split(
+        "CREATE POLICY task_event_read_state_tenant_isolation ON task_event_read_state", 1
+    )[1].split(";", 1)[0]
+    for clause in (
+        "task_event_read_state.user_id = task_event_read_state.owner_user_id",
+        "event.id = task_event_read_state.event_id",
+        "event.owner_user_id = task_event_read_state.owner_user_id",
+        "event.dataset_id = task_event_read_state.dataset_id",
+    ):
+        assert read_state_policy.count(clause) == 2
+
+
 def test_chacha_rls_includes_source_review_read_and_write_policies():
     sql = "\n".join(build_chacha_rls_sql())
 
@@ -112,12 +488,37 @@ def test_chacha_rls_includes_guarded_active_workspace_source_saved_view_policy()
     assert "WITH CHECK" in sql
 
 
-def test_ensure_chacha_rls_uses_the_guarded_saved_view_policy_block():
+def test_ensure_chacha_rls_uses_the_guarded_saved_view_policy_block(
+    monkeypatch: pytest.MonkeyPatch,
+):
     conn = _TxnConn()
     conn.cursor_obj.execute = lambda _sql: None
+    monkeypatch.setattr(rls_module, "_ensure_chacha_schema", lambda _backend: None)
 
     assert ensure_chacha_rls(_Backend(conn)) is True
     assert conn.committed is True
+
+
+def test_ensure_chacha_rls_migrates_schema_before_installing_policies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = SimpleNamespace(backend_type=SimpleNamespace(name="POSTGRESQL"))
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        rls_module,
+        "_ensure_chacha_schema",
+        lambda seen_backend: calls.append("schema") if seen_backend is backend else None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        rls_module,
+        "_ensure_rls_policy_set",
+        lambda seen_backend, **_kwargs: calls.append("policies") or seen_backend is backend,
+    )
+
+    assert rls_module.ensure_chacha_rls(backend) is True
+    assert calls == ["schema", "policies"]
 
 
 def test_run_pg_rls_auto_ensure_logs_success_only_after_both_installers_pass(monkeypatch):

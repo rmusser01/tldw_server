@@ -4,6 +4,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 import tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping as ews
+from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
+from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightTarget
+from tldw_Server_API.app.core.Web_Scraping.runtime import PolicyDecision, RuntimeRequestContext
 
 HTTP_BACKEND = "httpx"
 
@@ -93,17 +96,36 @@ def _build_scraper(monkeypatch):
     )
 
     monkeypatch.setattr(scraper, "_resolve_scrape_plan", lambda url: (plan, HTTP_BACKEND, ""))
-    monkeypatch.setattr(scraper, "_run_preflight_analysis", AsyncMock(return_value=None))
-    monkeypatch.setattr(scraper, "_apply_preflight_advice", lambda *args: (HTTP_BACKEND, "trafilatura", []))
-
-    async def _allow_outbound_policy(*_args, **_kwargs):
-        return SimpleNamespace(allowed=True)
-
-    monkeypatch.setattr(ews, "decide_web_outbound_policy", _allow_outbound_policy)
+    monkeypatch.setattr(ews, "preflight_facade", preflight_facade, raising=False)
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.Security.egress.evaluate_url_policy",
-        lambda url, **_kwargs: SimpleNamespace(allowed=True),
+        preflight_facade,
+        "evaluate_target",
+        AsyncMock(
+            return_value=PreflightTarget(
+                url="https://example.com/article",
+                decision=PolicyDecision(
+                    allowed=True,
+                    mode="compat",
+                    reason="allowed",
+                    stage="pre_fetch",
+                    source="enhanced_scrape",
+                ),
+                request_context=RuntimeRequestContext(source="enhanced_scrape", stage="pre_fetch"),
+            )
+        ),
     )
+    monkeypatch.setattr(ews, "_ENHANCED_POLICY_CHECKER", object(), raising=False)
+
+    async def _deny_legacy_policy(*_args, **_kwargs):
+        return ews.WebOutboundPolicyDecision(
+            allowed=False,
+            mode="strict",
+            reason="deny_legacy_path",
+            stage="pre_fetch",
+            source="enhanced_scrape",
+        )
+
+    monkeypatch.setattr(ews, "decide_web_outbound_policy", _deny_legacy_policy)
     monkeypatch.setattr(ews, "increment_counter", lambda *args, **kwargs: None)
 
     return scraper
@@ -137,19 +159,22 @@ async def test_scrape_article_blocks_when_robots_disallows(monkeypatch):
     fake_scrape = AsyncMock()
     monkeypatch.setattr(scraper, "_scrape_with_trafilatura", fake_scrape)
 
-    async def _block_robots_policy(*_args, **_kwargs):
-        return ews.WebOutboundPolicyDecision(
-            allowed=False,
-            mode="strict",
-            reason="robots_disallowed",
-            stage="pre_fetch",
-            source="enhanced_scrape",
-        )
-
     monkeypatch.setattr(
-        ews,
-        "decide_web_outbound_policy",
-        _block_robots_policy,
+        preflight_facade,
+        "evaluate_target",
+        AsyncMock(
+            return_value=PreflightTarget(
+                url="https://example.com/article",
+                decision=PolicyDecision(
+                    allowed=False,
+                    mode="strict",
+                    reason="robots_disallowed",
+                    stage="pre_fetch",
+                    source="enhanced_scrape",
+                ),
+                request_context=RuntimeRequestContext(source="enhanced_scrape", stage="pre_fetch"),
+            )
+        ),
     )
 
     result = await scraper.scrape_article("https://example.com/article")

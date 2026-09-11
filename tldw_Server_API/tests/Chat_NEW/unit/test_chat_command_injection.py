@@ -13,6 +13,7 @@ def test_system_injection_for_time(monkeypatch):
      # Enable commands and system injection
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
     monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
 
     captured_payload: List[Dict[str, Any]] = []
 
@@ -51,6 +52,9 @@ def test_system_injection_for_time(monkeypatch):
     assert any(m.get("role") == "system" and any(
         (p.get("type") == "text" and "/time" in p.get("text", "")) for p in (m.get("content") or [])
     ) for m in captured_payload)
+    assert not any(m.get("role") == "system" and any(
+        (p.get("type") == "text" and "Permission denied" in p.get("text", "")) for p in (m.get("content") or [])
+    ) for m in captured_payload)
     # If message was purely a command, there may be no user message
     assert not any(m.get("role") == "user" and any(
         (p.get("type") == "text" and p.get("text", "").strip() == "/time") for p in (m.get("content") or [])
@@ -64,6 +68,7 @@ def test_streaming_path_uses_async_dispatcher(monkeypatch):
 
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
     monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
 
     called: Dict[str, Any] = {"async_calls": 0, "sync_calls": 0}
 
@@ -124,6 +129,7 @@ def test_weather_injection_with_args(monkeypatch):
 
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
     monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
 
     # Stub weather client to return a deterministic summary
     from tldw_Server_API.app.core.Integrations import weather_providers
@@ -178,6 +184,7 @@ def test_system_injection_truncates_to_max_chars(monkeypatch):
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
     monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
     monkeypatch.setenv("CHAT_COMMANDS_MAX_CHARS", "22")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
 
     class Result:
         ok = True
@@ -233,12 +240,14 @@ def test_system_injection_truncates_to_max_chars(monkeypatch):
     assert len(text_part.get("text", "")) <= 22
 
 
-def test_system_injection_for_skill_without_request_meta(monkeypatch):
+def test_system_injection_for_skill_with_single_user_context(monkeypatch):
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
     monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
 
     async def fake_execute(ctx, skill_name, skill_args):
-        assert ctx.request_meta is None
+        assert ctx.request_meta["auth_mode"] == "single_user"
+        assert ctx.request_meta["is_single_user_owner"] is True
         assert skill_name == "summarize"
         assert skill_args == "release notes"
         return {

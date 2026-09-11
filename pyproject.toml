@@ -10,9 +10,9 @@ build-backend = "setuptools.build_meta"
 ###########################
 [project]
 name = "tldw-server"
-version = "0.1.41"
+version = "0.1.42"
 description = "A comprehensive research assistant and media analysis platform - Too Long; Didn't Watch Server"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 readme = "README.md"
 # Use SPDX license expression as a string to avoid deprecation warnings.
 # Project is licensed under GPLv3.
@@ -40,6 +40,7 @@ dependencies = [
   # API Server Core
   "aiofiles>=23.0.0",
   "aiohttp",
+  "async-timeout>=4,<6; python_version < '3.11'",
   "aioresponses",
   "aiosqlite",
   "apscheduler>=3.10.0",
@@ -60,6 +61,7 @@ dependencies = [
   "hypothesis",
   "loguru>=0.7.0",
   "lxml>=4.9.0",
+  "cssselect>=1.2.0",
   "numpy>=1.24.0",
   "icalendar>=5.0.0",
   "openpyxl>=3.1.2",
@@ -75,11 +77,12 @@ dependencies = [
   "python-dateutil>=2.9.0",
   "python-magic>=0.4.0",
   "python-multipart>=0.0.27",
-  "jsonschema>=4.22.0",
+  "jsonschema>=4.23,<5",
   "markdown>=3.6",
   "pyspellchecker>=0.7.2",
   "PyYAML>=6.0.0",
   "redis>=4.5.0",
+  "rfc8785==0.1.4",
   "rich>=13.0.0",
   "scikit-learn>=1.3.0",
   "scipy>=1.10.0",
@@ -90,7 +93,8 @@ dependencies = [
   "toml>=0.10.0",
   "tomli>=2.0.0",
   "tqdm>=4.65.0",
-  "uvicorn[standard]>=0.23.0",
+  "uvicorn[standard]==0.35.0",
+  "websockets==15.0.1",
 
 
   # Security
@@ -147,7 +151,7 @@ dependencies = [
 
   # Research/Web
   "arxiv>=2.0.0",
-  "playwright>=1.40.0",
+  "playwright>=1.48.0",
   "playwright-stealth>=1.0.0",
   "requests>=2.31.0",
   "tenacity>=8.2.0",
@@ -162,6 +166,8 @@ dependencies = [
 
   # HTML sanitization
   "bleach>=6.1.0",
+  "html5lib==1.1",
+  "tinycss2==1.4.0",
 
   # Template/UI Utilities
   "Jinja2>=3.1.0",
@@ -212,18 +218,21 @@ dev = [
   "pytest-timeout>=2.4.0",
   "pytest-benchmark>=5.2.3",
   "pytest-randomly>=3.15.0",
+  "mkdocs>=1.6.1,<2",
+  "mkdocs-material>=9.7.3,<10",
+  "mkdocs-git-revision-date-localized-plugin>=1.5.1,<2",
   "black>=26.3.1",
   "mypy>=1.20.1",
   "ruff>=0.15.10",
   "pre-commit>=4.5.1",
-  "websockets>=12.0",
+  "websockets==15.0.1",
   "locust>=2.20.0"
 ]
 
 # Tooling smoke helpers and local scripts
 tooling = [
   "requests>=2.31.0",
-  "websockets>=12.0",
+  "websockets==15.0.1",
 ]
 
 # OpenTelemetry (optional, for metrics/tracing export)
@@ -289,14 +298,14 @@ ingestion_email = [
 web_research = [
   "arxiv>=2.0.0",
   "genanki>=0.13.0",
-  "playwright>=1.40.0",
+  "playwright>=1.48.0",
   "trafilatura>=1.6.0"
 ]
 
 # Scraper analyzers (optional)
 scrape-analyzers = [
-  "playwright>=1.40.0",
-  "curl-cffi>=0.5.0",
+  "playwright>=1.48.0",
+  "curl-cffi>=0.9.0",
 ]
 
 scrape-analyzers-waf = [
@@ -479,6 +488,7 @@ tldw-server = "tldw_Server_API.app.main:run_server"
 # Point tldw-evals to the richer, unified CLI
 tldw-evals = "tldw_Server_API.cli.evals_cli:main"
 tldw-setup = "tldw_Server_API.cli.wizard.cli:main"
+tldw-admin-webhooks = "tldw_Server_API.cli.admin_webhooks_cli:main"
 
 ###########################
 # Tools - Package Discovery
@@ -487,12 +497,14 @@ tldw-setup = "tldw_Server_API.cli.wizard.cli:main"
 include-package-data = false
 
 [tool.setuptools.packages.find]
-where = [".", "apps/mcp-unified/src"]
+where = [".", "apps/mcp-unified/src", "packages/tldw_profile_core/src"]
 include = [
   "tldw_Server_API",
   "tldw_Server_API.*",
   "mcp_unified",
   "mcp_unified.*",
+  "tldw_profile_core",
+  "tldw_profile_core.*",
 ]
 namespaces = false
 exclude = [
@@ -517,11 +529,22 @@ tldw_Server_API = [
   "app/core/Evaluations/data/**/*.json",
   "app/core/DB_Management/migrations/*.sql",
   "app/core/Persona/assets/**/*.png",
+  "app/core/Persona/assets/**/*.json",
+  "app/core/Persona/assets/**/PROVENANCE.md",
+  "app/core/Visual_Identities/assets/**/*",
   "app/core/Slides/revealjs/**/*",
   "Databases/**/*.sql",
   "Samples/Workflows/*.json",
 ]
 mcp_unified = ["docs/store/schema.sql"]
+
+[tool.setuptools.data-files]
+"share/tldw_profile_core/schemas" = [
+  "packages/tldw_profile_core/schemas/*.json",
+]
+"share/tldw_profile_core/fixtures/v1" = [
+  "packages/tldw_profile_core/fixtures/v1/*.json",
+]
 
 [tool.setuptools.exclude-package-data]
 tldw_Server_API = [
@@ -540,7 +563,7 @@ tldw_Server_API = [
 # Tools - Tests
 ###########################
 [tool.pytest.ini_options]
-pythonpath = ["apps/mcp-unified/src"]
+pythonpath = ["apps/mcp-unified/src", "packages/tldw_profile_core/src"]
 filterwarnings = [
     "ignore::DeprecationWarning:pkg_resources:",
     "ignore::DeprecationWarning:speechbrain.pretrained:",
@@ -1791,7 +1814,7 @@ exclude = []
 known-first-party = ["tldw_Server_API"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true

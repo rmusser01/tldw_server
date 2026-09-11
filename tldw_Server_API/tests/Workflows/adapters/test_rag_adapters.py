@@ -581,7 +581,7 @@ class TestWebSearchAdapter:
             return {"url": url, "content": f"full content for {url}", "extraction_successful": True}
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_article",
+            "tldw_Server_API.app.core.Web_Scraping.orchestration.scrape_article",
             fake_scrape_article,
         )
 
@@ -642,7 +642,7 @@ class TestWebSearchAdapter:
             return {"url": url, "content": "", "extraction_successful": False, "error": "blocked"}
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_article",
+            "tldw_Server_API.app.core.Web_Scraping.orchestration.scrape_article",
             fake_scrape_article,
         )
 
@@ -685,7 +685,7 @@ class TestWebSearchAdapter:
             return {"url": url, "content": "", "extraction_successful": False, "error": "blocked"}
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_article",
+            "tldw_Server_API.app.core.Web_Scraping.orchestration.scrape_article",
             fake_scrape_article,
         )
 
@@ -806,7 +806,7 @@ class TestWebSearchAdapter:
             raise RuntimeError("scrape token at /private/rag-scrape-cache")
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_article",
+            "tldw_Server_API.app.core.Web_Scraping.orchestration.scrape_article",
             fake_scrape_article,
         )
 

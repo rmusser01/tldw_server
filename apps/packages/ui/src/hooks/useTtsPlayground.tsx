@@ -18,6 +18,9 @@ export type TtsPlaygroundSegment = {
   format?: string
   mimeType?: string
   source?: "browser" | "generated"
+  requestedBackend?: string
+  actualBackend?: string
+  fallbackUsed?: boolean
 }
 
 export type TtsPlaygroundOverrides = TtsProviderOverrides & {
@@ -200,7 +203,10 @@ export const useTtsPlayground = () => {
           blob: created.blob,
           format: created.format,
           mimeType: created.mimeType,
-          source: "generated"
+          source: "generated",
+          requestedBackend: overrides?.tldwBackend,
+          actualBackend: audio.actualBackend,
+          fallbackUsed: audio.fallbackUsed
         })
         setGenerationProgress({ completed: i + 1, total: sentences.length })
       }

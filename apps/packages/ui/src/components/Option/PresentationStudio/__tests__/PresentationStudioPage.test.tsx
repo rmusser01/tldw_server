@@ -19,11 +19,19 @@ const routerMocks = vi.hoisted(() => ({
 
 const clientMocks = vi.hoisted(() => ({
   createPresentation: vi.fn(),
+  getPresentationMetadata: vi.fn(),
+  getSlidesCapabilities: vi.fn(),
   getPresentation: vi.fn(),
   listVisualStyles: vi.fn(),
   createVisualStyle: vi.fn(),
   patchVisualStyle: vi.fn(),
   deleteVisualStyle: vi.fn()
+}))
+
+const standaloneWorkspaceMocks = vi.hoisted(() => ({
+  rendered: vi.fn(),
+  mounted: vi.fn(),
+  unmounted: vi.fn()
 }))
 
 vi.mock("@/hooks/useServerOnline", () => ({
@@ -50,6 +58,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     style ? { ...style } : null,
   tldwClient: {
     createPresentation: (...args: unknown[]) => clientMocks.createPresentation(...args),
+    getPresentationMetadata: (...args: unknown[]) => clientMocks.getPresentationMetadata(...args),
+    getSlidesCapabilities: (...args: unknown[]) => clientMocks.getSlidesCapabilities(...args),
     getPresentation: (...args: unknown[]) => clientMocks.getPresentation(...args),
     listVisualStyles: (...args: unknown[]) => clientMocks.listVisualStyles(...args),
     createVisualStyle: (...args: unknown[]) => clientMocks.createVisualStyle(...args),
@@ -57,6 +67,41 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     deleteVisualStyle: (...args: unknown[]) => clientMocks.deleteVisualStyle(...args)
   }
 }))
+
+vi.mock("../StandaloneHtmlWorkspace", async () => {
+  const ReactModule = await import("react")
+  return {
+    StandaloneHtmlWorkspace: ({
+      presentationId,
+      kindAuthorityPending,
+      kindAuthorityEpoch,
+      onKindAuthoritySettled
+    }: {
+      presentationId: string
+      kindAuthorityPending?: boolean
+      kindAuthorityEpoch?: number | null
+      kindAuthorityReleaseRequired?: boolean
+      onKindAuthoritySettled?: (authorityEpoch: number, releaseSafe: boolean) => void
+    }) => {
+      const [privateSource] = ReactModule.useState(`private source for ${presentationId}`)
+      standaloneWorkspaceMocks.rendered(presentationId, privateSource)
+      ReactModule.useEffect(() => {
+        standaloneWorkspaceMocks.mounted(presentationId)
+        return () => standaloneWorkspaceMocks.unmounted(presentationId)
+      }, [presentationId])
+      ReactModule.useEffect(() => {
+        if (kindAuthorityPending && kindAuthorityEpoch !== null && kindAuthorityEpoch !== undefined) {
+          onKindAuthoritySettled?.(kindAuthorityEpoch, true)
+        }
+      }, [kindAuthorityEpoch, kindAuthorityPending, onKindAuthoritySettled])
+      return (
+        <section data-testid="standalone-html-workspace-handoff">
+          Standalone HTML workspace for {presentationId}: {privateSource}
+        </section>
+      )
+    }
+  }
+})
 
 const visualStyles = [
   {
@@ -83,16 +128,89 @@ const visualStyles = [
   }
 ]
 
+const structuredRecord = (id: string, title: string) => ({
+  id,
+  content_kind: "structured_slides" as const,
+  title,
+  description: null,
+  theme: "black",
+  visual_style_id: "minimal-academic",
+  visual_style_scope: "builtin",
+  visual_style_name: "Minimal Academic",
+  visual_style_version: 1,
+  visual_style_snapshot: {
+    id: "minimal-academic",
+    scope: "builtin",
+    name: "Minimal Academic",
+    appearance_defaults: { theme: "white" }
+  },
+  slides: [
+    {
+      order: 0,
+      layout: "title",
+      title: `${title} slide`,
+      content: "",
+      speaker_notes: "",
+      metadata: {
+        studio: {
+          slideId: `${id}-slide`,
+          audio: { status: "missing" },
+          image: { status: "missing" }
+        }
+      }
+    }
+  ],
+  studio_data: { origin: "blank" },
+  created_at: "2026-03-13T00:00:00Z",
+  last_modified: "2026-03-13T00:00:00Z",
+  deleted: false,
+  client_id: "1",
+  version: 1
+})
+
 describe("PresentationStudioPage", () => {
   beforeEach(() => {
     usePresentationStudioStore.getState().reset()
     routerMocks.navigate.mockReset()
     clientMocks.createPresentation.mockReset()
+    clientMocks.getPresentationMetadata.mockReset()
+    clientMocks.getSlidesCapabilities.mockReset()
     clientMocks.getPresentation.mockReset()
+    clientMocks.getPresentation.mockImplementation(async (presentationId: string) => {
+      const state = usePresentationStudioStore.getState()
+      if (state.projectId !== presentationId) {
+        throw new Error("Presentation detail was not arranged for this test")
+      }
+      return {
+        record: {
+          id: presentationId,
+          content_kind: "structured_slides",
+          title: state.title,
+          description: state.description || null,
+          theme: state.theme,
+          visual_style_id: state.visualStyleId,
+          visual_style_scope: state.visualStyleScope,
+          visual_style_name: state.visualStyleName,
+          visual_style_version: state.visualStyleVersion,
+          visual_style_snapshot: state.visualStyleSnapshot,
+          slides: state.slides,
+          studio_data: state.studioData,
+          created_at: "2026-03-13T00:00:00Z",
+          last_modified: "2026-03-13T00:00:00Z",
+          deleted: false,
+          client_id: "1",
+          version: 1
+        },
+        etag: state.etag
+      }
+    })
     clientMocks.listVisualStyles.mockReset()
     clientMocks.createVisualStyle.mockReset()
     clientMocks.patchVisualStyle.mockReset()
     clientMocks.deleteVisualStyle.mockReset()
+    standaloneWorkspaceMocks.rendered.mockReset()
+    standaloneWorkspaceMocks.mounted.mockReset()
+    standaloneWorkspaceMocks.unmounted.mockReset()
     onlineMocks.useServerOnline.mockReturnValue(true)
     capabilityMocks.useServerCapabilities.mockReturnValue({
       loading: false,
@@ -103,11 +221,21 @@ describe("PresentationStudioPage", () => {
       }
     })
     clientMocks.listVisualStyles.mockResolvedValue(visualStyles)
+    clientMocks.getPresentationMetadata.mockImplementation(async (presentationId: string) => ({
+      record: { id: presentationId, content_kind: "structured_slides" },
+      etag: null
+    }))
+    clientMocks.getSlidesCapabilities.mockResolvedValue({
+      schema_version: 1,
+      content_kinds: { standalone_html: { read: true } },
+      generation_modes: { standalone_html: { enabled: true } }
+    })
   })
 
   it("creates a blank project from the precreate form and redirects to its detail route", async () => {
     clientMocks.createPresentation.mockResolvedValue({
       id: "presentation-1",
+      content_kind: "structured_slides",
       title: "Untitled Presentation",
       description: null,
       theme: "white",
@@ -145,11 +273,13 @@ describe("PresentationStudioPage", () => {
       version: 1
     })
 
-    render(<PresentationStudioPage mode="new" />)
+    render(<PresentationStudioPage mode="new" embedded />)
 
     await waitFor(() => {
       expect(clientMocks.listVisualStyles).toHaveBeenCalledTimes(1)
     })
+    expect(screen.getByRole("heading", { level: 2, name: "Structured presentation setup" })).toBeVisible()
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument()
     expect(
       screen.getByText(
         /Updates deck appearance defaults and future generated slides\. Existing slide content stays unchanged\./
@@ -219,6 +349,7 @@ describe("PresentationStudioPage", () => {
 
     resolveCreate?.({
       id: "presentation-strict",
+      content_kind: "structured_slides",
       title: "Untitled Presentation",
       description: null,
       theme: "white",
@@ -268,42 +399,46 @@ describe("PresentationStudioPage", () => {
 
   it("loads a detail project and leaves the loading state", async () => {
     clientMocks.getPresentation.mockResolvedValue({
-      id: "presentation-load",
-      title: "Loaded Presentation",
-      description: null,
-      theme: "black",
-      visual_style_id: "minimal-academic",
-      visual_style_scope: "builtin",
-      visual_style_name: "Minimal Academic",
-      visual_style_version: 1,
-      visual_style_snapshot: {
-        id: "minimal-academic",
-        scope: "builtin",
-        name: "Minimal Academic",
-        appearance_defaults: { theme: "white" }
-      },
-      slides: [
-        {
-          order: 0,
-          layout: "title",
-          title: "Loaded slide",
-          content: "",
-          speaker_notes: "",
-          metadata: {
-            studio: {
-              slideId: "slide-load",
-              audio: { status: "missing" },
-              image: { status: "missing" }
+      record: {
+        id: "presentation-load",
+        content_kind: "structured_slides",
+        title: "Loaded Presentation",
+        description: null,
+        theme: "black",
+        visual_style_id: "minimal-academic",
+        visual_style_scope: "builtin",
+        visual_style_name: "Minimal Academic",
+        visual_style_version: 1,
+        visual_style_snapshot: {
+          id: "minimal-academic",
+          scope: "builtin",
+          name: "Minimal Academic",
+          appearance_defaults: { theme: "white" }
+        },
+        slides: [
+          {
+            order: 0,
+            layout: "title",
+            title: "Loaded slide",
+            content: "",
+            speaker_notes: "",
+            metadata: {
+              studio: {
+                slideId: "slide-load",
+                audio: { status: "missing" },
+                image: { status: "missing" }
+              }
             }
           }
-        }
-      ],
-      studio_data: { origin: "blank" },
-      created_at: "2026-03-13T00:00:00Z",
-      last_modified: "2026-03-13T00:00:00Z",
-      deleted: false,
-      client_id: "1",
-      version: 1
+        ],
+        studio_data: { origin: "blank" },
+        created_at: "2026-03-13T00:00:00Z",
+        last_modified: "2026-03-13T00:00:00Z",
+        deleted: false,
+        client_id: "1",
+        version: 1
+      },
+      etag: 'W/"opaque-server-tag"'
     })
 
     render(
@@ -318,6 +453,7 @@ describe("PresentationStudioPage", () => {
       expect(screen.getByTestId("presentation-studio-slide-rail")).toBeInTheDocument()
     })
     expect(screen.queryByText("Loading presentation…")).not.toBeInTheDocument()
+    expect(usePresentationStudioStore.getState().etag).toBe('W/"opaque-server-tag"')
     fireEvent.click(screen.getByRole("button", { name: /Timeline/ }))
 
     await waitFor(() => {
@@ -325,44 +461,331 @@ describe("PresentationStudioPage", () => {
     })
   })
 
-  it("updates the deck visual style preference on the detail page without mutating slides", async () => {
-    clientMocks.getPresentation.mockResolvedValue({
-      id: "presentation-style",
-      title: "Styled Deck",
-      description: null,
-      theme: "black",
-      visual_style_id: "minimal-academic",
-      visual_style_scope: "builtin",
-      visual_style_name: "Minimal Academic",
-      visual_style_version: 1,
-      visual_style_snapshot: {
-        id: "minimal-academic",
-        scope: "builtin",
-        name: "Minimal Academic",
-        appearance_defaults: { theme: "white" }
+  it("rechecks source-free kind metadata before trusting a same-ID structured store entry", async () => {
+    usePresentationStudioStore.getState().loadProject(
+      structuredRecord("reused-id", "Old account deck") as any,
+      { etag: 'W/"old"' }
+    )
+    let resolveMetadata: ((value: any) => void) | null = null
+    clientMocks.getPresentationMetadata.mockReturnValueOnce(
+      new Promise((resolve) => { resolveMetadata = resolve })
+    )
+
+    render(<PresentationStudioPage mode="detail" projectId="reused-id" />)
+
+    expect(screen.getByText("Loading presentation…")).toBeVisible()
+    expect(screen.queryByText(/Old account deck/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Old account deck slide/)).not.toBeInTheDocument()
+    expect(clientMocks.getPresentationMetadata).toHaveBeenCalledWith("reused-id")
+
+    resolveMetadata?.({
+      record: { id: "reused-id", content_kind: "standalone_html" },
+      etag: null
+    })
+    expect(await screen.findByTestId("standalone-html-workspace-handoff")).toHaveTextContent(
+      "reused-id"
+    )
+    expect(clientMocks.getPresentation).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["origin", () => new Event("tldw:config-updated")],
+    ["account", () => new CustomEvent("tldw:auth-principal-changed", {
+      detail: { kind: "subject_changed" }
+    })]
+  ])("rechecks same-ID metadata after a trusted %s boundary", async (_boundary, eventFactory) => {
+    clientMocks.getPresentationMetadata
+      .mockResolvedValueOnce({
+        record: { id: "same-id", content_kind: "structured_slides" },
+        etag: null
+      })
+      .mockResolvedValueOnce({
+        record: { id: "same-id", content_kind: "standalone_html" },
+        etag: null
+      })
+    clientMocks.getPresentation.mockResolvedValueOnce({
+      record: structuredRecord("same-id", "First trusted deck"),
+      etag: 'W/"v1"'
+    })
+    render(<PresentationStudioPage mode="detail" projectId="same-id" />)
+    expect(await screen.findByTestId("presentation-studio-slide-rail")).toBeVisible()
+    expect(usePresentationStudioStore.getState().title).toBe("First trusted deck")
+
+    fireEvent(window, eventFactory())
+
+    await waitFor(() => expect(clientMocks.getPresentationMetadata).toHaveBeenCalledTimes(2))
+    expect(await screen.findByTestId("standalone-html-workspace-handoff")).toHaveTextContent(
+      "same-id"
+    )
+    expect(screen.queryByText(/First trusted deck/)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["blank structured", "", "structured_slides"],
+    ["mismatched structured", "presentation-b", "structured_slides"],
+    ["mismatched standalone", "presentation-b", "standalone_html"]
+  ])("rejects a %s metadata identity before kind can authorize a source-bearing surface", async (
+    _case,
+    metadataId,
+    contentKind
+  ) => {
+    clientMocks.getPresentationMetadata.mockResolvedValueOnce({
+      record: { id: metadataId, content_kind: contentKind },
+      etag: null
+    })
+    clientMocks.getPresentation.mockResolvedValueOnce({
+      record: structuredRecord("presentation-a", "source sentinel"),
+      etag: 'W/"v1"'
+    })
+
+    render(<PresentationStudioPage mode="detail" projectId="presentation-a" />)
+
+    expect(await screen.findByText(/metadata could not be verified/i)).toBeVisible()
+    expect(clientMocks.getPresentation).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("standalone-html-workspace-handoff")).not.toBeInTheDocument()
+    expect(document.body.textContent).not.toContain("source sentinel")
+  })
+
+  it("does not reuse delayed metadata after leaving and returning to the same presentation ID", async () => {
+    let resolveOldMetadata: ((value: any) => void) | null = null
+    clientMocks.getPresentationMetadata
+      .mockReturnValueOnce(new Promise((resolve) => { resolveOldMetadata = resolve }))
+      .mockResolvedValueOnce({
+        record: { id: "same-route-id", content_kind: "standalone_html" },
+        etag: null
+      })
+    const view = render(<PresentationStudioPage mode="detail" projectId="same-route-id" />)
+    await waitFor(() => expect(clientMocks.getPresentationMetadata).toHaveBeenCalledTimes(1))
+
+    view.rerender(<PresentationStudioPage mode="index" />)
+    view.rerender(<PresentationStudioPage mode="detail" projectId="same-route-id" />)
+
+    await waitFor(() => expect(clientMocks.getPresentationMetadata).toHaveBeenCalledTimes(2))
+    expect(await screen.findByTestId("standalone-html-workspace-handoff")).toHaveTextContent(
+      "same-route-id"
+    )
+    resolveOldMetadata?.({
+      record: { id: "same-route-id", content_kind: "structured_slides" },
+      etag: null
+    })
+    await Promise.resolve()
+    expect(clientMocks.getPresentation).not.toHaveBeenCalled()
+    expect(screen.getByTestId("standalone-html-workspace-handoff")).toBeVisible()
+  })
+
+  it("does not reuse delayed structured detail after leaving and returning to the same presentation ID", async () => {
+    let resolveOldDetail: ((value: any) => void) | null = null
+    clientMocks.getPresentationMetadata
+      .mockResolvedValueOnce({
+        record: { id: "same-route-id", content_kind: "structured_slides" },
+        etag: null
+      })
+      .mockResolvedValueOnce({
+        record: { id: "same-route-id", content_kind: "standalone_html" },
+        etag: null
+      })
+    clientMocks.getPresentation.mockReturnValueOnce(
+      new Promise((resolve) => { resolveOldDetail = resolve })
+    )
+    const view = render(<PresentationStudioPage mode="detail" projectId="same-route-id" />)
+    await waitFor(() => expect(clientMocks.getPresentation).toHaveBeenCalledTimes(1))
+
+    view.rerender(<PresentationStudioPage mode="index" />)
+    view.rerender(<PresentationStudioPage mode="detail" projectId="same-route-id" />)
+
+    await waitFor(() => expect(clientMocks.getPresentationMetadata).toHaveBeenCalledTimes(2))
+    expect(await screen.findByTestId("standalone-html-workspace-handoff")).toBeVisible()
+    resolveOldDetail?.({
+      record: structuredRecord("same-route-id", "stale structured source sentinel"),
+      etag: 'W/"old"'
+    })
+    await Promise.resolve()
+    expect(document.body.textContent).not.toContain("stale structured source sentinel")
+    expect(screen.getByTestId("standalone-html-workspace-handoff")).toBeVisible()
+  })
+
+  it("hands standalone HTML metadata to the isolated workspace without fetching detail in the page", async () => {
+    clientMocks.getPresentationMetadata.mockResolvedValue({
+      record: { id: "presentation-html", content_kind: "standalone_html" },
+      etag: null
+    })
+
+    render(<PresentationStudioPage mode="detail" projectId="presentation-html" />)
+
+    expect(await screen.findByTestId("standalone-html-workspace-handoff")).toHaveTextContent(
+      "presentation-html"
+    )
+    expect(clientMocks.getPresentationMetadata).toHaveBeenCalledWith("presentation-html")
+    expect(clientMocks.getPresentation).not.toHaveBeenCalled()
+  })
+
+  it("unmounts presentation A before mounting B so route reuse cannot carry A source into B", async () => {
+    clientMocks.getPresentationMetadata.mockImplementation(async (presentationId: string) => ({
+      record: { id: presentationId, content_kind: "standalone_html" },
+      etag: null
+    }))
+    const view = render(<PresentationStudioPage mode="detail" projectId="presentation-a" />)
+
+    expect(await screen.findByTestId("standalone-html-workspace-handoff")).toHaveTextContent(
+      "private source for presentation-a"
+    )
+    expect(standaloneWorkspaceMocks.mounted).toHaveBeenCalledWith("presentation-a")
+
+    view.rerender(<PresentationStudioPage mode="detail" projectId="presentation-b" />)
+
+    await waitFor(() => expect(standaloneWorkspaceMocks.unmounted).toHaveBeenCalledWith("presentation-a"))
+    expect(await screen.findByTestId("standalone-html-workspace-handoff")).toHaveTextContent(
+      "private source for presentation-b"
+    )
+    expect(screen.getByTestId("standalone-html-workspace-handoff")).not.toHaveTextContent(
+      "private source for presentation-a"
+    )
+    expect(standaloneWorkspaceMocks.rendered).not.toHaveBeenCalledWith(
+      "presentation-b",
+      "private source for presentation-a"
+    )
+    expect(standaloneWorkspaceMocks.mounted).toHaveBeenLastCalledWith("presentation-b")
+  })
+
+  it("keeps a reused route source-free until metadata authorizes the new presentation ID", async () => {
+    let resolvePresentationB: ((value: any) => void) | null = null
+    clientMocks.getPresentationMetadata
+      .mockResolvedValueOnce({
+        record: { id: "presentation-a", content_kind: "standalone_html" },
+        etag: null
+      })
+      .mockReturnValueOnce(new Promise((resolve) => { resolvePresentationB = resolve }))
+    const view = render(<PresentationStudioPage mode="detail" projectId="presentation-a" />)
+    expect(await screen.findByTestId("standalone-html-workspace-handoff")).toHaveTextContent(
+      "presentation-a"
+    )
+
+    view.rerender(<PresentationStudioPage mode="detail" projectId="presentation-b" />)
+
+    expect(screen.getByText("Loading presentation…")).toBeVisible()
+    expect(screen.queryByTestId("standalone-html-workspace-handoff")).not.toBeInTheDocument()
+    expect(standaloneWorkspaceMocks.rendered).not.toHaveBeenCalledWith(
+      "presentation-b",
+      expect.anything()
+    )
+    expect(clientMocks.getPresentation).not.toHaveBeenCalled()
+
+    resolvePresentationB?.({
+      record: { id: "presentation-b", content_kind: "standalone_html" },
+      etag: null
+    })
+    expect(await screen.findByTestId("standalone-html-workspace-handoff")).toHaveTextContent(
+      "presentation-b"
+    )
+  })
+
+  it("shows a source-free kind-aware state for an unknown presentation kind", async () => {
+    clientMocks.getPresentationMetadata.mockResolvedValue({
+      record: {
+        id: "presentation-future",
+        content_kind: "unsupported",
+        unsupported_content_kind: "immersive_canvas",
+        read_only: true
       },
-      slides: [
-        {
+      etag: null
+    })
+
+    render(<PresentationStudioPage mode="detail" projectId="presentation-future" />)
+
+    expect(await screen.findByText("Unsupported presentation kind")).toBeVisible()
+    expect(screen.getByText("immersive_canvas")).toBeVisible()
+    expect(clientMocks.getPresentation).not.toHaveBeenCalled()
+  })
+
+  it("does not fall back to full detail when a standalone-aware server lacks metadata", async () => {
+    clientMocks.getPresentationMetadata.mockRejectedValue(Object.assign(new Error("missing"), { status: 404 }))
+
+    render(<PresentationStudioPage mode="detail" projectId="new-server-missing-metadata" />)
+
+    expect(await screen.findByText("Presentation metadata is unavailable")).toBeVisible()
+    expect(clientMocks.getSlidesCapabilities).toHaveBeenCalledTimes(1)
+    expect(clientMocks.getPresentation).not.toHaveBeenCalled()
+  })
+
+  it("uses full detail only when a 404 capability endpoint proves a legacy structured-only server", async () => {
+    clientMocks.getPresentationMetadata.mockRejectedValue(Object.assign(new Error("missing"), { status: 404 }))
+    clientMocks.getSlidesCapabilities.mockRejectedValue(Object.assign(new Error("legacy"), { status: 404 }))
+    clientMocks.getPresentation.mockResolvedValue({
+      record: {
+        id: "legacy-structured",
+        content_kind: "structured_slides",
+        title: "Legacy structured deck",
+        description: null,
+        theme: "black",
+        slides: [{
           order: 0,
           layout: "title",
-          title: "Loaded slide",
+          title: "Legacy slide",
           content: "",
           speaker_notes: "",
-          metadata: {
-            studio: {
-              slideId: "slide-load",
-              audio: { status: "missing" },
-              image: { status: "missing" }
+          metadata: { studio: { slideId: "legacy-slide", audio: { status: "missing" }, image: { status: "missing" } } }
+        }],
+        studio_data: { origin: "blank" },
+        created_at: "2026-03-13T00:00:00Z",
+        last_modified: "2026-03-13T00:00:00Z",
+        deleted: false,
+        client_id: "1",
+        version: 1
+      },
+      etag: 'W/"legacy"'
+    })
+
+    render(<PresentationStudioPage mode="detail" projectId="legacy-structured" />)
+
+    expect(await screen.findByTestId("presentation-studio-slide-rail")).toBeVisible()
+    expect(clientMocks.getPresentation).toHaveBeenCalledWith(
+      "legacy-structured",
+      expect.objectContaining({ abortSignal: expect.any(AbortSignal) })
+    )
+  })
+
+  it("updates the deck visual style preference on the detail page without mutating slides", async () => {
+    clientMocks.getPresentation.mockResolvedValue({
+      record: {
+        id: "presentation-style",
+        content_kind: "structured_slides",
+        title: "Styled Deck",
+        description: null,
+        theme: "black",
+        visual_style_id: "minimal-academic",
+        visual_style_scope: "builtin",
+        visual_style_name: "Minimal Academic",
+        visual_style_version: 1,
+        visual_style_snapshot: {
+          id: "minimal-academic",
+          scope: "builtin",
+          name: "Minimal Academic",
+          appearance_defaults: { theme: "white" }
+        },
+        slides: [
+          {
+            order: 0,
+            layout: "title",
+            title: "Loaded slide",
+            content: "",
+            speaker_notes: "",
+            metadata: {
+              studio: {
+                slideId: "slide-load",
+                audio: { status: "missing" },
+                image: { status: "missing" }
+              }
             }
           }
-        }
-      ],
-      studio_data: { origin: "blank" },
-      created_at: "2026-03-13T00:00:00Z",
-      last_modified: "2026-03-13T00:00:00Z",
-      deleted: false,
-      client_id: "1",
-      version: 1
+        ],
+        studio_data: { origin: "blank" },
+        created_at: "2026-03-13T00:00:00Z",
+        last_modified: "2026-03-13T00:00:00Z",
+        deleted: false,
+        client_id: "1",
+        version: 1
+      },
+      etag: 'W/"v1"'
     })
 
     render(<PresentationStudioPage mode="detail" projectId="presentation-style" />)
@@ -465,43 +888,47 @@ describe("PresentationStudioPage", () => {
 
   it("edits and deletes a selected custom visual style in detail mode", async () => {
     clientMocks.getPresentation.mockResolvedValue({
-      id: "presentation-custom-style",
-      title: "Styled Deck",
-      description: null,
-      theme: "black",
-      visual_style_id: "style-user-1",
-      visual_style_scope: "user",
-      visual_style_name: "CGPSC Sprint",
-      visual_style_version: 1,
-      visual_style_snapshot: {
-        id: "style-user-1",
-        scope: "user",
-        name: "CGPSC Sprint",
-        description: "Recall-heavy revision deck",
-        appearance_defaults: { theme: "beige" }
-      },
-      slides: [
-        {
-          order: 0,
-          layout: "title",
-          title: "Loaded slide",
-          content: "",
-          speaker_notes: "",
-          metadata: {
-            studio: {
-              slideId: "slide-load",
-              audio: { status: "missing" },
-              image: { status: "missing" }
+      record: {
+        id: "presentation-custom-style",
+        content_kind: "structured_slides",
+        title: "Styled Deck",
+        description: null,
+        theme: "black",
+        visual_style_id: "style-user-1",
+        visual_style_scope: "user",
+        visual_style_name: "CGPSC Sprint",
+        visual_style_version: 1,
+        visual_style_snapshot: {
+          id: "style-user-1",
+          scope: "user",
+          name: "CGPSC Sprint",
+          description: "Recall-heavy revision deck",
+          appearance_defaults: { theme: "beige" }
+        },
+        slides: [
+          {
+            order: 0,
+            layout: "title",
+            title: "Loaded slide",
+            content: "",
+            speaker_notes: "",
+            metadata: {
+              studio: {
+                slideId: "slide-load",
+                audio: { status: "missing" },
+                image: { status: "missing" }
+              }
             }
           }
-        }
-      ],
-      studio_data: { origin: "blank" },
-      created_at: "2026-03-13T00:00:00Z",
-      last_modified: "2026-03-13T00:00:00Z",
-      deleted: false,
-      client_id: "1",
-      version: 1
+        ],
+        studio_data: { origin: "blank" },
+        created_at: "2026-03-13T00:00:00Z",
+        last_modified: "2026-03-13T00:00:00Z",
+        deleted: false,
+        client_id: "1",
+        version: 1
+      },
+      etag: 'W/"v1"'
     })
     clientMocks.listVisualStyles
       .mockResolvedValueOnce([
@@ -586,10 +1013,11 @@ describe("PresentationStudioPage", () => {
     })
   })
 
-  it("shows stale audio and ready image badges for seeded slide media state", () => {
+  it("shows stale audio and ready image badges for seeded slide media state", async () => {
     usePresentationStudioStore.getState().loadProject(
       {
         id: "presentation-1",
+        content_kind: "structured_slides",
         title: "Seeded deck",
         description: null,
         theme: "black",
@@ -621,17 +1049,18 @@ describe("PresentationStudioPage", () => {
 
     render(<PresentationStudioPage mode="detail" projectId="presentation-1" />)
 
-    const mediaRail = screen.getByTestId("presentation-studio-media-rail")
+    const mediaRail = await screen.findByTestId("presentation-studio-media-rail")
     expect(within(mediaRail).getByText("Audio status")).toBeInTheDocument()
     expect(within(mediaRail).getByText("Image status")).toBeInTheDocument()
     expect(within(mediaRail).getAllByText("stale").length).toBeGreaterThan(0)
     expect(within(mediaRail).getAllByText("ready").length).toBeGreaterThan(0)
   })
 
-  it("explains readiness issues and narration timing for the selected slide", () => {
+  it("explains readiness issues and narration timing for the selected slide", async () => {
     usePresentationStudioStore.getState().loadProject(
       {
         id: "presentation-readiness",
+        content_kind: "structured_slides",
         title: "Readiness deck",
         description: null,
         theme: "black",
@@ -663,7 +1092,7 @@ describe("PresentationStudioPage", () => {
 
     render(<PresentationStudioPage mode="detail" projectId="presentation-readiness" />)
 
-    const mediaRail = screen.getByTestId("presentation-studio-media-rail")
+    const mediaRail = await screen.findByTestId("presentation-studio-media-rail")
     expect(within(mediaRail).getByText("Narration timing")).toBeInTheDocument()
     expect(within(mediaRail).getAllByText("1m 32s").length).toBeGreaterThan(0)
     expect(
@@ -677,10 +1106,11 @@ describe("PresentationStudioPage", () => {
     expect(within(mediaRail).getByText("Estimated narration length")).toBeInTheDocument()
   })
 
-  it("surfaces task-oriented editing guidance and slide controls for the active slide", () => {
+  it("surfaces task-oriented editing guidance and slide controls for the active slide", async () => {
     usePresentationStudioStore.getState().loadProject(
       {
         id: "presentation-ux",
+        content_kind: "structured_slides",
         title: "Narrated deck",
         description: null,
         theme: "black",
@@ -728,7 +1158,7 @@ describe("PresentationStudioPage", () => {
 
     render(<PresentationStudioPage mode="detail" projectId="presentation-ux" />)
 
-    expect(screen.getByRole("button", { name: "Duplicate slide" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "Duplicate slide" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Move earlier" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Move later" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Delete slide" })).toBeEnabled()
@@ -753,10 +1183,11 @@ describe("PresentationStudioPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("lets the editor configure transition and manual slide timing", () => {
+  it("lets the editor configure transition and manual slide timing", async () => {
     usePresentationStudioStore.getState().loadProject(
       {
         id: "presentation-timing",
+        content_kind: "structured_slides",
         title: "Timed deck",
         description: null,
         theme: "black",
@@ -788,7 +1219,7 @@ describe("PresentationStudioPage", () => {
 
     render(<PresentationStudioPage mode="detail" projectId="presentation-timing" />)
 
-    expect(screen.getByRole("heading", { name: "Transitions & timing" })).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { name: "Transitions & timing" })).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText("Transition"), {
       target: { value: "wipe" }

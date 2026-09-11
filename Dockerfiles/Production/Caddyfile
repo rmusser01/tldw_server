@@ -1,0 +1,25 @@
+{$TLDW_PUBLIC_DOMAIN} {
+  encode zstd gzip
+
+  @private_control path /internal/ready /ready /health/ready /api/v1/healthz /api/v1/readyz /setup /setup/* /api/v1/setup /api/v1/setup/*
+  respond @private_control 404
+
+  reverse_proxy app:8000 {
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-Proto https
+    transport http {
+      read_timeout 3600s
+      write_timeout 3600s
+      dial_timeout 60s
+    }
+  }
+
+  header {
+    X-Content-Type-Options nosniff
+    X-Frame-Options DENY
+    Referrer-Policy no-referrer
+  }
+
+  tls {$TLDW_ACME_EMAIL}
+}

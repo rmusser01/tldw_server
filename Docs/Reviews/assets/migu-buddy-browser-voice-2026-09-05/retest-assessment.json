@@ -1,0 +1,16 @@
+{
+  "tested_revision": "71843993589539f8dcf0bc7e95175c2c5274c1f9",
+  "manual_mode_no_false_vad_error": true,
+  "provisional_notebook_phrase_occurrences": 1,
+  "prefix_recognition_error": true,
+  "repeated_punctuation": true,
+  "capture_exceeded_operator_window": true,
+  "audio_rate_warning_observed": true,
+  "operator_stop_cancelled_turn": true,
+  "provider_reply_qualified": false,
+  "human_playback_confirmation": null,
+  "final_browser_state": "disconnected",
+  "acceptance": "incomplete; coordinated short recording required",
+  "exit_code": -15,
+  "normal_config_unchanged": true
+}

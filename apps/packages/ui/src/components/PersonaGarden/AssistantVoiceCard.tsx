@@ -36,6 +36,9 @@ type AssistantVoiceCardProps = {
   state: PersonaLiveVoiceState
   speechAvailable: boolean
   isListening: boolean
+  isVoiceActive?: boolean
+  isPreparing?: boolean
+  voiceReady?: boolean
   heardText: string
   lastCommittedText: string
   activeToolStatus: string
@@ -91,6 +94,9 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
   state,
   speechAvailable,
   isListening,
+  isVoiceActive = isListening,
+  isPreparing = false,
+  voiceReady = false,
   heardText,
   lastCommittedText,
   activeToolStatus,
@@ -162,12 +168,12 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
         <div>
           <Typography.Text strong>Assistant Voice</Typography.Text>
           <Typography.Text type="secondary" className="mt-1 block text-xs">
-            Saved defaults live under Profiles. The toggles here only affect this live
-            session.
+            Save voice defaults under Profiles, then disconnect and reconnect Live to apply changes.
+            The toggles here only affect this live session.
           </Typography.Text>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Tag color={textOnlyDueToTtsFailure ? "orange" : "blue"}>{state}</Tag>
+          <Tag color={textOnlyDueToTtsFailure ? "orange" : "blue"}>{isPreparing ? "preparing" : state}</Tag>
           <Button
             data-testid="live-voice-send-now"
             size="small"
@@ -179,11 +185,11 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
           <Button
             data-testid="live-voice-start-stop"
             size="small"
-            type={isListening ? "default" : "primary"}
-            disabled={sessionControlsDisabled || !speechAvailable}
+            type={isVoiceActive ? "default" : "primary"}
+            disabled={!isVoiceActive && (sessionControlsDisabled || !speechAvailable)}
             onClick={onToggleListening}
           >
-            {isListening ? "Stop listening" : "Start listening"}
+            {isVoiceActive ? "Stop voice" : "Start listening"}
           </Button>
         </div>
       </div>
@@ -201,15 +207,21 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
         </div>
         <div className="rounded border border-border bg-surface2 px-2 py-1.5">
           <div className="text-text-muted">TTS</div>
-          <div className="mt-1">{`${resolvedDefaults.ttsProvider} · ${resolvedDefaults.ttsVoice || "default voice"}`}</div>
+          <div className="mt-1">{`${resolvedDefaults.ttsProvider} · ${resolvedDefaults.ttsModel || "default model"} · ${resolvedDefaults.ttsVoice || "default voice"}`}</div>
         </div>
         <div className="rounded border border-border bg-surface2 px-2 py-1.5">
           <div className="text-text-muted">Live status</div>
           <div className="mt-1">
             {!speechAvailable
               ? "Server speech transcription is unavailable for this connection."
+              : isPreparing
+                ? "Preparing the selected speech models and conversation provider before microphone access."
+              : !voiceReady
+                ? "Start checks the selected speech models and conversation provider before requesting microphone access."
               : manualModeRequired
                 ? "Server speech transcription is ready, but VAD auto-commit is unavailable. Use Send now."
+              : !autoCommitEnabled
+                ? "Server speech transcription ready. Use Send now to commit manually."
                 : "Server speech transcription ready with VAD auto-commit."}
           </div>
         </div>

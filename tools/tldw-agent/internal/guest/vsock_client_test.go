@@ -3,10 +3,12 @@ package guest
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"reflect"
 	"testing"
+	"time"
 )
 
 type recordingDialer struct {
@@ -104,7 +106,7 @@ func TestGuestVSockClientSendsHandshakeAndReady(t *testing.T) {
 		done <- nil
 	}()
 
-	if err := client.primeConnection(context.Background(), guestConn, server, false); err != nil {
+	if _, err := client.primeConnection(context.Background(), guestConn, server, false); err != nil {
 		t.Fatalf("primeConnection() error = %v", err)
 	}
 	if err := <-done; err != nil {
@@ -204,18 +206,113 @@ func TestGuestVSockClientReconnectsWithSameVMIDAndToken(t *testing.T) {
 	go assertHello(firstHelperConn, "handshake", firstDone)
 	go assertHello(secondHelperConn, "reconnect", secondDone)
 
-	if err := client.primeConnection(context.Background(), firstGuestConn, server, false); err != nil {
+	if _, err := client.primeConnection(context.Background(), firstGuestConn, server, false); err != nil {
 		t.Fatalf("primeConnection(first) error = %v", err)
 	}
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first helper side error = %v", err)
 	}
 
-	if err := client.primeConnection(context.Background(), secondGuestConn, server, true); err != nil {
+	if _, err := client.primeConnection(context.Background(), secondGuestConn, server, true); err != nil {
 		t.Fatalf("primeConnection(second) error = %v", err)
 	}
 	if err := <-secondDone; err != nil {
 		t.Fatalf("second helper side error = %v", err)
+	}
+}
+
+func TestGuestVSockClientRunPreservesExecBufferedAfterReady(t *testing.T) {
+	root := t.TempDir()
+	server, err := NewServer(root)
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	guestConn, helperConn := net.Pipe()
+	client := &VSockClient{
+		cfg: VSockClientConfig{
+			VMID:            "vm-buffered-exec",
+			ConnectionToken: "token-buffered-exec",
+			HostPort:        4242,
+			WorkspaceRoot:   root,
+			GuestVersion:    "1.0.0",
+		},
+		dialer: &recordingDialer{conns: []io.ReadWriteCloser{guestConn}},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	helperDone := make(chan error, 1)
+	go func() {
+		defer helperConn.Close()
+		reader := bufio.NewReader(helperConn)
+
+		var handshake HandshakeRequest
+		if err := decodeLine(reader, &handshake); err != nil {
+			helperDone <- err
+			return
+		}
+		if err := writeJSONLine(helperConn, HandshakeAck{
+			ProtocolVersion: ProtocolVersion,
+			RequestID:       handshake.RequestID,
+			Type:            "handshake_ack",
+			Status:          "accepted",
+			VMID:            handshake.VMID,
+		}); err != nil {
+			helperDone <- err
+			return
+		}
+
+		var ready ReadyRequest
+		if err := decodeLine(reader, &ready); err != nil {
+			helperDone <- err
+			return
+		}
+		readyPayload, err := json.Marshal(ReadyResponse{
+			ProtocolVersion: ProtocolVersion,
+			RequestID:       ready.RequestID,
+			Status:          "ready",
+			WorkspaceRoot:   root,
+		})
+		if err != nil {
+			helperDone <- err
+			return
+		}
+
+		execPayload := []byte(`{"protocol_version":"1","request_id":"req-buffered-exec","type":"exec","argv":["/bin/echo","preserved"],"cwd":"."}`)
+		payload := append(append(readyPayload, '\n'), execPayload...)
+		payload = append(payload, '\n')
+		if _, err = helperConn.Write(payload); err != nil {
+			helperDone <- err
+			return
+		}
+
+		if err = helperConn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			helperDone <- err
+			return
+		}
+		var execResp ExecResponse
+		if err = decodeLine(reader, &execResp); err != nil {
+			helperDone <- err
+			return
+		}
+		if execResp.RequestID != "req-buffered-exec" {
+			helperDone <- errUnexpectedValue("exec request id", execResp.RequestID)
+			return
+		}
+		if execResp.Stdout != "preserved\n" {
+			helperDone <- errUnexpectedValue("exec stdout", execResp.Stdout)
+			return
+		}
+		cancel()
+		helperDone <- nil
+	}()
+
+	if err := client.Run(ctx, server); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if err := <-helperDone; err != nil {
+		t.Fatalf("helper side error = %v", err)
 	}
 }
 

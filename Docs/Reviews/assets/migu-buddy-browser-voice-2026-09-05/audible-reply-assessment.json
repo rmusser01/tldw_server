@@ -1,0 +1,21 @@
+{
+  "observed_at": "2026-09-06T00:43:34.970591+00:00",
+  "tested_revision": "c60f59a95e5d1da7a4a06d4e84863084b713c4bc",
+  "endpoint_source_matches_launch": true,
+  "manual_mode": true,
+  "auto_resume": false,
+  "capture_already_active_at_start": true,
+  "preexisting_transcript": "Thank you.",
+  "committed_transcript": "Thank you. Reply with The Blue Notebook is Ready.",
+  "assistant_reply": "The Blue Notebook is Ready.",
+  "tts_chunk_notices": 4,
+  "observed_states": [
+    "listening",
+    "thinking",
+    "idle"
+  ],
+  "final_connection": "disconnected",
+  "human_playback_confirmation": "yes, clearly",
+  "human_prefix_confirmation": "did not say Thank you",
+  "transcript_accuracy": "failed: unspoken prefix"
+}

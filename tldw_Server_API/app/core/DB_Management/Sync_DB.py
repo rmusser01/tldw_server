@@ -2,40 +2,56 @@ from __future__ import annotations
 
 """Database helper for per-user Sync v2 storage."""
 
+import hashlib
 import json
 import os
-from collections.abc import Mapping, Sequence
-from dataclasses import replace
+import re
+import sqlite3
+import typing
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
+from uuid import UUID, uuid4
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncConflictNotFoundError,
     SyncDatasetNotFoundError,
+    SyncHeadConflictError,
     SyncIdempotencyConflictError,
     SyncInvalidDomainError,
+    SyncMaterializationBusyError,
+    SyncMaterializationPredecessorError,
     SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
     MEDIA_SYNC_DOMAINS,
+    NOTES_LINK_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
+    NOTES_TASK_SYNC_DOMAINS,
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
     SOURCE_CACHE_SYNC_DOMAINS,
-    SYNC_V2_SUPPORTED_OPERATIONS,
+    SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
+    SYNC_V2_INTERNAL_OPERATIONS,
     WORKSPACE_SYNC_DOMAINS,
     ConflictStatus,
     SyncApplyStatus,
     SyncAttachment,
     SyncAttachmentCreate,
+    SyncAttachmentRevisionBinding,
+    SyncAttachmentRevisionBindingCreate,
     SyncBackgroundDomainStatus,
     SyncBackgroundLease,
     SyncBackgroundLeaseCreate,
     SyncBackgroundPolicy,
     SyncBackgroundPolicyUpsert,
+    SyncBlobAvailabilityStatus,
     SyncBlobChunk,
     SyncBlobChunkCreate,
     SyncBlobObject,
@@ -47,12 +63,15 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncConflictCreate,
     SyncDataset,
     SyncDatasetCreate,
+    SyncDatasetStorageNamespace,
     SyncDevice,
     SyncDeviceAcknowledgmentSummary,
     SyncDeviceAuthorization,
     SyncDeviceAuthorizationCreate,
     SyncDeviceBlobAck,
     SyncDeviceBlobAckCreate,
+    SyncDeviceBlobIdAck,
+    SyncDeviceBlobIdAckCreate,
     SyncDeviceCursor,
     SyncDeviceDomainAck,
     SyncDeviceDomainAckCreate,
@@ -64,15 +83,53 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncKeyRecord,
     SyncKeyRecordCreate,
     SyncKeyRotationEnvelopeRange,
+    SyncNotesAttachmentCleanupCandidate,
+    SyncNotesAttachmentSourceMap,
     SyncObjectState,
     SyncRestoreManifestStats,
+    normalize_sync_timestamp,
+    resolve_personal_context_ingress_result_revision,
 )
+from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
+    SYNC_MUTATION_GROUP_MAX_SIZE,
+)
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_readiness import (
+    NOTES_MOODBOARD_STUDIO_READINESS_REASON_CODES_BY_KEY,
+    NOTES_MOODBOARD_STUDIO_READINESS_STATES,
+    NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS,
+    NotesMoodboardStudioReadinessRecord,
+    default_notes_moodboard_studio_readiness_record,
+    parse_notes_moodboard_studio_readiness_record,
+)
+from tldw_Server_API.app.core.Sync.v2.notes_task_readiness import (
+    NOTES_TASK_READINESS_REASON_CODES_BY_KEY,
+    NOTES_TASK_READINESS_STATES,
+    NOTES_TASK_SERVER_METADATA_KEYS,
+    NotesTaskReadinessRecord,
+    default_notes_task_readiness_record,
+    notes_task_capture_is_active,
+    notes_task_sync_is_ready,
+    parse_notes_task_readiness_record,
+)
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
-from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, QueryResult
+from .backends.base import (
+    BackendType,
+    DatabaseBackend,
+    DatabaseConfig,
+    QueryResult,
+)
+from .backends.base import DatabaseError as BackendDatabaseError
 from .backends.factory import DatabaseBackendFactory
 
 SYNC_DB_FILENAME = "Sync_v2.db"
-SYNC_APPLY_STATUSES: set[str] = {"pending", "applied", "failed", "conflict"}
+SYNC_APPLY_STATUSES: set[str] = {
+    "pending",
+    "applied",
+    "failed",
+    "conflict",
+    "superseded",
+}
 _WHOLE_OBJECT_DOMAINS = {"notes.note", "chat.conversation"}
 _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS = {
     "attachment_id",
@@ -83,6 +140,125 @@ _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS = {
     "payload_hash",
     "availability",
 }
+_NOTES_TASK_READINESS_TRANSITIONS = {
+    "not_enrolled": frozenset({"not_enrolled", "enrolling"}),
+    "enrolling": frozenset(
+        {"enrolling", "bootstrapping", "blocked", "not_enrolled"}
+    ),
+    "bootstrapping": frozenset(
+        {"bootstrapping", "verifying", "blocked", "not_enrolled"}
+    ),
+    "verifying": frozenset({"verifying", "ready", "blocked", "not_enrolled"}),
+    "blocked": frozenset(
+        {"blocked", "bootstrapping", "verifying", "not_enrolled"}
+    ),
+    "ready": frozenset({"ready"}),
+}
+_NOTES_TASK_LOCAL_UNBOUND_DATASET_ID = "local-unbound"
+
+
+@dataclass(frozen=True, slots=True)
+class PersonalContextHistoryShredReceipt:
+    """Content-free proof that one old Personal Context generation was scrubbed."""
+
+    dataset_id: str
+    profile_id: str
+    old_generation_through: int
+    purge_generation: int
+
+
+def _moodboard_studio_cursor_regressed(
+    readiness_key: str,
+    current: object,
+    requested: object,
+) -> bool:
+    """Return whether a canonical moodboard or Studio cursor moved backward.
+
+    Args:
+        readiness_key: Domain-specific readiness metadata key.
+        current: Current parsed UUID cursor or placement UUID pair.
+        requested: Requested parsed UUID cursor or placement UUID pair.
+
+    Returns:
+        ``True`` when the requested cursor sorts before the current cursor.
+
+    Raises:
+        SyncStoreError: If the domain or either cursor shape is invalid.
+    """
+    if readiness_key in {"notes_moodboard_v1", "notes_studio_document_v1"}:
+        if not isinstance(current, UUID) or not isinstance(requested, UUID):
+            raise SyncStoreError("notes_moodboard_studio_readiness_cursor_invalid")
+        return requested.int < current.int
+    if readiness_key != "notes_moodboard_note_v1":
+        raise SyncStoreError("notes_moodboard_studio_readiness_cursor_invalid")
+    if not isinstance(current, tuple) or not isinstance(requested, tuple):
+        raise SyncStoreError("notes_moodboard_studio_readiness_cursor_invalid")
+    current_board, current_note = current
+    requested_board, requested_note = requested
+    if not all(
+        isinstance(item, UUID)
+        for item in (current_board, current_note, requested_board, requested_note)
+    ):
+        raise SyncStoreError("notes_moodboard_studio_readiness_cursor_invalid")
+    return requested_board.int < current_board.int or (
+        requested_board.int == current_board.int
+        and requested_note.int < current_note.int
+    )
+
+
+def _is_rebase_required_conflict_source(
+    conflict_row: Mapping[str, Any],
+    envelope_row: Mapping[str, Any],
+) -> bool:
+    """Validate and identify one generated rebase-required conflict source."""
+
+    conflict_marked = (
+        conflict_row.get("conflict_type")
+        == SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
+    )
+    envelope_marked = (
+        envelope_row.get("apply_error_code")
+        == SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
+    )
+    if conflict_marked != envelope_marked:
+        raise SyncStoreError("Sync rebase conflict marker does not match its source")
+    return conflict_marked
+
+
+def _is_mutation_group_step_unique_error(exc: BaseException) -> bool:
+    """Match PostgreSQL's named mutation-group step uniqueness violation."""
+
+    current: BaseException | None = exc
+    while current is not None:
+        sqlstate = getattr(current, "sqlstate", None) or getattr(
+            current, "pgcode", None
+        )
+        diagnostics = getattr(current, "diag", None)
+        if (
+            sqlstate == "23505"
+            and getattr(diagnostics, "constraint_name", None)
+            == "uq_sync_envelopes_dataset_mutation_group_step"
+        ):
+            return True
+        current = current.__cause__
+    return False
+
+
+def _is_materialization_lock_error(exc: BaseException) -> bool:
+    """Match bounded PostgreSQL/SQLite lock acquisition failures."""
+
+    current: BaseException | None = exc
+    while current is not None:
+        sqlstate = getattr(current, "sqlstate", None) or getattr(
+            current, "pgcode", None
+        )
+        if sqlstate in {"40P01", "55P03"}:
+            return True
+        message = str(current).lower()
+        if "database is locked" in message or "database table is locked" in message:
+            return True
+        current = current.__cause__
+    return False
 
 SYNC_SQLITE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS sync_devices (
@@ -193,6 +369,41 @@ CREATE TABLE IF NOT EXISTS sync_datasets (
 CREATE INDEX IF NOT EXISTS idx_sync_datasets_owner ON sync_datasets(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_sync_datasets_workspace ON sync_datasets(workspace_id);
 
+CREATE TABLE IF NOT EXISTS sync_personal_context_link_receipts (
+    user_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    integrity_key_id TEXT NOT NULL,
+    purge_generation INTEGER NOT NULL,
+    bootstrap_cursor TEXT NOT NULL,
+    PRIMARY KEY (user_id, dataset_id, device_id)
+);
+
+CREATE TABLE IF NOT EXISTS sync_personal_context_activations (
+    activation_id TEXT PRIMARY KEY,
+    dataset_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    baseline_digest TEXT NOT NULL,
+    purge_generation BIGINT NOT NULL,
+    publication_watermark BIGINT NOT NULL,
+    home_server_cursor BIGINT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    envelopes_json TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sync_personal_context_activation_profile
+    ON sync_personal_context_activations(user_id, profile_id);
+CREATE TABLE IF NOT EXISTS sync_personal_context_activation_acks (
+    activation_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    local_receipt_id TEXT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    PRIMARY KEY (activation_id, device_id)
+);
+
 CREATE TABLE IF NOT EXISTS sync_domain_state (
     dataset_id TEXT NOT NULL,
     domain TEXT NOT NULL,
@@ -215,6 +426,10 @@ CREATE TABLE IF NOT EXISTS sync_envelopes (
     device_id TEXT,
     client_profile_id TEXT,
     client_sequence INTEGER,
+    mutation_group_id TEXT,
+    mutation_step INTEGER,
+    mutation_step_count INTEGER,
+    mutation_plan_hash TEXT,
     client_timestamp TEXT,
     server_timestamp TEXT NOT NULL,
     base_server_cursor INTEGER,
@@ -244,16 +459,40 @@ CREATE TABLE IF NOT EXISTS sync_envelopes (
     applied_at TEXT,
     UNIQUE (dataset_id, client_envelope_id)
 );
+CREATE TABLE IF NOT EXISTS sync_personal_context_ingress_receipts (
+    server_sequence INTEGER PRIMARY KEY,
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    client_envelope_id TEXT NOT NULL,
+    canonical_payload_digest TEXT NOT NULL,
+    purge_generation INTEGER NOT NULL,
+    resulting_object_id TEXT NOT NULL,
+    resulting_internal_version_id TEXT NOT NULL,
+    manifest_revision INTEGER NOT NULL,
+    manifest_version_id TEXT NOT NULL,
+    publication_batch_id TEXT NOT NULL,
+    profile_publication_sequence INTEGER NOT NULL,
+    receipt_id TEXT NOT NULL UNIQUE,
+    wire_entity_version TEXT NOT NULL,
+    FOREIGN KEY (server_sequence) REFERENCES sync_envelopes(server_sequence)
+);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_sequence
     ON sync_envelopes(dataset_id, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_sequence
     ON sync_envelopes(dataset_id, domain, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_object
     ON sync_envelopes(dataset_id, domain, entity_id);
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_entity_status_sequence
+    ON sync_envelopes(dataset_id, domain, entity_id, status, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_status_sequence
     ON sync_envelopes(dataset_id, status, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_sequence
     ON sync_envelopes(dataset_id, device_id, server_sequence);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_envelopes_dataset_mutation_group_step
+    ON sync_envelopes(dataset_id, mutation_group_id, mutation_step)
+    WHERE mutation_group_id IS NOT NULL AND mutation_step IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_mutation_group_step
+    ON sync_envelopes(dataset_id, mutation_group_id, mutation_step);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_client_sequence
     ON sync_envelopes(dataset_id, device_id, client_sequence)
     WHERE device_id IS NOT NULL AND client_sequence IS NOT NULL;
@@ -262,6 +501,9 @@ CREATE INDEX IF NOT EXISTS idx_sync_envelopes_payload_hash
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_failed_apply
     ON sync_envelopes(dataset_id, apply_status, server_sequence)
     WHERE apply_status = 'failed';
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_outstanding_apply
+    ON sync_envelopes(dataset_id, server_sequence)
+    WHERE status = 'accepted' AND apply_status NOT IN ('applied', 'superseded');
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_entity
     ON sync_envelopes(dataset_id, domain, entity_id);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_stable_key
@@ -280,6 +522,24 @@ CREATE TABLE IF NOT EXISTS sync_object_state (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_object_state_dataset_domain_object
     ON sync_object_state(dataset_id, domain, object_id);
+
+CREATE TABLE IF NOT EXISTS sync_current_heads (
+    dataset_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    latest_server_cursor INTEGER NOT NULL,
+    PRIMARY KEY (dataset_id, domain, object_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_current_heads_dataset_domain_cursor
+    ON sync_current_heads(dataset_id, domain, latest_server_cursor, object_id);
+
+CREATE TABLE IF NOT EXISTS sync_materialization_locks (
+    dataset_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (dataset_id, domain, object_id)
+);
 
 CREATE TABLE IF NOT EXISTS sync_device_cursors (
     dataset_id TEXT NOT NULL,
@@ -385,6 +645,154 @@ CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_owner
     ON sync_blob_objects(owner_user_id, dataset_id, status);
 CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_attachment
     ON sync_blob_objects(dataset_id, attachment_id);
+CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_retention
+    ON sync_blob_objects(dataset_id, status, updated_at, blob_id);
+
+CREATE TABLE IF NOT EXISTS sync_attachment_revision_bindings (
+    dataset_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    attachment_revision INTEGER NOT NULL,
+    blob_hash TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    establishing_server_cursor INTEGER NOT NULL,
+    availability_at_acceptance TEXT NOT NULL,
+    resolved_blob_id TEXT,
+    retention_released_at TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (dataset_id, attachment_id, attachment_revision),
+    CHECK (length(dataset_id) > 0),
+    CHECK (
+        length(attachment_id) = 36
+        AND lower(attachment_id) = attachment_id
+        AND substr(attachment_id, 9, 1) = '-'
+        AND substr(attachment_id, 14, 1) = '-'
+        AND substr(attachment_id, 15, 1) = '4'
+        AND substr(attachment_id, 19, 1) = '-'
+        AND substr(attachment_id, 20, 1) IN ('8', '9', 'a', 'b')
+        AND substr(attachment_id, 24, 1) = '-'
+        AND length(replace(attachment_id, '-', '')) = 32
+        AND replace(attachment_id, '-', '') NOT GLOB '*[^0-9a-f]*'
+    ),
+    CHECK (attachment_revision > 0),
+    CHECK (length(blob_hash) = 71),
+    CHECK (substr(blob_hash, 1, 7) = 'sha256:'),
+    CHECK (substr(blob_hash, 8) NOT GLOB '*[^0-9a-f]*'),
+    CHECK (size_bytes > 0),
+    CHECK (establishing_server_cursor > 0),
+    CHECK (availability_at_acceptance IN ('available', 'metadata_only')),
+    CHECK (resolved_blob_id IS NULL OR length(resolved_blob_id) > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_unresolved
+    ON sync_attachment_revision_bindings(
+        dataset_id, establishing_server_cursor, attachment_id, attachment_revision
+    )
+    WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob
+    ON sync_attachment_revision_bindings(dataset_id, resolved_blob_id);
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob_retention
+    ON sync_attachment_revision_bindings(
+        dataset_id, resolved_blob_id, establishing_server_cursor,
+        attachment_id, attachment_revision
+    )
+    WHERE retention_released_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_retention_release
+    ON sync_attachment_revision_bindings(dataset_id, establishing_server_cursor, attachment_id, attachment_revision)
+    WHERE retention_released_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
+    ON sync_attachment_revision_bindings(dataset_id, blob_hash, size_bytes, establishing_server_cursor, attachment_id, attachment_revision)
+    WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS sync_dataset_storage_namespaces (
+    dataset_id TEXT NOT NULL PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    storage_namespace_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK (length(dataset_id) > 0),
+    CHECK (length(owner_user_id) > 0),
+    CHECK (length(storage_namespace_id) = 32),
+    CHECK (storage_namespace_id NOT GLOB '*[^0-9a-f]*')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_dataset_storage_namespace_id
+    ON sync_dataset_storage_namespaces(storage_namespace_id);
+CREATE INDEX IF NOT EXISTS idx_sync_dataset_storage_namespaces_owner
+    ON sync_dataset_storage_namespaces(owner_user_id, dataset_id);
+
+CREATE TABLE IF NOT EXISTS sync_notes_attachment_source_map (
+    dataset_id TEXT NOT NULL,
+    bootstrap_id TEXT NOT NULL,
+    source_key_hash TEXT NOT NULL,
+    note_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (dataset_id, bootstrap_id, source_key_hash),
+    CHECK (length(dataset_id) > 0),
+    CHECK (length(bootstrap_id) BETWEEN 1 AND 128),
+    CHECK (length(source_key_hash) = 71),
+    CHECK (substr(source_key_hash, 1, 7) = 'sha256:'),
+    CHECK (substr(source_key_hash, 8) NOT GLOB '*[^0-9a-f]*'),
+    CHECK (length(note_id) > 0),
+    CHECK (
+        length(attachment_id) = 36
+        AND lower(attachment_id) = attachment_id
+        AND substr(attachment_id, 9, 1) = '-'
+        AND substr(attachment_id, 14, 1) = '-'
+        AND substr(attachment_id, 15, 1) = '4'
+        AND substr(attachment_id, 19, 1) = '-'
+        AND substr(attachment_id, 20, 1) IN ('8', '9', 'a', 'b')
+        AND substr(attachment_id, 24, 1) = '-'
+        AND length(replace(attachment_id, '-', '')) = 32
+        AND replace(attachment_id, '-', '') NOT GLOB '*[^0-9a-f]*'
+    )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_notes_attachment_source_id
+    ON sync_notes_attachment_source_map(dataset_id, attachment_id);
+
+CREATE TABLE IF NOT EXISTS sync_notes_attachment_cleanup_candidates (
+    dataset_id TEXT NOT NULL,
+    bootstrap_id TEXT NOT NULL,
+    source_key_hash TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    source_relative_path TEXT NOT NULL,
+    source_path_hash TEXT NOT NULL,
+    source_blob_hash TEXT NOT NULL,
+    source_size_bytes INTEGER NOT NULL,
+    source_modified_ns INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (dataset_id, bootstrap_id, source_key_hash),
+    CHECK (length(dataset_id) > 0),
+    CHECK (length(bootstrap_id) BETWEEN 1 AND 128),
+    CHECK (length(source_key_hash) = 71),
+    CHECK (substr(source_key_hash, 1, 7) = 'sha256:'),
+    CHECK (substr(source_key_hash, 8) NOT GLOB '*[^0-9a-f]*'),
+    CHECK (
+        length(attachment_id) = 36
+        AND lower(attachment_id) = attachment_id
+        AND substr(attachment_id, 9, 1) = '-'
+        AND substr(attachment_id, 14, 1) = '-'
+        AND substr(attachment_id, 15, 1) = '4'
+        AND substr(attachment_id, 19, 1) = '-'
+        AND substr(attachment_id, 20, 1) IN ('8', '9', 'a', 'b')
+        AND substr(attachment_id, 24, 1) = '-'
+        AND length(replace(attachment_id, '-', '')) = 32
+        AND replace(attachment_id, '-', '') NOT GLOB '*[^0-9a-f]*'
+    ),
+    CHECK (length(source_relative_path) BETWEEN 1 AND 4096),
+    CHECK (length(source_path_hash) = 71),
+    CHECK (substr(source_path_hash, 1, 7) = 'sha256:'),
+    CHECK (substr(source_path_hash, 8) NOT GLOB '*[^0-9a-f]*'),
+    CHECK (source_path_hash = source_key_hash),
+    CHECK (length(source_blob_hash) = 71),
+    CHECK (substr(source_blob_hash, 1, 7) = 'sha256:'),
+    CHECK (substr(source_blob_hash, 8) NOT GLOB '*[^0-9a-f]*'),
+    CHECK (typeof(source_size_bytes) = 'integer'),
+    CHECK (typeof(source_modified_ns) = 'integer'),
+    CHECK (source_size_bytes > 0),
+    CHECK (source_modified_ns >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_notes_attachment_cleanup_page
+    ON sync_notes_attachment_cleanup_candidates(
+        dataset_id, bootstrap_id, source_key_hash
+    );
 
 CREATE TABLE IF NOT EXISTS sync_blob_upload_sessions (
     upload_id TEXT PRIMARY KEY,
@@ -413,6 +821,9 @@ CREATE INDEX IF NOT EXISTS idx_sync_blob_upload_sessions_owner
     ON sync_blob_upload_sessions(owner_user_id, dataset_id, status);
 CREATE INDEX IF NOT EXISTS idx_sync_blob_upload_sessions_hash
     ON sync_blob_upload_sessions(dataset_id, payload_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_blob_upload_sessions_owner_key_without_device
+    ON sync_blob_upload_sessions(dataset_id, owner_user_id, idempotency_key)
+    WHERE device_id IS NULL AND idempotency_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS sync_blob_chunks (
     upload_id TEXT NOT NULL,
@@ -428,6 +839,61 @@ CREATE TABLE IF NOT EXISTS sync_blob_chunks (
 CREATE INDEX IF NOT EXISTS idx_sync_blob_chunks_dataset
     ON sync_blob_chunks(dataset_id, upload_id);
 """
+
+SYNC_VERSIONED_DEVICE_STATE_MIGRATION_ID = "adapter_cursor_ack_blob_id_v1"
+# Stable, process-independent signed 64-bit key reserved for this Sync migration.
+SYNC_VERSIONED_DEVICE_STATE_MIGRATION_LOCK_KEY = 5_465_866_052_944_881_777
+
+SYNC_VERSIONED_DEVICE_STATE_SQLITE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sync_device_adapter_cursors (
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    adapter_version INTEGER NOT NULL CHECK (adapter_version > 0),
+    last_pulled_sequence INTEGER NOT NULL DEFAULT 0 CHECK (last_pulled_sequence >= 0),
+    max_delivered_sequence INTEGER NOT NULL DEFAULT 0 CHECK (max_delivered_sequence >= 0),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(dataset_id, device_id, domain, adapter_version),
+    CHECK (max_delivered_sequence <= last_pulled_sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_device_adapter_cursors_device
+    ON sync_device_adapter_cursors(device_id, dataset_id);
+CREATE TABLE IF NOT EXISTS sync_device_adapter_domain_acks (
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    adapter_version INTEGER NOT NULL CHECK (adapter_version > 0),
+    through_server_sequence INTEGER NOT NULL DEFAULT 0 CHECK (through_server_sequence >= 0),
+    applied_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    idempotency_key TEXT,
+    PRIMARY KEY(dataset_id, device_id, domain, adapter_version)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_device_adapter_domain_acks_device
+    ON sync_device_adapter_domain_acks(device_id, dataset_id);
+CREATE TABLE IF NOT EXISTS sync_device_blob_id_acks (
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    blob_id TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    verified_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    idempotency_key TEXT,
+    PRIMARY KEY(dataset_id, device_id, blob_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_device_blob_id_acks_device
+    ON sync_device_blob_id_acks(device_id, dataset_id);
+"""
+
+SYNC_VERSIONED_DEVICE_STATE_POSTGRES_SCHEMA = (
+    SYNC_VERSIONED_DEVICE_STATE_SQLITE_SCHEMA
+    .replace("last_pulled_sequence INTEGER", "last_pulled_sequence BIGINT")
+    .replace("max_delivered_sequence INTEGER", "max_delivered_sequence BIGINT")
+    .replace("through_server_sequence INTEGER", "through_server_sequence BIGINT")
+    .replace("updated_at TEXT", "updated_at TIMESTAMPTZ")
+    .replace("applied_at TEXT", "applied_at TIMESTAMPTZ")
+    .replace("verified_at TEXT", "verified_at TIMESTAMPTZ")
+)
 
 SYNC_POSTGRES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS sync_devices (
@@ -538,6 +1004,41 @@ CREATE TABLE IF NOT EXISTS sync_datasets (
 CREATE INDEX IF NOT EXISTS idx_sync_datasets_owner ON sync_datasets(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_sync_datasets_workspace ON sync_datasets(workspace_id);
 
+CREATE TABLE IF NOT EXISTS sync_personal_context_link_receipts (
+    user_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    integrity_key_id TEXT NOT NULL,
+    purge_generation INTEGER NOT NULL,
+    bootstrap_cursor TEXT NOT NULL,
+    PRIMARY KEY (user_id, dataset_id, device_id)
+);
+
+CREATE TABLE IF NOT EXISTS sync_personal_context_activations (
+    activation_id TEXT PRIMARY KEY,
+    dataset_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    baseline_digest TEXT NOT NULL,
+    purge_generation BIGINT NOT NULL,
+    publication_watermark BIGINT NOT NULL,
+    home_server_cursor BIGINT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    envelopes_json TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sync_personal_context_activation_profile
+    ON sync_personal_context_activations(user_id, profile_id);
+CREATE TABLE IF NOT EXISTS sync_personal_context_activation_acks (
+    activation_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    local_receipt_id TEXT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    PRIMARY KEY (activation_id, device_id)
+);
+
 CREATE TABLE IF NOT EXISTS sync_domain_state (
     dataset_id TEXT NOT NULL,
     domain TEXT NOT NULL,
@@ -560,6 +1061,10 @@ CREATE TABLE IF NOT EXISTS sync_envelopes (
     device_id TEXT,
     client_profile_id TEXT,
     client_sequence BIGINT,
+    mutation_group_id TEXT,
+    mutation_step INTEGER,
+    mutation_step_count INTEGER,
+    mutation_plan_hash TEXT,
     client_timestamp TIMESTAMPTZ,
     server_timestamp TIMESTAMPTZ NOT NULL,
     base_server_cursor BIGINT,
@@ -589,16 +1094,39 @@ CREATE TABLE IF NOT EXISTS sync_envelopes (
     applied_at TIMESTAMPTZ,
     UNIQUE (dataset_id, client_envelope_id)
 );
+CREATE TABLE IF NOT EXISTS sync_personal_context_ingress_receipts (
+    server_sequence BIGINT PRIMARY KEY REFERENCES sync_envelopes(server_sequence),
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    client_envelope_id TEXT NOT NULL,
+    canonical_payload_digest TEXT NOT NULL,
+    purge_generation INTEGER NOT NULL,
+    resulting_object_id TEXT NOT NULL,
+    resulting_internal_version_id TEXT NOT NULL,
+    manifest_revision BIGINT NOT NULL,
+    manifest_version_id TEXT NOT NULL,
+    publication_batch_id TEXT NOT NULL,
+    profile_publication_sequence BIGINT NOT NULL,
+    receipt_id TEXT NOT NULL UNIQUE,
+    wire_entity_version TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_sequence
     ON sync_envelopes(dataset_id, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_sequence
     ON sync_envelopes(dataset_id, domain, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_object
     ON sync_envelopes(dataset_id, domain, entity_id);
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_entity_status_sequence
+    ON sync_envelopes(dataset_id, domain, entity_id, status, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_status_sequence
     ON sync_envelopes(dataset_id, status, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_sequence
     ON sync_envelopes(dataset_id, device_id, server_sequence);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_envelopes_dataset_mutation_group_step
+    ON sync_envelopes(dataset_id, mutation_group_id, mutation_step)
+    WHERE mutation_group_id IS NOT NULL AND mutation_step IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_mutation_group_step
+    ON sync_envelopes(dataset_id, mutation_group_id, mutation_step);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_client_sequence
     ON sync_envelopes(dataset_id, device_id, client_sequence)
     WHERE device_id IS NOT NULL AND client_sequence IS NOT NULL;
@@ -607,6 +1135,9 @@ CREATE INDEX IF NOT EXISTS idx_sync_envelopes_payload_hash
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_failed_apply
     ON sync_envelopes(dataset_id, apply_status, server_sequence)
     WHERE apply_status = 'failed';
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_outstanding_apply
+    ON sync_envelopes(dataset_id, server_sequence)
+    WHERE status = 'accepted' AND apply_status NOT IN ('applied', 'superseded');
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_entity
     ON sync_envelopes(dataset_id, domain, entity_id);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_stable_key
@@ -625,6 +1156,24 @@ CREATE TABLE IF NOT EXISTS sync_object_state (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_object_state_dataset_domain_object
     ON sync_object_state(dataset_id, domain, object_id);
+
+CREATE TABLE IF NOT EXISTS sync_current_heads (
+    dataset_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    latest_server_cursor BIGINT NOT NULL,
+    PRIMARY KEY (dataset_id, domain, object_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_current_heads_dataset_domain_cursor
+    ON sync_current_heads(dataset_id, domain, latest_server_cursor, object_id);
+
+CREATE TABLE IF NOT EXISTS sync_materialization_locks (
+    dataset_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (dataset_id, domain, object_id)
+);
 
 CREATE TABLE IF NOT EXISTS sync_device_cursors (
     dataset_id TEXT NOT NULL,
@@ -730,6 +1279,106 @@ CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_owner
     ON sync_blob_objects(owner_user_id, dataset_id, status);
 CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_attachment
     ON sync_blob_objects(dataset_id, attachment_id);
+CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_retention
+    ON sync_blob_objects(dataset_id, status, updated_at, blob_id);
+
+CREATE TABLE IF NOT EXISTS sync_attachment_revision_bindings (
+    dataset_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    attachment_revision BIGINT NOT NULL,
+    blob_hash TEXT NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    establishing_server_cursor BIGINT NOT NULL,
+    availability_at_acceptance TEXT NOT NULL,
+    resolved_blob_id TEXT,
+    retention_released_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (dataset_id, attachment_id, attachment_revision),
+    CHECK (length(dataset_id) > 0),
+    CHECK (attachment_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'),
+    CHECK (attachment_revision > 0),
+    CHECK (blob_hash ~ '^sha256:[0-9a-f]{64}$'),
+    CHECK (size_bytes > 0),
+    CHECK (establishing_server_cursor > 0),
+    CHECK (availability_at_acceptance IN ('available', 'metadata_only')),
+    CHECK (resolved_blob_id IS NULL OR length(resolved_blob_id) > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_unresolved
+    ON sync_attachment_revision_bindings(dataset_id, establishing_server_cursor, attachment_id, attachment_revision)
+    WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob
+    ON sync_attachment_revision_bindings(dataset_id, resolved_blob_id);
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob_retention
+    ON sync_attachment_revision_bindings(
+        dataset_id, resolved_blob_id, establishing_server_cursor,
+        attachment_id, attachment_revision
+    )
+    WHERE retention_released_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_retention_release
+    ON sync_attachment_revision_bindings(dataset_id, establishing_server_cursor, attachment_id, attachment_revision)
+    WHERE retention_released_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
+    ON sync_attachment_revision_bindings(dataset_id, blob_hash, size_bytes, establishing_server_cursor, attachment_id, attachment_revision)
+    WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS sync_dataset_storage_namespaces (
+    dataset_id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    storage_namespace_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    CHECK (length(dataset_id) > 0),
+    CHECK (length(owner_user_id) > 0),
+    CHECK (storage_namespace_id ~ '^[0-9a-f]{32}$')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_dataset_storage_namespace_id
+    ON sync_dataset_storage_namespaces(storage_namespace_id);
+CREATE INDEX IF NOT EXISTS idx_sync_dataset_storage_namespaces_owner
+    ON sync_dataset_storage_namespaces(owner_user_id, dataset_id);
+
+CREATE TABLE IF NOT EXISTS sync_notes_attachment_source_map (
+    dataset_id TEXT NOT NULL,
+    bootstrap_id TEXT NOT NULL,
+    source_key_hash TEXT NOT NULL,
+    note_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (dataset_id, bootstrap_id, source_key_hash),
+    CHECK (length(dataset_id) > 0),
+    CHECK (length(bootstrap_id) BETWEEN 1 AND 128),
+    CHECK (source_key_hash ~ '^sha256:[0-9a-f]{64}$'),
+    CHECK (length(note_id) > 0),
+    CHECK (attachment_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_notes_attachment_source_id
+    ON sync_notes_attachment_source_map(dataset_id, attachment_id);
+
+CREATE TABLE IF NOT EXISTS sync_notes_attachment_cleanup_candidates (
+    dataset_id TEXT NOT NULL,
+    bootstrap_id TEXT NOT NULL,
+    source_key_hash TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    source_relative_path TEXT NOT NULL,
+    source_path_hash TEXT NOT NULL,
+    source_blob_hash TEXT NOT NULL,
+    source_size_bytes BIGINT NOT NULL,
+    source_modified_ns BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (dataset_id, bootstrap_id, source_key_hash),
+    CHECK (length(dataset_id) > 0),
+    CHECK (length(bootstrap_id) BETWEEN 1 AND 128),
+    CHECK (source_key_hash ~ '^sha256:[0-9a-f]{64}$'),
+    CHECK (attachment_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'),
+    CHECK (length(source_relative_path) BETWEEN 1 AND 4096),
+    CHECK (source_path_hash ~ '^sha256:[0-9a-f]{64}$'),
+    CHECK (source_path_hash = source_key_hash),
+    CHECK (source_blob_hash ~ '^sha256:[0-9a-f]{64}$'),
+    CHECK (source_size_bytes > 0),
+    CHECK (source_modified_ns >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_notes_attachment_cleanup_page
+    ON sync_notes_attachment_cleanup_candidates(
+        dataset_id, bootstrap_id, source_key_hash
+    );
 
 CREATE TABLE IF NOT EXISTS sync_blob_upload_sessions (
     upload_id TEXT PRIMARY KEY,
@@ -758,6 +1407,9 @@ CREATE INDEX IF NOT EXISTS idx_sync_blob_upload_sessions_owner
     ON sync_blob_upload_sessions(owner_user_id, dataset_id, status);
 CREATE INDEX IF NOT EXISTS idx_sync_blob_upload_sessions_hash
     ON sync_blob_upload_sessions(dataset_id, payload_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_blob_upload_sessions_owner_key_without_device
+    ON sync_blob_upload_sessions(dataset_id, owner_user_id, idempotency_key)
+    WHERE device_id IS NULL AND idempotency_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS sync_blob_chunks (
     upload_id TEXT NOT NULL,
@@ -819,11 +1471,7 @@ def _manifest_attachment_size_class(size_bytes: int) -> str:
 
 
 def _timestamp_to_string(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return str(value)
+    return normalize_sync_timestamp(value)
 
 
 def _optional_int_from_storage(value: Any) -> int | None:
@@ -969,6 +1617,7 @@ def _device_domain_ack_from_row(row: dict[str, Any]) -> SyncDeviceDomainAck:
         through_server_sequence=int(row["through_server_sequence"]),
         applied_at=_timestamp_to_string(row.get("applied_at")) or "",
         updated_at=_timestamp_to_string(row.get("updated_at")) or "",
+        adapter_version=int(row.get("adapter_version") or 1),
         idempotency_key=row.get("idempotency_key"),
     )
 
@@ -978,6 +1627,18 @@ def _device_blob_ack_from_row(row: dict[str, Any]) -> SyncDeviceBlobAck:
         dataset_id=row["dataset_id"],
         device_id=row["device_id"],
         attachment_id=row["attachment_id"],
+        payload_hash=row["payload_hash"],
+        verified_at=_timestamp_to_string(row.get("verified_at")) or "",
+        updated_at=_timestamp_to_string(row.get("updated_at")) or "",
+        idempotency_key=row.get("idempotency_key"),
+    )
+
+
+def _device_blob_id_ack_from_row(row: dict[str, Any]) -> SyncDeviceBlobIdAck:
+    return SyncDeviceBlobIdAck(
+        dataset_id=row["dataset_id"],
+        device_id=row["device_id"],
+        blob_id=row["blob_id"],
         payload_hash=row["payload_hash"],
         verified_at=_timestamp_to_string(row.get("verified_at")) or "",
         updated_at=_timestamp_to_string(row.get("updated_at")) or "",
@@ -1042,7 +1703,19 @@ def _dataset_from_row(row: dict[str, Any]) -> SyncDataset:
 
 
 def _envelope_from_row(row: dict[str, Any]) -> SyncEnvelope:
-    return SyncEnvelope(
+    raw_created_at_client = row.get("created_at_client") or row.get("client_timestamp")
+    raw_client_timestamp = row.get("client_timestamp") or row.get("created_at_client")
+    created_at_client = (
+        raw_created_at_client
+        if isinstance(raw_created_at_client, str)
+        else _timestamp_to_string(raw_created_at_client)
+    )
+    client_timestamp = (
+        raw_client_timestamp
+        if isinstance(raw_client_timestamp, str)
+        else _timestamp_to_string(raw_client_timestamp)
+    )
+    envelope = SyncEnvelope(
         server_cursor=int(row["server_sequence"]),
         dataset_id=row["dataset_id"],
         client_envelope_id=row["client_envelope_id"],
@@ -1057,11 +1730,19 @@ def _envelope_from_row(row: dict[str, Any]) -> SyncEnvelope:
             if row.get("client_sequence") is not None
             else None
         ),
+        mutation_group_id=row.get("mutation_group_id"),
+        mutation_step=_optional_int_from_storage(row.get("mutation_step")),
+        mutation_step_count=_optional_int_from_storage(row.get("mutation_step_count")),
+        mutation_plan_hash=row.get("mutation_plan_hash"),
         stable_key=row.get("stable_key"),
-        created_at_client=row.get("created_at_client") or row.get("client_timestamp"),
-        received_at_server=row.get("received_at_server") or row.get("server_timestamp"),
-        client_timestamp=row.get("client_timestamp") or row.get("created_at_client"),
-        server_timestamp=row.get("server_timestamp") or row.get("received_at_server"),
+        created_at_client=created_at_client,
+        received_at_server=_timestamp_to_string(
+            row.get("received_at_server") or row.get("server_timestamp")
+        ),
+        client_timestamp=client_timestamp,
+        server_timestamp=_timestamp_to_string(
+            row.get("server_timestamp") or row.get("received_at_server")
+        ),
         base_server_cursor=(
             int(row["base_server_cursor"])
             if row.get("base_server_cursor") is not None
@@ -1108,6 +1789,10 @@ def _envelope_from_row(row: dict[str, Any]) -> SyncEnvelope:
         apply_error_message=row.get("apply_error_message"),
         applied_at=row.get("applied_at"),
     )
+    if isinstance(raw_created_at_client, str):
+        object.__setattr__(envelope, "created_at_client", created_at_client)
+        object.__setattr__(envelope, "client_timestamp", client_timestamp)
+    return envelope
 
 
 def _cursor_from_row(row: dict[str, Any]) -> SyncDeviceCursor:
@@ -1116,6 +1801,8 @@ def _cursor_from_row(row: dict[str, Any]) -> SyncDeviceCursor:
         device_id=row["device_id"],
         domain=row["domain"],
         last_pulled_sequence=int(row["last_pulled_sequence"]),
+        adapter_version=int(row.get("adapter_version") or 1),
+        max_delivered_sequence=int(row.get("max_delivered_sequence") or 0),
         updated_at=row["updated_at"],
     )
 
@@ -1203,7 +1890,10 @@ def _blob_upload_session_from_row(
     return SyncBlobUploadSession(
         upload_id=row["upload_id"],
         dataset_id=row["dataset_id"],
+        owner_user_id=row["owner_user_id"],
         attachment_id=row["attachment_id"],
+        domain=row["domain"],
+        object_id=row["entity_id"],
         status=row["status"],
         chunk_size=int(row["chunk_size"]),
         chunk_count=chunk_count,
@@ -1216,6 +1906,7 @@ def _blob_upload_session_from_row(
         quota={"reserved_blob_bytes": int(row["reserved_quota_bytes"])},
         expires_at=_timestamp_to_string(row.get("expires_at")),
         blob_id=row.get("blob_id"),
+        metadata=decode_json(row.get("metadata_json"), default={}),
     )
 
 
@@ -1250,6 +1941,62 @@ def _blob_object_from_row(row: dict[str, Any]) -> SyncBlobObject:
         created_at=_timestamp_to_string(row.get("created_at")) or "",
         updated_at=_timestamp_to_string(row.get("updated_at")) or "",
         deleted_at=_timestamp_to_string(row.get("deleted_at")),
+    )
+
+
+def _attachment_revision_binding_from_row(
+    row: dict[str, Any],
+) -> SyncAttachmentRevisionBinding:
+    return SyncAttachmentRevisionBinding(
+        dataset_id=row["dataset_id"],
+        attachment_id=row["attachment_id"],
+        attachment_revision=int(row["attachment_revision"]),
+        blob_hash=row["blob_hash"],
+        size_bytes=int(row["size_bytes"]),
+        establishing_server_cursor=int(row["establishing_server_cursor"]),
+        availability_at_acceptance=row["availability_at_acceptance"],
+        resolved_blob_id=row.get("resolved_blob_id"),
+        retention_released_at=_timestamp_to_string(row.get("retention_released_at")),
+        created_at=_timestamp_to_string(row.get("created_at")) or "",
+    )
+
+
+def _storage_namespace_from_row(row: dict[str, Any]) -> SyncDatasetStorageNamespace:
+    return SyncDatasetStorageNamespace(
+        dataset_id=row["dataset_id"],
+        owner_user_id=row["owner_user_id"],
+        storage_namespace_id=row["storage_namespace_id"],
+        created_at=_timestamp_to_string(row.get("created_at")) or "",
+    )
+
+
+def _notes_attachment_source_map_from_row(
+    row: dict[str, Any],
+) -> SyncNotesAttachmentSourceMap:
+    return SyncNotesAttachmentSourceMap(
+        dataset_id=row["dataset_id"],
+        bootstrap_id=row["bootstrap_id"],
+        source_key_hash=row["source_key_hash"],
+        note_id=row["note_id"],
+        attachment_id=row["attachment_id"],
+        created_at=_timestamp_to_string(row.get("created_at")) or "",
+    )
+
+
+def _notes_attachment_cleanup_candidate_from_row(
+    row: dict[str, Any],
+) -> SyncNotesAttachmentCleanupCandidate:
+    return SyncNotesAttachmentCleanupCandidate(
+        dataset_id=row["dataset_id"],
+        bootstrap_id=row["bootstrap_id"],
+        source_key_hash=row["source_key_hash"],
+        attachment_id=row["attachment_id"],
+        source_relative_path=row["source_relative_path"],
+        source_path_hash=row["source_path_hash"],
+        source_blob_hash=row["source_blob_hash"],
+        source_size_bytes=int(row["source_size_bytes"]),
+        source_modified_ns=int(row["source_modified_ns"]),
+        created_at=_timestamp_to_string(row.get("created_at")) or "",
     )
 
 
@@ -1300,7 +2047,7 @@ def _dataset_domains_from_row(row: dict[str, Any]) -> set[str]:
 
 
 def _envelope_fingerprint_from_create(envelope: SyncEnvelopeCreate) -> dict[str, Any]:
-    return {
+    fingerprint = {
         "dataset_id": envelope.dataset_id,
         "domain": envelope.domain,
         "object_id": envelope.object_id,
@@ -1310,7 +2057,7 @@ def _envelope_fingerprint_from_create(envelope: SyncEnvelopeCreate) -> dict[str,
         "device_id": envelope.device_id,
         "client_profile_id": envelope.client_profile_id,
         "client_sequence": envelope.client_sequence,
-        "created_at_client": envelope.created_at_client,
+        "created_at_client": normalize_sync_timestamp(envelope.created_at_client),
         "base_server_cursor": envelope.base_server_cursor,
         "base_object_revision": envelope.base_object_revision,
         "base_object_hash": envelope.base_object_hash,
@@ -1329,7 +2076,20 @@ def _envelope_fingerprint_from_create(envelope: SyncEnvelopeCreate) -> dict[str,
         "encryption_metadata": envelope.encryption_metadata,
         "adapter_version": envelope.adapter_version,
         "status": envelope.status,
+        **_mutation_group_fingerprint(
+            mutation_group_id=envelope.mutation_group_id,
+            mutation_step=envelope.mutation_step,
+            mutation_step_count=envelope.mutation_step_count,
+            mutation_plan_hash=envelope.mutation_plan_hash,
+        ),
     }
+    if envelope.domain.startswith("personal_context."):
+        fingerprint["payload_ciphertext"] = None
+        fingerprint["payload"] = {}
+        fingerprint["encryption_metadata"] = _without_personal_context_at_rest(
+            fingerprint["encryption_metadata"]
+        )
+    return fingerprint
 
 
 def _envelope_fingerprint_from_row(
@@ -1351,7 +2111,9 @@ def _envelope_fingerprint_from_row(
             if row.get("client_sequence") is not None
             else None
         ),
-        "created_at_client": row.get("created_at_client") or row.get("client_timestamp"),
+        "created_at_client": normalize_sync_timestamp(
+            row.get("created_at_client") or row.get("client_timestamp")
+        ),
         "base_server_cursor": (
             int(row["base_server_cursor"])
             if row.get("base_server_cursor") is not None
@@ -1385,10 +2147,45 @@ def _envelope_fingerprint_from_row(
         "encryption_metadata": decode_json(row.get("encryption_metadata_json"), default={}),
         "adapter_version": int(row.get("adapter_version") or row.get("schema_version") or 1),
         "status": row["status"],
+        **_mutation_group_fingerprint(
+            mutation_group_id=row.get("mutation_group_id"),
+            mutation_step=_optional_int_from_storage(row.get("mutation_step")),
+            mutation_step_count=_optional_int_from_storage(row.get("mutation_step_count")),
+            mutation_plan_hash=row.get("mutation_plan_hash"),
+        ),
     }
     if not ignore_client_envelope_id:
         fingerprint["client_envelope_id"] = row["client_envelope_id"]
+    if str(row["domain"]).startswith("personal_context."):
+        fingerprint["payload_ciphertext"] = None
+        fingerprint["payload"] = {}
+        fingerprint["encryption_metadata"] = _without_personal_context_at_rest(
+            fingerprint["encryption_metadata"]
+        )
     return fingerprint
+
+
+def _without_personal_context_at_rest(value: Any) -> dict[str, Any]:
+    metadata = dict(value) if isinstance(value, dict) else {}
+    metadata.pop("personal_context_at_rest", None)
+    return metadata
+
+
+def _mutation_group_fingerprint(
+    *,
+    mutation_group_id: Any,
+    mutation_step: Any,
+    mutation_step_count: Any,
+    mutation_plan_hash: Any,
+) -> dict[str, Any]:
+    if mutation_group_id is None:
+        return {}
+    return {
+        "mutation_group_id": mutation_group_id,
+        "mutation_step": mutation_step,
+        "mutation_step_count": mutation_step_count,
+        "mutation_plan_hash": mutation_plan_hash,
+    }
 
 
 def _envelope_sequence_fingerprint_from_create(
@@ -1690,21 +2487,40 @@ class SyncDatabase:
             else SYNC_SQLITE_SCHEMA
         )
         with self.backend.transaction() as conn:
+            if self.backend_type == BackendType.POSTGRESQL:
+                self.execute(
+                    "SELECT pg_advisory_xact_lock(?)",
+                    (SYNC_VERSIONED_DEVICE_STATE_MIGRATION_LOCK_KEY,),
+                    connection=conn,
+                )
+            current_heads_existed = self.backend.table_exists(
+                "sync_current_heads", connection=conn
+            )
             if self.backend.table_exists("sync_envelopes", connection=conn):
                 self._ensure_envelope_m1_columns(connection=conn)
             if self.backend.table_exists("sync_key_records", connection=conn):
                 self._ensure_key_record_user_id_column(connection=conn)
                 self._ensure_key_record_rotation_columns(connection=conn)
+            self._preflight_notes_attachment_bootstrap_tables(connection=conn)
             self.backend.create_tables(schema, connection=conn)
             self._ensure_device_lifecycle_columns(connection=conn)
             self._ensure_device_lifecycle_tables(connection=conn)
             self._ensure_background_sync_tables(connection=conn)
             self._ensure_envelope_m1_columns(connection=conn)
             self._ensure_sync_object_state_table(connection=conn)
+            self._ensure_sync_current_heads_table(
+                connection=conn, projection_exists=current_heads_existed
+            )
+            self._ensure_sync_materialization_locks_table(connection=conn)
+            self._ensure_attachment_binding_tables(connection=conn)
+            self._ensure_notes_attachment_bootstrap_tables(connection=conn)
             self._ensure_envelope_m1_indexes(connection=conn)
+            self._ensure_conflict_indexes(connection=conn)
             self._ensure_key_record_user_id_column(connection=conn)
             self._ensure_key_record_rotation_columns(connection=conn)
             self._ensure_key_record_user_id_index(connection=conn)
+        with self.backend.transaction() as conn:
+            self._migrate_versioned_device_state(connection=conn)
 
     def execute(
         self,
@@ -1716,6 +2532,775 @@ class SyncDatabase:
         """Execute a parameterized SQL statement through the configured backend."""
 
         return self.backend.execute(query, params, connection=connection)
+
+    @contextmanager
+    def materialization_transaction(
+        self,
+        keys: Sequence[tuple[str, SyncDomain, str]],
+        *,
+        trusted_notes_task_bootstrap_id: str | None = None,
+        trusted_notes_task_coordinator: bool = False,
+    ) -> Iterator[Any]:
+        """Serialize product projection and Sync bookkeeping by dataset."""
+
+        ordered_keys = sorted(set(keys))
+        if not ordered_keys:
+            raise SyncStoreError("Sync materialization requires at least one object")
+        try:
+            with self.backend.transaction() as conn:
+                domains_by_dataset: dict[str, set[SyncDomain]] = {}
+                for dataset_id, domain, _object_id in ordered_keys:
+                    domains_by_dataset.setdefault(dataset_id, set()).add(domain)
+                for dataset_id, domains in sorted(domains_by_dataset.items()):
+                    row = self._get_dataset_row_for_update(
+                        dataset_id,
+                        connection=conn,
+                    )
+                    if row is None:
+                        raise SyncDatasetNotFoundError(
+                            f"Sync dataset not found: {dataset_id}"
+                        )
+                    enrolled = _dataset_domains_from_row(row)
+                    metadata = decode_json(row.get("metadata_json"), default={})
+                    for domain in sorted(domains):
+                        trusted_task = (
+                            domain in {"notes.task", "notes.task_activity"}
+                            and trusted_notes_task_bootstrap_id is not None
+                        )
+                        if trusted_task:
+                            readiness_key = (
+                                "notes_task_v1"
+                                if domain == "notes.task"
+                                else "notes_task_activity_v1"
+                            )
+                            readiness = metadata.get(readiness_key)
+                            if (
+                                not isinstance(readiness, Mapping)
+                                or readiness.get("state") != "bootstrapping"
+                                or metadata.get("task_activity_capture_enabled") is not True
+                            ):
+                                raise SyncStoreError("notes_task_sync_not_ready")
+                        elif (
+                            domain in {"notes.task", "notes.task_activity"}
+                            and trusted_notes_task_coordinator
+                        ):
+                            if not notes_task_capture_is_active(metadata):
+                                raise SyncStoreError("notes_task_sync_not_ready")
+                        elif domain not in enrolled:
+                            raise SyncInvalidDomainError(
+                                "Sync domain is not enrolled for dataset "
+                                f"{dataset_id}: {domain}"
+                            )
+                for dataset_id in sorted(domains_by_dataset):
+                    self._lock_materialization_dataset(dataset_id, connection=conn)
+                yield conn
+        except Exception as exc:
+            if _is_materialization_lock_error(exc):
+                raise SyncMaterializationBusyError() from exc
+            raise
+
+    @contextmanager
+    def conflict_resolution_transaction(self, dataset_id: str) -> Iterator[Any]:
+        """Hold the dataset projection fence for one conflict-resolution batch."""
+
+        try:
+            with self.backend.transaction() as conn:
+                if self._get_dataset_row_for_update(dataset_id, connection=conn) is None:
+                    raise SyncDatasetNotFoundError(
+                        f"Sync dataset not found: {dataset_id}"
+                    )
+                self._lock_materialization_dataset(dataset_id, connection=conn)
+                yield conn
+        except Exception as exc:
+            if _is_materialization_lock_error(exc):
+                raise SyncMaterializationBusyError() from exc
+            raise
+
+    @contextmanager
+    def conflict_resolution_savepoint(self, *, connection: Any) -> Iterator[None]:
+        """Rollback one failed batch item without releasing the dataset fence."""
+
+        self.execute("SAVEPOINT sync_conflict_resolution_item", connection=connection)
+        try:
+            yield
+        except BaseException:  # noqa: BLE001 - contain every per-item failure.
+            self.execute(
+                "ROLLBACK TO SAVEPOINT sync_conflict_resolution_item",
+                connection=connection,
+            )
+            self.execute(
+                "RELEASE SAVEPOINT sync_conflict_resolution_item",
+                connection=connection,
+            )
+            raise
+        self.execute(
+            "RELEASE SAVEPOINT sync_conflict_resolution_item",
+            connection=connection,
+        )
+
+    def commit_personal_context_authority_transaction(
+        self,
+        *,
+        connection: Any,
+    ) -> None:
+        """Commit a guarded authority mutation before its source fence releases."""
+
+        try:
+            connection.commit()
+        except Exception as exc:
+            raise SyncStoreError("sync_personal_context_authority_commit_failed") from exc
+
+    @contextmanager
+    def personal_context_transport_snapshot(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        streams: Sequence[tuple[SyncDomain, int]],
+    ) -> Iterator[dict[tuple[SyncDomain, int], int]]:
+        """Fence Sync inserts while canonical bootstrap state is read.
+
+        This is a Sync-database ordering fence, not a cross-database
+        transaction. Envelope inserts take this same dataset-row lock before
+        receiving a server sequence.
+        """
+
+        expected_streams = set(streams)
+        if not expected_streams:
+            raise SyncStoreError("personal_context_transport_streams_unavailable")
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            enrolled_domains = set(_dataset_domains_from_row(row))
+            if any(domain not in enrolled_domains for domain, _version in streams):
+                raise SyncInvalidDomainError(
+                    "Personal Context transport stream is not enrolled"
+                )
+            yield self._personal_context_transport_watermarks_in_transaction(
+                dataset_id=dataset_id,
+                streams=streams,
+                connection=conn,
+            )
+
+    def _personal_context_transport_watermarks_in_transaction(
+        self,
+        *,
+        dataset_id: str,
+        streams: Sequence[tuple[SyncDomain, int]],
+        connection: Any,
+    ) -> dict[tuple[SyncDomain, int], int]:
+        """Read bounded transport watermarks on the caller-owned transaction."""
+
+        expected_streams = set(streams)
+        if not expected_streams:
+            raise SyncStoreError("personal_context_transport_streams_unavailable")
+        domains = sorted({domain for domain, _version in streams})
+        versions = sorted({version for _domain, version in streams})
+        domain_placeholders = ", ".join("?" for _ in domains)
+        version_placeholders = ", ".join("?" for _ in versions)
+        result = self.execute(
+            f"""
+            SELECT domain,
+                   adapter_version,
+                   MAX(server_sequence) AS watermark,
+                   SUM(
+                       CASE
+                           WHEN apply_status IN ('applied', 'superseded') THEN 0
+                           ELSE 1
+                       END
+                   ) AS projection_debt
+              FROM sync_envelopes
+             WHERE dataset_id = ?
+               AND status = 'accepted'
+               AND domain IN ({domain_placeholders})
+               AND adapter_version IN ({version_placeholders})
+             GROUP BY domain, adapter_version
+            """,  # nosec B608 - placeholders are generated from bounded lists.
+            (dataset_id, *domains, *versions),
+            connection=connection,
+        )
+        watermarks = dict.fromkeys(expected_streams, 0)
+        for envelope_row in result.rows:
+            stream = (
+                str(envelope_row["domain"]),
+                int(envelope_row["adapter_version"]),
+            )
+            if stream in expected_streams:
+                if int(envelope_row["projection_debt"] or 0) != 0:
+                    raise SyncStoreError("personal_context_projection_incomplete")
+                watermarks[stream] = int(envelope_row["watermark"] or 0)
+        return watermarks
+
+    def _lock_materialization_dataset(
+        self,
+        dataset_id: str,
+        *,
+        connection: Any,
+    ) -> None:
+        """Acquire one reusable durable dataset projection lock in the caller's tx."""
+
+        if self.backend_type == BackendType.POSTGRESQL:
+            self.execute("SET LOCAL lock_timeout = '10s'", connection=connection)
+        self.execute(
+            """
+            INSERT INTO sync_materialization_locks (
+                dataset_id, domain, object_id, updated_at
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT (dataset_id, domain, object_id)
+            DO UPDATE SET updated_at = excluded.updated_at
+            """,
+            (dataset_id, "*", "*", utcnow_iso()),
+            connection=connection,
+        )
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        row = _first(
+            self.execute(
+                """
+                SELECT dataset_id FROM sync_materialization_locks
+                 WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                """
+                + suffix,  # nosec B608 - suffix is a backend-controlled SQL literal.
+                (dataset_id, "*", "*"),
+                connection=connection,
+            )
+        )
+        if row is None:
+            raise SyncStoreError("sync_materialization_lock_unavailable")
+
+    def require_materialization_predecessors_applied(
+        self,
+        envelopes: Sequence[SyncEnvelope],
+        *,
+        connection: Any,
+    ) -> None:
+        """Prevent a projection unit from advancing past earlier unresolved work."""
+
+        cursors_by_dataset: dict[str, list[int]] = {}
+        for envelope in envelopes:
+            if envelope.status != "accepted" or envelope.server_cursor is None:
+                raise SyncStoreError("Sync materialization requires stored accepted envelopes")
+            cursors_by_dataset.setdefault(envelope.dataset_id, []).append(
+                envelope.server_cursor
+            )
+        for dataset_id, cursors in sorted(cursors_by_dataset.items()):
+            predecessor = _first(
+                self.execute(
+                    """
+                    SELECT server_sequence, apply_status
+                      FROM sync_envelopes
+                     WHERE dataset_id = ?
+                       AND status = 'accepted'
+                       AND server_sequence < ?
+                       AND apply_status NOT IN ('applied', 'superseded')
+                       AND NOT (
+                           domain IN ('personal_context.record', 'personal_context.scope', 'personal_context.proposal', 'personal_context.manifest', 'personal_context.purge') AND apply_status = 'conflict'
+                           AND EXISTS (
+                               SELECT 1 FROM sync_conflicts AS review
+                                WHERE review.dataset_id = sync_envelopes.dataset_id
+                                  AND review.server_sequence = sync_envelopes.server_sequence
+                                  AND review.status = 'unresolved' AND review.remote_envelope_id IS NOT NULL
+                           )
+                       )
+                     ORDER BY server_sequence ASC
+                     LIMIT 1
+                    """,
+                    (dataset_id, min(cursors)),
+                    connection=connection,
+                )
+            )
+            if predecessor is not None:
+                raise SyncMaterializationPredecessorError(
+                    apply_status=str(predecessor.get("apply_status") or "pending")
+                )
+
+    def require_conflict_resolution_predecessors_applied(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        connection: Any,
+    ) -> SyncEnvelope:
+        """Evaluate readiness at the claimed conflict's logical cursor."""
+
+        conflict_row, envelope_row = self._require_claimed_conflict_source(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            connection=connection,
+        )
+        source_cursor = int(conflict_row["server_sequence"])
+        predecessor = _first(
+            self.execute(
+                """
+                SELECT server_sequence, apply_status
+                  FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND status = 'accepted'
+                   AND server_sequence < ?
+                   AND apply_status NOT IN ('applied', 'superseded')
+                 ORDER BY server_sequence ASC
+                 LIMIT 1
+                """,
+                (dataset_id, source_cursor),
+                connection=connection,
+            )
+        )
+        if predecessor is not None:
+            raise SyncMaterializationPredecessorError(
+                apply_status=str(predecessor.get("apply_status") or "pending")
+            )
+        return _envelope_from_row(envelope_row)
+
+    def terminalize_claimed_conflict_envelope(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        apply_error_code: str,
+        connection: Any,
+    ) -> SyncEnvelope:
+        """Mark exactly the claimed, unprojected conflict source superseded."""
+
+        _conflict_row, envelope_row = self._require_claimed_conflict_source(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            connection=connection,
+        )
+        cursor = int(envelope_row["server_sequence"])
+        result = self.execute(
+            """
+            UPDATE sync_envelopes
+               SET apply_status = 'superseded',
+                   apply_error_code = ?,
+                   apply_error_message = NULL,
+                   applied_at = NULL
+             WHERE server_sequence = ?
+               AND apply_status IN ('pending', 'failed', 'conflict')
+            """,
+            (apply_error_code, cursor),
+            connection=connection,
+        )
+        if result.rowcount == 0:
+            raise SyncStoreError("Sync conflict source could not be terminalized")
+        self._repoint_current_head_from_unprojected_row(
+            envelope_row,
+            connection=connection,
+        )
+        updated = _first(
+            self.execute(
+                "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                (cursor,),
+                connection=connection,
+            )
+        )
+        if updated is None:
+            raise SyncStoreError("Sync conflict source envelope was not found")
+        return _envelope_from_row(updated)
+
+    def stage_later_claimed_conflict_rebase_plan(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        connection: Any,
+    ) -> tuple[int, ...]:
+        """Validate and freeze the bounded later-row rebase plan."""
+
+        conflict_row, _source_row = self._require_claimed_conflict_source(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            connection=connection,
+        )
+        rows = self._validated_later_conflict_rebase_rows(
+            dataset_id=dataset_id,
+            source_cursor=int(conflict_row["server_sequence"]),
+            connection=connection,
+        )
+        return tuple(int(row["server_sequence"]) for row in rows)
+
+    def rebase_later_claimed_conflict_envelopes(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        expected_server_cursors: Sequence[int] | None = None,
+        connection: Any,
+    ) -> list[SyncConflict]:
+        """Convert bounded legacy work queued after a claimed source into conflicts."""
+
+        conflict_row, _source_row = self._require_claimed_conflict_source(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            connection=connection,
+        )
+        source_cursor = int(conflict_row["server_sequence"])
+        rows = self._validated_later_conflict_rebase_rows(
+            dataset_id=dataset_id,
+            source_cursor=source_cursor,
+            connection=connection,
+        )
+        planned_cursors = tuple(int(row["server_sequence"]) for row in rows)
+        if (
+            expected_server_cursors is not None
+            and planned_cursors != tuple(expected_server_cursors)
+        ):
+            raise SyncStoreError("sync_conflict_resolution_rebase_plan_changed")
+
+        conflicts: list[SyncConflict] = []
+        for row in rows:
+            previous_apply_status = str(row.get("apply_status") or "pending")
+            cursor = int(row["server_sequence"])
+            self.execute(
+                """
+                UPDATE sync_envelopes
+                   SET apply_status = 'conflict',
+                       apply_error_code = ?,
+                       apply_error_message = ?,
+                       applied_at = NULL
+                 WHERE server_sequence = ?
+                   AND status = 'accepted'
+                   AND apply_status NOT IN ('applied', 'superseded')
+                """,
+                (
+                    SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
+                    "Queued change requires review after conflict resolution",
+                    cursor,
+                ),
+                connection=connection,
+            )
+            conflicts.append(
+                self._upsert_rebase_required_conflict(
+                    row,
+                    source_conflict_id=conflict_id,
+                    source_cursor=source_cursor,
+                    previous_apply_status=previous_apply_status,
+                    connection=connection,
+                )
+            )
+            self._repoint_current_head_from_unprojected_row(
+                row,
+                connection=connection,
+            )
+        return conflicts
+
+    def _validated_later_conflict_rebase_rows(
+        self,
+        *,
+        dataset_id: str,
+        source_cursor: int,
+        connection: Any,
+    ) -> list[dict[str, Any]]:
+        """Return the bounded plan after validating every existing conflict row."""
+
+        rows = self.execute(
+            """
+            SELECT *
+              FROM sync_envelopes
+             WHERE dataset_id = ?
+               AND status = 'accepted'
+               AND server_sequence > ?
+               AND apply_status NOT IN ('applied', 'superseded')
+             ORDER BY server_sequence ASC
+             LIMIT ?
+            """,
+            (dataset_id, source_cursor, SYNC_MUTATION_GROUP_MAX_SIZE + 1),
+            connection=connection,
+        ).rows
+        if len(rows) > SYNC_MUTATION_GROUP_MAX_SIZE:
+            raise SyncStoreError("sync_conflict_resolution_rebase_limit_exceeded")
+        for row in rows:
+            existing = self._get_conflict_for_rebase_envelope(
+                row,
+                connection=connection,
+            )
+            if existing is not None:
+                self._require_compatible_rebase_conflict_record(existing, row)
+        return rows
+
+    def _get_conflict_for_rebase_envelope(
+        self,
+        envelope_row: Mapping[str, Any],
+        *,
+        connection: Any,
+    ) -> dict[str, Any] | None:
+        return _first(
+            self.execute(
+                """
+                SELECT * FROM sync_conflicts
+                 WHERE dataset_id = ?
+                   AND local_envelope_id = ?
+                   AND server_sequence = ?
+                """,
+                (
+                    envelope_row["dataset_id"],
+                    envelope_row["client_envelope_id"],
+                    int(envelope_row["server_sequence"]),
+                ),
+                connection=connection,
+            )
+        )
+
+    @staticmethod
+    def _require_compatible_rebase_conflict_record(
+        conflict_row: Mapping[str, Any],
+        envelope_row: Mapping[str, Any],
+    ) -> None:
+        identity_matches = (
+            conflict_row.get("dataset_id") == envelope_row.get("dataset_id")
+            and conflict_row.get("local_envelope_id")
+            == envelope_row.get("client_envelope_id")
+            and conflict_row.get("server_sequence")
+            == envelope_row.get("server_sequence")
+            and conflict_row.get("domain") == envelope_row.get("domain")
+            and conflict_row.get("entity_id") == envelope_row.get("entity_id")
+        )
+        if (
+            not identity_matches
+            or conflict_row.get("status") != "unresolved"
+            or _conflict_row_has_resolution_claim(conflict_row)
+        ):
+            raise SyncStoreError(
+                "sync_conflict_resolution_rebase_record_incompatible"
+            )
+
+    def _upsert_rebase_required_conflict(
+        self,
+        envelope_row: dict[str, Any],
+        *,
+        source_conflict_id: str,
+        source_cursor: int,
+        previous_apply_status: str,
+        connection: Any,
+    ) -> SyncConflict:
+        cursor = int(envelope_row["server_sequence"])
+        existing = self._get_conflict_for_rebase_envelope(
+            envelope_row,
+            connection=connection,
+        )
+        metadata: dict[str, Any] = {
+            "source_conflict_id": source_conflict_id,
+            "source_server_cursor": source_cursor,
+            "previous_apply_status": previous_apply_status,
+        }
+        if existing is not None:
+            self._require_compatible_rebase_conflict_record(existing, envelope_row)
+            if existing.get("conflict_type") != (
+                SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
+            ):
+                metadata["previous_conflict_type"] = existing.get("conflict_type")
+                metadata["previous_conflict_metadata"] = decode_json(
+                    existing.get("metadata_json"),
+                    default={},
+                )
+            else:
+                return _conflict_from_row(existing)
+            self.execute(
+                """
+                UPDATE sync_conflicts
+                   SET conflict_type = ?,
+                       metadata_json = ?
+                 WHERE conflict_id = ? AND status = 'unresolved'
+                """,
+                (
+                    SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
+                    encode_json(metadata, default={}),
+                    existing["conflict_id"],
+                ),
+                connection=connection,
+            )
+            updated = _first(
+                self.execute(
+                    "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
+                    (existing["conflict_id"],),
+                    connection=connection,
+                )
+            )
+            if updated is None:
+                raise SyncStoreError("Sync rebase conflict could not be stored")
+            return _conflict_from_row(updated)
+
+        digest = hashlib.sha256(
+            (
+                f"{envelope_row['dataset_id']}\0"
+                f"{envelope_row['client_envelope_id']}\0{cursor}"
+            ).encode()
+        ).hexdigest()
+        return self.insert_conflict(
+            SyncConflictCreate(
+                conflict_id=f"conflict-rebase-{digest}",
+                dataset_id=str(envelope_row["dataset_id"]),
+                domain=str(envelope_row["domain"]),  # type: ignore[arg-type]
+                entity_id=str(envelope_row["entity_id"]),
+                conflict_type=SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
+                local_envelope_id=str(envelope_row["client_envelope_id"]),
+                server_sequence=cursor,
+                metadata=metadata,
+            ),
+            connection=connection,
+        )
+
+    def _repoint_current_head_from_unprojected_row(
+        self,
+        envelope_row: dict[str, Any],
+        *,
+        connection: Any,
+    ) -> None:
+        """Conditionally restore the latest applied head hidden by one row."""
+
+        cursor = int(envelope_row["server_sequence"])
+        head = _first(
+            self.execute(
+                """
+                SELECT latest_server_cursor
+                  FROM sync_current_heads
+                 WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                """,
+                (
+                    envelope_row["dataset_id"],
+                    envelope_row["domain"],
+                    envelope_row["entity_id"],
+                ),
+                connection=connection,
+            )
+        )
+        if head is None or int(head["latest_server_cursor"]) != cursor:
+            return
+        projected = _first(
+            self.execute(
+                """
+                SELECT server_sequence
+                  FROM sync_envelopes
+                 WHERE dataset_id = ? AND domain = ? AND entity_id = ?
+                   AND status = 'accepted' AND apply_status = 'applied'
+                   AND server_sequence < ?
+                 ORDER BY server_sequence DESC
+                 LIMIT 1
+                """,
+                (
+                    envelope_row["dataset_id"],
+                    envelope_row["domain"],
+                    envelope_row["entity_id"],
+                    cursor,
+                ),
+                connection=connection,
+            )
+        )
+        if projected is None:
+            self.execute(
+                """
+                DELETE FROM sync_current_heads
+                 WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                   AND latest_server_cursor = ?
+                """,
+                (
+                    envelope_row["dataset_id"],
+                    envelope_row["domain"],
+                    envelope_row["entity_id"],
+                    cursor,
+                ),
+                connection=connection,
+            )
+            return
+        self.execute(
+            """
+            UPDATE sync_current_heads
+               SET latest_server_cursor = ?
+             WHERE dataset_id = ? AND domain = ? AND object_id = ?
+               AND latest_server_cursor = ?
+            """,
+            (
+                projected["server_sequence"],
+                envelope_row["dataset_id"],
+                envelope_row["domain"],
+                envelope_row["entity_id"],
+                cursor,
+            ),
+            connection=connection,
+        )
+
+    def _require_claimed_conflict_source(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        connection: Any,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        conflict_row = _first(
+            self.execute(
+                "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
+                (conflict_id,),
+                connection=connection,
+            )
+        )
+        if (
+            conflict_row is None
+            or conflict_row.get("dataset_id") != dataset_id
+            or conflict_row.get("server_sequence") is None
+            or conflict_row.get("local_envelope_id") is None
+            or not _conflict_row_matches_resolution_claim(
+                conflict_row,
+                resolved_by_device_id=resolved_by_device_id,
+                resolution_action=resolution_action,
+                resolution_notes=resolution_notes,
+            )
+        ):
+            raise SyncStoreError("Sync conflict resolution claim does not match its source")
+        envelope_row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND client_envelope_id = ?
+                   AND server_sequence = ?
+                """,
+                (
+                    dataset_id,
+                    conflict_row["local_envelope_id"],
+                    conflict_row["server_sequence"],
+                ),
+                connection=connection,
+            )
+        )
+        if (
+            envelope_row is None
+            or envelope_row.get("domain") != conflict_row.get("domain")
+            or envelope_row.get("entity_id") != conflict_row.get("entity_id")
+            or (
+                envelope_row.get("status") == "accepted"
+                and envelope_row.get("apply_status") != "conflict"
+            )
+        ):
+            raise SyncStoreError("Sync conflict source envelope is not unresolved")
+        return conflict_row, envelope_row
 
     def _get_dataset_row(
         self,
@@ -1743,6 +3328,21 @@ class SyncDatabase:
             )
         )
 
+    def _get_dataset_row_for_update(
+        self,
+        dataset_id: str,
+        *,
+        connection: Any,
+    ) -> dict[str, Any] | None:
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        return _first(
+            self.execute(
+                "SELECT * FROM sync_datasets WHERE dataset_id = ?" + suffix,  # nosec B608
+                (dataset_id,),
+                connection=connection,
+            )
+        )
+
     def _require_dataset(
         self,
         dataset_id: str,
@@ -1750,6 +3350,50 @@ class SyncDatabase:
         connection: Any | None = None,
     ) -> dict[str, Any]:
         row = self._get_dataset_row(dataset_id, connection=connection)
+        if row is None:
+            raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+        return row
+
+    def _require_attachment_binding_dataset_owner(
+        self,
+        dataset_id: str,
+        owner_user_id: str,
+        *,
+        connection: Any,
+    ) -> dict[str, Any]:
+        row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_datasets
+                 WHERE dataset_id = ? AND owner_user_id = ?
+                """,
+                (dataset_id, owner_user_id),
+                connection=connection,
+            )
+        )
+        if row is None:
+            raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+        return row
+
+    def _require_dataset_owner_for_update(
+        self,
+        dataset_id: str,
+        owner_user_id: str,
+        *,
+        connection: Any,
+    ) -> dict[str, Any]:
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_datasets
+                 WHERE dataset_id = ? AND owner_user_id = ?
+                """
+                + suffix,  # nosec B608 - backend-controlled row lock suffix.
+                (dataset_id, owner_user_id),
+                connection=connection,
+            )
+        )
         if row is None:
             raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
         return row
@@ -1767,6 +3411,93 @@ class SyncDatabase:
                 f"Sync domain is not enrolled for dataset {dataset_id}: {domain}"
             )
         return row
+
+    def _require_dataset_domain_for_update(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        connection: Any,
+    ) -> dict[str, Any]:
+        row = self._get_dataset_row_for_update(dataset_id, connection=connection)
+        if row is None:
+            raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+        if domain not in _dataset_domains_from_row(row):
+            raise SyncInvalidDomainError(
+                f"Sync domain is not enrolled for dataset {dataset_id}: {domain}"
+            )
+        return row
+
+    def _require_notes_organization_write_ready(
+        self,
+        row: Mapping[str, Any],
+        domain: SyncDomain,
+        *,
+        trusted_bootstrap_id: str | None = None,
+    ) -> None:
+        if domain == "notes.link":
+            metadata = decode_json(row.get("metadata_json"), default={}).get(
+                "notes_link_v1"
+            )
+            if not isinstance(metadata, Mapping):
+                raise SyncStoreError("notes_link_sync_not_ready")
+            if metadata.get("state") == "ready":
+                return
+            if (
+                trusted_bootstrap_id is not None
+                and metadata.get("state") == "initializing"
+                and metadata.get("bootstrap_id") == trusted_bootstrap_id
+            ):
+                return
+            raise SyncStoreError("notes_link_sync_not_ready")
+        if domain not in NOTES_ORGANIZATION_DOMAINS:
+            return
+        if set(NOTES_ORGANIZATION_DOMAINS).difference(_dataset_domains_from_row(dict(row))):
+            raise SyncStoreError("notes_organization_sync_domains_incomplete")
+        metadata = decode_json(row.get("metadata_json"), default={}).get(
+            "notes_organization_v1"
+        )
+        if not isinstance(metadata, Mapping):
+            raise SyncStoreError("notes_organization_sync_not_ready")
+        if metadata.get("state") == "ready":
+            return
+        if (
+            trusted_bootstrap_id is not None
+            and metadata.get("state") == "initializing"
+            and metadata.get("bootstrap_id") == trusted_bootstrap_id
+        ):
+            return
+        raise SyncStoreError("notes_organization_sync_not_ready")
+
+    @staticmethod
+    def _require_notes_task_bootstrap_write_ready(
+        row: Mapping[str, Any],
+        *,
+        envelope: SyncEnvelope | SyncEnvelopeCreate,
+        bootstrap_id: str,
+    ) -> None:
+        """Authorize only the private source-verified dormant task bootstrap."""
+
+        metadata = decode_json(row.get("metadata_json"), default={})
+        readiness_key = {
+            "notes.task": "notes_task_v1",
+            "notes.task_activity": "notes_task_activity_v1",
+        }.get(envelope.domain)
+        expected_source = {
+            "notes.task": "notes-task-bootstrap",
+            "notes.task_activity": "notes-task-activity-bootstrap",
+        }.get(envelope.domain)
+        readiness = metadata.get(readiness_key) if readiness_key is not None else None
+        routing = envelope.routing_metadata
+        if (
+            not isinstance(readiness, Mapping)
+            or readiness.get("state") != "bootstrapping"
+            or metadata.get("task_activity_capture_enabled") is not True
+            or routing.get("bootstrap_capture") is not True
+            or routing.get("bootstrap_id") != bootstrap_id
+            or routing.get("source") != expected_source
+        ):
+            raise SyncStoreError("notes_task_sync_not_ready")
 
     def _get_device_row(
         self,
@@ -1822,7 +3553,14 @@ class SyncDatabase:
         if dataset.scope_type == "personal":
             if dataset.workspace_id is not None:
                 raise SyncStoreError("Personal sync datasets must not include workspace_id")
-            allowed_domains = set(M1_SYNC_DOMAINS).union(SOURCE_CACHE_SYNC_DOMAINS, MEDIA_SYNC_DOMAINS)
+            allowed_domains = set(M1_SYNC_DOMAINS).union(
+                SOURCE_CACHE_SYNC_DOMAINS,
+                MEDIA_SYNC_DOMAINS,
+                NOTES_ORGANIZATION_DOMAINS,
+                NOTES_LINK_DOMAINS,
+                NOTES_TASK_SYNC_DOMAINS,
+                PERSONAL_CONTEXT_SYNC_DOMAINS,
+            )
         elif dataset.scope_type == "workspace":
             if not dataset.workspace_id or not dataset.workspace_id.strip():
                 raise SyncStoreError("Workspace sync datasets require workspace_id")
@@ -1835,11 +3573,38 @@ class SyncDatabase:
                 f"Sync v2 dataset scope {dataset.scope_type} contains unsupported domains: "
                 + ", ".join(invalid_domains)
             )
+        organization_domains = set(dataset.domains).intersection(NOTES_ORGANIZATION_DOMAINS)
+        if organization_domains and organization_domains != set(NOTES_ORGANIZATION_DOMAINS):
+            raise SyncInvalidDomainError("notes_organization_sync_domains_incomplete")
+        if organization_domains:
+            organization_metadata = dataset.metadata.get("notes_organization_v1")
+            state = (
+                organization_metadata.get("state")
+                if isinstance(organization_metadata, Mapping)
+                else None
+            )
+            if state not in {"initializing", "ready", "failed"}:
+                raise SyncStoreError("notes_organization_sync_not_ready")
+        personal_context_domains = set(dataset.domains).intersection(
+            PERSONAL_CONTEXT_SYNC_DOMAINS
+        )
+        if personal_context_domains and personal_context_domains != set(
+            PERSONAL_CONTEXT_SYNC_DOMAINS
+        ):
+            raise SyncInvalidDomainError("personal_context_sync_domains_incomplete")
+        task_domains = set(dataset.domains).intersection(NOTES_TASK_SYNC_DOMAINS)
+        if task_domains and task_domains != set(NOTES_TASK_SYNC_DOMAINS):
+            raise SyncInvalidDomainError("notes_task_sync_domains_incomplete")
+        if task_domains and not notes_task_sync_is_ready(
+            domains=dataset.domains,
+            metadata=dataset.metadata,
+        ):
+            raise SyncStoreError("notes_task_sync_not_ready")
 
     def _validate_envelope_contract(self, envelope: SyncEnvelopeCreate) -> None:
-        if envelope.domain not in SYNC_V2_SUPPORTED_OPERATIONS:
+        if envelope.domain not in SYNC_V2_INTERNAL_OPERATIONS:
             raise SyncInvalidDomainError(f"Sync v2 M1 domain is not supported: {envelope.domain}")
-        if envelope.operation not in SYNC_V2_SUPPORTED_OPERATIONS[envelope.domain]:
+        if envelope.operation not in SYNC_V2_INTERNAL_OPERATIONS[envelope.domain]:
             raise SyncStoreError(
                 f"Sync v2 M1 operation {envelope.operation} is not supported for {envelope.domain}"
             )
@@ -1859,12 +3624,23 @@ class SyncDatabase:
         )
         has_any_base = any(value is not None for value in base_values)
         has_all_base = all(value is not None for value in base_values)
-        if has_any_base and not has_all_base:
+        has_prebootstrap_product_base = bool(
+            envelope.domain == "notes.task"
+            and envelope.base_server_cursor is None
+            and envelope.base_object_revision is not None
+            and envelope.base_object_hash is not None
+            and envelope.routing_metadata.get("product_transition_base") is True
+        )
+        if has_any_base and not has_all_base and not has_prebootstrap_product_base:
             raise SyncStoreError(
                 "Sync v2 M1 base metadata must be supplied as a complete set"
             )
         if envelope.domain in _WHOLE_OBJECT_DOMAINS:
-            if envelope.operation == "tombstone" and not has_all_base:
+            if (
+                envelope.operation == "tombstone"
+                and not has_all_base
+                and not has_prebootstrap_product_base
+            ):
                 raise SyncStoreError(
                     f"Sync v2 M1 {envelope.domain} tombstones require base metadata"
                 )
@@ -1873,6 +3649,7 @@ class SyncDatabase:
                 and envelope.object_revision is not None
                 and envelope.object_revision > 1
                 and not has_all_base
+                and not has_prebootstrap_product_base
             ):
                 raise SyncStoreError(
                     f"Sync v2 M1 {envelope.domain} updates require base metadata"
@@ -1883,19 +3660,46 @@ class SyncDatabase:
                     "Sync v2 M1 chat.message append envelopes require object_id and payload_hash"
                 )
         if envelope.domain == "attachment.ref":
-            missing = _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS.difference(envelope.payload)
+            required = (
+                {"attachment_id", "blob_hash", "size_bytes"}
+                if envelope.adapter_version == 2
+                else _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS
+            )
+            missing = required.difference(envelope.payload)
             if missing:
                 raise SyncStoreError(
                     "Sync v2 M1 attachment.ref envelopes require payload metadata fields: "
                     + ", ".join(sorted(missing))
                 )
+            if envelope.adapter_version == 2 and (
+                envelope.schema_version != 2
+                or envelope.object_revision is None
+                or envelope.object_revision < 1
+            ):
+                raise SyncStoreError(
+                    "attachment.ref v2 envelopes require schema version 2 and a positive revision"
+                )
 
-    def upsert_device(self, device: SyncDeviceUpsert) -> SyncDevice:
+    def upsert_device(
+        self,
+        device: SyncDeviceUpsert,
+        *,
+        capabilities_resolver: Callable[
+            [SyncDevice | None], dict[str, object]
+        ]
+        | None = None,
+    ) -> SyncDevice:
         now = utcnow_iso()
         with self.backend.transaction() as conn:
+            lock_suffix = (
+                " FOR UPDATE"
+                if self.backend_type == BackendType.POSTGRESQL
+                else ""
+            )
             existing = _first(
                 self.execute(
-                    "SELECT * FROM sync_devices WHERE device_id = ?",
+                    "SELECT * FROM sync_devices WHERE device_id = ?"
+                    + lock_suffix,  # nosec B608
                     (device.device_id,),
                     connection=conn,
                 )
@@ -1907,6 +3711,11 @@ class SyncDatabase:
                     )
                 existing_status = existing.get("status") or (
                     "revoked" if existing.get("revoked_at") else "active"
+                )
+                capabilities = (
+                    capabilities_resolver(_device_from_row(existing))
+                    if capabilities_resolver is not None
+                    else device.capabilities
                 )
                 if existing_status == "revoked" and device.status != "revoked":
                     status = "revoked"
@@ -1944,7 +3753,7 @@ class SyncDatabase:
                         device.display_name,
                         device.client_type,
                         device.client_version,
-                        encode_json(device.capabilities, default={}),
+                        encode_json(capabilities, default={}),
                         now,
                         status,
                         device.user_label or existing.get("user_label"),
@@ -1956,6 +3765,11 @@ class SyncDatabase:
                     connection=conn,
                 )
             else:
+                capabilities = (
+                    capabilities_resolver(None)
+                    if capabilities_resolver is not None
+                    else device.capabilities
+                )
                 status = (
                     "revoked"
                     if device.status == "revoked" or device.revoked_at is not None
@@ -1977,7 +3791,7 @@ class SyncDatabase:
                         device.display_name,
                         device.client_type,
                         device.client_version,
-                        encode_json(device.capabilities, default={}),
+                        encode_json(capabilities, default={}),
                         now,
                         now,
                         status,
@@ -2000,12 +3814,14 @@ class SyncDatabase:
     def enroll_dataset(self, dataset: SyncDatasetCreate) -> SyncDataset:
         self._validate_dataset_contract(dataset)
         now = utcnow_iso()
-        domains_json = encode_json(dataset.domains, default=[])
-        metadata_json = encode_json(dataset.metadata, default={})
         with self.backend.transaction() as conn:
+            lock_suffix = (
+                " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+            )
             existing = _first(
                 self.execute(
-                    "SELECT * FROM sync_datasets WHERE dataset_id = ?",
+                    "SELECT * FROM sync_datasets WHERE dataset_id = ?"
+                    + lock_suffix,  # nosec B608 - backend-controlled row lock suffix.
                     (dataset.dataset_id,),
                     connection=conn,
                 )
@@ -2015,6 +3831,41 @@ class SyncDatabase:
                     raise SyncStoreError(
                         f"Sync dataset already belongs to another user: {dataset.dataset_id}"
                     )
+                raw_existing_metadata = existing.get("metadata_json")
+                if not isinstance(raw_existing_metadata, str):
+                    raise SyncStoreError("sync_dataset_metadata_invalid")
+                try:
+                    existing_metadata = json.loads(raw_existing_metadata)
+                except ValueError as exc:
+                    raise SyncStoreError("sync_dataset_metadata_invalid") from exc
+                if not isinstance(existing_metadata, dict):
+                    raise SyncStoreError("sync_dataset_metadata_invalid")
+                server_metadata_keys = (
+                    NOTES_TASK_SERVER_METADATA_KEYS
+                    | NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS
+                    | {"personal_context"}
+                )
+                metadata = {
+                    key: value
+                    for key, value in dataset.metadata.items()
+                    if key not in server_metadata_keys
+                }
+                metadata.update(
+                    {
+                        key: existing_metadata[key]
+                        for key in server_metadata_keys
+                        if key in existing_metadata
+                    }
+                )
+                protected_personal_context_domains = (
+                    _dataset_domains_from_row(existing)
+                    & set(PERSONAL_CONTEXT_SYNC_DOMAINS)
+                )
+                effective_domains = list(
+                    dict.fromkeys(
+                        [*dataset.domains, *sorted(protected_personal_context_domains)]
+                    )
+                )
                 self.execute(
                     """
                     UPDATE sync_datasets
@@ -2033,8 +3884,8 @@ class SyncDatabase:
                         dataset.workspace_id,
                         dataset.scope_type,
                         dataset.encryption_policy,
-                        domains_json,
-                        metadata_json,
+                        encode_json(effective_domains, default=[]),
+                        encode_json(metadata, default={}),
                         now,
                         dataset.archived_at,
                         dataset.dataset_id,
@@ -2057,15 +3908,15 @@ class SyncDatabase:
                         dataset.workspace_id,
                         dataset.scope_type,
                         dataset.encryption_policy,
-                        domains_json,
-                        metadata_json,
+                        encode_json(dataset.domains, default=[]),
+                        encode_json(dataset.metadata, default={}),
                         now,
                         now,
                         dataset.archived_at,
                     ),
                     connection=conn,
                 )
-            for domain in dataset.domains:
+            for domain in effective_domains if existing else dataset.domains:
                 self._ensure_domain_state(
                     dataset_id=dataset.dataset_id,
                     domain=domain,
@@ -2082,34 +3933,760 @@ class SyncDatabase:
             )
         return _dataset_from_row(row)
 
+    def complete_personal_context_link_receipt(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        profile_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
+        bootstrap_cursor: str,
+    ) -> None:
+        """Lock and compare the opaque Personal Context binding before receipt CAS."""
+
+        with self.backend.transaction() as connection:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_datasets
+                     WHERE dataset_id = ? AND owner_user_id = ?
+                    """
+                    + (
+                        " FOR UPDATE"
+                        if self.backend_type == BackendType.POSTGRESQL
+                        else ""
+                    ),  # nosec B608 - backend-controlled lock suffix.
+                    (dataset_id, user_id),
+                    connection=connection,
+                )
+            )
+            raw_metadata = row.get("metadata_json") if row is not None else None
+            metadata = decode_json(raw_metadata, default={})
+            binding = metadata.get("personal_context") if isinstance(metadata, dict) else None
+            if not isinstance(binding, dict) or (
+                binding.get("profile_id") != profile_id
+                or binding.get("integrity_key_id") != integrity_key_id
+                or binding.get("purge_generation") != purge_generation
+                or binding.get("link_state") not in {"bootstrap_pending", "complete"}
+            ):
+                raise SyncStoreError("personal_context_link_binding_stale")
+            completed_metadata = dict(metadata)
+            completed_binding = dict(binding)
+            completed_binding["link_state"] = "complete"
+            completed_metadata["personal_context"] = completed_binding
+            updated = self.execute(
+                """UPDATE sync_datasets
+                      SET metadata_json = ?, updated_at = ?
+                    WHERE dataset_id = ? AND owner_user_id = ?
+                      AND metadata_json = ?""",
+                (
+                    encode_json(completed_metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                    user_id,
+                    raw_metadata,
+                ),
+                connection=connection,
+            )
+            if updated.rowcount != 1:
+                raise SyncStoreError("personal_context_link_binding_stale")
+            self.execute(
+                """INSERT INTO sync_personal_context_link_receipts
+                   (user_id, dataset_id, device_id, profile_id, integrity_key_id, purge_generation, bootstrap_cursor)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(user_id, dataset_id, device_id) DO UPDATE SET
+                     profile_id = excluded.profile_id,
+                     integrity_key_id = excluded.integrity_key_id,
+                     purge_generation = excluded.purge_generation,
+                     bootstrap_cursor = excluded.bootstrap_cursor""",
+                (
+                    user_id,
+                    dataset_id,
+                    device_id,
+                    profile_id,
+                    integrity_key_id,
+                    purge_generation,
+                    bootstrap_cursor,
+                ),
+                connection=connection,
+            )
+
+    def mirror_personal_context_activation(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+        profile_id: str,
+        purge_generation: int,
+        activation_epoch: str,
+        continuity_token: str,
+        connection: Any,
+    ) -> None:
+        """Mirror installed canonical continuity without enabling the rollout gate."""
+
+        if connection is None:
+            raise SyncStoreError("personal_context_activation_guard_required")
+        row = self._require_dataset_owner_for_update(dataset_id, user_id, connection=connection)
+        metadata = decode_json(row.get("metadata_json"), default={})
+        state = metadata.get("personal_context")
+        if not isinstance(state, dict) or any(
+            state.get(key) != value
+            for key, value in {
+                "profile_id": profile_id,
+                "purge_generation": purge_generation,
+                "link_state": "complete",
+            }.items()
+        ):
+            raise SyncStoreError("personal_context_activation_required")
+        state.update(activation_epoch=activation_epoch, continuity_token=continuity_token)
+        changed = self.execute(
+            """UPDATE sync_datasets SET metadata_json = ?, updated_at = ?
+               WHERE dataset_id = ? AND owner_user_id = ? AND metadata_json = ?""",
+            (encode_json(metadata, default={}), utcnow_iso(), dataset_id, user_id, row["metadata_json"]),
+            connection=connection,
+        )
+        if changed.rowcount != 1:
+            raise SyncStoreError("personal_context_activation_required")
+
+    def get_personal_context_activation(
+        self,
+        activation_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> dict[str, Any] | None:
+        """Read one immutable encrypted baseline and its installation receipt."""
+
+        return _first(
+            self.execute(
+                "SELECT * FROM sync_personal_context_activations WHERE activation_id = ?",
+                (activation_id,),
+                connection=connection,
+            )
+        )
+
+    def install_personal_context_activation(
+        self,
+        *,
+        activation_id: str,
+        dataset_id: str,
+        user_id: str,
+        profile_id: str,
+        device_id: str,
+        baseline_digest: str,
+        purge_generation: int,
+        publication_watermark: int,
+        home_server_cursor: int,
+        receipt_id: str,
+        envelopes_json: str,
+        expires_at: str,
+        connection: Any,
+    ) -> dict[str, Any]:
+        """Install once under the caller's Sync and canonical source guards.
+
+        The application verifies encrypted envelope identity and canonical custody;
+        this boundary rejects every changed replay instead of replacing ciphertext.
+        """
+
+        if connection is None:
+            raise SyncStoreError("personal_context_activation_guard_required")
+        desired = {
+            "activation_id": activation_id,
+            "dataset_id": dataset_id,
+            "user_id": user_id,
+            "profile_id": profile_id,
+            "device_id": device_id,
+            "baseline_digest": baseline_digest,
+            "purge_generation": purge_generation,
+            "publication_watermark": publication_watermark,
+            "home_server_cursor": home_server_cursor,
+            "receipt_id": receipt_id,
+            "envelopes_json": envelopes_json,
+            "expires_at": expires_at,
+        }
+        self.execute(
+            """INSERT INTO sync_personal_context_activations
+               (activation_id, dataset_id, user_id, profile_id, device_id, baseline_digest,
+                purge_generation, publication_watermark, home_server_cursor, receipt_id,
+                envelopes_json, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(activation_id) DO NOTHING""",
+            tuple(desired.values()),
+            connection=connection,
+        )
+        stored = self.get_personal_context_activation(activation_id, connection=connection)
+        if stored is None or any(stored.get(key) != value for key, value in desired.items()):
+            raise SyncStoreError("personal_context_activation_receipt_mismatch")
+        return stored
+
+    def acknowledge_personal_context_activation(
+        self,
+        *,
+        activation_id: str,
+        dataset_id: str,
+        user_id: str,
+        device_id: str,
+        baseline_digest: str,
+        local_receipt_id: str,
+        connection: Any,
+    ) -> dict[str, Any]:
+        """Persist an exact device install acknowledgment without mutable replay."""
+
+        if connection is None:
+            raise SyncStoreError("personal_context_activation_guard_required")
+        activation = self.get_personal_context_activation(activation_id, connection=connection)
+        if activation is None or any(
+            activation.get(key) != value
+            for key, value in {
+                "dataset_id": dataset_id,
+                "user_id": user_id,
+                "device_id": device_id,
+                "baseline_digest": baseline_digest,
+            }.items()
+        ):
+            raise SyncStoreError("personal_context_activation_receipt_mismatch")
+        receipt_id = hashlib.sha256(
+            encode_json(
+                [activation_id, dataset_id, user_id, device_id, baseline_digest, local_receipt_id],
+                default=[],
+            ).encode()
+        ).hexdigest()
+        self.execute(
+            """INSERT INTO sync_personal_context_activation_acks
+               (activation_id, device_id, local_receipt_id, receipt_id)
+               VALUES (?, ?, ?, ?) ON CONFLICT(activation_id, device_id) DO NOTHING""",
+            (activation_id, device_id, local_receipt_id, receipt_id),
+            connection=connection,
+        )
+        stored = self.get_personal_context_activation_ack(
+            activation_id,
+            device_id,
+            connection=connection,
+        )
+        if (
+            stored is None
+            or stored.get("local_receipt_id") != local_receipt_id
+            or stored.get("receipt_id") != receipt_id
+        ):
+            raise SyncStoreError("personal_context_activation_receipt_mismatch")
+        return stored
+
+    def get_personal_context_activation_ack(
+        self,
+        activation_id: str,
+        device_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> dict[str, Any] | None:
+        """Read the content-free acknowledgment retained for an ordinary device."""
+
+        return _first(
+            self.execute(
+                """SELECT * FROM sync_personal_context_activation_acks
+               WHERE activation_id = ? AND device_id = ?""",
+                (activation_id, device_id),
+                connection=connection,
+            )
+        )
+
+    def has_personal_context_link_receipt(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        profile_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
+        connection: Any | None = None,
+    ) -> bool:
+        """Return whether a device has the exact current Personal Context receipt."""
+
+        result = self.execute(
+            """SELECT 1 FROM sync_personal_context_link_receipts
+               WHERE user_id = ? AND dataset_id = ? AND device_id = ? AND profile_id = ?
+                 AND integrity_key_id = ? AND purge_generation = ?""",
+            (user_id, dataset_id, device_id, profile_id, integrity_key_id, purge_generation),
+            connection=connection,
+        )
+        return bool(result.rows)
+
+    def _lock_personal_context_owner_rows(
+        self,
+        *,
+        user_id: str,
+        connection: Any,
+    ) -> list[dict[str, Any]]:
+        """Serialize all Personal Context binding choices for one owner."""
+
+        if self.backend_type == BackendType.POSTGRESQL:
+            self.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(?, 0)) AS owner_locked",
+                (f"sync-personal-context:{user_id}",),
+                connection=connection,
+            )
+        lock_suffix = (
+            " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        )
+        return self.execute(
+            """SELECT * FROM sync_datasets
+                WHERE owner_user_id = ?
+                ORDER BY dataset_id"""
+            + lock_suffix,  # nosec B608 - backend-controlled row lock suffix.
+            (user_id,),
+            connection=connection,
+        ).rows
+
+    @staticmethod
+    def _personal_context_binding_from_row(
+        row: Mapping[str, Any],
+    ) -> dict[str, object] | None:
+        """Validate one active row's opaque authority binding."""
+
+        metadata = decode_json(row.get("metadata_json"), default=None)
+        if not isinstance(metadata, dict):
+            raise SyncStoreError("personal_context_authority_mismatch")
+        state = metadata.get("personal_context")
+        if state is None:
+            return None
+        if not isinstance(state, dict) or row.get("scope_type") != "personal":
+            raise SyncStoreError("personal_context_authority_mismatch")
+        required = ("profile_id", "authority_id", "integrity_key_id", "link_state")
+        generation = state.get("purge_generation")
+        if (
+            any(
+                not isinstance(state.get(name), str) or not state[name]
+                for name in required
+            )
+            or type(generation) is not int
+            or generation < 0
+            or state.get("link_state") not in {"bootstrap_pending", "complete"}
+        ):
+            raise SyncStoreError("personal_context_authority_mismatch")
+        return dict(state)
+
+    @classmethod
+    def _validate_personal_context_authority_target(
+        cls,
+        row: Mapping[str, Any],
+        *,
+        user_id: str,
+        require_chatbook_default: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, object] | None]:
+        """Validate an authority target before any transport state is mutated."""
+
+        if (
+            row.get("owner_user_id") != user_id
+            or row.get("archived_at") is not None
+            or row.get("scope_type") != "personal"
+            or row.get("workspace_id") is not None
+            or row.get("encryption_policy") != DEFAULT_M1_ENCRYPTION_POLICY
+        ):
+            raise SyncStoreError("personal_context_authority_mismatch")
+        metadata = decode_json(row.get("metadata_json"), default=None)
+        if not isinstance(metadata, dict):
+            raise SyncStoreError("personal_context_authority_mismatch")
+        binding = cls._personal_context_binding_from_row(row)
+        if require_chatbook_default and (
+            metadata.get("default_personal") is not True
+            or metadata.get("client_family") != "chatbook"
+        ):
+            raise SyncStoreError("personal_context_authority_mismatch")
+        return metadata, binding
+
+    def _create_default_personal_dataset_in_transaction(
+        self,
+        *,
+        user_id: str,
+        connection: Any,
+    ) -> dict[str, Any]:
+        """Create the deterministic Chatbook default on the caller's transaction."""
+
+        dataset_id = f"ds_personal_{str(user_id).replace('/', '_').replace(':', '_')}"
+        existing = self._get_dataset_row(dataset_id, connection=connection)
+        if existing is not None:
+            self._validate_personal_context_authority_target(
+                existing,
+                user_id=user_id,
+                require_chatbook_default=True,
+            )
+            return existing
+        dataset = SyncDatasetCreate(
+            dataset_id=dataset_id,
+            owner_user_id=user_id,
+            scope_type="personal",
+            encryption_policy=DEFAULT_M1_ENCRYPTION_POLICY,
+            domains=list(M1_SYNC_DOMAINS),
+            metadata={"default_personal": True, "client_family": "chatbook"},
+        )
+        self._validate_dataset_contract(dataset)
+        now = utcnow_iso()
+        self.execute(
+            """INSERT INTO sync_datasets (
+                   dataset_id, owner_user_id, workspace_id, scope_type,
+                   encryption_policy, domain_set_json, metadata_json,
+                   created_at, updated_at, archived_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                dataset.dataset_id,
+                dataset.owner_user_id,
+                dataset.workspace_id,
+                dataset.scope_type,
+                dataset.encryption_policy,
+                encode_json(dataset.domains, default=[]),
+                encode_json(dataset.metadata, default={}),
+                now,
+                now,
+                dataset.archived_at,
+            ),
+            connection=connection,
+        )
+        for domain in dataset.domains:
+            self._ensure_domain_state(
+                dataset_id=dataset.dataset_id,
+                domain=domain,
+                adapter_version=1,
+                server_sequence=0,
+                connection=connection,
+            )
+        row = self._get_dataset_row(dataset.dataset_id, connection=connection)
+        if row is None:
+            raise SyncStoreError("personal_context_authority_mismatch")
+        return row
+
+    def _enroll_personal_context_domains_in_transaction(
+        self,
+        *,
+        row: dict[str, Any],
+        user_id: str,
+        connection: Any,
+    ) -> dict[str, Any]:
+        """Enroll transport domains after the entire target set is validated."""
+
+        raw_domains = decode_json(row.get("domain_set_json"), default=None)
+        if not isinstance(raw_domains, list):
+            raise SyncStoreError("personal_context_authority_mismatch")
+        domains = list(dict.fromkeys([*raw_domains, *PERSONAL_CONTEXT_SYNC_DOMAINS]))
+        dataset_id = str(row["dataset_id"])
+        if domains != raw_domains:
+            self.execute(
+                """UPDATE sync_datasets
+                      SET domain_set_json = ?, updated_at = ?
+                    WHERE dataset_id = ? AND owner_user_id = ?""",
+                (encode_json(domains, default=[]), utcnow_iso(), dataset_id, user_id),
+                connection=connection,
+            )
+        for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            self._ensure_domain_state(
+                dataset_id=dataset_id,
+                domain=domain,
+                adapter_version=1,
+                server_sequence=0,
+                connection=connection,
+            )
+        updated = self._get_dataset_row(
+            dataset_id,
+            owner_user_id=user_id,
+            connection=connection,
+        )
+        if updated is None:
+            raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+        return updated
+
+    @contextmanager
+    def personal_context_bootstrap_transaction(
+        self,
+        *,
+        user_id: str,
+        streams: Sequence[tuple[SyncDomain, int]],
+    ) -> Iterator[
+        tuple[SyncDataset, dict[tuple[SyncDomain, int], int], Any]
+    ]:
+        """Keep target choice, transport state, watermark, and binding atomic."""
+
+        if not user_id or not streams:
+            raise SyncStoreError("personal_context_transport_streams_unavailable")
+        with self.backend.transaction() as connection:
+            owner_rows = self._lock_personal_context_owner_rows(
+                user_id=user_id,
+                connection=connection,
+            )
+            active_rows = [row for row in owner_rows if row.get("archived_at") is None]
+            bound_rows: list[dict[str, Any]] = []
+            default_rows: list[dict[str, Any]] = []
+            for row in active_rows:
+                binding = self._personal_context_binding_from_row(row)
+                if binding is not None:
+                    bound_rows.append(row)
+                metadata = decode_json(row.get("metadata_json"), default=None)
+                if (
+                    row.get("scope_type") == "personal"
+                    and isinstance(metadata, dict)
+                    and metadata.get("default_personal") is True
+                    and metadata.get("client_family") == "chatbook"
+                ):
+                    default_rows.append(row)
+            if len(bound_rows) > 1 or (not bound_rows and len(default_rows) > 1):
+                raise SyncStoreError("personal_context_authority_mismatch")
+            require_chatbook_default = not bound_rows and bool(default_rows)
+            target = (
+                bound_rows[0]
+                if bound_rows
+                else default_rows[0]
+                if default_rows
+                else self._create_default_personal_dataset_in_transaction(
+                    user_id=user_id,
+                    connection=connection,
+                )
+            )
+            self._validate_personal_context_authority_target(
+                target,
+                user_id=user_id,
+                require_chatbook_default=require_chatbook_default,
+            )
+            target = self._enroll_personal_context_domains_in_transaction(
+                row=target,
+                user_id=user_id,
+                connection=connection,
+            )
+            watermarks = self._personal_context_transport_watermarks_in_transaction(
+                dataset_id=str(target["dataset_id"]),
+                streams=streams,
+                connection=connection,
+            )
+            yield _dataset_from_row(target), watermarks, connection
+
+    def bind_personal_context_dataset(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+        expected_binding: Mapping[str, object] | None,
+        profile_id: str,
+        authority_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
+        link_state: str,
+        connection: Any | None = None,
+    ) -> SyncDataset:
+        """Merge a canonical Personal Context binding into the locked dataset row."""
+
+        if (
+            any(
+                type(value) is not str or not value
+                for value in (profile_id, authority_id, integrity_key_id, link_state)
+            )
+            or link_state not in {"bootstrap_pending", "complete"}
+            or type(purge_generation) is not int
+            or purge_generation < 0
+        ):
+            raise SyncStoreError("personal_context_authority_mismatch")
+        with self.backend.transaction(connection) as transaction:
+            owner_rows = self._lock_personal_context_owner_rows(
+                user_id=user_id,
+                connection=transaction,
+            )
+            row = next(
+                (candidate for candidate in owner_rows if candidate.get("dataset_id") == dataset_id),
+                None,
+            )
+            if row is None:
+                raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+            metadata, current_binding = self._validate_personal_context_authority_target(
+                row,
+                user_id=user_id,
+            )
+            for candidate in owner_rows:
+                if (
+                    candidate.get("dataset_id") == dataset_id
+                    or candidate.get("archived_at") is not None
+                ):
+                    continue
+                candidate_metadata = decode_json(
+                    candidate.get("metadata_json"),
+                    default=None,
+                )
+                if not isinstance(candidate_metadata, dict):
+                    raise SyncStoreError("personal_context_authority_mismatch")
+                if candidate_metadata.get("personal_context") is not None:
+                    raise SyncStoreError("personal_context_authority_mismatch")
+            if current_binding is not None:
+                current_generation = current_binding["purge_generation"]
+                if purge_generation < current_generation:
+                    raise SyncStoreError("personal_context_link_binding_stale")
+            expected = dict(expected_binding) if expected_binding is not None else None
+            desired = {
+                "profile_id": profile_id,
+                "authority_id": authority_id,
+                "integrity_key_id": integrity_key_id,
+                "purge_generation": purge_generation,
+                "link_state": link_state,
+            }
+            if current_binding == desired:
+                return _dataset_from_row(row)
+            if current_binding != expected:
+                raise SyncStoreError("personal_context_link_binding_stale")
+            merged_metadata = dict(metadata)
+            merged_metadata["personal_context"] = desired
+            raw_domains = decode_json(row.get("domain_set_json"), default=[])
+            if not isinstance(raw_domains, list):
+                raise SyncStoreError("personal_context_authority_mismatch")
+            domains = list(dict.fromkeys([*raw_domains, *PERSONAL_CONTEXT_SYNC_DOMAINS]))
+            now = utcnow_iso()
+            self.execute(
+                """
+                UPDATE sync_datasets
+                   SET domain_set_json = ?, metadata_json = ?, updated_at = ?
+                 WHERE dataset_id = ? AND owner_user_id = ?
+                """,
+                (
+                    encode_json(domains, default=[]),
+                    encode_json(merged_metadata, default={}),
+                    now,
+                    dataset_id,
+                    user_id,
+                ),
+                connection=transaction,
+            )
+            for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                self._ensure_domain_state(
+                    dataset_id=dataset_id,
+                    domain=domain,
+                    adapter_version=1,
+                    server_sequence=0,
+                    connection=transaction,
+                )
+            updated = self._get_dataset_row(
+                dataset_id,
+                owner_user_id=user_id,
+                connection=transaction,
+            )
+            if updated is None:
+                raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+            return _dataset_from_row(updated)
+
+    def personal_context_authority_dataset(
+        self,
+        *,
+        user_id: str,
+        profile_id: str | None = None,
+    ) -> SyncDataset | None:
+        """Return the sole active authority binding, rejecting corrupt ambiguity."""
+
+        rows = self.execute(
+            """SELECT * FROM sync_datasets
+                WHERE owner_user_id = ? AND archived_at IS NULL
+                ORDER BY dataset_id""",
+            (user_id,),
+        ).rows
+        bound: list[tuple[dict[str, Any], dict[str, object]]] = []
+        for row in rows:
+            state = self._personal_context_binding_from_row(row)
+            if state is None:
+                continue
+            _metadata, validated_state = self._validate_personal_context_authority_target(
+                row,
+                user_id=user_id,
+            )
+            if validated_state is None:
+                raise SyncStoreError("personal_context_authority_mismatch")
+            bound.append((row, validated_state))
+        if len(bound) > 1:
+            raise SyncStoreError("personal_context_authority_mismatch")
+        if not bound or (
+            profile_id is not None and bound[0][1]["profile_id"] != profile_id
+        ):
+            return None
+        return _dataset_from_row(bound[0][0])
+
+    def ensure_personal_context_transport_domains(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+    ) -> SyncDataset:
+        """Enroll only content-free Personal Context transport control state."""
+
+        with self.backend.transaction() as connection:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                user_id,
+                connection=connection,
+            )
+            raw_domains = decode_json(row.get("domain_set_json"), default=[])
+            if not isinstance(raw_domains, list):
+                raise SyncStoreError("personal_context_authority_mismatch")
+            domains = list(dict.fromkeys([*raw_domains, *PERSONAL_CONTEXT_SYNC_DOMAINS]))
+            if domains != raw_domains:
+                self.execute(
+                    """
+                    UPDATE sync_datasets
+                       SET domain_set_json = ?, updated_at = ?
+                     WHERE dataset_id = ? AND owner_user_id = ?
+                    """,
+                    (encode_json(domains, default=[]), utcnow_iso(), dataset_id, user_id),
+                    connection=connection,
+                )
+            for domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                self._ensure_domain_state(
+                    dataset_id=dataset_id,
+                    domain=domain,
+                    adapter_version=1,
+                    server_sequence=0,
+                    connection=connection,
+                )
+            updated = self._get_dataset_row(
+                dataset_id,
+                owner_user_id=user_id,
+                connection=connection,
+            )
+            if updated is None:
+                raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+        return _dataset_from_row(updated)
+
     def get_dataset(
         self,
         dataset_id: str,
         *,
         owner_user_id: str | None = None,
+        connection: Any | None = None,
     ) -> SyncDataset | None:
-        row = self._get_dataset_row(dataset_id, owner_user_id=owner_user_id)
+        row = self._get_dataset_row(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            connection=connection,
+        )
         if row is None:
             return None
         return _dataset_from_row(row)
 
-    def list_datasets_for_user(self, user_id: str) -> list[SyncDataset]:
-        """List active Sync v2 datasets owned by a user."""
+    def list_datasets_for_user(
+        self,
+        user_id: str,
+        *,
+        include_archived: bool = False,
+    ) -> list[SyncDataset]:
+        """List Sync v2 datasets owned by a user."""
 
+        archived_predicate = "" if include_archived else " AND archived_at IS NULL"
         result = self.execute(
-            """
-            SELECT * FROM sync_datasets
-             WHERE owner_user_id = ? AND archived_at IS NULL
-             ORDER BY created_at ASC, dataset_id ASC
-            """,
+            "SELECT * FROM sync_datasets WHERE owner_user_id = ?"
+            f"{archived_predicate} ORDER BY created_at ASC, dataset_id ASC",  # nosec B608
             (user_id,),
         )
         return [_dataset_from_row(row) for row in result.rows]
 
-    def get_device(self, user_id: str, device_id: str) -> SyncDevice | None:
+    def get_device(
+        self,
+        user_id: str,
+        device_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> SyncDevice | None:
         """Return one Sync v2 device for a user."""
 
-        row = self._get_device_row(user_id, device_id)
+        row = self._get_device_row(user_id, device_id, connection=connection)
         if row is None:
             return None
         return _device_from_row(row)
@@ -2119,6 +4696,7 @@ class SyncDatabase:
         user_id: str,
         *,
         include_revoked: bool = False,
+        connection: Any | None = None,
     ) -> list[SyncDevice]:
         """List Sync v2 devices registered by a user."""
 
@@ -2130,7 +4708,7 @@ class SyncDatabase:
         if not include_revoked:
             sql += " AND status <> 'revoked' AND revoked_at IS NULL"
         sql += " ORDER BY last_seen_at DESC, device_id ASC"
-        result = self.execute(sql, tuple(params))
+        result = self.execute(sql, tuple(params), connection=connection)
         return [_device_from_row(row) for row in result.rows]
 
     def create_device_authorization(
@@ -2346,11 +4924,13 @@ class SyncDatabase:
     def upsert_device_domain_ack(
         self,
         acknowledgment: SyncDeviceDomainAckCreate,
+        *,
+        connection: Any | None = None,
     ) -> SyncDeviceDomainAck:
         """Record the highest accepted sequence a device has applied for a domain."""
 
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_dataset_domain(
                 acknowledgment.dataset_id,
                 acknowledgment.domain,
@@ -2361,21 +4941,134 @@ class SyncDatabase:
                 acknowledgment.device_id,
                 connection=conn,
             )
-            existing = _first(
+            cursor = _first(
                 self.execute(
                     """
-                    SELECT * FROM sync_device_domain_acks
+                    SELECT * FROM sync_device_adapter_cursors
                      WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = ?
                     """,
                     (
                         acknowledgment.dataset_id,
                         acknowledgment.device_id,
                         acknowledgment.domain,
+                        acknowledgment.adapter_version,
                     ),
                     connection=conn,
                 )
             )
-            if existing is None:
+            delivered = int((cursor or {}).get("max_delivered_sequence") or 0)
+            if acknowledgment.adapter_version == 1:
+                legacy_cursor = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_device_cursors
+                         WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                        """,
+                        (
+                            acknowledgment.dataset_id,
+                            acknowledgment.device_id,
+                            acknowledgment.domain,
+                        ),
+                        connection=conn,
+                    )
+                )
+                legacy_delivered = int(
+                    (legacy_cursor or {}).get("last_pulled_sequence") or 0
+                )
+                if cursor is None or legacy_delivered > int(
+                    cursor.get("last_pulled_sequence") or 0
+                ):
+                    delivered = max(delivered, legacy_delivered)
+            if acknowledgment.through_server_sequence > delivered:
+                raise SyncStoreError(
+                    "Sync domain acknowledgment exceeds the delivered watermark"
+                )
+            existing = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_adapter_domain_acks
+                     WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = ?
+                    """,
+                    (
+                        acknowledgment.dataset_id,
+                        acknowledgment.device_id,
+                        acknowledgment.domain,
+                        acknowledgment.adapter_version,
+                    ),
+                    connection=conn,
+                )
+            )
+            sequence = max(
+                acknowledgment.through_server_sequence,
+                int((existing or {}).get("through_server_sequence") or 0),
+            )
+            applied_at = acknowledgment.applied_at
+            idempotency_key = acknowledgment.idempotency_key
+            if existing is not None and acknowledgment.through_server_sequence < int(
+                existing["through_server_sequence"]
+            ):
+                applied_at = existing["applied_at"]
+                idempotency_key = existing.get("idempotency_key")
+            self.execute(
+                """
+                INSERT INTO sync_device_adapter_domain_acks (
+                    dataset_id, device_id, domain, adapter_version,
+                    through_server_sequence, applied_at, updated_at, idempotency_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (dataset_id, device_id, domain, adapter_version)
+                DO UPDATE SET through_server_sequence = CASE
+                                  WHEN excluded.through_server_sequence >
+                                       sync_device_adapter_domain_acks.through_server_sequence
+                                  THEN excluded.through_server_sequence
+                                  ELSE sync_device_adapter_domain_acks.through_server_sequence END,
+                              applied_at = CASE
+                                  WHEN excluded.through_server_sequence >=
+                                       sync_device_adapter_domain_acks.through_server_sequence
+                                  THEN excluded.applied_at
+                                  ELSE sync_device_adapter_domain_acks.applied_at END,
+                              updated_at = excluded.updated_at,
+                              idempotency_key = CASE
+                                  WHEN excluded.through_server_sequence >=
+                                       sync_device_adapter_domain_acks.through_server_sequence
+                                  THEN excluded.idempotency_key
+                                  ELSE sync_device_adapter_domain_acks.idempotency_key END
+                """,
+                (
+                    acknowledgment.dataset_id,
+                    acknowledgment.device_id,
+                    acknowledgment.domain,
+                    acknowledgment.adapter_version,
+                    sequence,
+                    applied_at,
+                    now,
+                    idempotency_key,
+                ),
+                connection=conn,
+            )
+            if acknowledgment.adapter_version == 1:
+                legacy = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_device_domain_acks
+                         WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                        """,
+                        (
+                            acknowledgment.dataset_id,
+                            acknowledgment.device_id,
+                            acknowledgment.domain,
+                        ),
+                        connection=conn,
+                    )
+                )
+                legacy_sequence = int(
+                    (legacy or {}).get("through_server_sequence") or 0
+                )
+                if legacy is not None and legacy_sequence > sequence:
+                    sequence = legacy_sequence
+                    applied_at = legacy["applied_at"]
+                    idempotency_key = legacy.get("idempotency_key")
                 self.execute(
                     """
                     INSERT INTO sync_device_domain_acks (
@@ -2383,35 +5076,49 @@ class SyncDatabase:
                         applied_at, updated_at, idempotency_key
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (dataset_id, device_id, domain)
+                    DO UPDATE SET through_server_sequence = CASE
+                                      WHEN excluded.through_server_sequence >
+                                           sync_device_domain_acks.through_server_sequence
+                                      THEN excluded.through_server_sequence
+                                      ELSE sync_device_domain_acks.through_server_sequence END,
+                                  applied_at = CASE
+                                      WHEN excluded.through_server_sequence >=
+                                           sync_device_domain_acks.through_server_sequence
+                                      THEN excluded.applied_at
+                                      ELSE sync_device_domain_acks.applied_at END,
+                                  updated_at = excluded.updated_at,
+                                  idempotency_key = CASE
+                                      WHEN excluded.through_server_sequence >=
+                                           sync_device_domain_acks.through_server_sequence
+                                      THEN excluded.idempotency_key
+                                      ELSE sync_device_domain_acks.idempotency_key END
                     """,
                     (
                         acknowledgment.dataset_id,
                         acknowledgment.device_id,
                         acknowledgment.domain,
-                        acknowledgment.through_server_sequence,
-                        acknowledgment.applied_at,
+                        sequence,
+                        applied_at,
                         now,
-                        acknowledgment.idempotency_key,
+                        idempotency_key,
                     ),
                     connection=conn,
                 )
-            elif acknowledgment.through_server_sequence >= int(
-                existing["through_server_sequence"]
-            ):
                 self.execute(
                     """
-                    UPDATE sync_device_domain_acks
-                       SET through_server_sequence = ?,
-                           applied_at = ?,
-                           updated_at = ?,
-                           idempotency_key = ?
+                    UPDATE sync_device_adapter_domain_acks
+                       SET through_server_sequence = CASE
+                               WHEN through_server_sequence < ?
+                               THEN (? + 0) ELSE through_server_sequence END,
+                           updated_at = ?
                      WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = 1
                     """,
                     (
-                        acknowledgment.through_server_sequence,
-                        acknowledgment.applied_at,
+                        sequence,
+                        sequence,
                         now,
-                        acknowledgment.idempotency_key,
                         acknowledgment.dataset_id,
                         acknowledgment.device_id,
                         acknowledgment.domain,
@@ -2421,27 +5128,73 @@ class SyncDatabase:
             row = _first(
                 self.execute(
                     """
-                    SELECT * FROM sync_device_domain_acks
+                    SELECT * FROM sync_device_adapter_domain_acks
                      WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = ?
                     """,
                     (
                         acknowledgment.dataset_id,
                         acknowledgment.device_id,
                         acknowledgment.domain,
+                        acknowledgment.adapter_version,
                     ),
                     connection=conn,
                 )
             )
         return _device_domain_ack_from_row(row)
 
+    def get_device_domain_ack(
+        self,
+        dataset_id: str,
+        device_id: str,
+        domain: SyncDomain,
+        *,
+        adapter_version: int = 1,
+        connection: Any | None = None,
+    ) -> SyncDeviceDomainAck | None:
+        with self.backend.transaction(connection) as conn:
+            self._require_dataset_domain(dataset_id, domain, connection=conn)
+            self._require_device_for_dataset(dataset_id, device_id, connection=conn)
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_adapter_domain_acks
+                     WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = ?
+                    """,
+                    (dataset_id, device_id, domain, adapter_version),
+                    connection=conn,
+                )
+            )
+            if adapter_version == 1:
+                legacy = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_device_domain_acks
+                         WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                        """,
+                        (dataset_id, device_id, domain),
+                        connection=conn,
+                    )
+                )
+                if legacy is not None and (
+                    row is None
+                    or int(legacy["through_server_sequence"])
+                    > int(row["through_server_sequence"])
+                ):
+                    row = {**legacy, "adapter_version": 1}
+        return None if row is None else _device_domain_ack_from_row(row)
+
     def upsert_device_blob_ack(
         self,
         acknowledgment: SyncDeviceBlobAckCreate,
+        *,
+        connection: Any | None = None,
     ) -> SyncDeviceBlobAck:
         """Record a device-level blob verification acknowledgment."""
 
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_device_for_dataset(
                 acknowledgment.dataset_id,
                 acknowledgment.device_id,
@@ -2488,16 +5241,118 @@ class SyncDatabase:
             )
         return _device_blob_ack_from_row(row)
 
+    def upsert_device_blob_id_ack(
+        self,
+        acknowledgment: SyncDeviceBlobIdAckCreate,
+        *,
+        connection: Any | None = None,
+    ) -> SyncDeviceBlobIdAck:
+        """Record immutable, authorized v2 blob-ID verification evidence."""
+
+        now = utcnow_iso()
+        with self.backend.transaction(connection) as conn:
+            self._require_device_for_dataset(
+                acknowledgment.dataset_id,
+                acknowledgment.device_id,
+                connection=conn,
+            )
+            blob = _first(
+                self.execute(
+                    """
+                    SELECT blob.blob_id, blob.payload_hash
+                      FROM sync_blob_objects AS blob
+                      JOIN sync_datasets AS dataset
+                        ON dataset.dataset_id = blob.dataset_id
+                     WHERE blob.dataset_id = ? AND blob.blob_id = ?
+                       AND blob.status = 'available'
+                       AND (
+                            dataset.scope_type = 'workspace'
+                            OR blob.owner_user_id = dataset.owner_user_id
+                       )
+                    """,
+                    (acknowledgment.dataset_id, acknowledgment.blob_id),
+                    connection=conn,
+                )
+            )
+            if blob is None:
+                raise SyncStoreError("sync_blob_id_ack_not_authorized")
+            if blob["payload_hash"] != acknowledgment.payload_hash:
+                raise SyncStoreError("sync_blob_id_ack_digest_mismatch")
+            existing = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_blob_id_acks
+                     WHERE dataset_id = ? AND device_id = ? AND blob_id = ?
+                    """,
+                    (
+                        acknowledgment.dataset_id,
+                        acknowledgment.device_id,
+                        acknowledgment.blob_id,
+                    ),
+                    connection=conn,
+                )
+            )
+            if existing is not None and existing["payload_hash"] != acknowledgment.payload_hash:
+                raise SyncStoreError("sync_blob_id_ack_digest_immutable")
+            self.execute(
+                """
+                INSERT INTO sync_device_blob_id_acks (
+                    dataset_id, device_id, blob_id, payload_hash,
+                    verified_at, updated_at, idempotency_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (dataset_id, device_id, blob_id)
+                DO UPDATE SET verified_at = excluded.verified_at,
+                              updated_at = excluded.updated_at,
+                              idempotency_key = excluded.idempotency_key
+                """,
+                (
+                    acknowledgment.dataset_id,
+                    acknowledgment.device_id,
+                    acknowledgment.blob_id,
+                    acknowledgment.payload_hash,
+                    acknowledgment.verified_at,
+                    now,
+                    acknowledgment.idempotency_key,
+                ),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_blob_id_acks
+                     WHERE dataset_id = ? AND device_id = ? AND blob_id = ?
+                    """,
+                    (
+                        acknowledgment.dataset_id,
+                        acknowledgment.device_id,
+                        acknowledgment.blob_id,
+                    ),
+                    connection=conn,
+                )
+            )
+        return _device_blob_id_ack_from_row(row)
+
     def list_device_acknowledgments(
         self,
         dataset_id: str,
         device_id: str,
+        *,
+        connection: Any | None = None,
     ) -> SyncDeviceAcknowledgmentSummary:
         """Return all domain and blob acknowledgments for one device in a dataset."""
 
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_device_for_dataset(dataset_id, device_id, connection=conn)
-            domain_rows = self.execute(
+            version_rows = self.execute(
+                """
+                SELECT * FROM sync_device_adapter_domain_acks
+                 WHERE dataset_id = ? AND device_id = ?
+                 ORDER BY domain ASC, adapter_version ASC
+                """,
+                (dataset_id, device_id),
+                connection=conn,
+            ).rows
+            legacy_rows = self.execute(
                 """
                 SELECT * FROM sync_device_domain_acks
                  WHERE dataset_id = ? AND device_id = ?
@@ -2515,16 +5370,134 @@ class SyncDatabase:
                 (dataset_id, device_id),
                 connection=conn,
             ).rows
+            blob_id_rows = self.execute(
+                """
+                SELECT * FROM sync_device_blob_id_acks
+                 WHERE dataset_id = ? AND device_id = ?
+                 ORDER BY updated_at ASC, blob_id ASC
+                """,
+                (dataset_id, device_id),
+                connection=conn,
+            ).rows
+        version_ack_by_key = {
+            (ack.domain, ack.adapter_version): ack
+            for ack in (_device_domain_ack_from_row(row) for row in version_rows)
+        }
+        for row in legacy_rows:
+            legacy_ack = _device_domain_ack_from_row(row)
+            key = (legacy_ack.domain, 1)
+            current = version_ack_by_key.get(key)
+            if (
+                current is None
+                or legacy_ack.through_server_sequence
+                > current.through_server_sequence
+            ):
+                version_ack_by_key[key] = legacy_ack
+        version_acks = [
+            version_ack_by_key[key] for key in sorted(version_ack_by_key)
+        ]
         domain_acks = {
-            row["domain"]: _device_domain_ack_from_row(row)
-            for row in domain_rows
+            ack.domain: ack for ack in version_acks if ack.adapter_version == 1
         }
         return SyncDeviceAcknowledgmentSummary(
             dataset_id=dataset_id,
             device_id=device_id,
             domain_acks=domain_acks,
             blob_acks=[_device_blob_ack_from_row(row) for row in blob_rows],
+            version_acks=version_acks,
+            blob_id_acks=[_device_blob_id_ack_from_row(row) for row in blob_id_rows],
         )
+
+    def acknowledge_device_state_atomic(
+        self,
+        dataset_id: str,
+        device_id: str,
+        *,
+        domain_acks: Sequence[SyncDeviceDomainAckCreate] = (),
+        blob_acks: Sequence[SyncDeviceBlobAckCreate] = (),
+        blob_id_acks: Sequence[SyncDeviceBlobIdAckCreate] = (),
+    ) -> SyncDeviceAcknowledgmentSummary:
+        """Validate and persist one acknowledgment request as a single unit."""
+
+        with self.backend.transaction() as conn:
+            device_row = self._require_device_for_dataset(
+                dataset_id,
+                device_id,
+                connection=conn,
+            )
+            if (
+                device_row.get("revoked_at") is not None
+                or str(device_row.get("status") or "active") != "active"
+            ):
+                raise SyncStoreError("Sync device was not found or is not accessible")
+            for acknowledgment in domain_acks:
+                self._require_ack_request_identity(
+                    dataset_id,
+                    device_id,
+                    acknowledgment.dataset_id,
+                    acknowledgment.device_id,
+                )
+                self.upsert_device_domain_ack(acknowledgment, connection=conn)
+            for acknowledgment in blob_acks:
+                self._require_ack_request_identity(
+                    dataset_id,
+                    device_id,
+                    acknowledgment.dataset_id,
+                    acknowledgment.device_id,
+                )
+                self.upsert_device_blob_ack(acknowledgment, connection=conn)
+            for acknowledgment in blob_id_acks:
+                self._require_ack_request_identity(
+                    dataset_id,
+                    device_id,
+                    acknowledgment.dataset_id,
+                    acknowledgment.device_id,
+                )
+                capabilities = decode_json(
+                    device_row.get("capabilities_json"),
+                    default={},
+                )
+                version_map = (
+                    capabilities.get("supported_adapter_versions")
+                    if isinstance(capabilities, Mapping)
+                    else None
+                )
+                versions = (
+                    version_map.get("attachment.ref")
+                    if isinstance(version_map, Mapping)
+                    else None
+                )
+                if not isinstance(versions, Sequence) or isinstance(
+                    versions,
+                    (str, bytes, bytearray),
+                ) or not any(
+                    isinstance(version, int)
+                    and not isinstance(version, bool)
+                    and version == 2
+                    for version in versions
+                ):
+                    raise SyncStoreError("sync_blob_id_ack_adapter_v2_required")
+                self.upsert_device_blob_id_ack(acknowledgment, connection=conn)
+            return self.list_device_acknowledgments(
+                dataset_id,
+                device_id,
+                connection=conn,
+            )
+
+    @staticmethod
+    def _require_ack_request_identity(
+        dataset_id: str,
+        device_id: str,
+        acknowledgment_dataset_id: str,
+        acknowledgment_device_id: str,
+    ) -> None:
+        if (
+            acknowledgment_dataset_id != dataset_id
+            or acknowledgment_device_id != device_id
+        ):
+            raise SyncStoreError(
+                "Sync acknowledgment device or dataset does not match request"
+            )
 
     def get_background_policy(
         self,
@@ -2798,7 +5771,7 @@ class SyncDatabase:
                           FROM sync_envelopes
                          WHERE dataset_id = ?
                            AND domain = ?
-                           AND apply_status = 'failed'
+                           AND apply_status IN ('pending', 'failed')
                         """,
                         (dataset_id, domain),
                         connection=conn,
@@ -2880,6 +5853,1564 @@ class SyncDatabase:
             )
         )
 
+    @staticmethod
+    def _notes_task_readiness_record(
+        metadata: Mapping[str, Any],
+        readiness_key: str,
+    ) -> NotesTaskReadinessRecord:
+        if readiness_key not in metadata:
+            return default_notes_task_readiness_record()
+        result = parse_notes_task_readiness_record(
+            metadata[readiness_key],
+            readiness_key=readiness_key,
+        )
+        if result.record is None:
+            raise SyncStoreError("notes_task_readiness_state_invalid")
+        return result.record
+
+    def transition_notes_task_domain_readiness(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        readiness_key: str,
+        expected_state: str,
+        state: str,
+        source_dataset_id: str,
+        source_cursor: str | None,
+        source_count: int,
+        source_fingerprint: str | None,
+        reason_code: str | None = None,
+        task_activity_capture_enabled: bool | None = None,
+        captured_source_rebase: bool = False,
+    ) -> SyncDataset:
+        """Atomically persist one bounded dormant task-domain readiness transition."""
+
+        if readiness_key not in NOTES_TASK_READINESS_REASON_CODES_BY_KEY:
+            raise SyncStoreError("notes_task_readiness_domain_invalid")
+        if (
+            expected_state not in NOTES_TASK_READINESS_STATES
+            or state not in NOTES_TASK_READINESS_STATES
+        ):
+            raise SyncStoreError("notes_task_readiness_transition_invalid")
+        if (
+            not isinstance(source_dataset_id, str)
+            or source_dataset_id != dataset_id
+            or source_dataset_id == _NOTES_TASK_LOCAL_UNBOUND_DATASET_ID
+        ):
+            raise SyncStoreError("notes_task_readiness_source_scope_invalid")
+        if task_activity_capture_enabled is not None and not isinstance(
+            task_activity_capture_enabled, bool
+        ):
+            raise SyncStoreError("notes_task_readiness_capture_invalid")
+        if not isinstance(captured_source_rebase, bool):
+            raise SyncStoreError("notes_task_readiness_source_changed")
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            if row.get("scope_type") != "personal":
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            raw_metadata = row.get("metadata_json")
+            if not isinstance(raw_metadata, str) or not raw_metadata:
+                raise SyncStoreError("notes_task_readiness_state_invalid")
+            try:
+                metadata = json.loads(raw_metadata)
+            except ValueError as exc:
+                raise SyncStoreError("notes_task_readiness_state_invalid") from exc
+            if not isinstance(metadata, dict):
+                raise SyncStoreError("notes_task_readiness_state_invalid")
+            current = self._notes_task_readiness_record(metadata, readiness_key)
+            if current.state != expected_state:
+                raise SyncStoreError("notes_task_readiness_compare_and_set_failed")
+            if state not in _NOTES_TASK_READINESS_TRANSITIONS[expected_state]:
+                raise SyncStoreError("notes_task_readiness_transition_invalid")
+            if (
+                isinstance(source_count, int)
+                and not isinstance(source_count, bool)
+                and source_count < current.source_count
+            ):
+                raise SyncStoreError("notes_task_readiness_progress_regressed")
+
+            resume_phase: str | None = None
+            if state == "blocked":
+                if expected_state == "blocked":
+                    resume_phase = current.resume_phase
+                elif expected_state == "verifying":
+                    resume_phase = "verifying"
+                else:
+                    resume_phase = "bootstrapping"
+            parsed = parse_notes_task_readiness_record(
+                {
+                    "state": state,
+                    "source_cursor": source_cursor,
+                    "source_count": source_count,
+                    "source_fingerprint": source_fingerprint,
+                    "reason_code": reason_code,
+                    "resume_phase": resume_phase,
+                },
+                readiness_key=readiness_key,
+            )
+            if parsed.record is None:
+                raise SyncStoreError(
+                    parsed.error_code or "notes_task_readiness_state_invalid"
+                )
+            requested = parsed.record
+
+            current_count = current.source_count
+            current_cursor = current.source_cursor
+            current_cursor_key = current.source_cursor_key
+            current_fingerprint = current.source_fingerprint
+            capture_active = notes_task_capture_is_active(metadata)
+            permitted_source_rebase = (
+                captured_source_rebase
+                and capture_active
+                and expected_state == "bootstrapping"
+                and state in {"bootstrapping", "verifying"}
+                and source_cursor == current_cursor
+                and source_count == current_count
+            )
+            resetting_empty = state == "not_enrolled" and current_count == 0
+            if state == "blocked" and any(
+                (
+                    source_cursor != current_cursor,
+                    source_count != current_count,
+                    source_fingerprint != current_fingerprint,
+                )
+            ):
+                raise SyncStoreError("notes_task_readiness_source_changed")
+            if (
+                expected_state == "blocked"
+                and state not in {"blocked", "not_enrolled"}
+            ):
+                if state != current.resume_phase:
+                    raise SyncStoreError("notes_task_readiness_transition_invalid")
+                if any(
+                    (
+                        source_cursor != current_cursor,
+                        source_count != current_count,
+                        source_fingerprint != current_fingerprint,
+                    )
+                ):
+                    raise SyncStoreError("notes_task_readiness_source_changed")
+            if (
+                expected_state == "ready"
+                and requested.as_metadata() != current.as_metadata()
+            ):
+                raise SyncStoreError("notes_task_readiness_source_changed")
+            if not resetting_empty:
+                if source_count < current_count:
+                    raise SyncStoreError("notes_task_readiness_progress_regressed")
+                requested_cursor_key = requested.source_cursor_key
+                if current_cursor_key is not None:
+                    if requested_cursor_key is None:
+                        raise SyncStoreError(
+                            "notes_task_readiness_progress_regressed"
+                        )
+                    if readiness_key == "notes_task_v1":
+                        if not isinstance(current_cursor_key, UUID) or not isinstance(
+                            requested_cursor_key, UUID
+                        ):
+                            raise SyncStoreError(
+                                "notes_task_readiness_cursor_invalid"
+                            )
+                        cursor_regressed = (
+                            requested_cursor_key.int < current_cursor_key.int
+                        )
+                    else:
+                        if not isinstance(current_cursor_key, tuple) or not isinstance(
+                            requested_cursor_key, tuple
+                        ):
+                            raise SyncStoreError(
+                                "notes_task_readiness_cursor_invalid"
+                            )
+                        current_created_at, current_activity_id = current_cursor_key
+                        requested_created_at, requested_activity_id = (
+                            requested_cursor_key
+                        )
+                        cursor_regressed = (
+                            requested_created_at < current_created_at
+                            or (
+                                requested_created_at == current_created_at
+                                and requested_activity_id.int
+                                < current_activity_id.int
+                            )
+                        )
+                    if cursor_regressed:
+                        raise SyncStoreError(
+                            "notes_task_readiness_progress_regressed"
+                        )
+                cursor_advanced = requested.source_cursor_key != current_cursor_key
+                count_advanced = source_count != current_count
+                if cursor_advanced != count_advanced:
+                    raise SyncStoreError("notes_task_readiness_progress_regressed")
+                if cursor_advanced and source_fingerprint == current_fingerprint:
+                    raise SyncStoreError("notes_task_readiness_source_changed")
+                if current_fingerprint is not None and source_fingerprint is None:
+                    raise SyncStoreError("notes_task_readiness_progress_regressed")
+                if (
+                    not cursor_advanced
+                    and not count_advanced
+                    and current_fingerprint is not None
+                    and source_fingerprint != current_fingerprint
+                    and not permitted_source_rebase
+                ):
+                    raise SyncStoreError("notes_task_readiness_source_changed")
+            if state == "not_enrolled" and not resetting_empty:
+                raise SyncStoreError("notes_task_readiness_disable_forbidden")
+
+            raw_capture = metadata.get("task_activity_capture_enabled", False)
+            if not isinstance(raw_capture, bool):
+                raise SyncStoreError("notes_task_readiness_state_invalid")
+            capture_enabled = (
+                raw_capture
+                if task_activity_capture_enabled is None
+                else task_activity_capture_enabled
+            )
+            metadata[readiness_key] = requested.as_metadata()
+            task = self._notes_task_readiness_record(metadata, "notes_task_v1")
+            activity = self._notes_task_readiness_record(
+                metadata,
+                "notes_task_activity_v1",
+            )
+            readiness_records = (task, activity)
+            if capture_enabled and any(
+                item.state == "not_enrolled" for item in readiness_records
+            ):
+                raise SyncStoreError("notes_task_readiness_capture_incomplete")
+            if not capture_enabled and any(
+                item.state in {"bootstrapping", "verifying", "ready"}
+                for item in readiness_records
+            ):
+                raise SyncStoreError("notes_task_readiness_capture_required")
+            if raw_capture and not capture_enabled and any(
+                item.source_count != 0 or item.state == "ready"
+                for item in readiness_records
+            ):
+                raise SyncStoreError("notes_task_readiness_capture_disable_forbidden")
+            metadata["task_activity_capture_enabled"] = capture_enabled
+
+            self.execute(
+                "UPDATE sync_datasets SET metadata_json = ?, updated_at = ? "
+                "WHERE dataset_id = ? AND owner_user_id = ?",
+                (
+                    encode_json(metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                    owner_user_id,
+                ),
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset readiness transition was not persisted")
+            return _dataset_from_row(updated)
+
+    @staticmethod
+    def _notes_moodboard_studio_readiness_record(
+        metadata: Mapping[str, Any],
+        readiness_key: str,
+    ) -> NotesMoodboardStudioReadinessRecord:
+        """Parse one readiness record, defaulting absent domains to unenrolled.
+
+        Args:
+            metadata: Dataset metadata containing readiness records.
+            readiness_key: Moodboard or Studio readiness domain key.
+
+        Returns:
+            The validated readiness record.
+
+        Raises:
+            SyncStoreError: If an existing record is malformed.
+        """
+        if readiness_key not in metadata:
+            return default_notes_moodboard_studio_readiness_record()
+        result = parse_notes_moodboard_studio_readiness_record(
+            metadata[readiness_key],
+            readiness_key=readiness_key,
+        )
+        if result.record is None:
+            raise SyncStoreError("notes_moodboard_studio_readiness_state_invalid")
+        return result.record
+
+    def _transition_notes_moodboard_studio_readiness_records(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        source_dataset_id: str,
+        records: Sequence[
+            tuple[str, str, str, str | None, int, str | None, str | None]
+        ],
+        moodboard_capture_enabled: bool | None = None,
+        studio_document_capture_enabled: bool | None = None,
+    ) -> SyncDataset:
+        """Apply one atomic compare-and-set transition across readiness records.
+
+        Capture remains disabled throughout bootstrap readiness. The method
+        locks the owned dataset row, validates its personal Chatbook scope, and
+        commits all requested domain transitions together.
+
+        Args:
+            dataset_id: Target Sync dataset ID.
+            owner_user_id: Authenticated dataset owner.
+            source_dataset_id: Source scope, which must equal ``dataset_id``.
+            records: Domain transition tuples containing expected and requested
+                state plus source progress evidence.
+            moodboard_capture_enabled: Optional capture guard; only ``False``
+                or ``None`` is accepted.
+            studio_document_capture_enabled: Optional capture guard; only
+                ``False`` or ``None`` is accepted.
+
+        Returns:
+            The updated dataset after the transaction commits.
+
+        Raises:
+            SyncStoreError: If ownership, scope, metadata, capture state,
+                compare-and-set state, or source progress is invalid.
+        """
+        if (
+            not isinstance(source_dataset_id, str)
+            or source_dataset_id != dataset_id
+            or source_dataset_id == _NOTES_TASK_LOCAL_UNBOUND_DATASET_ID
+        ):
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_source_scope_invalid"
+            )
+        if moodboard_capture_enabled is True or studio_document_capture_enabled is True:
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_capture_forbidden"
+            )
+        if moodboard_capture_enabled not in {None, False}:
+            raise SyncStoreError("notes_moodboard_studio_readiness_capture_invalid")
+        if studio_document_capture_enabled not in {None, False}:
+            raise SyncStoreError("notes_moodboard_studio_readiness_capture_invalid")
+        for readiness_key, expected_state, state, *_ in records:
+            if readiness_key not in NOTES_MOODBOARD_STUDIO_READINESS_REASON_CODES_BY_KEY:
+                raise SyncStoreError("notes_moodboard_studio_readiness_domain_invalid")
+            if (
+                expected_state not in NOTES_MOODBOARD_STUDIO_READINESS_STATES
+                or state not in NOTES_MOODBOARD_STUDIO_READINESS_STATES
+            ):
+                raise SyncStoreError(
+                    "notes_moodboard_studio_readiness_transition_invalid"
+                )
+
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            if (
+                row.get("scope_type") != "personal"
+                or row.get("encryption_policy") != DEFAULT_M1_ENCRYPTION_POLICY
+            ):
+                raise SyncStoreError(
+                    "notes_moodboard_studio_readiness_source_scope_invalid"
+                )
+            raw_metadata = row.get("metadata_json")
+            if not isinstance(raw_metadata, str) or not raw_metadata:
+                raise SyncStoreError("notes_moodboard_studio_readiness_state_invalid")
+            try:
+                metadata = json.loads(raw_metadata)
+            except ValueError as exc:
+                raise SyncStoreError(
+                    "notes_moodboard_studio_readiness_state_invalid"
+                ) from exc
+            if not isinstance(metadata, dict):
+                raise SyncStoreError("notes_moodboard_studio_readiness_state_invalid")
+            if (
+                metadata.get("default_personal") is not True
+                or metadata.get("client_family") != "chatbook"
+            ):
+                raise SyncStoreError(
+                    "notes_moodboard_studio_readiness_source_scope_invalid"
+                )
+            for capture_key in (
+                "moodboard_capture_enabled",
+                "studio_document_capture_enabled",
+            ):
+                raw_capture = metadata.get(capture_key, False)
+                if not isinstance(raw_capture, bool):
+                    raise SyncStoreError(
+                        "notes_moodboard_studio_readiness_state_invalid"
+                    )
+                if raw_capture:
+                    raise SyncStoreError(
+                        "notes_moodboard_studio_readiness_capture_forbidden"
+                    )
+
+            for (
+                readiness_key,
+                expected_state,
+                state,
+                source_cursor,
+                source_count,
+                source_fingerprint,
+                reason_code,
+            ) in records:
+                current = self._notes_moodboard_studio_readiness_record(
+                    metadata,
+                    readiness_key,
+                )
+                requested = self._build_notes_moodboard_studio_readiness_record(
+                    readiness_key=readiness_key,
+                    current=current,
+                    expected_state=expected_state,
+                    state=state,
+                    source_cursor=source_cursor,
+                    source_count=source_count,
+                    source_fingerprint=source_fingerprint,
+                    reason_code=reason_code,
+                )
+                metadata[readiness_key] = requested.as_metadata()
+
+            metadata["moodboard_capture_enabled"] = False
+            metadata["studio_document_capture_enabled"] = False
+            self.execute(
+                "UPDATE sync_datasets SET metadata_json = ?, updated_at = ? "
+                "WHERE dataset_id = ? AND owner_user_id = ?",
+                (
+                    encode_json(metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                    owner_user_id,
+                ),
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset readiness transition was not persisted")
+            return _dataset_from_row(updated)
+
+    def _build_notes_moodboard_studio_readiness_record(
+        self,
+        *,
+        readiness_key: str,
+        current: NotesMoodboardStudioReadinessRecord,
+        expected_state: str,
+        state: str,
+        source_cursor: str | None,
+        source_count: int,
+        source_fingerprint: str | None,
+        reason_code: str | None,
+    ) -> NotesMoodboardStudioReadinessRecord:
+        """Build and validate one readiness compare-and-set transition.
+
+        Args:
+            readiness_key: Domain-specific readiness metadata key.
+            current: Current validated readiness record.
+            expected_state: State the caller expects to replace.
+            state: Requested next state.
+            source_cursor: Requested canonical bootstrap cursor.
+            source_count: Requested processed-object count.
+            source_fingerprint: Requested source snapshot fingerprint.
+            reason_code: Optional domain-specific blocked reason.
+
+        Returns:
+            The validated requested readiness record.
+
+        Raises:
+            SyncStoreError: If the compare-and-set fails, the transition is
+                illegal, or source progress changes or regresses.
+        """
+        if current.state != expected_state:
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_compare_and_set_failed"
+            )
+        if state not in _NOTES_TASK_READINESS_TRANSITIONS[expected_state]:
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_transition_invalid"
+            )
+        if (
+            isinstance(source_count, int)
+            and not isinstance(source_count, bool)
+            and source_count < current.source_count
+        ):
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_progress_regressed"
+            )
+
+        resume_phase: str | None = None
+        if state == "blocked":
+            if expected_state == "blocked":
+                resume_phase = current.resume_phase
+            elif expected_state == "verifying":
+                resume_phase = "verifying"
+            else:
+                resume_phase = "bootstrapping"
+        parsed = parse_notes_moodboard_studio_readiness_record(
+            {
+                "state": state,
+                "source_cursor": source_cursor,
+                "source_count": source_count,
+                "source_fingerprint": source_fingerprint,
+                "reason_code": reason_code,
+                "resume_phase": resume_phase,
+            },
+            readiness_key=readiness_key,
+        )
+        if parsed.record is None:
+            raise SyncStoreError(
+                parsed.error_code
+                or "notes_moodboard_studio_readiness_state_invalid"
+            )
+        requested = parsed.record
+
+        current_fingerprint = current.source_fingerprint
+        resetting_empty = state == "not_enrolled" and current.source_count == 0
+        if state == "blocked" and any(
+            (
+                source_cursor != current.source_cursor,
+                source_count != current.source_count,
+                source_fingerprint != current_fingerprint,
+            )
+        ):
+            raise SyncStoreError("notes_moodboard_studio_readiness_source_changed")
+        if expected_state == "blocked" and state not in {"blocked", "not_enrolled"}:
+            if state != current.resume_phase:
+                raise SyncStoreError(
+                    "notes_moodboard_studio_readiness_transition_invalid"
+                )
+            if any(
+                (
+                    source_cursor != current.source_cursor,
+                    source_count != current.source_count,
+                    source_fingerprint != current_fingerprint,
+                )
+            ):
+                raise SyncStoreError("notes_moodboard_studio_readiness_source_changed")
+        if expected_state == "ready" and requested.as_metadata() != current.as_metadata():
+            raise SyncStoreError("notes_moodboard_studio_readiness_source_changed")
+        if not resetting_empty:
+            self._validate_notes_moodboard_studio_progress(
+                readiness_key=readiness_key,
+                current=current,
+                requested=requested,
+            )
+        if state == "not_enrolled" and not resetting_empty:
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_disable_forbidden"
+            )
+        return requested
+
+    @staticmethod
+    def _validate_notes_moodboard_studio_progress(
+        *,
+        readiness_key: str,
+        current: NotesMoodboardStudioReadinessRecord,
+        requested: NotesMoodboardStudioReadinessRecord,
+    ) -> None:
+        """Validate monotonic cursor, count, and fingerprint progress.
+
+        Args:
+            readiness_key: Domain-specific readiness metadata key.
+            current: Current validated readiness record.
+            requested: Requested validated readiness record.
+
+        Raises:
+            SyncStoreError: If progress regresses or source identity changes
+                without a corresponding cursor and count advance.
+        """
+        if requested.source_count < current.source_count:
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_progress_regressed"
+            )
+        if current.source_cursor_key is not None:
+            if requested.source_cursor_key is None:
+                raise SyncStoreError(
+                    "notes_moodboard_studio_readiness_progress_regressed"
+                )
+            if _moodboard_studio_cursor_regressed(
+                readiness_key,
+                current.source_cursor_key,
+                requested.source_cursor_key,
+            ):
+                raise SyncStoreError(
+                    "notes_moodboard_studio_readiness_progress_regressed"
+                )
+        cursor_advanced = requested.source_cursor_key != current.source_cursor_key
+        count_advanced = requested.source_count != current.source_count
+        if cursor_advanced != count_advanced:
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_progress_regressed"
+            )
+        if (
+            cursor_advanced
+            and requested.source_fingerprint == current.source_fingerprint
+        ):
+            raise SyncStoreError("notes_moodboard_studio_readiness_source_changed")
+        if current.source_fingerprint is not None and requested.source_fingerprint is None:
+            raise SyncStoreError(
+                "notes_moodboard_studio_readiness_progress_regressed"
+            )
+        if (
+            not cursor_advanced
+            and not count_advanced
+            and current.source_fingerprint is not None
+            and requested.source_fingerprint != current.source_fingerprint
+        ):
+            raise SyncStoreError("notes_moodboard_studio_readiness_source_changed")
+
+    def transition_notes_moodboard_graph_readiness(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        expected_state: str,
+        state: str,
+        source_dataset_id: str,
+        moodboard_source_cursor: str | None,
+        moodboard_source_count: int,
+        moodboard_source_fingerprint: str | None,
+        placement_source_cursor: str | None,
+        placement_source_count: int,
+        placement_source_fingerprint: str | None,
+        moodboard_reason_code: str | None = None,
+        placement_reason_code: str | None = None,
+        moodboard_capture_enabled: bool | None = None,
+    ) -> SyncDataset:
+        """Persist the coupled dormant moodboard and placement readiness records."""
+
+        return self._transition_notes_moodboard_studio_readiness_records(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            source_dataset_id=source_dataset_id,
+            records=[
+                (
+                    "notes_moodboard_v1",
+                    expected_state,
+                    state,
+                    moodboard_source_cursor,
+                    moodboard_source_count,
+                    moodboard_source_fingerprint,
+                    moodboard_reason_code,
+                ),
+                (
+                    "notes_moodboard_note_v1",
+                    expected_state,
+                    state,
+                    placement_source_cursor,
+                    placement_source_count,
+                    placement_source_fingerprint,
+                    placement_reason_code,
+                ),
+            ],
+            moodboard_capture_enabled=moodboard_capture_enabled,
+        )
+
+    def transition_notes_studio_document_readiness(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        expected_state: str,
+        state: str,
+        source_dataset_id: str,
+        source_cursor: str | None,
+        source_count: int,
+        source_fingerprint: str | None,
+        reason_code: str | None = None,
+        studio_document_capture_enabled: bool | None = None,
+    ) -> SyncDataset:
+        """Persist the independent dormant Studio readiness record."""
+
+        return self._transition_notes_moodboard_studio_readiness_records(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            source_dataset_id=source_dataset_id,
+            records=[
+                (
+                    "notes_studio_document_v1",
+                    expected_state,
+                    state,
+                    source_cursor,
+                    source_count,
+                    source_fingerprint,
+                    reason_code,
+                )
+            ],
+            studio_document_capture_enabled=studio_document_capture_enabled,
+        )
+
+    def begin_notes_task_activation(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncDataset:
+        """Enable task and activity capture together before either source scan."""
+
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            if row.get("scope_type") != "personal":
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default=None)
+            if not isinstance(metadata, dict):
+                raise SyncStoreError("notes_task_readiness_state_invalid")
+            task = self._notes_task_readiness_record(metadata, "notes_task_v1")
+            activity = self._notes_task_readiness_record(
+                metadata,
+                "notes_task_activity_v1",
+            )
+            if task.state == activity.state == "not_enrolled":
+                enrolling = {
+                    "state": "enrolling",
+                    "source_cursor": None,
+                    "source_count": 0,
+                    "source_fingerprint": None,
+                    "reason_code": None,
+                    "resume_phase": None,
+                }
+                metadata["notes_task_v1"] = dict(enrolling)
+                metadata["notes_task_activity_v1"] = dict(enrolling)
+                metadata["task_activity_capture_enabled"] = True
+            elif (
+                task.state == "enrolling"
+                and activity.state == "not_enrolled"
+                and metadata.get("task_activity_capture_enabled") is not True
+            ):
+                metadata["notes_task_activity_v1"] = {
+                    "state": "enrolling",
+                    "source_cursor": None,
+                    "source_count": 0,
+                    "source_fingerprint": None,
+                    "reason_code": None,
+                    "resume_phase": None,
+                }
+                metadata["task_activity_capture_enabled"] = True
+            elif (
+                task.state == "not_enrolled"
+                or activity.state == "not_enrolled"
+                or metadata.get("task_activity_capture_enabled") is not True
+            ):
+                raise SyncStoreError("notes_task_readiness_state_invalid")
+            else:
+                return _dataset_from_row(row)
+
+            self.execute(
+                "UPDATE sync_datasets SET metadata_json = ?, updated_at = ? "
+                "WHERE dataset_id = ? AND owner_user_id = ?",
+                (
+                    encode_json(metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                    owner_user_id,
+                ),
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("notes_task_activation_not_persisted")
+            return _dataset_from_row(updated)
+
+    def activate_notes_task_domains(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncDataset:
+        """Publish both task domains in one transaction after coupled readiness."""
+
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            if row.get("scope_type") != "personal":
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default=None)
+            domains = list(decode_json(row.get("domain_set_json"), default=[]))
+            if not isinstance(metadata, dict) or not notes_task_sync_is_ready(
+                domains=[*domains, *NOTES_TASK_SYNC_DOMAINS],
+                metadata=metadata,
+            ):
+                raise SyncStoreError("notes_task_sync_not_ready")
+            for domain in NOTES_TASK_SYNC_DOMAINS:
+                if domain not in domains:
+                    domains.append(domain)
+            self.execute(
+                "UPDATE sync_datasets SET domain_set_json = ?, updated_at = ? "
+                "WHERE dataset_id = ? AND owner_user_id = ?",
+                (
+                    encode_json(domains, default=[]),
+                    utcnow_iso(),
+                    dataset_id,
+                    owner_user_id,
+                ),
+                connection=conn,
+            )
+            for domain in NOTES_TASK_SYNC_DOMAINS:
+                self._ensure_domain_state(
+                    dataset_id=dataset_id,
+                    domain=domain,
+                    adapter_version=1,
+                    server_sequence=0,
+                    connection=conn,
+                )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("notes_task_activation_not_persisted")
+            return _dataset_from_row(updated)
+
+    def begin_notes_organization_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        """Atomically enroll the complete organization group in initializing state."""
+
+        if not bootstrap_id.strip():
+            raise SyncStoreError("Notes organization bootstrap ID is required")
+        with self.backend.transaction() as conn:
+            row = self._get_dataset_row_for_update(dataset_id, connection=conn)
+            if (
+                row is None
+                or row.get("owner_user_id") != owner_user_id
+                or row.get("scope_type") != "personal"
+            ):
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default={})
+            current = metadata.get("notes_organization_v1")
+            if isinstance(current, Mapping) and current.get("state") in {
+                "initializing",
+                "ready",
+            }:
+                return _dataset_from_row(row)
+
+            enrolled = list(decode_json(row.get("domain_set_json"), default=[]))
+            for domain in NOTES_ORGANIZATION_DOMAINS:
+                if domain not in enrolled:
+                    enrolled.append(domain)
+            metadata["notes_organization_v1"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": "initializing",
+                "captured_count": 0,
+                "expected_count": 0,
+                "error_code": None,
+            }
+            now = utcnow_iso()
+            self.execute(
+                "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ?, "
+                "updated_at = ? WHERE dataset_id = ?",
+                (
+                    encode_json(enrolled, default=[]),
+                    encode_json(metadata, default={}),
+                    now,
+                    dataset_id,
+                ),
+                connection=conn,
+            )
+            for domain in NOTES_ORGANIZATION_DOMAINS:
+                self._ensure_domain_state(
+                    dataset_id=dataset_id,
+                    domain=domain,
+                    adapter_version=1,
+                    server_sequence=0,
+                    connection=conn,
+                )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset bootstrap update was not persisted")
+            return _dataset_from_row(updated)
+
+    def transition_notes_organization_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        """Compare-and-set one durable Notes organization bootstrap transition."""
+
+        if expected_state not in {"initializing", "ready", "failed"} or state not in {
+            "initializing",
+            "ready",
+            "failed",
+        }:
+            raise SyncStoreError("Notes organization bootstrap state is invalid")
+        if captured_count < 0 or expected_count < 0:
+            raise SyncStoreError("Notes organization bootstrap counts are invalid")
+        with self.backend.transaction() as conn:
+            row = self._get_dataset_row_for_update(dataset_id, connection=conn)
+            if row is None:
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default={})
+            current = metadata.get("notes_organization_v1")
+            if not isinstance(current, Mapping) or (
+                current.get("bootstrap_id") != bootstrap_id
+                or current.get("state") != expected_state
+            ):
+                raise SyncStoreError("notes_organization_bootstrap_compare_and_set_failed")
+            domains = set(_dataset_domains_from_row(row))
+            if set(NOTES_ORGANIZATION_DOMAINS).difference(domains):
+                raise SyncStoreError("notes_organization_sync_domains_incomplete")
+            if state == "ready":
+                if captured_count != expected_count or ready_verifier is None or not ready_verifier():
+                    raise SyncStoreError("notes_organization_bootstrap_verification_failed")
+                placeholders = ", ".join("?" for _ in NOTES_ORGANIZATION_DOMAINS)
+                undrained = _first(
+                    self.execute(
+                        "SELECT COUNT(*) AS count FROM sync_envelopes "
+                        "WHERE dataset_id = ? "
+                        f"AND domain IN ({placeholders}) "  # nosec B608
+                        "AND status = 'accepted' "
+                        "AND apply_status NOT IN ('applied', 'superseded')",
+                        (dataset_id, *NOTES_ORGANIZATION_DOMAINS),
+                        connection=conn,
+                    )
+                )
+                if undrained is None or int(undrained.get("count") or 0) != 0:
+                    raise SyncStoreError("notes_organization_bootstrap_verification_failed")
+                error_code = None
+            metadata["notes_organization_v1"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": state,
+                "captured_count": captured_count,
+                "expected_count": expected_count,
+                "error_code": error_code,
+            }
+            self.execute(
+                "UPDATE sync_datasets SET metadata_json = ?, updated_at = ? WHERE dataset_id = ?",
+                (encode_json(metadata, default={}), utcnow_iso(), dataset_id),
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset bootstrap transition was not persisted")
+            return _dataset_from_row(updated)
+
+    def begin_notes_link_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        """Atomically enroll notes.link without changing organization readiness."""
+
+        if not bootstrap_id.strip():
+            raise SyncStoreError("Notes link bootstrap ID is required")
+        with self.backend.transaction() as conn:
+            row = self._get_dataset_row_for_update(dataset_id, connection=conn)
+            if (
+                row is None
+                or row.get("owner_user_id") != owner_user_id
+                or row.get("scope_type") != "personal"
+            ):
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default={})
+            current = metadata.get("notes_link_v1")
+            if isinstance(current, Mapping) and current.get("state") in {
+                "initializing",
+                "ready",
+            }:
+                return _dataset_from_row(row)
+            enrolled = list(decode_json(row.get("domain_set_json"), default=[]))
+            if "notes.note" not in enrolled:
+                raise SyncStoreError("notes_link_note_domain_missing")
+            if "notes.link" not in enrolled:
+                enrolled.append("notes.link")
+            metadata["notes_link_v1"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": "initializing",
+                "captured_count": 0,
+                "expected_count": 0,
+                "source_hash": None,
+                "error_code": None,
+            }
+            self.execute(
+                "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ?, "
+                "updated_at = ? WHERE dataset_id = ?",
+                (
+                    encode_json(enrolled, default=[]),
+                    encode_json(metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                ),
+                connection=conn,
+            )
+            self._ensure_domain_state(
+                dataset_id=dataset_id,
+                domain="notes.link",
+                adapter_version=1,
+                server_sequence=0,
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset link bootstrap update was not persisted")
+            return _dataset_from_row(updated)
+
+    def transition_notes_link_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        source_hash: str | None,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        """Compare-and-set one durable notes.link bootstrap transition."""
+
+        valid_states = {"initializing", "ready", "failed"}
+        if expected_state not in valid_states or state not in valid_states:
+            raise SyncStoreError("Notes link bootstrap state is invalid")
+        if captured_count < 0 or expected_count < 0 or captured_count > expected_count:
+            raise SyncStoreError("Notes link bootstrap counts are invalid")
+        if source_hash is not None and (
+            len(source_hash) != 64
+            or any(character not in "0123456789abcdef" for character in source_hash)
+        ):
+            raise SyncStoreError("Notes link bootstrap source hash is invalid")
+        with self.backend.transaction() as conn:
+            row = self._get_dataset_row_for_update(dataset_id, connection=conn)
+            if row is None:
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default={})
+            current = metadata.get("notes_link_v1")
+            if not isinstance(current, Mapping) or (
+                current.get("bootstrap_id") != bootstrap_id
+                or current.get("state") != expected_state
+            ):
+                raise SyncStoreError("notes_link_bootstrap_compare_and_set_failed")
+            if set(NOTES_LINK_DOMAINS).difference(_dataset_domains_from_row(row)):
+                raise SyncStoreError("notes_link_sync_domain_incomplete")
+            current_hash = current.get("source_hash")
+            if current_hash not in {None, source_hash}:
+                raise SyncStoreError("notes_link_bootstrap_source_changed")
+            if state == "ready":
+                if (
+                    captured_count != expected_count
+                    or ready_verifier is None
+                    or not ready_verifier()
+                ):
+                    raise SyncStoreError("notes_link_bootstrap_verification_failed")
+                undrained = _first(
+                    self.execute(
+                        "SELECT COUNT(*) AS count FROM sync_envelopes "
+                        "WHERE dataset_id = ? AND domain = 'notes.link' "
+                        "AND status = 'accepted' "
+                        "AND apply_status NOT IN ('applied', 'superseded')",
+                        (dataset_id,),
+                        connection=conn,
+                    )
+                )
+                if undrained is None or int(undrained.get("count") or 0) != 0:
+                    raise SyncStoreError("notes_link_bootstrap_verification_failed")
+                error_code = None
+            metadata["notes_link_v1"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": state,
+                "captured_count": captured_count,
+                "expected_count": expected_count,
+                "source_hash": source_hash,
+                "error_code": error_code,
+            }
+            self.execute(
+                "UPDATE sync_datasets SET metadata_json = ?, updated_at = ? WHERE dataset_id = ?",
+                (encode_json(metadata, default={}), utcnow_iso(), dataset_id),
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset link bootstrap transition was not persisted")
+            return _dataset_from_row(updated)
+
+    @staticmethod
+    def _validate_notes_attachment_bootstrap_id(bootstrap_id: str) -> None:
+        if (
+            not isinstance(bootstrap_id, str)
+            or not bootstrap_id.strip()
+            or bootstrap_id != bootstrap_id.strip()
+            or len(bootstrap_id.encode("utf-8")) > 128
+        ):
+            raise SyncStoreError("Notes attachment bootstrap ID is invalid")
+
+    @staticmethod
+    def _notes_attachment_source_hash(source_key: str) -> str:
+        if not isinstance(source_key, str) or not source_key:
+            raise SyncStoreError("Notes attachment source key is invalid")
+        if len(source_key.encode("utf-8")) > 4_096:
+            raise SyncStoreError("Notes attachment source key is too large")
+        path = PurePosixPath(source_key)
+        if (
+            path.is_absolute()
+            or "\\" in source_key
+            or any(part in {"", ".", ".."} for part in path.parts)
+        ):
+            raise SyncStoreError("Notes attachment source key is invalid")
+        return f"sha256:{hashlib.sha256(source_key.encode('utf-8')).hexdigest()}"
+
+    @staticmethod
+    def _notes_attachment_bootstrap_metadata(
+        row: Mapping[str, Any],
+        bootstrap_id: str,
+    ) -> tuple[dict[str, Any], Mapping[str, Any]]:
+        metadata = decode_json(row.get("metadata_json"), default={})
+        current = metadata.get("notes_attachment_v2")
+        if not isinstance(current, Mapping) or current.get("bootstrap_id") != bootstrap_id:
+            raise SyncStoreError("notes_attachment_bootstrap_compare_and_set_failed")
+        return metadata, current
+
+    def begin_notes_attachment_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        """Enroll attachment.ref v2 and establish one stable bootstrap identity."""
+
+        self._validate_notes_attachment_bootstrap_id(bootstrap_id)
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            if row.get("scope_type") != "personal":
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default={})
+            current = metadata.get("notes_attachment_v2")
+            if isinstance(current, Mapping):
+                if (
+                    current.get("state") not in {"initializing", "ready", "failed"}
+                    or current.get("target_adapter_version") != 2
+                    or not isinstance(current.get("bootstrap_id"), str)
+                ):
+                    raise SyncStoreError("notes_attachment_bootstrap_state_invalid")
+                return _dataset_from_row(row)
+            enrolled = list(decode_json(row.get("domain_set_json"), default=[]))
+            if "notes.note" not in enrolled:
+                raise SyncStoreError("notes_attachment_note_domain_missing")
+            if "attachment.ref" not in enrolled:
+                enrolled.append("attachment.ref")
+            metadata["notes_attachment_v2"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": "initializing",
+                "target_adapter_version": 2,
+                "captured_count": 0,
+                "expected_count": 0,
+                "source_hash": None,
+                "source_cursor": None,
+                "error_code": None,
+            }
+            self.execute(
+                "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ?, "
+                "updated_at = ? WHERE dataset_id = ? AND owner_user_id = ?",
+                (
+                    encode_json(enrolled, default=[]),
+                    encode_json(metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                    owner_user_id,
+                ),
+                connection=conn,
+            )
+            self._ensure_domain_state(
+                dataset_id=dataset_id,
+                domain="attachment.ref",
+                adapter_version=2,
+                server_sequence=0,
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset attachment bootstrap was not persisted")
+            return _dataset_from_row(updated)
+
+    def transition_notes_attachment_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        source_hash: str | None,
+        source_cursor: str | None,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        """Compare-and-set one durable attachment bootstrap transition."""
+
+        self._validate_notes_attachment_bootstrap_id(bootstrap_id)
+        valid_states = {"initializing", "ready", "failed"}
+        if expected_state not in valid_states or state not in valid_states:
+            raise SyncStoreError("Notes attachment bootstrap state is invalid")
+        if (
+            isinstance(captured_count, bool)
+            or isinstance(expected_count, bool)
+            or captured_count < 0
+            or expected_count < 0
+            or captured_count > expected_count
+        ):
+            raise SyncStoreError("Notes attachment bootstrap counts are invalid")
+        if source_hash is not None and re.fullmatch(r"[0-9a-f]{64}", source_hash) is None:
+            raise SyncStoreError("Notes attachment bootstrap source hash is invalid")
+        if source_cursor is not None and (
+            not isinstance(source_cursor, str)
+            or len(source_cursor.encode("utf-8")) > 64 * 1_024
+        ):
+            raise SyncStoreError("Notes attachment bootstrap cursor is invalid")
+        if state == "failed":
+            if error_code is None or re.fullmatch(r"[a-z][a-z0-9_]{0,127}", error_code) is None:
+                raise SyncStoreError("Notes attachment bootstrap failure code is invalid")
+        elif error_code is not None:
+            raise SyncStoreError("Notes attachment bootstrap failure code is invalid")
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            metadata, current = self._notes_attachment_bootstrap_metadata(
+                row,
+                bootstrap_id,
+            )
+            if current.get("state") != expected_state:
+                raise SyncStoreError("notes_attachment_bootstrap_compare_and_set_failed")
+            if (
+                current.get("target_adapter_version") != 2
+                or "attachment.ref" not in _dataset_domains_from_row(row)
+            ):
+                raise SyncStoreError("notes_attachment_bootstrap_state_invalid")
+            current_captured = current.get("captured_count")
+            current_expected = current.get("expected_count")
+            if (
+                not isinstance(current_captured, int)
+                or isinstance(current_captured, bool)
+                or captured_count < current_captured
+                or not isinstance(current_expected, int)
+                or isinstance(current_expected, bool)
+                or expected_count < current_expected
+            ):
+                raise SyncStoreError("notes_attachment_bootstrap_progress_regressed")
+            current_hash = current.get("source_hash")
+            if current_hash not in {None, source_hash}:
+                raise SyncStoreError("notes_attachment_bootstrap_source_changed")
+            if state == "ready":
+                if (
+                    source_hash is None
+                    or captured_count != expected_count
+                    or ready_verifier is None
+                    or not ready_verifier()
+                ):
+                    raise SyncStoreError("notes_attachment_bootstrap_verification_failed")
+                undrained = _first(
+                    self.execute(
+                        "SELECT COUNT(*) AS count FROM sync_envelopes "
+                        "WHERE dataset_id = ? AND domain = 'attachment.ref' "
+                        "AND status = 'accepted' "
+                        "AND apply_status NOT IN ('applied', 'superseded')",
+                        (dataset_id,),
+                        connection=conn,
+                    )
+                )
+                if undrained is None or int(undrained.get("count") or 0) != 0:
+                    raise SyncStoreError("notes_attachment_bootstrap_verification_failed")
+            metadata["notes_attachment_v2"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": state,
+                "target_adapter_version": 2,
+                "captured_count": captured_count,
+                "expected_count": expected_count,
+                "source_hash": source_hash,
+                "source_cursor": source_cursor,
+                "error_code": error_code,
+            }
+            self.execute(
+                "UPDATE sync_datasets SET metadata_json = ?, updated_at = ? "
+                "WHERE dataset_id = ? AND owner_user_id = ?",
+                (
+                    encode_json(metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                    owner_user_id,
+                ),
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset attachment bootstrap transition was not persisted")
+            return _dataset_from_row(updated)
+
+    def resolve_notes_attachment_source_map(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        note_id: str,
+        source_key: str,
+    ) -> SyncNotesAttachmentSourceMap:
+        """Allocate one immutable UUIDv4 for one hashed bootstrap source key."""
+
+        self._validate_notes_attachment_bootstrap_id(bootstrap_id)
+        if not isinstance(note_id, str) or not note_id.strip():
+            raise SyncStoreError("Notes attachment source note ID is invalid")
+        source_key_hash = self._notes_attachment_source_hash(source_key)
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            self._notes_attachment_bootstrap_metadata(row, bootstrap_id)
+            existing = _first(
+                self.execute(
+                    "SELECT * FROM sync_notes_attachment_source_map "
+                    "WHERE dataset_id = ? AND bootstrap_id = ? AND source_key_hash = ?",
+                    (dataset_id, bootstrap_id, source_key_hash),
+                    connection=conn,
+                )
+            )
+            if existing is not None:
+                if existing.get("note_id") != note_id:
+                    raise SyncStoreError("notes_attachment_source_map_identity_conflict")
+                return _notes_attachment_source_map_from_row(existing)
+            self.execute(
+                "INSERT INTO sync_notes_attachment_source_map "
+                "(dataset_id, bootstrap_id, source_key_hash, note_id, attachment_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    dataset_id,
+                    bootstrap_id,
+                    source_key_hash,
+                    note_id,
+                    str(uuid4()),
+                    utcnow_iso(),
+                ),
+                connection=conn,
+            )
+            created = _first(
+                self.execute(
+                    "SELECT * FROM sync_notes_attachment_source_map "
+                    "WHERE dataset_id = ? AND bootstrap_id = ? AND source_key_hash = ?",
+                    (dataset_id, bootstrap_id, source_key_hash),
+                    connection=conn,
+                )
+            )
+            if created is None:
+                raise SyncStoreError("Notes attachment source map was not persisted")
+            return _notes_attachment_source_map_from_row(created)
+
+    def record_notes_attachment_cleanup_candidate(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        source_key: str,
+        source_relative_path: str,
+        source_blob_hash: str,
+        source_size_bytes: int,
+        source_modified_ns: int,
+    ) -> SyncNotesAttachmentCleanupCandidate:
+        """Persist immutable, non-authoritative cleanup evidence for one source."""
+
+        self._validate_notes_attachment_bootstrap_id(bootstrap_id)
+        source_key_hash = self._notes_attachment_source_hash(source_key)
+        source_path_hash = self._notes_attachment_source_hash(source_relative_path)
+        if source_path_hash != source_key_hash:
+            raise SyncStoreError("Notes attachment cleanup source path does not match")
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", source_blob_hash) is None:
+            raise SyncStoreError("Notes attachment cleanup blob hash is invalid")
+        if (
+            isinstance(source_size_bytes, bool)
+            or source_size_bytes < 1
+            or isinstance(source_modified_ns, bool)
+            or source_modified_ns < 0
+        ):
+            raise SyncStoreError("Notes attachment cleanup source stat is invalid")
+        with self.backend.transaction() as conn:
+            row = self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            self._notes_attachment_bootstrap_metadata(row, bootstrap_id)
+            mapping = _first(
+                self.execute(
+                    "SELECT * FROM sync_notes_attachment_source_map "
+                    "WHERE dataset_id = ? AND bootstrap_id = ? AND source_key_hash = ?",
+                    (dataset_id, bootstrap_id, source_key_hash),
+                    connection=conn,
+                )
+            )
+            if mapping is None:
+                raise SyncStoreError("notes_attachment_source_map_missing")
+            existing = _first(
+                self.execute(
+                    "SELECT * FROM sync_notes_attachment_cleanup_candidates "
+                    "WHERE dataset_id = ? AND bootstrap_id = ? AND source_key_hash = ?",
+                    (dataset_id, bootstrap_id, source_key_hash),
+                    connection=conn,
+                )
+            )
+            expected = {
+                "attachment_id": mapping["attachment_id"],
+                "source_relative_path": source_relative_path,
+                "source_path_hash": source_path_hash,
+                "source_blob_hash": source_blob_hash,
+                "source_size_bytes": source_size_bytes,
+                "source_modified_ns": source_modified_ns,
+            }
+            if existing is not None:
+                if any(existing.get(key) != value for key, value in expected.items()):
+                    raise SyncStoreError("notes_attachment_cleanup_candidate_conflict")
+                return _notes_attachment_cleanup_candidate_from_row(existing)
+            self.execute(
+                "INSERT INTO sync_notes_attachment_cleanup_candidates "
+                "(dataset_id, bootstrap_id, source_key_hash, attachment_id, "
+                "source_relative_path, source_path_hash, source_blob_hash, "
+                "source_size_bytes, source_modified_ns, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    dataset_id,
+                    bootstrap_id,
+                    source_key_hash,
+                    mapping["attachment_id"],
+                    source_relative_path,
+                    source_path_hash,
+                    source_blob_hash,
+                    source_size_bytes,
+                    source_modified_ns,
+                    utcnow_iso(),
+                ),
+                connection=conn,
+            )
+            created = _first(
+                self.execute(
+                    "SELECT * FROM sync_notes_attachment_cleanup_candidates "
+                    "WHERE dataset_id = ? AND bootstrap_id = ? AND source_key_hash = ?",
+                    (dataset_id, bootstrap_id, source_key_hash),
+                    connection=conn,
+                )
+            )
+            if created is None:
+                raise SyncStoreError("Notes attachment cleanup candidate was not persisted")
+            return _notes_attachment_cleanup_candidate_from_row(created)
+
+    def get_notes_attachment_bootstrap_source_by_hash(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        source_key_hash: str,
+    ) -> tuple[
+        SyncNotesAttachmentSourceMap,
+        SyncNotesAttachmentCleanupCandidate,
+    ] | None:
+        """Resolve one internal bootstrap source without exposing its path publicly."""
+
+        self._validate_notes_attachment_bootstrap_id(bootstrap_id)
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", source_key_hash) is None:
+            raise ValueError("Notes attachment source cursor is invalid")
+        with self.backend.transaction() as conn:
+            row = self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            self._notes_attachment_bootstrap_metadata(row, bootstrap_id)
+            source = _first(
+                self.execute(
+                    "SELECT source_map.*, cleanup.source_relative_path, "
+                    "cleanup.source_path_hash, cleanup.source_blob_hash, "
+                    "cleanup.source_size_bytes, cleanup.source_modified_ns, "
+                    "cleanup.created_at AS cleanup_created_at "
+                    "FROM sync_notes_attachment_source_map AS source_map "
+                    "JOIN sync_notes_attachment_cleanup_candidates AS cleanup "
+                    "ON cleanup.dataset_id = source_map.dataset_id "
+                    "AND cleanup.bootstrap_id = source_map.bootstrap_id "
+                    "AND cleanup.source_key_hash = source_map.source_key_hash "
+                    "WHERE source_map.dataset_id = ? "
+                    "AND source_map.bootstrap_id = ? "
+                    "AND source_map.source_key_hash = ?",
+                    (dataset_id, bootstrap_id, source_key_hash),
+                    connection=conn,
+                )
+            )
+            if source is None:
+                return None
+            cleanup_row = {
+                "dataset_id": source["dataset_id"],
+                "bootstrap_id": source["bootstrap_id"],
+                "source_key_hash": source["source_key_hash"],
+                "attachment_id": source["attachment_id"],
+                "source_relative_path": source["source_relative_path"],
+                "source_path_hash": source["source_path_hash"],
+                "source_blob_hash": source["source_blob_hash"],
+                "source_size_bytes": source["source_size_bytes"],
+                "source_modified_ns": source["source_modified_ns"],
+                "created_at": source["cleanup_created_at"],
+            }
+            return (
+                _notes_attachment_source_map_from_row(source),
+                _notes_attachment_cleanup_candidate_from_row(cleanup_row),
+            )
+
+    def list_notes_attachment_cleanup_candidates(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        after_source_key_hash: str | None = None,
+        limit: int = 1_000,
+    ) -> tuple[SyncNotesAttachmentCleanupCandidate, ...]:
+        """Return one bounded owner-scoped cleanup-candidate keyset page."""
+
+        self._validate_notes_attachment_bootstrap_id(bootstrap_id)
+        if isinstance(limit, bool) or not 1 <= limit <= 1_000:
+            raise ValueError("cleanup candidate page limit must be 1..1000")
+        if after_source_key_hash is not None and re.fullmatch(
+            r"sha256:[0-9a-f]{64}", after_source_key_hash
+        ) is None:
+            raise ValueError("cleanup candidate cursor is invalid")
+        with self.backend.transaction() as conn:
+            row = self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            self._notes_attachment_bootstrap_metadata(row, bootstrap_id)
+            cursor = after_source_key_hash or ""
+            rows = self.execute(
+                "SELECT * FROM sync_notes_attachment_cleanup_candidates "
+                "WHERE dataset_id = ? AND bootstrap_id = ? AND source_key_hash > ? "
+                "ORDER BY source_key_hash LIMIT ?",
+                (dataset_id, bootstrap_id, cursor, limit),
+                connection=conn,
+            ).rows
+            return tuple(
+                _notes_attachment_cleanup_candidate_from_row(item) for item in rows
+            )
+
     def _find_existing_envelope_for_idempotency(
         self,
         envelope: SyncEnvelopeCreate,
@@ -2949,11 +7480,12 @@ class SyncDatabase:
     ) -> SyncEnvelope | None:
         self._validate_envelope_contract(envelope)
         with self.backend.transaction() as conn:
-            self._require_dataset_domain(
+            dataset_row = self._require_dataset_domain_for_update(
                 envelope.dataset_id,
                 envelope.domain,
                 connection=conn,
             )
+            self._require_notes_organization_write_ready(dataset_row, envelope.domain)
             existing = self._find_existing_envelope_for_idempotency(
                 envelope,
                 connection=conn,
@@ -2962,14 +7494,75 @@ class SyncDatabase:
             return None
         return _envelope_from_row(existing)
 
-    def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
+    def _require_no_unresolved_materialization_conflict(
+        self,
+        dataset_id: str,
+        *,
+        envelope_status: str,
+        connection: Any,
+    ) -> None:
+        """Reject new accepted history while a projected conflict needs review."""
+
+        if envelope_status != "accepted":
+            return
+        blocker = self.get_unresolved_materialization_conflict(
+            dataset_id,
+            connection=connection,
+        )
+        if blocker is not None:
+            raise SyncMaterializationPredecessorError(
+                apply_status="conflict",
+                conflict_id=blocker.conflict_id,
+                domain=blocker.domain,
+                entity_id=blocker.entity_id,
+                server_sequence=blocker.server_sequence,
+            )
+
+    def get_unresolved_materialization_conflict(
+        self,
+        dataset_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> SyncConflict | None:
+        """Return the earliest accepted projection conflict for a dataset."""
+
+        row = _first(
+            self.execute(
+                """
+                SELECT conflict.*
+                  FROM sync_conflicts AS conflict
+                  JOIN sync_envelopes AS envelope
+                    ON envelope.dataset_id = conflict.dataset_id
+                   AND envelope.client_envelope_id = conflict.local_envelope_id
+                   AND envelope.server_sequence = conflict.server_sequence
+                 WHERE conflict.dataset_id = ?
+                   AND conflict.status = 'unresolved'
+                   AND envelope.status = 'accepted'
+                   AND envelope.apply_status = 'conflict'
+                   AND conflict.domain NOT IN ('personal_context.record', 'personal_context.scope', 'personal_context.proposal', 'personal_context.manifest', 'personal_context.purge')
+                 ORDER BY envelope.server_sequence ASC
+                 LIMIT 1
+                """,
+                (dataset_id,),
+                connection=connection,
+            )
+        )
+        return None if row is None else _conflict_from_row(row)
+
+    def insert_envelope(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        connection: Any | None = None,
+    ) -> SyncEnvelope:
         self._validate_envelope_contract(envelope)
-        with self.backend.transaction() as conn:
-            self._require_dataset_domain(
+        with self.backend.transaction(connection) as conn:
+            dataset_row = self._require_dataset_domain_for_update(
                 envelope.dataset_id,
                 envelope.domain,
                 connection=conn,
             )
+            self._require_notes_organization_write_ready(dataset_row, envelope.domain)
 
             existing = self._find_existing_envelope_for_idempotency(
                 envelope,
@@ -2978,65 +7571,432 @@ class SyncDatabase:
             if existing is not None:
                 return _envelope_from_row(existing)
 
-            now = utcnow_iso()
+            self._require_no_unresolved_materialization_conflict(
+                envelope.dataset_id,
+                envelope_status=envelope.status,
+                connection=conn,
+            )
+            self._require_expected_current_head(envelope, connection=conn)
+            return self._insert_envelope_in_transaction(envelope, connection=conn)
+
+    def insert_claimed_conflict_resolution_envelope(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        conflict_id: str,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        connection: Any,
+    ) -> SyncEnvelope:
+        """Append a claimed resolution under the caller's dataset authority."""
+
+        self._validate_envelope_contract(envelope)
+        with self.backend.transaction(connection) as conn:
+            dataset_row = self._require_dataset_domain(
+                envelope.dataset_id,
+                envelope.domain,
+                connection=conn,
+            )
+            self._require_notes_organization_write_ready(dataset_row, envelope.domain)
+            conflict_row, source_row = self._require_claimed_conflict_source(
+                conflict_id,
+                dataset_id=dataset_id,
+                resolved_by_device_id=resolved_by_device_id,
+                resolution_action=resolution_action,
+                resolution_notes=resolution_notes,
+                connection=conn,
+            )
+            existing = self._find_existing_envelope_for_idempotency(
+                envelope,
+                connection=conn,
+            )
+            if existing is not None:
+                return _envelope_from_row(existing)
+
+            source_is_rebase_required = _is_rebase_required_conflict_source(
+                conflict_row,
+                source_row,
+            )
+            if (
+                envelope.dataset_id != source_row.get("dataset_id")
+                or envelope.domain != source_row.get("domain")
+                or (
+                    resolution_action == "overwrite"
+                    and envelope.object_id != source_row.get("entity_id")
+                )
+                or (
+                    resolution_action == "duplicate_rename"
+                    and envelope.object_id == source_row.get("entity_id")
+                )
+            ):
+                raise SyncHeadConflictError()
+            if resolution_action in {"overwrite", "duplicate_rename"}:
+                snapshot_cursor = (
+                    None
+                    if source_row.get("status") != "accepted"
+                    or source_is_rebase_required
+                    else int(source_row["server_sequence"])
+                )
+                self._require_expected_applied_head(
+                    envelope,
+                    through_server_cursor=snapshot_cursor,
+                    connection=conn,
+                )
+            else:
+                self._require_expected_current_head(envelope, connection=conn)
+            return self._insert_envelope_in_transaction(envelope, connection=conn)
+
+    def list_latest_applied_heads(
+        self,
+        dataset_id: str,
+        *,
+        through_server_cursor: int | None = None,
+        connection: Any,
+    ) -> list[SyncEnvelope]:
+        """Return one immutable latest-applied head per identity at a cursor."""
+
+        if through_server_cursor is None:
+            query = """
+                SELECT envelope.*
+                  FROM sync_envelopes AS envelope
+                 WHERE envelope.dataset_id = ?
+                   AND envelope.status = 'accepted'
+                   AND envelope.apply_status = 'applied'
+                   AND NOT EXISTS (
+                        SELECT 1
+                          FROM sync_envelopes AS newer
+                         WHERE newer.dataset_id = envelope.dataset_id
+                           AND newer.domain = envelope.domain
+                           AND newer.entity_id = envelope.entity_id
+                           AND newer.status = 'accepted'
+                           AND newer.apply_status = 'applied'
+                           AND newer.server_sequence > envelope.server_sequence
+                   )
+                 ORDER BY envelope.domain ASC, envelope.entity_id ASC
+            """
+            params = (dataset_id,)
+        else:
+            query = """
+                SELECT envelope.*
+                  FROM sync_envelopes AS envelope
+                 WHERE envelope.dataset_id = ?
+                   AND envelope.status = 'accepted'
+                   AND envelope.apply_status = 'applied'
+                   AND envelope.server_sequence <= ?
+                   AND NOT EXISTS (
+                        SELECT 1
+                          FROM sync_envelopes AS newer
+                         WHERE newer.dataset_id = envelope.dataset_id
+                           AND newer.domain = envelope.domain
+                           AND newer.entity_id = envelope.entity_id
+                           AND newer.status = 'accepted'
+                           AND newer.apply_status = 'applied'
+                           AND newer.server_sequence > envelope.server_sequence
+                           AND newer.server_sequence <= ?
+                   )
+                 ORDER BY envelope.domain ASC, envelope.entity_id ASC
+            """
+            params = (dataset_id, through_server_cursor, through_server_cursor)
+        rows = self.execute(
+            query,
+            params,
+            connection=connection,
+        ).rows
+        return [_envelope_from_row(row) for row in rows]
+
+    def _require_expected_applied_head(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        through_server_cursor: int | None,
+        connection: Any,
+    ) -> None:
+        if through_server_cursor is None:
+            query = """
+                SELECT *
+                  FROM sync_envelopes
+                 WHERE dataset_id = ? AND domain = ? AND entity_id = ?
+                   AND status = 'accepted' AND apply_status = 'applied'
+                 ORDER BY server_sequence DESC
+                 LIMIT 1
+            """
+            params = (envelope.dataset_id, envelope.domain, envelope.object_id)
+        else:
+            query = """
+                SELECT *
+                  FROM sync_envelopes
+                 WHERE dataset_id = ? AND domain = ? AND entity_id = ?
+                   AND status = 'accepted' AND apply_status = 'applied'
+                   AND server_sequence <= ?
+                 ORDER BY server_sequence DESC
+                 LIMIT 1
+            """
+            params = (
+                envelope.dataset_id,
+                envelope.domain,
+                envelope.object_id,
+                through_server_cursor,
+            )
+        projected = _first(
+            self.execute(
+                query,
+                params,
+                connection=connection,
+            )
+        )
+        expected = (
+            None,
+            None,
+            None,
+        ) if projected is None else (
+            int(projected["server_sequence"]),
+            projected.get("object_revision"),
+            projected.get("payload_hash"),
+        )
+        if (
+            envelope.base_server_cursor,
+            envelope.base_object_revision,
+            envelope.base_object_hash,
+        ) != expected:
+            raise SyncHeadConflictError()
+
+    def get_latest_applied_predecessor(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        connection: Any,
+    ) -> SyncEnvelope | None:
+        """Return the projected base immediately preceding one canonical envelope."""
+
+        if envelope.server_cursor is None:
+            raise SyncStoreError("Stored Sync envelope is missing its server cursor")
+        row = _first(
             self.execute(
                 """
-                INSERT INTO sync_envelopes (
-                    dataset_id, domain, entity_id, stable_key, operation,
-                    client_envelope_id, device_id, client_profile_id, client_sequence,
-                    client_timestamp, server_timestamp, base_server_cursor,
-                    base_object_revision, base_object_hash, object_revision, parent_id,
-                    schema_version, base_version, entity_version, dependency_json,
-                    routing_metadata_json, payload_ciphertext, payload_json,
-                    payload_clear_json, payload_hash, payload_size_bytes,
-                    created_at_client, received_at_server, deleted,
-                    encryption_metadata_json, adapter_version, status, apply_status,
-                    apply_error_code, apply_error_message, applied_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                SELECT *
+                  FROM sync_envelopes
+                 WHERE dataset_id = ? AND domain = ? AND entity_id = ?
+                   AND status = 'accepted' AND apply_status = 'applied'
+                   AND server_sequence < ?
+                 ORDER BY server_sequence DESC
+                 LIMIT 1
                 """,
                 (
                     envelope.dataset_id,
                     envelope.domain,
                     envelope.object_id,
-                    envelope.stable_key,
-                    envelope.operation,
-                    envelope.client_envelope_id,
-                    envelope.device_id,
-                    envelope.client_profile_id,
-                    envelope.client_sequence,
-                    envelope.client_timestamp,
-                    now,
-                    envelope.base_server_cursor,
-                    envelope.base_object_revision,
-                    envelope.base_object_hash,
-                    envelope.object_revision,
-                    envelope.parent_id,
-                    envelope.schema_version,
-                    _version_to_storage(envelope.base_version),
-                    _version_to_storage(envelope.entity_version),
-                    encode_json(envelope.dependencies, default=[]),
-                    encode_json(envelope.routing_metadata, default={}),
-                    envelope.payload_ciphertext,
-                    encode_json(envelope.payload, default={}),
-                    encode_json(envelope.payload_clear, default={}),
-                    envelope.payload_hash,
-                    envelope.payload_size_bytes,
-                    envelope.created_at_client,
-                    now,
-                    1 if envelope.deleted else 0,
-                    encode_json(envelope.encryption_metadata, default={}),
-                    envelope.adapter_version,
-                    envelope.status,
-                    envelope.apply_status,
-                    envelope.apply_error_code,
-                    envelope.apply_error_message,
-                    envelope.applied_at,
+                    envelope.server_cursor,
                 ),
-                connection=conn,
+                connection=connection,
             )
-            sequence = self.backend.get_last_insert_id(connection=conn)
-            if sequence is None:
+        )
+        return None if row is None else _envelope_from_row(row)
+
+    def _require_expected_current_head(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        connection: Any,
+        planned_head: SyncEnvelopeCreate | None = None,
+        allow_unstored_product_base: bool = False,
+    ) -> None:
+        """CAS one accepted envelope against its preflighted object head."""
+
+        if envelope.status != "accepted":
+            return
+        if planned_head is not None:
+            expected_cursor = 0
+            expected_revision = planned_head.object_revision
+            expected_hash = planned_head.payload_hash
+        else:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT envelope.*,
+                           projected.object_revision AS projected_object_revision,
+                           projected.object_hash AS projected_object_hash
+                      FROM sync_current_heads AS head
+                      JOIN sync_envelopes AS envelope
+                        ON envelope.server_sequence = head.latest_server_cursor
+                      LEFT JOIN sync_object_state AS projected
+                        ON projected.dataset_id = head.dataset_id
+                       AND projected.domain = head.domain
+                       AND projected.object_id = head.object_id
+                       AND projected.latest_server_cursor = head.latest_server_cursor
+                     WHERE head.dataset_id = ?
+                       AND head.domain = ?
+                       AND head.object_id = ?
+                    """,
+                    (envelope.dataset_id, envelope.domain, envelope.object_id),
+                    connection=connection,
+                )
+            )
+            if row is None:
+                if (
+                    allow_unstored_product_base
+                    and envelope.domain == "notes.task"
+                    and envelope.base_server_cursor is None
+                    and envelope.base_object_revision is not None
+                    and envelope.base_object_hash is not None
+                    and envelope.routing_metadata.get("product_transition_base")
+                    is True
+                ):
+                    return
+                if any(
+                    value is not None
+                    for value in (
+                        envelope.base_server_cursor,
+                        envelope.base_object_revision,
+                        envelope.base_object_hash,
+                    )
+                ):
+                    raise SyncHeadConflictError()
+                return
+            authority = envelope.routing_metadata.get("personal_context_authority")
+            is_personal_context_authority = (
+                envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+                and isinstance(authority, Mapping)
+                and authority.get("role") == "home_authority"
+            )
+            if is_personal_context_authority:
+                expected_cursor = row.get("server_sequence")
+                expected_revision = resolve_personal_context_ingress_result_revision(
+                    object_revision=row.get("object_revision"),
+                    base_server_cursor=row.get("base_server_cursor"),
+                    base_object_revision=row.get("base_object_revision"),
+                    base_object_hash=row.get("base_object_hash"),
+                    base_version=_version_from_storage(row.get("base_version")),
+                )
+                expected_hash = row.get("payload_hash")
+                if type(expected_cursor) is not int or expected_revision is None:
+                    raise SyncHeadConflictError()
+            else:
+                current = _envelope_from_row(row)
+                expected_cursor = current.server_cursor
+                if current.object_revision is None and row.get("projected_object_revision") is not None:
+                    expected_revision = int(row["projected_object_revision"])
+                    expected_hash = row.get("projected_object_hash")
+                else:
+                    expected_revision = current.object_revision
+                    expected_hash = current.payload_hash
+
+        if (
+            envelope.base_server_cursor != expected_cursor
+            or envelope.base_object_revision != expected_revision
+            or envelope.base_object_hash != expected_hash
+        ):
+            raise SyncHeadConflictError()
+
+    def _insert_envelope_in_transaction(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        connection: Any,
+    ) -> SyncEnvelope:
+        authority = envelope.routing_metadata.get("personal_context_authority")
+        protected_conflict_candidate = (
+            envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+            and envelope.status == "conflict"
+            and envelope.apply_status == "applied"
+            and envelope.device_id == "server-origin"
+            and bool(envelope.payload_ciphertext)
+            and bool(envelope.routing_metadata.get("personal_context_conflict_candidate"))
+            and isinstance(authority, Mapping)
+            and authority.get("role") == "home_authority"
+        )
+        # Canonical candidate custody fixes these bytes before any Sync allocation.
+        # Ordinary client ingress still receives the server's actual arrival time.
+        now = envelope.received_at_server if protected_conflict_candidate else utcnow_iso()
+        if not now:
+            raise SyncStoreError("Personal Context candidate timestamp is unavailable")
+        self.execute(
+            """
+            INSERT INTO sync_envelopes (
+                dataset_id, domain, entity_id, stable_key, operation,
+                client_envelope_id, device_id, client_profile_id, client_sequence,
+                mutation_group_id, mutation_step, mutation_step_count,
+                mutation_plan_hash, client_timestamp, server_timestamp,
+                base_server_cursor, base_object_revision, base_object_hash,
+                object_revision, parent_id, schema_version, base_version,
+                entity_version, dependency_json, routing_metadata_json,
+                payload_ciphertext, payload_json, payload_clear_json, payload_hash,
+                payload_size_bytes, created_at_client, received_at_server, deleted,
+                encryption_metadata_json, adapter_version, status, apply_status,
+                apply_error_code, apply_error_message, applied_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                envelope.dataset_id,
+                envelope.domain,
+                envelope.object_id,
+                envelope.stable_key,
+                envelope.operation,
+                envelope.client_envelope_id,
+                envelope.device_id,
+                envelope.client_profile_id,
+                envelope.client_sequence,
+                envelope.mutation_group_id,
+                envelope.mutation_step,
+                envelope.mutation_step_count,
+                envelope.mutation_plan_hash,
+                envelope.client_timestamp,
+                now,
+                envelope.base_server_cursor,
+                envelope.base_object_revision,
+                envelope.base_object_hash,
+                envelope.object_revision,
+                envelope.parent_id,
+                envelope.schema_version,
+                _version_to_storage(envelope.base_version),
+                _version_to_storage(envelope.entity_version),
+                encode_json(envelope.dependencies, default=[]),
+                encode_json(envelope.routing_metadata, default={}),
+                envelope.payload_ciphertext,
+                encode_json(envelope.payload, default={}),
+                encode_json(envelope.payload_clear, default={}),
+                envelope.payload_hash,
+                envelope.payload_size_bytes,
+                envelope.created_at_client,
+                now,
+                envelope.deleted,
+                encode_json(envelope.encryption_metadata, default={}),
+                envelope.adapter_version,
+                envelope.status,
+                envelope.apply_status,
+                envelope.apply_error_code,
+                envelope.apply_error_message,
+                envelope.applied_at,
+            ),
+            connection=connection,
+        )
+        sequence = self.backend.get_last_insert_id(connection=connection)
+        if sequence is None:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_envelopes
+                     WHERE dataset_id = ? AND client_envelope_id = ?
+                    """,
+                    (envelope.dataset_id, envelope.client_envelope_id),
+                    connection=connection,
+                )
+            )
+        else:
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (sequence,),
+                    connection=connection,
+                )
+            )
+            if (
+                row is None
+                or row.get("dataset_id") != envelope.dataset_id
+                or row.get("client_envelope_id") != envelope.client_envelope_id
+            ):
                 row = _first(
                     self.execute(
                         """
@@ -3044,52 +8004,327 @@ class SyncDatabase:
                          WHERE dataset_id = ? AND client_envelope_id = ?
                         """,
                         (envelope.dataset_id, envelope.client_envelope_id),
-                        connection=conn,
+                        connection=connection,
                     )
                 )
-            else:
-                row = _first(
-                    self.execute(
-                        "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
-                        (sequence,),
-                        connection=conn,
-                    )
-                )
-                if (
-                    row is None
-                    or row.get("dataset_id") != envelope.dataset_id
-                    or row.get("client_envelope_id") != envelope.client_envelope_id
-                ):
-                    row = _first(
-                        self.execute(
-                            """
-                            SELECT * FROM sync_envelopes
-                             WHERE dataset_id = ? AND client_envelope_id = ?
-                            """,
-                            (envelope.dataset_id, envelope.client_envelope_id),
+        if row is None:
+            raise SyncStoreError("Sync envelope insert did not produce a retrievable record")
+        if (
+            _envelope_fingerprint_from_row(row)
+            != _envelope_fingerprint_from_create(envelope)
+        ):
+            raise SyncIdempotencyConflictError(
+                "Sync envelope idempotency key was reused with different content"
+            )
+        inserted = _envelope_from_row(row)
+        if (
+            inserted.status == "accepted"
+            and inserted.domain == "attachment.ref"
+            and inserted.adapter_version == 2
+        ):
+            self._create_attachment_binding_for_envelope(
+                inserted,
+                connection=connection,
+            )
+        if inserted.status == "accepted":
+            self.execute(
+                """
+                INSERT INTO sync_current_heads (
+                    dataset_id, domain, object_id, latest_server_cursor
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT (dataset_id, domain, object_id)
+                DO UPDATE SET latest_server_cursor = excluded.latest_server_cursor
+                 WHERE excluded.latest_server_cursor > sync_current_heads.latest_server_cursor
+                """,
+                (
+                    inserted.dataset_id,
+                    inserted.domain,
+                    inserted.object_id,
+                    inserted.server_cursor,
+                ),
+                connection=connection,
+            )
+        self._ensure_domain_state(
+            dataset_id=inserted.dataset_id,
+            domain=inserted.domain,
+            adapter_version=inserted.adapter_version,
+            server_sequence=inserted.server_sequence,
+            connection=connection,
+        )
+        return inserted
+
+    def insert_envelopes_atomic(
+        self,
+        envelopes: Sequence[SyncEnvelopeCreate],
+        *,
+        trusted_notes_organization_bootstrap_id: str | None = None,
+        trusted_notes_task_bootstrap_id: str | None = None,
+        trusted_notes_task_coordinator: bool = False,
+    ) -> list[SyncEnvelope]:
+        """Insert one complete validated group or return its exact stored replay."""
+
+        submitted_plan = list(envelopes)
+        try:
+            plan = self._validate_mutation_group_plan(submitted_plan)
+        except SyncStoreError as exc:
+            if self._has_existing_mutation_group(submitted_plan):
+                raise SyncIdempotencyConflictError(
+                    "Sync mutation group idempotency key was reused with different content"
+                ) from exc
+            raise
+        first = plan[0]
+        mutation_group_id = first.mutation_group_id
+        if mutation_group_id is None:
+            raise SyncStoreError("Atomic Sync append requires mutation group metadata")
+
+        try:
+            with self.backend.transaction() as conn:
+                for envelope in plan:
+                    if (
+                        envelope.domain in {"notes.task", "notes.task_activity"}
+                        and trusted_notes_task_bootstrap_id is not None
+                    ):
+                        dataset_row = self._get_dataset_row_for_update(
+                            envelope.dataset_id,
                             connection=conn,
                         )
+                        if dataset_row is None:
+                            raise SyncDatasetNotFoundError(
+                                f"Sync dataset not found: {envelope.dataset_id}"
+                            )
+                        self._require_notes_task_bootstrap_write_ready(
+                            dataset_row,
+                            envelope=envelope,
+                            bootstrap_id=trusted_notes_task_bootstrap_id,
+                        )
+                    elif (
+                        envelope.domain in {"notes.task", "notes.task_activity"}
+                        and trusted_notes_task_coordinator
+                    ):
+                        dataset_row = self._get_dataset_row_for_update(
+                            envelope.dataset_id,
+                            connection=conn,
+                        )
+                        if dataset_row is None:
+                            raise SyncDatasetNotFoundError(
+                                f"Sync dataset not found: {envelope.dataset_id}"
+                            )
+                        metadata = decode_json(
+                            dataset_row.get("metadata_json"),
+                            default={},
+                        )
+                        if not notes_task_capture_is_active(metadata):
+                            raise SyncStoreError("notes_task_sync_not_ready")
+                    else:
+                        dataset_row = self._require_dataset_domain_for_update(
+                            envelope.dataset_id,
+                            envelope.domain,
+                            connection=conn,
+                        )
+                    self._require_notes_organization_write_ready(
+                        dataset_row,
+                        envelope.domain,
+                        trusted_bootstrap_id=trusted_notes_organization_bootstrap_id,
                     )
-            if row is None:
-                raise SyncStoreError(
-                    "Sync envelope insert did not produce a retrievable record"
+
+                existing_rows = self._list_mutation_group_rows(
+                    first.dataset_id,
+                    mutation_group_id,
+                    connection=conn,
                 )
-            if (
-                _envelope_fingerprint_from_row(row)
-                != _envelope_fingerprint_from_create(envelope)
-            ):
-                raise SyncIdempotencyConflictError(
-                    "Sync envelope idempotency key was reused with different content"
+                if existing_rows:
+                    return self._matched_mutation_group_replay(plan, existing_rows)
+
+                for envelope in plan:
+                    existing = self._find_existing_envelope_for_idempotency(
+                        envelope,
+                        connection=conn,
+                    )
+                    if existing is not None:
+                        raise SyncIdempotencyConflictError(
+                            "Sync mutation group idempotency key was reused with different content"
+                        )
+
+                self._require_no_unresolved_materialization_conflict(
+                    first.dataset_id,
+                    envelope_status=first.status,
+                    connection=conn,
                 )
-            inserted = _envelope_from_row(row)
-            self._ensure_domain_state(
-                dataset_id=inserted.dataset_id,
-                domain=inserted.domain,
-                adapter_version=inserted.adapter_version,
-                server_sequence=inserted.server_sequence,
-                connection=conn,
+                planned_heads: dict[tuple[str, str], SyncEnvelopeCreate] = {}
+                for envelope in plan:
+                    key = (envelope.domain, envelope.object_id)
+                    self._require_expected_current_head(
+                        envelope,
+                        connection=conn,
+                        planned_head=planned_heads.get(key),
+                        allow_unstored_product_base=trusted_notes_task_coordinator,
+                    )
+                    if envelope.status == "accepted":
+                        planned_heads[key] = envelope
+
+                return [
+                    self._insert_envelope_in_transaction(envelope, connection=conn)
+                    for envelope in plan
+                ]
+        except SyncHeadConflictError:
+            with self.backend.transaction() as conn:
+                existing_rows = self._list_mutation_group_rows(
+                    first.dataset_id,
+                    mutation_group_id,
+                    connection=conn,
+                )
+            if not existing_rows:
+                raise
+            return self._matched_mutation_group_replay(plan, existing_rows)
+        except BackendDatabaseError as exc:
+            if not _is_mutation_group_step_unique_error(exc):
+                raise
+            with self.backend.transaction() as conn:
+                existing_rows = self._list_mutation_group_rows(
+                    first.dataset_id,
+                    mutation_group_id,
+                    connection=conn,
+                )
+            if not existing_rows:
+                raise
+            return self._matched_mutation_group_replay(plan, existing_rows)
+
+    def _has_existing_mutation_group(
+        self,
+        plan: Sequence[SyncEnvelopeCreate],
+    ) -> bool:
+        identities = {
+            (envelope.dataset_id, envelope.mutation_group_id)
+            for envelope in plan
+            if envelope.mutation_group_id is not None
+        }
+        if not identities:
+            return False
+        with self.backend.transaction() as conn:
+            return any(
+                self._list_mutation_group_rows(
+                    dataset_id,
+                    mutation_group_id,
+                    connection=conn,
+                )
+                for dataset_id, mutation_group_id in identities
             )
-            return inserted
+
+    def _validate_mutation_group_plan(
+        self,
+        envelopes: Sequence[SyncEnvelopeCreate],
+    ) -> list[SyncEnvelopeCreate]:
+        plan = list(envelopes)
+        if not plan:
+            raise SyncStoreError("Sync mutation group must contain at least one envelope")
+        if len(plan) > SYNC_MUTATION_GROUP_MAX_SIZE:
+            raise SyncStoreError("sync_restore_group_limit_exceeded")
+        for envelope in plan:
+            self._validate_envelope_contract(envelope)
+
+        first = plan[0]
+        if (
+            first.mutation_group_id is None
+            or first.mutation_step_count is None
+            or first.mutation_plan_hash is None
+        ):
+            raise SyncStoreError("Atomic Sync append requires mutation group metadata")
+        expected_metadata = (
+            first.dataset_id,
+            first.mutation_group_id,
+            first.mutation_step_count,
+            first.mutation_plan_hash,
+        )
+        if any(
+            (
+                envelope.dataset_id,
+                envelope.mutation_group_id,
+                envelope.mutation_step_count,
+                envelope.mutation_plan_hash,
+            )
+            != expected_metadata
+            for envelope in plan
+        ):
+            raise SyncStoreError(
+                "Sync mutation group envelopes must share dataset, group, count, and hash"
+            )
+        if [envelope.mutation_step for envelope in plan] != list(
+            range(first.mutation_step_count)
+        ):
+            raise SyncStoreError(
+                "Sync mutation group steps must exactly match the ordered complete plan"
+            )
+        client_envelope_ids = [envelope.client_envelope_id for envelope in plan]
+        if len(set(client_envelope_ids)) != len(client_envelope_ids):
+            raise SyncStoreError("Sync mutation group client envelope ids must be unique")
+        client_sequence_keys = [
+            (envelope.device_id, envelope.client_sequence)
+            for envelope in plan
+            if envelope.device_id is not None and envelope.client_sequence is not None
+        ]
+        if len(set(client_sequence_keys)) != len(client_sequence_keys):
+            raise SyncStoreError("Sync mutation group client sequence keys must be unique")
+        return plan
+
+    def _list_mutation_group_rows(
+        self,
+        dataset_id: str,
+        mutation_group_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        rows = self.execute(
+            """
+            SELECT * FROM sync_envelopes
+             WHERE dataset_id = ? AND mutation_group_id = ?
+             ORDER BY mutation_step ASC
+             LIMIT ?
+            """,
+            (
+                dataset_id,
+                mutation_group_id,
+                SYNC_MUTATION_GROUP_MAX_SIZE + 1,
+            ),
+            connection=connection,
+        ).rows
+        if len(rows) > SYNC_MUTATION_GROUP_MAX_SIZE:
+            raise SyncStoreError("sync_restore_group_limit_exceeded")
+        return rows
+
+    def _matched_mutation_group_replay(
+        self,
+        plan: Sequence[SyncEnvelopeCreate],
+        existing_rows: Sequence[dict[str, Any]],
+    ) -> list[SyncEnvelope]:
+        if len(plan) != len(existing_rows) or any(
+            _envelope_fingerprint_from_create(envelope)
+            != _envelope_fingerprint_from_row(row)
+            for envelope, row in zip(plan, existing_rows)
+        ):
+            raise SyncIdempotencyConflictError(
+                "Sync mutation group idempotency key was reused with different content"
+            )
+        return [_envelope_from_row(row) for row in existing_rows]
+
+    def list_mutation_group(
+        self,
+        dataset_id: str,
+        mutation_group_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> list[SyncEnvelope]:
+        """Return a complete mutation group ordered by zero-based step."""
+
+        if not mutation_group_id.strip():
+            raise SyncStoreError("Sync mutation group id must be non-empty")
+        return [
+            _envelope_from_row(row)
+            for row in self._list_mutation_group_rows(
+                dataset_id,
+                mutation_group_id,
+                connection=connection,
+            )
+        ]
 
     def list_envelopes_after(
         self,
@@ -3098,8 +8333,10 @@ class SyncDatabase:
         *,
         limit: int = 100,
         domains: Sequence[SyncDomain] | None = None,
+        adapter_versions: Sequence[int] | None = None,
         status: str | Sequence[str] | None = None,
         exclude_device_id: str | None = None,
+        connection: Any | None = None,
     ) -> list[SyncEnvelope]:
         if limit < 1:
             return []
@@ -3112,6 +8349,13 @@ class SyncDatabase:
             if not domains:
                 return []
             sql += _domain_filter_sql(domains, params)
+        if adapter_versions is not None:
+            versions = sorted(set(adapter_versions))
+            if not versions:
+                return []
+            placeholders = ", ".join("?" for _ in versions)
+            sql += f" AND adapter_version IN ({placeholders})"
+            params.extend(versions)
         if status is not None:
             statuses = [status] if isinstance(status, str) else list(status)
             if not statuses:
@@ -3128,7 +8372,7 @@ class SyncDatabase:
             params.append(exclude_device_id)
         sql += " ORDER BY server_sequence ASC LIMIT ?"
         params.append(limit)
-        result = self.execute(sql, tuple(params))
+        result = self.execute(sql, tuple(params), connection=connection)
         return [_envelope_from_row(row) for row in result.rows]
 
     def summarize_domain_envelopes(
@@ -3208,6 +8452,7 @@ class SyncDatabase:
         entity_id: str | None = None,
         stable_key: str | None = None,
         limit: int = 100,
+        connection: Any | None = None,
     ) -> list[SyncEnvelope]:
         """List accepted envelopes for one entity identity or stable key."""
 
@@ -3248,14 +8493,184 @@ class SyncDatabase:
             """
             params.append(stable_key)
         params.append(limit)
-        result = self.execute(sql, tuple(params))
+        result = self.execute(sql, tuple(params), connection=connection)
         return [_envelope_from_row(row) for row in result.rows]
+
+    def get_historical_task_envelope(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        task_id: str,
+        object_revision: int,
+        object_hash: str,
+        envelope_id: str | None = None,
+        connection: Any | None = None,
+    ) -> SyncEnvelope | None:
+        """Resolve one applied immutable task envelope from every anchor claim."""
+
+        def _lookup(conn: Any) -> SyncEnvelope | None:
+            dataset = self._require_dataset_domain(
+                dataset_id,
+                "notes.task",
+                connection=conn,
+            )
+            if dataset.get("owner_user_id") != owner_user_id:
+                return None
+            if envelope_id is None:
+                rows = self.execute(
+                    """
+                    SELECT * FROM sync_envelopes
+                     WHERE dataset_id = ? AND domain = 'notes.task'
+                       AND entity_id = ? AND object_revision = ? AND payload_hash = ?
+                       AND operation = 'upsert' AND status = 'accepted'
+                       AND apply_status = 'applied'
+                     ORDER BY server_sequence DESC
+                     LIMIT 2
+                    """,
+                    (dataset_id, task_id, object_revision, object_hash),
+                    connection=conn,
+                ).rows
+                return _envelope_from_row(rows[0]) if len(rows) == 1 else None
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_envelopes
+                     WHERE dataset_id = ? AND client_envelope_id = ?
+                       AND domain = 'notes.task' AND entity_id = ?
+                       AND object_revision = ? AND payload_hash = ?
+                       AND operation = 'upsert' AND status = 'accepted'
+                       AND apply_status = 'applied'
+                     LIMIT 1
+                    """,
+                    (
+                        dataset_id,
+                        envelope_id,
+                        task_id,
+                        object_revision,
+                        object_hash,
+                    ),
+                    connection=conn,
+                )
+            )
+            return _envelope_from_row(row) if row is not None else None
+
+        if connection is not None:
+            return _lookup(connection)
+        with self.backend.transaction() as transaction_conn:
+            return _lookup(transaction_conn)
+
+    def get_projection_note_envelope(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        note_id: str,
+        envelope_id: str,
+        object_hash: str,
+        connection: Any | None = None,
+    ) -> SyncEnvelope | None:
+        """Resolve the exact applied note envelope named by a projection anchor."""
+
+        def _lookup(conn: Any) -> SyncEnvelope | None:
+            dataset = self._require_dataset_domain(
+                dataset_id,
+                "notes.note",
+                connection=conn,
+            )
+            if dataset.get("owner_user_id") != owner_user_id:
+                return None
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_envelopes
+                     WHERE dataset_id = ? AND client_envelope_id = ?
+                       AND domain = 'notes.note' AND entity_id = ?
+                       AND payload_hash = ? AND operation = 'upsert'
+                       AND status = 'accepted' AND apply_status = 'applied'
+                     LIMIT 1
+                    """,
+                    (dataset_id, envelope_id, note_id, object_hash),
+                    connection=conn,
+                )
+            )
+            return _envelope_from_row(row) if row is not None else None
+
+        if connection is not None:
+            return _lookup(connection)
+        with self.backend.transaction() as transaction_conn:
+            return _lookup(transaction_conn)
+
+    def get_envelope_for_entity_at_or_before(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        entity_id: str,
+        server_sequence: int,
+    ) -> SyncEnvelope | None:
+        """Return the newest accepted entity envelope at one durable boundary."""
+
+        if server_sequence < 1:
+            return None
+        row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND domain = ?
+                   AND status = 'accepted'
+                   AND entity_id = ?
+                   AND server_sequence <= ?
+                 ORDER BY server_sequence DESC
+                 LIMIT 1
+                """,
+                (dataset_id, domain, entity_id, server_sequence),
+            )
+        )
+        return _envelope_from_row(row) if row is not None else None
+
+    def get_envelope_by_server_cursor(
+        self,
+        server_cursor: int,
+        *,
+        connection: Any | None = None,
+    ) -> SyncEnvelope | None:
+        row = _first(
+            self.execute(
+                "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                (server_cursor,),
+                connection=connection,
+            )
+        )
+        return _envelope_from_row(row) if row is not None else None
+
+    def get_envelope_by_client_id(
+        self,
+        dataset_id: str,
+        client_envelope_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> SyncEnvelope | None:
+        """Return one exact dataset-scoped idempotency envelope without a fingerprint guess."""
+
+        row = _first(
+            self.execute(
+                "SELECT * FROM sync_envelopes "
+                "WHERE dataset_id = ? AND client_envelope_id = ?",
+                (dataset_id, client_envelope_id),
+                connection=connection,
+            )
+        )
+        return _envelope_from_row(row) if row is not None else None
 
     def get_object_state(
         self,
         dataset_id: str,
         domain: SyncDomain,
         object_id: str,
+        *,
+        connection: Any | None = None,
     ) -> SyncObjectState | None:
         row = _first(
             self.execute(
@@ -3264,16 +8679,109 @@ class SyncDatabase:
                  WHERE dataset_id = ? AND domain = ? AND object_id = ?
                 """,
                 (dataset_id, domain, object_id),
+                connection=connection,
             )
         )
         if row is None:
             return None
         return _object_state_from_row(row)
 
-    def upsert_object_state(self, state: SyncObjectState) -> SyncObjectState:
+    def get_current_head(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        object_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> SyncEnvelope | None:
+        """Return one canonical head through the maintained head projection."""
+
+        row = _first(
+            self.execute(
+                """
+                SELECT envelope.*
+                  FROM sync_current_heads AS head
+                  JOIN sync_envelopes AS envelope
+                    ON envelope.server_sequence = head.latest_server_cursor
+                 WHERE head.dataset_id = ?
+                   AND head.domain = ?
+                   AND head.object_id = ?
+                """,
+                (dataset_id, domain, object_id),
+                connection=connection,
+            )
+        )
+        return _envelope_from_row(row) if row is not None else None
+
+    def list_current_heads(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        limit: int,
+        offset: int,
+        connection: Any | None = None,
+    ) -> list[SyncEnvelope]:
+        """Return one bounded owner-scoped page from the head projection."""
+
+        if limit < 1 or limit > 1000:
+            raise SyncStoreError("Sync current-head limit must be between 1 and 1000")
+        if offset < 0:
+            raise SyncStoreError("Sync current-head offset must be non-negative")
+        rows = self.execute(
+            """
+            SELECT envelope.*
+              FROM sync_current_heads AS head
+              JOIN sync_envelopes AS envelope
+                ON envelope.server_sequence = head.latest_server_cursor
+             WHERE head.dataset_id = ? AND head.domain = ?
+             ORDER BY head.object_id ASC
+             LIMIT ? OFFSET ?
+            """,
+            (dataset_id, domain, limit, offset),
+            connection=connection,
+        ).rows
+        return [_envelope_from_row(row) for row in rows]
+
+    def upsert_object_state(
+        self,
+        state: SyncObjectState,
+        *,
+        connection: Any | None = None,
+        trusted_notes_task_bootstrap_id: str | None = None,
+        trusted_notes_task_coordinator: bool = False,
+    ) -> SyncObjectState:
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
-            self._require_dataset_domain(state.dataset_id, state.domain, connection=conn)
+        with self.backend.transaction(connection) as conn:
+            if (
+                state.domain in {"notes.task", "notes.task_activity"}
+                and trusted_notes_task_bootstrap_id is not None
+            ):
+                row = self._require_dataset(state.dataset_id, connection=conn)
+                metadata = decode_json(row.get("metadata_json"), default={})
+                readiness = metadata.get(
+                    "notes_task_v1"
+                    if state.domain == "notes.task"
+                    else "notes_task_activity_v1"
+                )
+                if (
+                    not isinstance(readiness, Mapping)
+                    or readiness.get("state") != "bootstrapping"
+                    or metadata.get("task_activity_capture_enabled") is not True
+                ):
+                    raise SyncStoreError("notes_task_sync_not_ready")
+            elif (
+                state.domain in {"notes.task", "notes.task_activity"}
+                and trusted_notes_task_coordinator
+            ):
+                row = self._require_dataset(state.dataset_id, connection=conn)
+                metadata = decode_json(row.get("metadata_json"), default={})
+                if not notes_task_capture_is_active(metadata):
+                    raise SyncStoreError("notes_task_sync_not_ready")
+            else:
+                self._require_dataset_domain(
+                    state.dataset_id, state.domain, connection=conn
+                )
             self.execute(
                 """
                 INSERT INTO sync_object_state (
@@ -3288,6 +8796,7 @@ class SyncDatabase:
                     latest_server_cursor = excluded.latest_server_cursor,
                     deleted = excluded.deleted,
                     updated_at = excluded.updated_at
+                WHERE excluded.latest_server_cursor > sync_object_state.latest_server_cursor
                 """,
                 (
                     state.dataset_id,
@@ -3296,7 +8805,7 @@ class SyncDatabase:
                     state.object_revision,
                     state.object_hash,
                     state.latest_server_cursor,
-                    1 if state.deleted else 0,
+                    state.deleted,
                     now,
                 ),
                 connection=conn,
@@ -3311,7 +8820,26 @@ class SyncDatabase:
                     connection=conn,
                 )
             )
-        return _object_state_from_row(row)
+        stored = _object_state_from_row(row)
+        if (
+            stored.dataset_id,
+            stored.domain,
+            stored.object_id,
+            stored.object_revision,
+            stored.object_hash,
+            stored.latest_server_cursor,
+            stored.deleted,
+        ) != (
+            state.dataset_id,
+            state.domain,
+            state.object_id,
+            state.object_revision,
+            state.object_hash,
+            state.latest_server_cursor,
+            state.deleted,
+        ):
+            raise SyncStoreError("sync_object_state_stale_write")
+        return stored
 
     def mark_envelope_apply_status(
         self,
@@ -3320,12 +8848,13 @@ class SyncDatabase:
         apply_status: SyncApplyStatus,
         apply_error_code: str | None = None,
         apply_error_message: str | None = None,
+        connection: Any | None = None,
     ) -> SyncEnvelope:
         if apply_status not in SYNC_APPLY_STATUSES:
             raise SyncStoreError(f"Invalid Sync envelope apply status: {apply_status}")
         now = utcnow_iso()
         applied_at = now if apply_status == "applied" else None
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self.execute(
                 """
                 UPDATE sync_envelopes
@@ -3354,6 +8883,918 @@ class SyncDatabase:
         if row is None:
             raise SyncStoreError(f"Sync envelope not found for server cursor: {server_cursor}")
         return _envelope_from_row(row)
+
+    def discard_pending_personal_context_authority(
+        self,
+        *,
+        server_cursor: int,
+        dataset_id: str,
+        client_envelope_id: str,
+        profile_id: str,
+        purge_generation: int,
+        publication_batch_id: str,
+        profile_publication_sequence: int,
+        batch_ordinal: int,
+        batch_size: int,
+        connection: Any | None = None,
+    ) -> typing.Literal["removed", "absent", "applied", "mismatch"]:
+        """Classify or delete one exact pending internal authority publication."""
+
+        with self.backend.transaction(connection) as connection:
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=connection,
+                )
+            )
+            if row is None:
+                return "absent"
+            routing = decode_json(row.get("routing_metadata_json"), default={})
+            authority = (
+                routing.get("personal_context_authority")
+                if isinstance(routing, dict)
+                else None
+            )
+            if (
+                row.get("dataset_id") != dataset_id
+                or row.get("client_envelope_id") != client_envelope_id
+                or row.get("device_id") != "server-origin"
+                or row.get("domain") not in PERSONAL_CONTEXT_SYNC_DOMAINS
+                or row.get("status") != "accepted"
+                or not isinstance(routing, dict)
+                or routing.get("profile_id") != profile_id
+                or routing.get("purge_generation") != purge_generation
+                or not isinstance(authority, dict)
+                or authority.get("role") != "home_authority"
+                or authority.get("publication_batch_id") != publication_batch_id
+                or authority.get("profile_publication_sequence")
+                != profile_publication_sequence
+                or authority.get("batch_ordinal") != batch_ordinal
+                or authority.get("batch_size") != batch_size
+            ):
+                return "mismatch"
+            if row.get("apply_status") == "applied":
+                return "applied"
+            if row.get("apply_status") != "pending":
+                return "mismatch"
+            if self.envelope_is_conflict_pinned(dataset_id, client_envelope_id, connection=connection):
+                return "mismatch"
+            current = _first(
+                self.execute(
+                    """SELECT latest_server_cursor FROM sync_current_heads
+                        WHERE dataset_id = ? AND domain = ? AND object_id = ?""",
+                    (dataset_id, row["domain"], row["entity_id"]),
+                    connection=connection,
+                )
+            )
+            if current is None or int(current["latest_server_cursor"]) != server_cursor:
+                return "mismatch"
+            deleted = self.execute(
+                """DELETE FROM sync_envelopes
+                    WHERE server_sequence = ? AND dataset_id = ?
+                      AND client_envelope_id = ? AND device_id = 'server-origin'
+                      AND status = 'accepted' AND apply_status = 'pending'
+                      AND routing_metadata_json = ?""",
+                (
+                    server_cursor,
+                    dataset_id,
+                    client_envelope_id,
+                    row["routing_metadata_json"],
+                ),
+                connection=connection,
+            )
+            if deleted.rowcount != 1:
+                return "mismatch"
+            previous = _first(
+                self.execute(
+                    """SELECT server_sequence FROM sync_envelopes
+                        WHERE dataset_id = ? AND domain = ? AND entity_id = ?
+                          AND status = 'accepted'
+                        ORDER BY server_sequence DESC LIMIT 1""",
+                    (dataset_id, row["domain"], row["entity_id"]),
+                    connection=connection,
+                )
+            )
+            if previous is None:
+                repaired = self.execute(
+                    """DELETE FROM sync_current_heads
+                        WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                          AND latest_server_cursor = ?""",
+                    (dataset_id, row["domain"], row["entity_id"], server_cursor),
+                    connection=connection,
+                )
+            else:
+                repaired = self.execute(
+                    """UPDATE sync_current_heads SET latest_server_cursor = ?
+                        WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                          AND latest_server_cursor = ?""",
+                    (
+                        int(previous["server_sequence"]),
+                        dataset_id,
+                        row["domain"],
+                        row["entity_id"],
+                        server_cursor,
+                    ),
+                    connection=connection,
+                )
+            if repaired.rowcount != 1:
+                raise SyncStoreError("personal_context_authority_cancel_raced")
+            return "removed"
+
+    def _shred_authorized_personal_context_profile_history(
+        self,
+        claim: object,
+    ) -> PersonalContextHistoryShredReceipt:
+        """Irreversibly remove one profile's readable old-generation Sync material."""
+
+        from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
+            _validate_direct_purge_cleanup_claim,
+        )
+
+        if self.backend_type != BackendType.SQLITE:
+            raise SyncStoreError(
+                "Personal Context cleanup needs a reviewed backend retention policy"
+            )
+        connection = self.backend.get_pool().get_connection()
+        if not isinstance(connection, sqlite3.Connection):
+            raise SyncStoreError("Personal Context SQLite cleanup connection is invalid")
+        self._require_personal_context_retention_prerequisites(connection)
+
+        personal_context_domains = tuple(sorted(PERSONAL_CONTEXT_SYNC_DOMAINS))
+        domain_placeholders = ", ".join("?" for _ in personal_context_domains)
+        with self.backend.transaction(connection) as transaction:
+            try:
+                execution = _validate_direct_purge_cleanup_claim(
+                    claim,
+                    expected_database=self,
+                )
+            except PermissionError as exc:
+                raise SyncStoreError(
+                    "Personal Context cleanup authority is invalid"
+                ) from exc
+            dataset_id = execution.dataset_id
+            user_id = execution.user_id
+            profile_id = execution.profile_id
+            old_generation_through = execution.old_generation_through
+            purge_generation = execution.purge_generation
+            dataset_row = self._require_dataset_owner_for_update(
+                dataset_id,
+                user_id,
+                connection=transaction,
+            )
+            metadata = decode_json(dataset_row.get("metadata_json"), default=None)
+            state = metadata.get("personal_context") if isinstance(metadata, dict) else None
+            if not isinstance(state, dict) or state.get("profile_id") != profile_id:
+                raise SyncStoreError("Personal Context cleanup profile does not own dataset")
+            current_generation = state.get("purge_generation")
+            if (
+                not isinstance(current_generation, int)
+                or isinstance(current_generation, bool)
+                or current_generation < old_generation_through
+            ):
+                raise SyncStoreError("Personal Context cleanup generation is invalid")
+
+            self.execute(
+                """DELETE FROM sync_personal_context_activation_acks
+                   WHERE activation_id IN (
+                     SELECT activation_id FROM sync_personal_context_activations
+                      WHERE dataset_id = ? AND user_id = ? AND profile_id = ?
+                        AND purge_generation <= ?
+                   )""",
+                (dataset_id, user_id, profile_id, old_generation_through),
+                connection=transaction,
+            )
+            self.execute(
+                """DELETE FROM sync_personal_context_activations
+                   WHERE dataset_id = ? AND user_id = ? AND profile_id = ?
+                     AND purge_generation <= ?""",
+                (dataset_id, user_id, profile_id, old_generation_through),
+                connection=transaction,
+            )
+
+            candidate_rows = self.execute(
+                f"""
+                SELECT server_sequence, domain, entity_id, client_envelope_id,
+                       routing_metadata_json
+                  FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND domain IN ({domain_placeholders})
+                 ORDER BY server_sequence
+                """,  # nosec B608 - placeholders cover the fixed domain constant.
+                (dataset_id, *personal_context_domains),
+                connection=transaction,
+            ).rows
+            targets: list[Mapping[str, Any]] = []
+            for row in candidate_rows:
+                routing = decode_json(row.get("routing_metadata_json"), default=None)
+                generation = routing.get("purge_generation") if isinstance(routing, dict) else None
+                if (
+                    isinstance(routing, dict)
+                    and routing.get("profile_id") == profile_id
+                    and isinstance(generation, int)
+                    and not isinstance(generation, bool)
+                    and generation <= old_generation_through
+                ):
+                    targets.append(row)
+
+            target_cursors = {int(row["server_sequence"]) for row in targets}
+            target_envelope_ids = {str(row["client_envelope_id"]) for row in targets}
+            for row in targets:
+                original_routing = str(row["routing_metadata_json"])
+                original_generation = decode_json(original_routing, default={}).get(
+                    "purge_generation"
+                )
+                shredded_routing = encode_json(
+                    {
+                        "profile_id": profile_id,
+                        "purge_generation": original_generation,
+                        "retention_state": "shredded",
+                    },
+                    default={},
+                )
+                updated = self.execute(
+                    """
+                    UPDATE sync_envelopes
+                       SET stable_key = NULL,
+                           mutation_group_id = NULL,
+                           mutation_step = NULL,
+                           mutation_step_count = NULL,
+                           mutation_plan_hash = NULL,
+                           base_object_hash = NULL,
+                           base_version = NULL,
+                           entity_version = NULL,
+                           dependency_json = '[]',
+                           routing_metadata_json = ?,
+                           payload_ciphertext = NULL,
+                           payload_json = '{}',
+                           payload_clear_json = '{}',
+                           payload_hash = NULL,
+                           payload_size_bytes = 0,
+                           encryption_metadata_json = '{}',
+                           apply_status = CASE
+                               WHEN apply_status = 'applied' THEN 'applied'
+                               ELSE 'superseded'
+                           END,
+                           apply_error_code = CASE
+                               WHEN apply_status = 'applied' THEN NULL
+                               ELSE 'personal_context_purged'
+                           END,
+                           apply_error_message = NULL
+                     WHERE server_sequence = ? AND dataset_id = ? AND domain = ?
+                       AND routing_metadata_json = ?
+                    """,
+                    (
+                        shredded_routing,
+                        int(row["server_sequence"]),
+                        dataset_id,
+                        str(row["domain"]),
+                        original_routing,
+                    ),
+                    connection=transaction,
+                )
+                if updated.rowcount != 1:
+                    raise SyncStoreError("Personal Context cleanup envelope predicate raced")
+
+            for cursor in target_cursors:
+                updated_receipt = self.execute(
+                    """
+                    UPDATE sync_personal_context_ingress_receipts
+                       SET canonical_payload_digest = 'shredded'
+                     WHERE dataset_id = ? AND server_sequence = ?
+                    """,
+                    (dataset_id, cursor),
+                    connection=transaction,
+                )
+                if updated_receipt.rowcount not in {0, 1}:
+                    raise SyncStoreError("Personal Context ingress receipt cleanup widened")
+
+            conflict_rows = self.execute(
+                f"""
+                SELECT conflict_id, server_sequence, base_envelope_id,
+                       local_envelope_id, remote_envelope_id
+                  FROM sync_conflicts
+                 WHERE dataset_id = ?
+                   AND domain IN ({domain_placeholders})
+                """,  # nosec B608 - placeholders cover the fixed domain constant.
+                (dataset_id, *personal_context_domains),
+                connection=transaction,
+            ).rows
+            conflict_ids = [
+                str(row["conflict_id"])
+                for row in conflict_rows
+                if (
+                    row.get("server_sequence") in target_cursors
+                    or any(
+                        value in target_envelope_ids
+                        for value in (
+                            row.get("base_envelope_id"),
+                            row.get("local_envelope_id"),
+                            row.get("remote_envelope_id"),
+                        )
+                        if value is not None
+                    )
+                )
+            ]
+            for conflict_id in conflict_ids:
+                updated_conflict = self.execute(
+                    """
+                    UPDATE sync_conflicts
+                       SET status = 'superseded', metadata_json = '{}',
+                           resolved_by_envelope_id = NULL,
+                           resolved_by_device_id = NULL,
+                           resolution_action = 'personal_context_purged',
+                           resolution_notes = NULL,
+                           resolved_at = COALESCE(resolved_at, ?)
+                     WHERE conflict_id = ? AND dataset_id = ?
+                    """,
+                    (utcnow_iso(), conflict_id, dataset_id),
+                    connection=transaction,
+                )
+                if updated_conflict.rowcount != 1:
+                    raise SyncStoreError("Personal Context conflict cleanup widened")
+
+            for cursor in target_cursors:
+                current_heads = self.execute(
+                    """
+                    DELETE FROM sync_current_heads
+                     WHERE dataset_id = ? AND latest_server_cursor = ?
+                       AND domain IN (
+                           'personal_context.manifest', 'personal_context.scope',
+                           'personal_context.record', 'personal_context.proposal',
+                           'personal_context.purge'
+                       )
+                    """,
+                    (dataset_id, cursor),
+                    connection=transaction,
+                )
+                if current_heads.rowcount not in {0, 1}:
+                    raise SyncStoreError("Personal Context current-head cleanup widened")
+                object_states = self.execute(
+                    """
+                    DELETE FROM sync_object_state
+                     WHERE dataset_id = ? AND latest_server_cursor = ?
+                       AND domain IN (
+                           'personal_context.manifest', 'personal_context.scope',
+                           'personal_context.record', 'personal_context.proposal',
+                           'personal_context.purge'
+                       )
+                    """,
+                    (dataset_id, cursor),
+                    connection=transaction,
+                )
+                if object_states.rowcount not in {0, 1}:
+                    raise SyncStoreError("Personal Context object-state cleanup widened")
+
+            key_count_row = _first(
+                self.execute(
+                    """
+                    SELECT COUNT(*) AS count FROM sync_key_records
+                     WHERE dataset_id = ? AND user_id = ?
+                       AND key_purpose = 'personal_context_integrity'
+                    """,
+                    (dataset_id, user_id),
+                    connection=transaction,
+                )
+            )
+            expected_key_count = int(key_count_row.get("count") or 0) if key_count_row else 0
+            deleted_keys = self.execute(
+                """
+                DELETE FROM sync_key_records
+                 WHERE dataset_id = ? AND user_id = ?
+                   AND key_purpose = 'personal_context_integrity'
+                """,
+                (dataset_id, user_id),
+                connection=transaction,
+            )
+            if deleted_keys.rowcount != expected_key_count:
+                raise SyncStoreError("Personal Context key cleanup predicate raced")
+
+            if current_generation < purge_generation:
+                state["purge_generation"] = purge_generation
+                metadata["personal_context"] = state
+                updated_dataset = self.execute(
+                    """
+                    UPDATE sync_datasets
+                       SET metadata_json = ?, updated_at = ?
+                     WHERE dataset_id = ? AND owner_user_id = ?
+                       AND metadata_json = ?
+                    """,
+                    (
+                        encode_json(metadata, default={}),
+                        utcnow_iso(),
+                        dataset_id,
+                        user_id,
+                        str(dataset_row["metadata_json"]),
+                    ),
+                    connection=transaction,
+                )
+                if updated_dataset.rowcount != 1:
+                    raise SyncStoreError("Personal Context cleanup generation raced")
+
+        self._maintain_personal_context_retention_storage(connection)
+        return PersonalContextHistoryShredReceipt(
+            dataset_id=dataset_id,
+            profile_id=profile_id,
+            old_generation_through=old_generation_through,
+            purge_generation=purge_generation,
+        )
+
+    def _require_personal_context_retention_prerequisites(
+        self,
+        connection: sqlite3.Connection,
+    ) -> None:
+        """Require verified secure deletion and WAL before destructive cleanup."""
+
+        try:
+            secure_delete = connection.execute("PRAGMA secure_delete = ON").fetchone()
+            journal_mode = connection.execute("PRAGMA journal_mode").fetchone()
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            raise SyncStoreError(
+                "Personal Context SQLite retention prerequisites are unavailable"
+            ) from exc
+        if secure_delete is None or int(secure_delete[0]) != 1:
+            raise SyncStoreError("Personal Context SQLite secure delete is unavailable")
+        if journal_mode is None or str(journal_mode[0]).lower() != "wal":
+            raise SyncStoreError("Personal Context SQLite WAL mode is required")
+
+    def _maintain_personal_context_retention_storage(
+        self,
+        connection: sqlite3.Connection,
+    ) -> None:
+        """Rewrite the main DB, empty its freelist, and truncate all WAL frames."""
+
+        self._require_personal_context_retention_prerequisites(connection)
+        try:
+            connection.execute("VACUUM")
+            freelist = connection.execute("PRAGMA freelist_count").fetchone()
+            prior_timeout = connection.execute("PRAGMA busy_timeout").fetchone()
+            connection.execute("PRAGMA busy_timeout = 0")
+            try:
+                checkpoint = connection.execute(
+                    "PRAGMA wal_checkpoint(TRUNCATE)"
+                ).fetchone()
+            finally:
+                timeout = 10_000 if prior_timeout is None else int(prior_timeout[0])
+                connection.execute(f"PRAGMA busy_timeout = {timeout}")
+            database_rows = connection.execute("PRAGMA database_list").fetchall()
+            main_path = next(
+                (str(row[2]) for row in database_rows if str(row[1]) == "main"),
+                "",
+            )
+            wal_path = Path(f"{main_path}-wal") if main_path else None
+            wal_is_empty = (
+                wal_path is None
+                or not wal_path.exists()
+                or wal_path.stat().st_size == 0
+            )
+        except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
+            raise SyncStoreError(
+                "Personal Context SQLite retention maintenance failed"
+            ) from exc
+        if freelist is None or int(freelist[0]) != 0:
+            raise SyncStoreError("Personal Context cleanup freelist is not empty")
+        if checkpoint is None or tuple(map(int, checkpoint)) != (0, 0, 0):
+            raise SyncStoreError("Personal Context cleanup WAL checkpoint is incomplete")
+        if not wal_is_empty:
+            raise SyncStoreError("Personal Context cleanup WAL artifact is not empty")
+
+    def mark_personal_context_authority_applied(
+        self,
+        server_cursor: int,
+        *,
+        dataset_id: str,
+        client_envelope_id: str,
+        profile_id: str,
+        purge_generation: int,
+        publication_batch_id: str,
+        profile_publication_sequence: int,
+        batch_ordinal: int,
+        batch_size: int,
+        connection: Any,
+    ) -> SyncEnvelope:
+        """Apply one verified authority row with pending/applied CAS semantics."""
+
+        with self.backend.transaction(connection) as conn:
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            head = _first(
+                self.execute(
+                    """SELECT latest_server_cursor FROM sync_current_heads
+                       WHERE dataset_id = ? AND domain = ? AND object_id = ?""",
+                    (
+                        dataset_id,
+                        None if row is None else row.get("domain"),
+                        None if row is None else row.get("entity_id"),
+                    ),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncStoreError("personal_context_authority_finalize_raced")
+            routing = decode_json(row.get("routing_metadata_json"), default={})
+            authority = (
+                routing.get("personal_context_authority")
+                if isinstance(routing, dict)
+                else None
+            )
+            exact = bool(
+                row.get("dataset_id") == dataset_id
+                and row.get("client_envelope_id") == client_envelope_id
+                and row.get("device_id") == "server-origin"
+                and row.get("domain") in PERSONAL_CONTEXT_SYNC_DOMAINS
+                and row.get("status") == "accepted"
+                and isinstance(routing, dict)
+                and routing.get("profile_id") == profile_id
+                and routing.get("purge_generation") == purge_generation
+                and isinstance(authority, dict)
+                and authority.get("role") == "home_authority"
+                and authority.get("publication_batch_id") == publication_batch_id
+                and authority.get("profile_publication_sequence")
+                == profile_publication_sequence
+                and authority.get("batch_ordinal") == batch_ordinal
+                and authority.get("batch_size") == batch_size
+            )
+            if not exact:
+                raise SyncStoreError("personal_context_authority_finalize_raced")
+            if row.get("apply_status") == "applied":
+                return _envelope_from_row(row)
+            if (
+                row.get("apply_status") != "pending"
+                or head is None
+                or head.get("latest_server_cursor") != server_cursor
+            ):
+                raise SyncStoreError("personal_context_authority_finalize_raced")
+            object_revision = resolve_personal_context_ingress_result_revision(
+                object_revision=row.get("object_revision"),
+                base_server_cursor=row.get("base_server_cursor"),
+                base_object_revision=row.get("base_object_revision"),
+                base_object_hash=row.get("base_object_hash"),
+                base_version=_version_from_storage(row.get("base_version")),
+            )
+            if (
+                object_revision is None
+                or not isinstance(row.get("entity_id"), str)
+                or not isinstance(row.get("payload_hash"), str)
+            ):
+                raise SyncStoreError("personal_context_authority_finalize_raced")
+            raw_deleted = row.get("deleted")
+            if type(raw_deleted) is bool:
+                deleted = raw_deleted
+            elif type(raw_deleted) is int and raw_deleted in {0, 1}:
+                deleted = bool(raw_deleted)
+            else:
+                raise SyncStoreError("personal_context_authority_finalize_raced")
+            updated = self.execute(
+                """UPDATE sync_envelopes
+                   SET apply_status = 'applied', apply_error_code = NULL,
+                       apply_error_message = NULL, applied_at = ?
+                   WHERE server_sequence = ? AND dataset_id = ?
+                     AND client_envelope_id = ? AND device_id = 'server-origin'
+                     AND status = 'accepted' AND apply_status = 'pending'
+                     AND routing_metadata_json = ?""",
+                (
+                    utcnow_iso(),
+                    server_cursor,
+                    dataset_id,
+                    client_envelope_id,
+                    row["routing_metadata_json"],
+                ),
+                connection=conn,
+            )
+            self.upsert_object_state(
+                SyncObjectState(
+                    dataset_id=dataset_id,
+                    domain=row["domain"],
+                    object_id=row["entity_id"],
+                    object_revision=object_revision,
+                    object_hash=row["payload_hash"],
+                    latest_server_cursor=server_cursor,
+                    deleted=deleted,
+                ),
+                connection=conn,
+            )
+            stored = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            if updated.rowcount != 1 or stored is None:
+                raise SyncStoreError("personal_context_authority_finalize_raced")
+        return _envelope_from_row(stored)
+
+    def mark_personal_context_ingress_applied(
+        self,
+        *,
+        server_cursor: int,
+        receipt: Mapping[str, Any],
+        connection: Any | None = None,
+    ) -> SyncEnvelope:
+        """Persist the exact canonical receipt and terminalize ingress atomically."""
+
+        fields = (
+            "dataset_id",
+            "device_id",
+            "client_envelope_id",
+            "canonical_payload_digest",
+            "purge_generation",
+            "resulting_object_id",
+            "resulting_version_id",
+            "manifest_revision",
+            "manifest_version_id",
+            "publication_batch_id",
+            "profile_publication_sequence",
+            "receipt_id",
+            "wire_entity_version",
+        )
+        values = tuple(receipt[name] for name in fields)
+        with self.backend.transaction(connection) as conn:
+            envelope = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            if (
+                envelope is None
+                or envelope["dataset_id"] != receipt["dataset_id"]
+                or envelope.get("device_id") != receipt["device_id"]
+                or envelope["client_envelope_id"] != receipt["client_envelope_id"]
+                or _version_from_storage(envelope.get("entity_version"))
+                != receipt["wire_entity_version"]
+            ):
+                raise SyncStoreError("personal_context_ingress_receipt_mismatch")
+            self.execute(
+                """
+                INSERT INTO sync_personal_context_ingress_receipts(
+                    server_sequence, dataset_id, device_id, client_envelope_id,
+                    canonical_payload_digest, purge_generation, resulting_object_id,
+                    resulting_internal_version_id, manifest_revision,
+                    manifest_version_id, publication_batch_id,
+                    profile_publication_sequence, receipt_id, wire_entity_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (server_sequence) DO NOTHING
+                """,
+                (server_cursor, *values),
+                connection=conn,
+            )
+            stored_receipt = _first(
+                self.execute(
+                    "SELECT * FROM sync_personal_context_ingress_receipts "
+                    "WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            expected = (server_cursor, *values)
+            actual = tuple(stored_receipt.get(name) for name in ("server_sequence", *(
+                "dataset_id", "device_id", "client_envelope_id",
+                "canonical_payload_digest", "purge_generation", "resulting_object_id",
+                "resulting_internal_version_id", "manifest_revision", "manifest_version_id",
+                "publication_batch_id", "profile_publication_sequence", "receipt_id",
+                "wire_entity_version",
+            ))) if stored_receipt is not None else ()
+            if actual != expected:
+                raise SyncStoreError("personal_context_ingress_receipt_mismatch")
+            self.execute(
+                """
+                UPDATE sync_envelopes
+                   SET apply_status = 'applied', apply_error_code = NULL,
+                       apply_error_message = NULL, applied_at = ?
+                 WHERE server_sequence = ? AND apply_status IN ('pending', 'failed', 'applied')
+                """,
+                (utcnow_iso(), server_cursor),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            if row is None or row.get("apply_status") != "applied":
+                raise SyncStoreError("personal_context_ingress_receipt_mismatch")
+        return _envelope_from_row(row)
+
+    def get_personal_context_ingress_receipt(
+        self,
+        server_cursor: int,
+        *,
+        connection: Any | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the exact canonical apply receipt stored for one ingress cursor."""
+
+        return _first(
+            self.execute(
+                """SELECT * FROM sync_personal_context_ingress_receipts
+                   WHERE server_sequence = ?""",
+                (server_cursor,),
+                connection=connection,
+            )
+        )
+
+    def mark_bootstrap_envelope_verified(
+        self,
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+        notes_task_bootstrap: bool = False,
+        connection: Any | None = None,
+    ) -> SyncEnvelope:
+        """Atomically record a source-verified bootstrap step without product replay."""
+
+        if connection is None:
+            source = _first(
+                self.execute(
+                    "SELECT dataset_id, domain, entity_id FROM sync_envelopes "
+                    "WHERE server_sequence = ?",
+                    (server_cursor,),
+                )
+            )
+            if source is None:
+                raise SyncStoreError(
+                    f"Sync envelope not found for server cursor: {server_cursor}"
+                )
+            with self.materialization_transaction(
+                [(str(source["dataset_id"]), source["domain"], str(source["entity_id"]))]
+            ) as guarded_connection:
+                return self.mark_bootstrap_envelope_verified(
+                    server_cursor,
+                    bootstrap_id=bootstrap_id,
+                    notes_task_bootstrap=notes_task_bootstrap,
+                    connection=guarded_connection,
+                )
+
+        with self.backend.transaction(connection) as conn:
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncStoreError(f"Sync envelope not found for server cursor: {server_cursor}")
+            if row["domain"] == "notes.task" and notes_task_bootstrap:
+                dataset_row = self._require_dataset(
+                    str(row["dataset_id"]), connection=conn
+                )
+                self._require_notes_task_bootstrap_write_ready(
+                    dataset_row,
+                    envelope=_envelope_from_row(row),
+                    bootstrap_id=bootstrap_id,
+                )
+            else:
+                dataset_row = self._require_dataset_domain(
+                    str(row["dataset_id"]), row["domain"], connection=conn
+                )
+            self._require_notes_organization_write_ready(
+                dataset_row,
+                row["domain"],
+                trusted_bootstrap_id=bootstrap_id,
+            )
+            now = utcnow_iso()
+            self.upsert_object_state(
+                SyncObjectState(
+                    dataset_id=str(row["dataset_id"]),
+                    domain=row["domain"],
+                    object_id=str(row["entity_id"]),
+                    object_revision=int(row.get("object_revision") or 1),
+                    object_hash=str(row.get("payload_hash") or ""),
+                    latest_server_cursor=server_cursor,
+                    deleted=row.get("operation") == "tombstone",
+                ),
+                connection=conn,
+                trusted_notes_task_bootstrap_id=(
+                    bootstrap_id if notes_task_bootstrap else None
+                ),
+            )
+            self.execute(
+                "UPDATE sync_envelopes SET apply_status = 'applied', apply_error_code = NULL, "
+                "apply_error_message = NULL, applied_at = ? WHERE server_sequence = ?",
+                (now, server_cursor),
+                connection=conn,
+            )
+            updated = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+        return _envelope_from_row(updated)
+
+    def reconcile_bootstrap_envelope_superseded(
+        self,
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+        superseded_by_cursor: int,
+        connection: Any | None = None,
+    ) -> SyncEnvelope:
+        """Audit-reconcile a stale step after its correction is current and applied."""
+
+        if superseded_by_cursor <= server_cursor:
+            raise SyncStoreError("Bootstrap correction must follow the stale step")
+        if connection is None:
+            source = _first(
+                self.execute(
+                    "SELECT dataset_id, domain, entity_id FROM sync_envelopes "
+                    "WHERE server_sequence = ?",
+                    (server_cursor,),
+                )
+            )
+            if source is None:
+                raise SyncStoreError("Bootstrap reconciliation envelope was not found")
+            with self.materialization_transaction(
+                [(str(source["dataset_id"]), source["domain"], str(source["entity_id"]))]
+            ) as guarded_connection:
+                return self.reconcile_bootstrap_envelope_superseded(
+                    server_cursor,
+                    bootstrap_id=bootstrap_id,
+                    superseded_by_cursor=superseded_by_cursor,
+                    connection=guarded_connection,
+                )
+        with self.backend.transaction(connection) as conn:
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+            correction = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (superseded_by_cursor,),
+                    connection=conn,
+                )
+            )
+            if row is None or correction is None:
+                raise SyncStoreError("Bootstrap reconciliation envelope was not found")
+            dataset_row = self._require_dataset_domain(
+                str(row["dataset_id"]), row["domain"], connection=conn
+            )
+            self._require_notes_organization_write_ready(
+                dataset_row,
+                row["domain"],
+                trusted_bootstrap_id=bootstrap_id,
+            )
+            correction_metadata = decode_json(
+                correction.get("routing_metadata_json"), default={}
+            )
+            if (
+                correction.get("dataset_id") != row.get("dataset_id")
+                or correction.get("domain") != row.get("domain")
+                or correction.get("entity_id") != row.get("entity_id")
+                or correction.get("status") != "accepted"
+                or correction.get("apply_status") != "applied"
+                or correction_metadata.get("source")
+                != "notes-organization-bootstrap"
+            ):
+                raise SyncStoreError("Bootstrap correction is not durably applied")
+            head = _first(
+                self.execute(
+                    """
+                    SELECT latest_server_cursor FROM sync_current_heads
+                     WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                    """,
+                    (row["dataset_id"], row["domain"], row["entity_id"]),
+                    connection=conn,
+                )
+            )
+            if head is None or int(head["latest_server_cursor"]) != superseded_by_cursor:
+                raise SyncStoreError("Bootstrap correction is not the current head")
+            now = utcnow_iso()
+            self.execute(
+                """
+                UPDATE sync_envelopes
+                   SET apply_status = 'applied',
+                       apply_error_code = 'sync_bootstrap_superseded',
+                       apply_error_message = NULL,
+                       applied_at = ?
+                 WHERE server_sequence = ?
+                """,
+                (now, server_cursor),
+                connection=conn,
+            )
+            updated = _first(
+                self.execute(
+                    "SELECT * FROM sync_envelopes WHERE server_sequence = ?",
+                    (server_cursor,),
+                    connection=conn,
+                )
+            )
+        return _envelope_from_row(updated)
 
     def list_failed_applies(
         self,
@@ -3400,56 +9841,145 @@ class SyncDatabase:
         now = utcnow_iso()
         with self.backend.transaction() as conn:
             self._require_dataset_domain(cursor.dataset_id, cursor.domain, connection=conn)
+            self._require_device_for_dataset(
+                cursor.dataset_id, cursor.device_id, connection=conn
+            )
             existing = _first(
                 self.execute(
                     """
-                    SELECT * FROM sync_device_cursors
+                    SELECT * FROM sync_device_adapter_cursors
                      WHERE dataset_id = ? AND device_id = ? AND domain = ?
-                    """,
-                    (cursor.dataset_id, cursor.device_id, cursor.domain),
-                    connection=conn,
-                )
-            )
-            if existing:
-                self.execute(
-                    """
-                    UPDATE sync_device_cursors
-                       SET last_pulled_sequence = ?, updated_at = ?
-                     WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = ?
                     """,
                     (
-                        cursor.last_pulled_sequence,
-                        now,
                         cursor.dataset_id,
                         cursor.device_id,
                         cursor.domain,
+                        cursor.adapter_version,
                     ),
                     connection=conn,
                 )
-            else:
+            )
+            last_pulled = max(
+                cursor.last_pulled_sequence,
+                int((existing or {}).get("last_pulled_sequence") or 0),
+            )
+            max_delivered = max(
+                cursor.max_delivered_sequence,
+                int((existing or {}).get("max_delivered_sequence") or 0),
+            )
+            self.execute(
+                """
+                INSERT INTO sync_device_adapter_cursors (
+                    dataset_id, device_id, domain, adapter_version,
+                    last_pulled_sequence, max_delivered_sequence, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (dataset_id, device_id, domain, adapter_version)
+                DO UPDATE SET last_pulled_sequence = CASE
+                                  WHEN excluded.last_pulled_sequence >
+                                       sync_device_adapter_cursors.last_pulled_sequence
+                                  THEN excluded.last_pulled_sequence
+                                  ELSE sync_device_adapter_cursors.last_pulled_sequence END,
+                              max_delivered_sequence = CASE
+                                  WHEN excluded.max_delivered_sequence >
+                                       sync_device_adapter_cursors.max_delivered_sequence
+                                  THEN excluded.max_delivered_sequence
+                                  ELSE sync_device_adapter_cursors.max_delivered_sequence END,
+                              updated_at = excluded.updated_at
+                """,
+                (
+                    cursor.dataset_id,
+                    cursor.device_id,
+                    cursor.domain,
+                    cursor.adapter_version,
+                    last_pulled,
+                    max_delivered,
+                    now,
+                ),
+                connection=conn,
+            )
+            if cursor.adapter_version == 1:
+                legacy = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_device_cursors
+                         WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                        """,
+                        (cursor.dataset_id, cursor.device_id, cursor.domain),
+                        connection=conn,
+                    )
+                )
+                legacy_last_pulled = int(
+                    (legacy or {}).get("last_pulled_sequence") or 0
+                )
+                if legacy_last_pulled > int(
+                    (existing or {}).get("last_pulled_sequence") or 0
+                ):
+                    max_delivered = max(max_delivered, legacy_last_pulled)
+                last_pulled = max(
+                    last_pulled,
+                    legacy_last_pulled,
+                )
                 self.execute(
                     """
                     INSERT INTO sync_device_cursors (
                         dataset_id, device_id, domain, last_pulled_sequence, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (dataset_id, device_id, domain)
+                    DO UPDATE SET last_pulled_sequence = CASE
+                                      WHEN excluded.last_pulled_sequence >
+                                           sync_device_cursors.last_pulled_sequence
+                                      THEN excluded.last_pulled_sequence
+                                      ELSE sync_device_cursors.last_pulled_sequence END,
+                                  updated_at = excluded.updated_at
                     """,
                     (
                         cursor.dataset_id,
                         cursor.device_id,
                         cursor.domain,
-                        cursor.last_pulled_sequence,
+                        last_pulled,
                         now,
+                    ),
+                    connection=conn,
+                )
+                self.execute(
+                    """
+                    UPDATE sync_device_adapter_cursors
+                       SET last_pulled_sequence = CASE
+                               WHEN last_pulled_sequence < ?
+                               THEN (? + 0) ELSE last_pulled_sequence END,
+                           max_delivered_sequence = CASE
+                               WHEN max_delivered_sequence > ?
+                               THEN max_delivered_sequence ELSE (? + 0) END,
+                           updated_at = ?
+                     WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = 1
+                    """,
+                    (
+                        last_pulled,
+                        last_pulled,
+                        max_delivered,
+                        max_delivered,
+                        now,
+                        cursor.dataset_id,
+                        cursor.device_id,
+                        cursor.domain,
                     ),
                     connection=conn,
                 )
             row = _first(
                 self.execute(
                     """
-                    SELECT * FROM sync_device_cursors
+                    SELECT * FROM sync_device_adapter_cursors
                      WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = ?
                     """,
-                    (cursor.dataset_id, cursor.device_id, cursor.domain),
+                    (
+                        cursor.dataset_id,
+                        cursor.device_id,
+                        cursor.domain,
+                        cursor.adapter_version,
+                    ),
                     connection=conn,
                 )
             )
@@ -3460,23 +9990,56 @@ class SyncDatabase:
         dataset_id: str,
         device_id: str,
         domain: SyncDomain,
+        *,
+        adapter_version: int = 1,
     ) -> SyncDeviceCursor | None:
-        row = _first(
-            self.execute(
-                """
-                SELECT * FROM sync_device_cursors
-                 WHERE dataset_id = ? AND device_id = ? AND domain = ?
-                """,
-                (dataset_id, device_id, domain),
+        with self.backend.transaction() as conn:
+            self._require_dataset_domain(dataset_id, domain, connection=conn)
+            self._require_device_for_dataset(dataset_id, device_id, connection=conn)
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_adapter_cursors
+                     WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                       AND adapter_version = ?
+                    """,
+                    (dataset_id, device_id, domain, adapter_version),
+                    connection=conn,
+                )
             )
-        )
+            if adapter_version == 1:
+                legacy = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_device_cursors
+                         WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                        """,
+                        (dataset_id, device_id, domain),
+                        connection=conn,
+                    )
+                )
+                if legacy is not None and (
+                    row is None
+                    or int(legacy["last_pulled_sequence"])
+                    > int(row["last_pulled_sequence"])
+                ):
+                    row = {
+                        **legacy,
+                        "adapter_version": 1,
+                        "max_delivered_sequence": legacy["last_pulled_sequence"],
+                    }
         if row is None:
             return None
         return _cursor_from_row(row)
 
-    def insert_conflict(self, conflict: SyncConflictCreate) -> SyncConflict:
+    def insert_conflict(
+        self,
+        conflict: SyncConflictCreate,
+        *,
+        connection: Any | None = None,
+    ) -> SyncConflict:
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_dataset_domain(conflict.dataset_id, conflict.domain, connection=conn)
             existing = _first(
                 self.execute(
@@ -3486,7 +10049,26 @@ class SyncDatabase:
                 )
             )
             if existing:
-                return _conflict_from_row(existing)
+                return self._require_matching_conflict(existing, conflict)
+            if conflict.local_envelope_id is not None and conflict.server_sequence is not None:
+                existing = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_conflicts
+                         WHERE dataset_id = ?
+                           AND local_envelope_id = ?
+                           AND server_sequence = ?
+                        """,
+                        (
+                            conflict.dataset_id,
+                            conflict.local_envelope_id,
+                            conflict.server_sequence,
+                        ),
+                        connection=conn,
+                    )
+                )
+                if existing is not None:
+                    return self._require_matching_conflict(existing, conflict)
             self.execute(
                 """
                 INSERT INTO sync_conflicts (
@@ -3495,6 +10077,7 @@ class SyncDatabase:
                     server_sequence, metadata_json, created_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT DO NOTHING
                 """,
                 (
                     conflict.conflict_id,
@@ -3519,6 +10102,62 @@ class SyncDatabase:
                     connection=conn,
                 )
             )
+            if (
+                row is None
+                and conflict.local_envelope_id is not None
+                and conflict.server_sequence is not None
+            ):
+                row = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_conflicts
+                         WHERE dataset_id = ?
+                           AND local_envelope_id = ?
+                           AND server_sequence = ?
+                        """,
+                        (
+                            conflict.dataset_id,
+                            conflict.local_envelope_id,
+                            conflict.server_sequence,
+                        ),
+                        connection=conn,
+                    )
+                )
+            if row is None:
+                raise SyncStoreError("Sync conflict could not be stored")
+            return self._require_matching_conflict(row, conflict)
+
+    @staticmethod
+    def _require_matching_conflict(
+        row: dict[str, Any],
+        conflict: SyncConflictCreate,
+    ) -> SyncConflict:
+        expected = (
+            conflict.dataset_id,
+            conflict.domain,
+            conflict.entity_id,
+            conflict.conflict_type,
+            conflict.base_envelope_id,
+            conflict.local_envelope_id,
+            conflict.remote_envelope_id,
+            conflict.server_sequence,
+            dict(conflict.metadata),
+        )
+        actual = (
+            row.get("dataset_id"),
+            row.get("domain"),
+            row.get("entity_id"),
+            row.get("conflict_type"),
+            row.get("base_envelope_id"),
+            row.get("local_envelope_id"),
+            row.get("remote_envelope_id"),
+            row.get("server_sequence"),
+            decode_json(row.get("metadata_json"), default={}),
+        )
+        if actual != expected:
+            raise SyncIdempotencyConflictError(
+                "Sync conflict identity was reused with different content"
+            )
         return _conflict_from_row(row)
 
     def list_conflicts(
@@ -3526,28 +10165,99 @@ class SyncDatabase:
         dataset_id: str,
         *,
         status: ConflictStatus | None = None,
+        domain: SyncDomain | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[SyncConflict]:
+        if limit is not None and limit < 1:
+            raise SyncStoreError("Sync conflict limit must be greater than zero")
+        if offset < 0:
+            raise SyncStoreError("Sync conflict offset must be non-negative")
+        if offset and limit is None:
+            raise SyncStoreError("Sync conflict offset requires a limit")
         params: list[Any] = [dataset_id]
         sql = "SELECT * FROM sync_conflicts WHERE dataset_id = ?"
         if status is not None:
             sql += " AND status = ?"
             params.append(status)
+        if domain is not None:
+            sql += " AND domain = ?"
+            params.append(domain)
         sql += " ORDER BY created_at ASC, conflict_id ASC"
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params.extend((limit, offset))
         result = self.execute(sql, tuple(params))
         return [_conflict_from_row(row) for row in result.rows]
 
-    def get_conflict(self, conflict_id: str) -> SyncConflict | None:
+    def get_conflict(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str | None = None,
+        connection: Any | None = None,
+        for_update: bool = False,
+    ) -> SyncConflict | None:
         """Return a conflict by ID without scanning dataset conflict lists."""
 
+        sql = "SELECT * FROM sync_conflicts WHERE conflict_id = ?"
+        params: list[Any] = [conflict_id]
+        if dataset_id is not None:
+            sql += " AND dataset_id = ?"
+            params.append(dataset_id)
+        suffix = (
+            " FOR UPDATE"
+            if for_update and self.backend_type == BackendType.POSTGRESQL
+            else ""
+        )
         row = _first(
             self.execute(
-                "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
-                (conflict_id,),
+                sql + suffix,  # nosec B608 - suffix is backend controlled.
+                tuple(params),
+                connection=connection,
             )
         )
         if row is None:
             return None
         return _conflict_from_row(row)
+
+    def list_conflict_pinned_envelopes(
+        self,
+        dataset_id: str,
+        *,
+        limit: int = 1000,
+        connection: Any | None = None,
+    ) -> list[SyncEnvelope]:
+        """Return immutable candidates still owned by an unresolved review."""
+        rows = self.execute(
+            """SELECT envelope.* FROM sync_envelopes AS envelope
+                WHERE envelope.dataset_id = ? AND EXISTS (
+                    SELECT 1 FROM sync_conflicts AS review
+                     WHERE review.dataset_id = envelope.dataset_id AND review.status = 'unresolved'
+                       AND (review.local_envelope_id = envelope.client_envelope_id
+                         OR review.remote_envelope_id = envelope.client_envelope_id)
+                ) ORDER BY envelope.server_sequence LIMIT ?""",
+            (dataset_id, limit),
+            connection=connection,
+        ).rows
+        return [_envelope_from_row(row) for row in rows]
+
+    def envelope_is_conflict_pinned(
+        self,
+        dataset_id: str,
+        envelope_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> bool:
+        """Check retention ownership in the caller's guarded storage transaction."""
+        return bool(
+            self.execute(
+                """SELECT 1 FROM sync_conflicts WHERE dataset_id = ? AND status = 'unresolved'
+                 AND (local_envelope_id = ? OR remote_envelope_id = ?) LIMIT 1""",
+                (dataset_id, envelope_id, envelope_id),
+                connection=connection,
+            ).rows
+        )
 
     def get_unresolved_conflict_for_envelope(
         self,
@@ -3555,6 +10265,7 @@ class SyncDatabase:
         *,
         local_envelope_id: str,
         server_sequence: int | None = None,
+        connection: Any | None = None,
     ) -> SyncConflict | None:
         """Return an unresolved conflict already recorded for a local envelope."""
 
@@ -3569,7 +10280,7 @@ class SyncDatabase:
             sql += " AND server_sequence = ?"
             params.append(server_sequence)
         sql += " ORDER BY created_at ASC, conflict_id ASC LIMIT 1"
-        row = _first(self.execute(sql, tuple(params)))
+        row = _first(self.execute(sql, tuple(params), connection=connection))
         if row is None:
             return None
         return _conflict_from_row(row)
@@ -3582,8 +10293,9 @@ class SyncDatabase:
         resolved_by_device_id: str | None = None,
         resolution_action: str | None = None,
         resolution_notes: str | None = None,
+        connection: Any | None = None,
     ) -> SyncConflict:
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             existing = _first(
                 self.execute(
                     "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
@@ -3647,8 +10359,9 @@ class SyncDatabase:
         resolved_by_device_id: str | None = None,
         resolution_action: str | None = None,
         resolution_notes: str | None = None,
+        connection: Any | None = None,
     ) -> SyncConflict:
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             existing = _first(
                 self.execute(
                     "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
@@ -3721,6 +10434,7 @@ class SyncDatabase:
         resolved_by_device_id: str | None = None,
         resolution_action: str | None = None,
         resolution_notes: str | None = None,
+        connection: Any | None = None,
     ) -> SyncConflict:
         def _matches_resolution(row: dict[str, Any]) -> bool:
             if row["status"] != status:
@@ -3737,7 +10451,7 @@ class SyncDatabase:
             )
 
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             existing = _first(
                 self.execute(
                     "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
@@ -3790,11 +10504,11 @@ class SyncDatabase:
                             AND resolution_action = ?
                             AND (
                                 resolved_by_device_id = ?
-                                OR (resolved_by_device_id IS NULL AND ? IS NULL)
+                                OR (resolved_by_device_id IS NULL AND CAST(? AS TEXT) IS NULL)
                             )
                             AND (
                                 resolution_notes = ?
-                                OR (resolution_notes IS NULL AND ? IS NULL)
+                                OR (resolution_notes IS NULL AND CAST(? AS TEXT) IS NULL)
                             )
                         )
                    )
@@ -3913,6 +10627,31 @@ class SyncDatabase:
         sql += " ORDER BY created_at ASC, key_record_id ASC"
         result = self.execute(sql, tuple(params))
         return [_key_record_from_row(row) for row in result.rows]
+
+    def revoke_key_record(self, *, user_id: str, key_record_id: str) -> SyncKeyRecord:
+        """Revoke one device-wrapped key record without revoking the device."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            self.execute(
+                """
+                UPDATE sync_key_records
+                   SET revoked_at = COALESCE(revoked_at, ?)
+                 WHERE user_id = ? AND key_record_id = ?
+                """,
+                (now, user_id, key_record_id),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_key_records WHERE user_id = ? AND key_record_id = ?",
+                    (user_id, key_record_id),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncStoreError("Sync key record was not found or is not accessible")
+        return _key_record_from_row(row)
 
     def _dataset_envelope_range(
         self,
@@ -4227,6 +10966,858 @@ class SyncDatabase:
                 )
         return _attachment_from_row(row, stored=inserted)
 
+    def _create_attachment_binding_for_envelope(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        connection: Any,
+    ) -> SyncAttachmentRevisionBinding:
+        """Observe blob availability and bind one accepted v2 revision atomically."""
+
+        payload = envelope.payload or envelope.payload_clear
+        attachment_id = str(payload.get("attachment_id") or "")
+        blob_hash = str(payload.get("blob_hash") or "")
+        size_value = payload.get("size_bytes")
+        if (
+            attachment_id != envelope.object_id
+            or isinstance(size_value, bool)
+            or not isinstance(size_value, int)
+            or envelope.object_revision is None
+            or envelope.server_cursor is None
+        ):
+            raise SyncStoreError("attachment.ref v2 binding metadata is invalid")
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        blob_row = _first(
+            self.execute(
+                """
+                SELECT blob.blob_id, blob.status
+                  FROM sync_blob_objects AS blob
+                  JOIN sync_datasets AS dataset
+                    ON dataset.dataset_id = blob.dataset_id
+                 WHERE blob.dataset_id = ?
+                   AND blob.payload_hash = ?
+                   AND blob.size_bytes = ?
+                   AND (
+                        dataset.scope_type = 'workspace'
+                        OR blob.owner_user_id = dataset.owner_user_id
+                   )
+                 ORDER BY blob.blob_id ASC
+                 LIMIT 1
+                """
+                + suffix,  # nosec B608 - backend-controlled row lock suffix.
+                (envelope.dataset_id, blob_hash, size_value),
+                connection=connection,
+            )
+        )
+        if blob_row is not None and blob_row.get("status") in {"deleting", "deleted"}:
+            raise SyncStoreError(
+                f"Sync attachment binding cannot target a {blob_row['status']} blob"
+            )
+        blob_available = blob_row is not None and blob_row.get("status") == "available"
+        binding = SyncAttachmentRevisionBindingCreate(
+            dataset_id=envelope.dataset_id,
+            attachment_id=attachment_id,
+            attachment_revision=envelope.object_revision,
+            blob_hash=blob_hash,
+            size_bytes=size_value,
+            establishing_server_cursor=envelope.server_cursor,
+            availability_at_acceptance=(
+                "available" if blob_available else "metadata_only"
+            ),
+            resolved_blob_id=(None if not blob_available else str(blob_row["blob_id"])),
+        )
+        return self._create_attachment_revision_binding(
+            binding,
+            connection=connection,
+        )
+
+    @staticmethod
+    def _binding_identity_matches(
+        row: Mapping[str, Any],
+        binding: SyncAttachmentRevisionBindingCreate,
+    ) -> bool:
+        return (
+            row.get("dataset_id") == binding.dataset_id
+            and row.get("attachment_id") == binding.attachment_id
+            and int(row.get("attachment_revision") or 0)
+            == binding.attachment_revision
+            and row.get("blob_hash") == binding.blob_hash
+            and int(row.get("size_bytes") or 0) == binding.size_bytes
+            and int(row.get("establishing_server_cursor") or 0)
+            == binding.establishing_server_cursor
+            and row.get("availability_at_acceptance")
+            == binding.availability_at_acceptance
+        )
+
+    def _create_attachment_revision_binding(
+        self,
+        binding: SyncAttachmentRevisionBindingCreate,
+        *,
+        connection: Any,
+    ) -> SyncAttachmentRevisionBinding:
+        if binding.resolved_blob_id is not None:
+            self._require_exact_available_blob_for_binding(
+                binding,
+                binding.resolved_blob_id,
+                connection=connection,
+            )
+        self.execute(
+            """
+            INSERT INTO sync_attachment_revision_bindings (
+                dataset_id, attachment_id, attachment_revision, blob_hash,
+                size_bytes, establishing_server_cursor,
+                availability_at_acceptance, resolved_blob_id,
+                retention_released_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+            ON CONFLICT (dataset_id, attachment_id, attachment_revision) DO NOTHING
+            """,
+            (
+                binding.dataset_id,
+                binding.attachment_id,
+                binding.attachment_revision,
+                binding.blob_hash,
+                binding.size_bytes,
+                binding.establishing_server_cursor,
+                binding.availability_at_acceptance,
+                binding.resolved_blob_id,
+                utcnow_iso(),
+            ),
+            connection=connection,
+        )
+        row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_attachment_revision_bindings
+                 WHERE dataset_id = ? AND attachment_id = ?
+                   AND attachment_revision = ?
+                """,
+                (
+                    binding.dataset_id,
+                    binding.attachment_id,
+                    binding.attachment_revision,
+                ),
+                connection=connection,
+            )
+        )
+        if row is None:
+            raise SyncStoreError(
+                "Sync attachment binding insert did not produce a retrievable record"
+            )
+        if not self._binding_identity_matches(row, binding):
+            raise SyncIdempotencyConflictError(
+                "Sync attachment revision identity was reused with different content"
+            )
+        if (
+            binding.resolved_blob_id is not None
+            and row.get("resolved_blob_id") != binding.resolved_blob_id
+        ):
+            raise SyncStoreError("Sync attachment binding cannot be rebound")
+        return _attachment_revision_binding_from_row(row)
+
+    def get_attachment_revision_binding(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        attachment_revision: int,
+        *,
+        owner_user_id: str,
+        connection: Any | None = None,
+    ) -> SyncAttachmentRevisionBinding | None:
+        """Return one dataset-scoped immutable attachment revision binding."""
+
+        with self.backend.transaction(connection) as conn:
+            self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_attachment_revision_bindings
+                     WHERE dataset_id = ? AND attachment_id = ?
+                       AND attachment_revision = ?
+                    """,
+                    (dataset_id, attachment_id, attachment_revision),
+                    connection=conn,
+                )
+            )
+        return None if row is None else _attachment_revision_binding_from_row(row)
+
+    def get_attachment_revision_binding_for_blob(
+        self,
+        dataset_id: str,
+        blob_id: str,
+        *,
+        owner_user_id: str,
+        connection: Any | None = None,
+    ) -> SyncAttachmentRevisionBinding | None:
+        """Return the immutable revision binding that resolved to one blob ID."""
+
+        with self.backend.transaction(connection) as conn:
+            self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            rows = self.execute(
+                """
+                SELECT * FROM sync_attachment_revision_bindings
+                 WHERE dataset_id = ? AND resolved_blob_id = ?
+                 ORDER BY establishing_server_cursor DESC
+                 LIMIT 1
+                """,
+                (dataset_id, blob_id),
+                connection=conn,
+            ).rows
+        return None if not rows else _attachment_revision_binding_from_row(rows[0])
+
+    def list_attachment_revision_bindings_for_blob(
+        self,
+        dataset_id: str,
+        blob_id: str,
+        *,
+        owner_user_id: str,
+        after_establishing_server_cursor: int = 0,
+        after_attachment_id: str = "",
+        after_attachment_revision: int = 0,
+        limit: int = 1000,
+        connection: Any | None = None,
+    ) -> list[SyncAttachmentRevisionBinding]:
+        """Return one bounded keyset page of unreleased bindings for a blob."""
+
+        if isinstance(limit, bool) or limit < 1:
+            raise SyncStoreError("Sync attachment binding page limit must be positive")
+        page_limit = min(limit, 1000)
+        with self.backend.transaction(connection) as conn:
+            self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            rows = self.execute(
+                """
+                SELECT * FROM sync_attachment_revision_bindings
+                 WHERE dataset_id = ? AND resolved_blob_id = ?
+                   AND retention_released_at IS NULL
+                   AND (establishing_server_cursor, attachment_id,
+                        attachment_revision) > (?, ?, ?)
+                 ORDER BY establishing_server_cursor, attachment_id,
+                          attachment_revision
+                 LIMIT ?
+                """,
+                (
+                    dataset_id,
+                    blob_id,
+                    after_establishing_server_cursor,
+                    after_attachment_id,
+                    after_attachment_revision,
+                    page_limit,
+                ),
+                connection=conn,
+            ).rows
+        return [_attachment_revision_binding_from_row(row) for row in rows]
+
+    def list_unreleased_attachment_revision_bindings(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        after_establishing_server_cursor: int = 0,
+        after_attachment_id: str = "",
+        after_attachment_revision: int = 0,
+        limit: int = 1000,
+        connection: Any | None = None,
+    ) -> list[SyncAttachmentRevisionBinding]:
+        """Return one bounded keyset page of unreleased dataset bindings."""
+
+        if isinstance(limit, bool) or limit < 1:
+            raise SyncStoreError("Sync attachment binding page limit must be positive")
+        page_limit = min(limit, 1000)
+        with self.backend.transaction(connection) as conn:
+            self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            rows = self.execute(
+                """
+                SELECT binding.* FROM sync_attachment_revision_bindings AS binding
+                 WHERE binding.dataset_id = ?
+                   AND binding.retention_released_at IS NULL
+                   AND NOT EXISTS (
+                        SELECT 1
+                          FROM sync_current_heads AS head
+                          JOIN sync_envelopes AS envelope
+                            ON envelope.server_sequence = head.latest_server_cursor
+                         WHERE head.dataset_id = binding.dataset_id
+                           AND head.domain = 'attachment.ref'
+                           AND head.object_id = binding.attachment_id
+                           AND envelope.adapter_version = 2
+                           AND envelope.object_revision = binding.attachment_revision
+                           AND envelope.operation <> 'tombstone'
+                   )
+                   AND (binding.establishing_server_cursor, binding.attachment_id,
+                        binding.attachment_revision) > (?, ?, ?)
+                 ORDER BY binding.establishing_server_cursor, binding.attachment_id,
+                          binding.attachment_revision
+                 LIMIT ?
+                """,
+                (
+                    dataset_id,
+                    after_establishing_server_cursor,
+                    after_attachment_id,
+                    after_attachment_revision,
+                    page_limit,
+                ),
+                connection=conn,
+            ).rows
+        return [_attachment_revision_binding_from_row(row) for row in rows]
+
+    def has_attachment_ref_v2_history(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        *,
+        owner_user_id: str,
+        connection: Any | None = None,
+    ) -> bool:
+        """Return whether an attachment identity has accepted adapter-v2 history."""
+
+        with self.backend.transaction(connection) as conn:
+            self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT 1 FROM sync_envelopes
+                     WHERE dataset_id = ?
+                       AND domain = 'attachment.ref'
+                       AND entity_id = ?
+                       AND adapter_version = 2
+                       AND status = 'accepted'
+                     LIMIT 1
+                    """,
+                    (dataset_id, attachment_id),
+                    connection=conn,
+                )
+            )
+        return row is not None
+
+    def list_unresolved_attachment_revision_bindings(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        after_establishing_server_cursor: int = 0,
+        limit: int = 1000,
+    ) -> list[SyncAttachmentRevisionBinding]:
+        """Return one bounded keyset page of unreleased unresolved bindings."""
+
+        if isinstance(limit, bool) or limit < 1:
+            raise SyncStoreError("Sync attachment binding page limit must be positive")
+        page_limit = min(limit, 1000)
+        with self.backend.transaction() as conn:
+            self._require_attachment_binding_dataset_owner(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            rows = self.execute(
+                """
+                SELECT * FROM sync_attachment_revision_bindings
+                 WHERE dataset_id = ?
+                   AND resolved_blob_id IS NULL
+                   AND retention_released_at IS NULL
+                   AND establishing_server_cursor > ?
+                 ORDER BY establishing_server_cursor, attachment_id,
+                          attachment_revision
+                 LIMIT ?
+                """,
+                (dataset_id, after_establishing_server_cursor, page_limit),
+                connection=conn,
+            ).rows
+        return [_attachment_revision_binding_from_row(row) for row in rows]
+
+    def _require_exact_available_blob_for_binding(
+        self,
+        binding: SyncAttachmentRevisionBindingCreate | SyncAttachmentRevisionBinding,
+        blob_id: str,
+        *,
+        connection: Any,
+    ) -> dict[str, Any]:
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        row = _first(
+            self.execute(
+                """
+                SELECT blob.*
+                  FROM sync_blob_objects AS blob
+                  JOIN sync_datasets AS dataset
+                    ON dataset.dataset_id = blob.dataset_id
+                 WHERE blob.dataset_id = ? AND blob.blob_id = ?
+                   AND (
+                        dataset.scope_type = 'workspace'
+                        OR blob.owner_user_id = dataset.owner_user_id
+                   )
+                """
+                + suffix,  # nosec B608 - backend-controlled row lock suffix.
+                (binding.dataset_id, blob_id),
+                connection=connection,
+            )
+        )
+        if (
+            row is None
+            or row.get("status") != "available"
+            or row.get("payload_hash") != binding.blob_hash
+            or int(row.get("size_bytes") or 0) != binding.size_bytes
+        ):
+            raise SyncStoreError(
+                "Sync attachment binding requires an exact available blob"
+            )
+        return row
+
+    def resolve_attachment_revision_binding(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        attachment_revision: int,
+        *,
+        blob_id: str,
+        owner_user_id: str,
+    ) -> SyncAttachmentRevisionBinding:
+        """CAS one pending binding to one exact verified blob ID."""
+
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        with self.backend.transaction() as conn:
+            self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_attachment_revision_bindings
+                     WHERE dataset_id = ? AND attachment_id = ?
+                       AND attachment_revision = ?
+                    """
+                    + suffix,  # nosec B608 - backend-controlled row lock suffix.
+                    (dataset_id, attachment_id, attachment_revision),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncStoreError("Sync attachment binding was not found")
+            binding = _attachment_revision_binding_from_row(row)
+            if binding.resolved_blob_id is not None:
+                if binding.resolved_blob_id != blob_id:
+                    raise SyncStoreError("Sync attachment binding cannot be rebound")
+                return binding
+            if binding.retention_released_at is not None:
+                raise SyncStoreError("Sync attachment binding retention was released")
+            self._require_exact_available_blob_for_binding(
+                binding,
+                blob_id,
+                connection=conn,
+            )
+            updated = self.execute(
+                """
+                UPDATE sync_attachment_revision_bindings
+                   SET resolved_blob_id = ?
+                 WHERE dataset_id = ? AND attachment_id = ?
+                   AND attachment_revision = ? AND resolved_blob_id IS NULL
+                   AND retention_released_at IS NULL
+                """,
+                (
+                    blob_id,
+                    dataset_id,
+                    attachment_id,
+                    attachment_revision,
+                ),
+                connection=conn,
+            )
+            if updated.rowcount != 1:
+                raise SyncStoreError("Sync attachment binding resolution CAS failed")
+            resolved_row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_attachment_revision_bindings
+                     WHERE dataset_id = ? AND attachment_id = ?
+                       AND attachment_revision = ?
+                    """,
+                    (dataset_id, attachment_id, attachment_revision),
+                    connection=conn,
+                )
+            )
+        if resolved_row is None:
+            raise SyncStoreError("Sync attachment binding resolution was not durable")
+        return _attachment_revision_binding_from_row(resolved_row)
+
+    def release_attachment_revision_binding(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        attachment_revision: int,
+        *,
+        released_at: str,
+        owner_user_id: str,
+        connection: Any | None = None,
+    ) -> SyncAttachmentRevisionBinding:
+        """Set the retention-release marker once without erasing audit identity."""
+
+        if not released_at.strip():
+            raise SyncStoreError("Sync attachment binding release timestamp is required")
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        with self.backend.transaction(connection) as conn:
+            self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_attachment_revision_bindings
+                     WHERE dataset_id = ? AND attachment_id = ?
+                       AND attachment_revision = ?
+                    """
+                    + suffix,  # nosec B608 - backend-controlled row lock suffix.
+                    (dataset_id, attachment_id, attachment_revision),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncStoreError("Sync attachment binding was not found")
+            if row.get("retention_released_at") is None:
+                self.execute(
+                    """
+                    UPDATE sync_attachment_revision_bindings
+                       SET retention_released_at = ?
+                     WHERE dataset_id = ? AND attachment_id = ?
+                       AND attachment_revision = ?
+                       AND retention_released_at IS NULL
+                    """,
+                    (released_at, dataset_id, attachment_id, attachment_revision),
+                    connection=conn,
+                )
+                row = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_attachment_revision_bindings
+                         WHERE dataset_id = ? AND attachment_id = ?
+                           AND attachment_revision = ?
+                        """,
+                        (dataset_id, attachment_id, attachment_revision),
+                        connection=conn,
+                    )
+                )
+        if row is None:
+            raise SyncStoreError("Sync attachment binding release was not durable")
+        return _attachment_revision_binding_from_row(row)
+
+    def get_or_create_storage_namespace(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncDatasetStorageNamespace:
+        """Return one server-issued opaque namespace under dataset owner authority."""
+
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        with self.backend.transaction() as conn:
+            self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_dataset_storage_namespaces
+                     WHERE dataset_id = ? AND owner_user_id = ?
+                    """
+                    + suffix,  # nosec B608 - backend-controlled row lock suffix.
+                    (dataset_id, owner_user_id),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                self.execute(
+                    """
+                    INSERT INTO sync_dataset_storage_namespaces (
+                        dataset_id, owner_user_id, storage_namespace_id, created_at
+                    ) VALUES (?, ?, ?, ?)
+                    ON CONFLICT (dataset_id) DO NOTHING
+                    """,
+                    (dataset_id, owner_user_id, uuid4().hex, utcnow_iso()),
+                    connection=conn,
+                )
+                row = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_dataset_storage_namespaces
+                         WHERE dataset_id = ? AND owner_user_id = ?
+                        """,
+                        (dataset_id, owner_user_id),
+                        connection=conn,
+                    )
+                )
+        if row is None:
+            raise SyncStoreError("Sync dataset storage namespace could not be resolved")
+        return _storage_namespace_from_row(row)
+
+    def get_storage_namespace(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        connection: Any | None = None,
+    ) -> SyncDatasetStorageNamespace | None:
+        """Return the existing opaque namespace under exact owner authority."""
+
+        with self.backend.transaction(connection) as conn:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT namespace.*
+                      FROM sync_dataset_storage_namespaces AS namespace
+                      JOIN sync_datasets AS dataset
+                        ON dataset.dataset_id = namespace.dataset_id
+                     WHERE namespace.dataset_id = ?
+                       AND namespace.owner_user_id = ?
+                       AND dataset.owner_user_id = ?
+                    """,
+                    (dataset_id, owner_user_id, owner_user_id),
+                    connection=conn,
+                )
+            )
+        return None if row is None else _storage_namespace_from_row(row)
+
+    def _resolve_pending_bindings_for_blob(
+        self,
+        blob_row: Mapping[str, Any],
+        *,
+        connection: Any,
+    ) -> None:
+        if blob_row.get("status") != "available":
+            return
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        authoritative_blob = _first(
+            self.execute(
+                """
+                SELECT blob.*
+                  FROM sync_blob_objects AS blob
+                  JOIN sync_datasets AS dataset
+                    ON dataset.dataset_id = blob.dataset_id
+                 WHERE blob.dataset_id = ? AND blob.blob_id = ?
+                   AND blob.status = 'available'
+                   AND (
+                        dataset.scope_type = 'workspace'
+                        OR blob.owner_user_id = dataset.owner_user_id
+                   )
+                """
+                + suffix,  # nosec B608 - backend-controlled row lock suffix.
+                (blob_row["dataset_id"], blob_row["blob_id"]),
+                connection=connection,
+            )
+        )
+        if authoritative_blob is None:
+            raise SyncStoreError("Sync blob is unavailable under dataset owner authority")
+        blob_row = authoritative_blob
+        match_params = (
+            blob_row["dataset_id"],
+            blob_row["payload_hash"],
+            int(blob_row["size_bytes"]),
+        )
+        current_rows = self.execute(
+            """
+            SELECT dataset_id, attachment_id, attachment_revision
+              FROM sync_attachment_revision_bindings
+             WHERE dataset_id = ? AND blob_hash = ? AND size_bytes = ?
+               AND resolved_blob_id IS NULL AND retention_released_at IS NULL
+               AND EXISTS (
+                    SELECT 1 FROM sync_current_heads AS head
+                     WHERE head.dataset_id =
+                               sync_attachment_revision_bindings.dataset_id
+                       AND head.domain = 'attachment.ref'
+                       AND head.object_id =
+                               sync_attachment_revision_bindings.attachment_id
+                       AND head.latest_server_cursor =
+                               sync_attachment_revision_bindings.establishing_server_cursor
+               )
+             ORDER BY establishing_server_cursor, attachment_id, attachment_revision
+             LIMIT 1000
+            """,
+            match_params,
+            connection=connection,
+        ).rows
+        historical_rows = self.execute(
+            """
+            SELECT dataset_id, attachment_id, attachment_revision
+              FROM sync_attachment_revision_bindings
+             WHERE dataset_id = ? AND blob_hash = ? AND size_bytes = ?
+               AND resolved_blob_id IS NULL AND retention_released_at IS NULL
+               AND NOT EXISTS (
+                    SELECT 1 FROM sync_current_heads AS head
+                     WHERE head.dataset_id =
+                               sync_attachment_revision_bindings.dataset_id
+                       AND head.domain = 'attachment.ref'
+                       AND head.object_id =
+                               sync_attachment_revision_bindings.attachment_id
+                       AND head.latest_server_cursor =
+                               sync_attachment_revision_bindings.establishing_server_cursor
+               )
+             ORDER BY establishing_server_cursor, attachment_id, attachment_revision
+             LIMIT 1000
+            """,
+            match_params,
+            connection=connection,
+        ).rows
+        for row in (*current_rows, *historical_rows):
+            self.execute(
+                """
+                UPDATE sync_attachment_revision_bindings
+                   SET resolved_blob_id = ?
+                 WHERE dataset_id = ? AND attachment_id = ?
+                   AND attachment_revision = ? AND resolved_blob_id IS NULL
+                   AND retention_released_at IS NULL
+                   AND blob_hash = ? AND size_bytes = ?
+                """,
+                (
+                    blob_row["blob_id"],
+                    row["dataset_id"],
+                    row["attachment_id"],
+                    row["attachment_revision"],
+                    blob_row["payload_hash"],
+                    int(blob_row["size_bytes"]),
+                ),
+                connection=connection,
+            )
+
+    def relocate_legacy_blob(
+        self,
+        blob_store: Any,
+        *,
+        dataset_id: str,
+        owner_user_id: str,
+        blob_id: str,
+    ) -> SyncBlobObject:
+        """Verify and relocate one legacy global object under its dataset namespace."""
+
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        with self.backend.transaction() as conn:
+            self._require_dataset_owner_for_update(
+                dataset_id,
+                owner_user_id,
+                connection=conn,
+            )
+            namespace_row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_dataset_storage_namespaces
+                     WHERE dataset_id = ? AND owner_user_id = ?
+                    """
+                    + suffix,  # nosec B608 - backend-controlled row lock suffix.
+                    (dataset_id, owner_user_id),
+                    connection=conn,
+                )
+            )
+            if namespace_row is None:
+                self.execute(
+                    """
+                    INSERT INTO sync_dataset_storage_namespaces (
+                        dataset_id, owner_user_id, storage_namespace_id, created_at
+                    ) VALUES (?, ?, ?, ?)
+                    ON CONFLICT (dataset_id) DO NOTHING
+                    """,
+                    (dataset_id, owner_user_id, uuid4().hex, utcnow_iso()),
+                    connection=conn,
+                )
+                namespace_row = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_dataset_storage_namespaces
+                         WHERE dataset_id = ? AND owner_user_id = ?
+                        """,
+                        (dataset_id, owner_user_id),
+                        connection=conn,
+                    )
+                )
+            if namespace_row is None:
+                raise SyncStoreError("Sync dataset storage namespace could not be resolved")
+            blob_row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_blob_objects
+                     WHERE dataset_id = ? AND owner_user_id = ? AND blob_id = ?
+                    """
+                    + suffix,  # nosec B608 - backend-controlled row lock suffix.
+                    (dataset_id, owner_user_id, blob_id),
+                    connection=conn,
+                )
+            )
+            if (
+                blob_row is None
+                or blob_row.get("status") != "available"
+                or blob_row.get("storage_backend") != "local_fs"
+            ):
+                raise SyncStoreError("Sync legacy blob relocation target is unavailable")
+            expected_key = blob_store.namespace_storage_key(
+                namespace_row["storage_namespace_id"],
+                blob_row["payload_hash"],
+            )
+            if blob_row["storage_key"] == expected_key:
+                blob_store.verify_blob(
+                    expected_key,
+                    payload_hash=blob_row["payload_hash"],
+                    expected_size=int(blob_row["size_bytes"]),
+                )
+            else:
+                legacy_key = blob_store.legacy_storage_key(blob_row["payload_hash"])
+                if blob_row["storage_key"] != legacy_key:
+                    raise SyncStoreError("Sync legacy blob storage key is not relocatable")
+                relocated_key = blob_store.relocate_legacy_blob(
+                    legacy_storage_key=legacy_key,
+                    storage_namespace_id=namespace_row["storage_namespace_id"],
+                    payload_hash=blob_row["payload_hash"],
+                    expected_size=int(blob_row["size_bytes"]),
+                )
+                updated = self.execute(
+                    """
+                    UPDATE sync_blob_objects
+                       SET storage_key = ?, updated_at = ?
+                     WHERE dataset_id = ? AND blob_id = ? AND storage_key = ?
+                       AND status = 'available'
+                    """,
+                    (
+                        relocated_key,
+                        utcnow_iso(),
+                        dataset_id,
+                        blob_id,
+                        legacy_key,
+                    ),
+                    connection=conn,
+                )
+                if updated.rowcount != 1:
+                    raise SyncStoreError("Sync legacy blob relocation CAS failed")
+                blob_row = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_blob_objects
+                         WHERE dataset_id = ? AND blob_id = ?
+                        """,
+                        (dataset_id, blob_id),
+                        connection=conn,
+                    )
+                )
+                if blob_row is None or blob_row.get("storage_key") != relocated_key:
+                    raise SyncStoreError("Sync legacy blob relocation was not durable")
+            self._resolve_pending_bindings_for_blob(blob_row, connection=conn)
+        return _blob_object_from_row(dict(blob_row))
+
     def create_blob_upload_session(
         self,
         session: SyncBlobUploadSessionCreate,
@@ -4252,10 +11843,18 @@ class SyncDatabase:
                     self.execute(
                         """
                         SELECT * FROM sync_blob_upload_sessions
-                         WHERE dataset_id = ? AND device_id = ? AND idempotency_key = ?
+                         WHERE dataset_id = ?
+                           AND owner_user_id = ?
+                           AND (
+                                device_id = ?
+                                OR (device_id IS NULL AND ? IS NULL)
+                           )
+                           AND idempotency_key = ?
                         """,
                         (
                             session.dataset_id,
+                            session.owner_user_id,
+                            session.device_id,
                             session.device_id,
                             session.idempotency_key,
                         ),
@@ -4480,12 +12079,68 @@ class SyncDatabase:
                 raise SyncStoreError("Sync blob chunk insert did not produce a retrievable record")
             return _blob_chunk_from_row(row)
 
-    def complete_blob_upload(self, blob: SyncBlobObjectCreate) -> SyncBlobObject:
+    def require_blob_upload_completion_allowed(
+        self,
+        blob: SyncBlobObjectCreate,
+        *,
+        connection: Any,
+    ) -> None:
+        """Reject storage publication after a fence or metadata conflict."""
+
+        row = _first(
+            self.execute(
+                """
+                SELECT blob.*
+                  FROM sync_blob_objects AS blob
+                  JOIN sync_datasets AS dataset
+                    ON dataset.dataset_id = blob.dataset_id
+                 WHERE blob.dataset_id = ? AND blob.payload_hash = ?
+                   AND (
+                        dataset.scope_type = 'workspace'
+                        OR blob.owner_user_id = ?
+                   )
+                """,
+                (blob.dataset_id, blob.payload_hash, blob.owner_user_id),
+                connection=connection,
+            )
+        )
+        if row is None:
+            return
+        existing_status = str(row.get("status"))
+        if existing_status == "deleting":
+            raise SyncStoreError("Sync blob is deleting")
+        if existing_status not in {"available", "deleted"}:
+            raise SyncStoreError("Sync blob is not available for upload completion")
+        existing_fingerprint = _blob_object_fingerprint_from_row(row)
+        requested_fingerprint = _blob_object_fingerprint_from_create(blob)
+        existing_fingerprint.pop("status")
+        requested_fingerprint.pop("status")
+        if existing_fingerprint != requested_fingerprint:
+            raise SyncIdempotencyConflictError(
+                "Sync blob payload hash was reused with different metadata"
+            )
+
+    def complete_blob_upload(
+        self,
+        blob: SyncBlobObjectCreate,
+        *,
+        connection: Any | None = None,
+    ) -> SyncBlobObject:
         """Commit a verified blob and deduplicate by dataset plus payload hash."""
 
+        if blob.status != "available":
+            raise SyncStoreError("Sync blob upload completion must become available")
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
-            dataset_row = self._require_dataset(blob.dataset_id, connection=conn)
+        suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        with self.backend.transaction(connection) as conn:
+            dataset_row = self._get_dataset_row_for_update(
+                blob.dataset_id,
+                connection=conn,
+            )
+            if dataset_row is None:
+                raise SyncDatasetNotFoundError(
+                    f"Sync dataset not found: {blob.dataset_id}"
+                )
             if (
                 str(dataset_row["scope_type"]) != "workspace"
                 and str(dataset_row["owner_user_id"]) != str(blob.owner_user_id)
@@ -4532,19 +12187,60 @@ class SyncDatabase:
             row = _first(
                 self.execute(
                     """
-                    SELECT * FROM sync_blob_objects
-                     WHERE dataset_id = ? AND payload_hash = ?
-                    """,
+                    SELECT blob.*
+                      FROM sync_blob_objects AS blob
+                      JOIN sync_datasets AS dataset
+                        ON dataset.dataset_id = blob.dataset_id
+                     WHERE blob.dataset_id = ? AND blob.payload_hash = ?
+                       AND (
+                            dataset.scope_type = 'workspace'
+                            OR blob.owner_user_id = dataset.owner_user_id
+                       )
+                    """
+                    + suffix,  # nosec B608 - backend-controlled row lock suffix.
                     (blob.dataset_id, blob.payload_hash),
                     connection=conn,
                 )
             )
             if row is None:
-                raise SyncStoreError("Sync blob object insert did not produce a retrievable record")
-            if _blob_object_fingerprint_from_row(row) != _blob_object_fingerprint_from_create(blob):
+                raise SyncStoreError(
+                    "Sync blob is unavailable under dataset owner authority"
+                )
+            existing_fingerprint = _blob_object_fingerprint_from_row(row)
+            requested_fingerprint = _blob_object_fingerprint_from_create(blob)
+            existing_status = str(existing_fingerprint.pop("status"))
+            requested_fingerprint.pop("status")
+            if existing_status == "deleting":
+                raise SyncStoreError("Sync blob is deleting")
+            if existing_fingerprint != requested_fingerprint:
                 raise SyncIdempotencyConflictError(
                     "Sync blob payload hash was reused with different metadata"
                 )
+            if existing_status == "deleted":
+                self.execute(
+                    """
+                    UPDATE sync_blob_objects
+                       SET status = 'available', deleted_at = NULL, updated_at = ?
+                     WHERE dataset_id = ? AND blob_id = ? AND status = 'deleted'
+                    """,
+                    (now, blob.dataset_id, row["blob_id"]),
+                    connection=conn,
+                )
+                row = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_blob_objects
+                         WHERE dataset_id = ? AND blob_id = ?
+                        """,
+                        (blob.dataset_id, row["blob_id"]),
+                        connection=conn,
+                    )
+                )
+                if row is None or row["status"] != "available":
+                    raise SyncStoreError("Sync blob repair did not become available")
+            elif existing_status != "available":
+                raise SyncStoreError("Sync blob is not available for upload completion")
+            self._resolve_pending_bindings_for_blob(row, connection=conn)
             if session is not None:
                 self.execute(
                     """
@@ -4565,51 +12261,104 @@ class SyncDatabase:
         blob_id: str | None = None,
         payload_hash: str | None = None,
         owner_user_id: str | None = None,
+        include_unavailable: bool = False,
+        connection: Any | None = None,
+        for_update: bool = False,
     ) -> SyncBlobObject | None:
         """Return an available blob object scoped by dataset and optional identity filters."""
 
-        self._require_dataset(dataset_id)
-        row = _first(
-            self.execute(
-                """
-                SELECT *
-                  FROM sync_blob_objects
-                 WHERE dataset_id = ?
-                   AND status = 'available'
-                   AND (? IS NULL OR owner_user_id = ?)
-                   AND (? IS NULL OR blob_id = ?)
-                   AND (? IS NULL OR payload_hash = ?)
-                   AND (
-                        ? IS NULL
-                        OR attachment_id = ?
-                        OR payload_hash IN (
-                            SELECT payload_hash
-                              FROM sync_attachments
-                             WHERE dataset_id = ?
-                               AND attachment_id = ?
-                        )
-                   )
-                 ORDER BY updated_at DESC, blob_id ASC
-                 LIMIT 1
-                """,
-                (
-                    dataset_id,
-                    owner_user_id,
-                    owner_user_id,
-                    blob_id,
-                    blob_id,
-                    payload_hash,
-                    payload_hash,
-                    attachment_id,
-                    attachment_id,
-                    dataset_id,
-                    attachment_id,
-                ),
-            )
+        suffix = (
+            " FOR UPDATE"
+            if for_update and self.backend_type == BackendType.POSTGRESQL
+            else ""
         )
+        with self.backend.transaction(connection) as conn:
+            self._require_dataset(dataset_id, connection=conn)
+            row = _first(
+                self.execute(
+                    """
+                    SELECT *
+                      FROM sync_blob_objects
+                     WHERE dataset_id = ?
+                       AND (? = 1 OR status = 'available')
+                       AND (? IS NULL OR owner_user_id = ?)
+                       AND (? IS NULL OR blob_id = ?)
+                       AND (? IS NULL OR payload_hash = ?)
+                       AND (
+                            ? IS NULL
+                            OR attachment_id = ?
+                            OR payload_hash IN (
+                                SELECT payload_hash
+                                  FROM sync_attachments
+                                 WHERE dataset_id = ?
+                                   AND attachment_id = ?
+                            )
+                       )
+                     ORDER BY updated_at DESC, blob_id ASC
+                     LIMIT 1
+                    """
+                    + suffix,  # nosec B608 - backend-controlled row lock suffix.
+                    (
+                        dataset_id,
+                        1 if include_unavailable else 0,
+                        owner_user_id,
+                        owner_user_id,
+                        blob_id,
+                        blob_id,
+                        payload_hash,
+                        payload_hash,
+                        attachment_id,
+                        attachment_id,
+                        dataset_id,
+                        attachment_id,
+                    ),
+                    connection=conn,
+                )
+            )
         if row is None:
             return None
         return _blob_object_from_row(row)
+
+    def list_blob_availability_by_hashes(
+        self,
+        dataset_id: str,
+        payload_hashes: Sequence[str],
+        *,
+        owner_user_id: str,
+        connection: Any | None = None,
+    ) -> dict[str, SyncBlobAvailabilityStatus]:
+        """Return one bounded owner-scoped availability map without exposing storage."""
+
+        unique_hashes = list(dict.fromkeys(payload_hashes))
+        if len(unique_hashes) > 200:
+            raise SyncStoreError("Sync blob availability query exceeds its boundary")
+        if not unique_hashes:
+            return {}
+        for payload_hash in unique_hashes:
+            digest = payload_hash.removeprefix("sha256:")
+            if (
+                not payload_hash.startswith("sha256:")
+                or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)
+            ):
+                raise SyncStoreError("payload_hash must be a canonical SHA-256 digest")
+        placeholders = ",".join("?" for _ in unique_hashes)
+        with self.backend.transaction(connection) as conn:
+            self._require_dataset(dataset_id, connection=conn)
+            rows = self.execute(
+                "SELECT payload_hash, status FROM sync_blob_objects "
+                "WHERE dataset_id = ? AND owner_user_id = ? "
+                f"AND payload_hash IN ({placeholders})",  # nosec B608 - placeholders only.
+                (dataset_id, owner_user_id, *unique_hashes),
+                connection=conn,
+            )
+        return {
+            str(row["payload_hash"]): typing.cast(
+                SyncBlobAvailabilityStatus,
+                row["status"],
+            )
+            for row in rows
+        }
 
     def list_blob_objects_for_dataset(
         self,
@@ -4632,42 +12381,110 @@ class SyncDatabase:
         ).rows
         return [_blob_object_from_row(row) for row in rows]
 
-    def mark_blob_object_deleted(
+    def list_blob_objects_for_dataset_page(
+        self,
+        dataset_id: str,
+        *,
+        status: str = "available",
+        after_updated_at: str | None = None,
+        after_blob_id: str | None = None,
+        limit: int = 1000,
+        connection: Any | None = None,
+    ) -> list[SyncBlobObject]:
+        """Return one capped keyset page of blob metadata."""
+
+        if isinstance(limit, bool) or limit < 1:
+            raise SyncStoreError("Sync blob page limit must be positive")
+        if (after_updated_at is None) != (after_blob_id is None):
+            raise SyncStoreError("Sync blob page cursor is incomplete")
+        page_limit = min(limit, 1000)
+        params: list[Any] = [dataset_id, status]
+        if after_updated_at is not None and after_blob_id is not None:
+            query = """
+                SELECT * FROM sync_blob_objects
+                 WHERE dataset_id = ? AND status = ?
+                   AND (updated_at, blob_id) > (?, ?)
+                 ORDER BY updated_at, blob_id LIMIT ?
+            """
+            params.extend((after_updated_at, after_blob_id))
+        else:
+            query = """
+                SELECT * FROM sync_blob_objects
+                 WHERE dataset_id = ? AND status = ?
+                 ORDER BY updated_at, blob_id LIMIT ?
+            """
+        params.append(page_limit)
+        with self.backend.transaction(connection) as conn:
+            self._require_dataset(dataset_id, connection=conn)
+            rows = self.execute(
+                query,
+                tuple(params),
+                connection=conn,
+            ).rows
+        return [_blob_object_from_row(row) for row in rows]
+
+    def fence_blob_object_deleting(
         self,
         dataset_id: str,
         blob_id: str,
+        *,
+        connection: Any,
     ) -> SyncBlobObject | None:
-        """Soft-delete available blob metadata without removing blob bytes."""
+        """Durably fence one available blob before physical deletion."""
 
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
+        self.execute(
+            """
+            UPDATE sync_blob_objects
+               SET status = 'deleting', updated_at = ?
+             WHERE dataset_id = ? AND blob_id = ?
+               AND status = 'available' AND deleted_at IS NULL
+            """,
+            (now, dataset_id, blob_id),
+            connection=connection,
+        )
+        row = _first(
             self.execute(
                 """
-                UPDATE sync_blob_objects
-                   SET status = 'deleted',
-                       deleted_at = ?
-                 WHERE dataset_id = ?
-                   AND blob_id = ?
-                   AND status = 'available'
-                   AND deleted_at IS NULL
+                SELECT * FROM sync_blob_objects
+                 WHERE dataset_id = ? AND blob_id = ?
                 """,
-                (now, dataset_id, blob_id),
-                connection=conn,
+                (dataset_id, blob_id),
+                connection=connection,
             )
-            row = _first(
-                self.execute(
-                    """
-                    SELECT *
-                      FROM sync_blob_objects
-                     WHERE dataset_id = ? AND blob_id = ?
-                    """,
-                    (dataset_id, blob_id),
-                    connection=conn,
-                )
+        )
+        return None if row is None else _blob_object_from_row(row)
+
+    def finalize_blob_object_deleted(
+        self,
+        dataset_id: str,
+        blob_id: str,
+        *,
+        connection: Any,
+    ) -> SyncBlobObject | None:
+        """Finalize a physically absent fenced blob as deleted."""
+
+        now = utcnow_iso()
+        self.execute(
+            """
+            UPDATE sync_blob_objects
+               SET status = 'deleted', deleted_at = ?, updated_at = ?
+             WHERE dataset_id = ? AND blob_id = ? AND status = 'deleting'
+            """,
+            (now, now, dataset_id, blob_id),
+            connection=connection,
+        )
+        row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_blob_objects
+                 WHERE dataset_id = ? AND blob_id = ?
+                """,
+                (dataset_id, blob_id),
+                connection=connection,
             )
-        if row is None:
-            return None
-        return _blob_object_from_row(row)
+        )
+        return None if row is None else _blob_object_from_row(row)
 
     def get_domain_compaction_sequence(
         self,
@@ -4696,12 +12513,25 @@ class SyncDatabase:
         through_server_sequence: int,
         state: Mapping[str, Any],
         adapter_version: int = 1,
+        connection: Any | None = None,
     ) -> int:
         """Record a non-destructive compaction checkpoint for a domain."""
 
         now = utcnow_iso()
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             self._require_dataset_domain(dataset_id, domain, connection=conn)
+            pinned = self.execute(
+                """SELECT 1 FROM sync_envelopes AS envelope
+                    WHERE envelope.dataset_id = ? AND envelope.domain = ? AND envelope.server_sequence <= ?
+                      AND EXISTS (SELECT 1 FROM sync_conflicts AS review
+                          WHERE review.dataset_id = envelope.dataset_id AND review.status = 'unresolved'
+                            AND (review.local_envelope_id = envelope.client_envelope_id
+                              OR review.remote_envelope_id = envelope.client_envelope_id)) LIMIT 1""",
+                (dataset_id, domain, through_server_sequence),
+                connection=conn,
+            ).rows
+            if pinned:
+                raise SyncStoreError("retention_conflict_pinned")
             existing = _first(
                 self.execute(
                     """
@@ -5073,6 +12903,597 @@ class SyncDatabase:
             connection=connection,
         )
 
+    def _migrate_versioned_device_state(self, *, connection: Any) -> None:
+        """Serialize, verify, and complete the additive adapter-state migration."""
+
+        if self.backend_type == BackendType.POSTGRESQL:
+            self.execute(
+                "SELECT pg_advisory_xact_lock(?)",
+                (SYNC_VERSIONED_DEVICE_STATE_MIGRATION_LOCK_KEY,),
+                connection=connection,
+            )
+        completed_type = (
+            "TIMESTAMPTZ" if self.backend_type == BackendType.POSTGRESQL else "TEXT"
+        )
+        self.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS sync_schema_migrations (
+                migration_id TEXT PRIMARY KEY NOT NULL,
+                completed_at {completed_type}
+            )
+            """,  # nosec B608 - backend-selected fixed timestamp type.
+            connection=connection,
+        )
+        self.execute(
+            """
+            INSERT INTO sync_schema_migrations (migration_id, completed_at)
+            VALUES (?, NULL)
+            ON CONFLICT (migration_id) DO NOTHING
+            """,
+            (SYNC_VERSIONED_DEVICE_STATE_MIGRATION_ID,),
+            connection=connection,
+        )
+        lock_suffix = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        marker = _first(
+            self.execute(
+                "SELECT completed_at FROM sync_schema_migrations WHERE migration_id = ?"
+                + lock_suffix,  # nosec B608 - backend-controlled row lock suffix.
+                (SYNC_VERSIONED_DEVICE_STATE_MIGRATION_ID,),
+                connection=connection,
+            )
+        )
+        if marker is None:
+            raise SyncStoreError("Sync adapter-state migration authority is unavailable")
+
+        if marker.get("completed_at") is None:
+            schema = (
+                SYNC_VERSIONED_DEVICE_STATE_POSTGRES_SCHEMA
+                if self.backend_type == BackendType.POSTGRESQL
+                else SYNC_VERSIONED_DEVICE_STATE_SQLITE_SCHEMA
+            )
+            for statement in schema.split(";"):
+                if statement.strip():
+                    self.execute(statement, connection=connection)
+
+        self._verify_versioned_device_state_catalog(connection=connection)
+        self._reconcile_versioned_device_state(connection=connection)
+        if marker.get("completed_at") is None:
+            self.execute(
+                """
+                UPDATE sync_schema_migrations
+                   SET completed_at = ?
+                 WHERE migration_id = ? AND completed_at IS NULL
+                """,
+                (utcnow_iso(), SYNC_VERSIONED_DEVICE_STATE_MIGRATION_ID),
+                connection=connection,
+            )
+
+    def _verify_versioned_device_state_catalog(self, *, connection: Any) -> None:
+        """Fail closed when the three additive side tables differ from the contract."""
+
+        authority_info = self.backend.get_table_info(
+            "sync_schema_migrations",
+            connection=connection,
+        )
+        if [str(column.get("name")) for column in authority_info] != [
+            "migration_id",
+            "completed_at",
+        ] or [str(column.get("type") or "").lower() for column in authority_info] != [
+            "text",
+            (
+                "timestamp with time zone"
+                if self.backend_type == BackendType.POSTGRESQL
+                else "text"
+            ),
+        ] or [bool(column.get("nullable")) for column in authority_info] != [False, True]:
+            raise SyncStoreError("Sync adapter-state migration catalog is incompatible")
+        if self.backend_type == BackendType.POSTGRESQL:
+            authority_pk = _first(
+                self.execute(
+                    """
+                    SELECT string_agg(attribute.attname, ',' ORDER BY keys.ordinality)
+                               AS primary_key_columns
+                      FROM pg_constraint AS constraint_row
+                      JOIN pg_class AS table_row
+                        ON table_row.oid = constraint_row.conrelid
+                      JOIN pg_namespace AS namespace
+                        ON namespace.oid = table_row.relnamespace
+                      JOIN unnest(constraint_row.conkey) WITH ORDINALITY
+                           AS keys(attnum, ordinality) ON TRUE
+                      JOIN pg_attribute AS attribute
+                        ON attribute.attrelid = table_row.oid
+                       AND attribute.attnum = keys.attnum
+                     WHERE namespace.nspname = current_schema()
+                       AND table_row.relname = 'sync_schema_migrations'
+                       AND constraint_row.contype = 'p'
+                    """,
+                    connection=connection,
+                )
+            ) or {}
+            authority_primary_key = str(
+                authority_pk.get("primary_key_columns") or ""
+            ).split(",")
+        else:
+            authority_primary_key = [
+                str(row["name"])
+                for row in self.execute(
+                    "PRAGMA table_info(sync_schema_migrations)",
+                    connection=connection,
+                ).rows
+                if int(row["pk"])
+            ]
+        if authority_primary_key != ["migration_id"]:
+            raise SyncStoreError("Sync adapter-state migration catalog is incompatible")
+        expected_columns = {
+            "sync_device_adapter_cursors": [
+                "dataset_id",
+                "device_id",
+                "domain",
+                "adapter_version",
+                "last_pulled_sequence",
+                "max_delivered_sequence",
+                "updated_at",
+            ],
+            "sync_device_adapter_domain_acks": [
+                "dataset_id",
+                "device_id",
+                "domain",
+                "adapter_version",
+                "through_server_sequence",
+                "applied_at",
+                "updated_at",
+                "idempotency_key",
+            ],
+            "sync_device_blob_id_acks": [
+                "dataset_id",
+                "device_id",
+                "blob_id",
+                "payload_hash",
+                "verified_at",
+                "updated_at",
+                "idempotency_key",
+            ],
+        }
+        expected_primary_keys = {
+            "sync_device_adapter_cursors": [
+                "dataset_id",
+                "device_id",
+                "domain",
+                "adapter_version",
+            ],
+            "sync_device_adapter_domain_acks": [
+                "dataset_id",
+                "device_id",
+                "domain",
+                "adapter_version",
+            ],
+            "sync_device_blob_id_acks": ["dataset_id", "device_id", "blob_id"],
+        }
+        expected_indexes = {
+            "sync_device_adapter_cursors": "idx_sync_device_adapter_cursors_device",
+            "sync_device_adapter_domain_acks": (
+                "idx_sync_device_adapter_domain_acks_device"
+            ),
+            "sync_device_blob_id_acks": "idx_sync_device_blob_id_acks_device",
+        }
+        expected_sqlite_table_sql: dict[str, str] = {}
+        if self.backend_type != BackendType.POSTGRESQL:
+            for statement in SYNC_VERSIONED_DEVICE_STATE_SQLITE_SCHEMA.split(";"):
+                compact_statement = self._compact_catalog_sql(statement)
+                for table_name in expected_columns:
+                    if f"createtableifnotexists{table_name}(" in compact_statement:
+                        expected_sqlite_table_sql[table_name] = compact_statement.replace(
+                            "createtableifnotexists",
+                            "createtable",
+                            1,
+                        )
+        expected_postgres_checks = {
+            "sync_device_adapter_cursors": {
+                "checkadapter_version>0",
+                "checklast_pulled_sequence>=0",
+                "checkmax_delivered_sequence>=0",
+                "checkmax_delivered_sequence<=last_pulled_sequence",
+            },
+            "sync_device_adapter_domain_acks": {
+                "checkadapter_version>0",
+                "checkthrough_server_sequence>=0",
+            },
+            "sync_device_blob_id_acks": set(),
+        }
+        timestamp_type = (
+            "timestamp with time zone"
+            if self.backend_type == BackendType.POSTGRESQL
+            else "text"
+        )
+        sequence_type = (
+            "bigint" if self.backend_type == BackendType.POSTGRESQL else "integer"
+        )
+        expected_types = {
+            "sync_device_adapter_cursors": [
+                "text",
+                "text",
+                "text",
+                "integer",
+                sequence_type,
+                sequence_type,
+                timestamp_type,
+            ],
+            "sync_device_adapter_domain_acks": [
+                "text",
+                "text",
+                "text",
+                "integer",
+                sequence_type,
+                timestamp_type,
+                timestamp_type,
+                "text",
+            ],
+            "sync_device_blob_id_acks": [
+                "text",
+                "text",
+                "text",
+                "text",
+                timestamp_type,
+                timestamp_type,
+                "text",
+            ],
+        }
+        for table_name, columns in expected_columns.items():
+            info = self.backend.get_table_info(table_name, connection=connection)
+            if (
+                [str(column.get("name")) for column in info] != columns
+                or [str(column.get("type") or "").lower() for column in info]
+                != expected_types[table_name]
+                or [bool(column.get("nullable")) for column in info]
+                != [False] * (len(columns) - 1) + [table_name != "sync_device_adapter_cursors"]
+            ):
+                raise SyncStoreError("Sync adapter-state migration catalog is incompatible")
+            if self.backend_type == BackendType.POSTGRESQL:
+                pk_row = _first(
+                    self.execute(
+                        """
+                        SELECT string_agg(attribute.attname, ',' ORDER BY keys.ordinality)
+                                   AS primary_key_columns
+                          FROM pg_constraint AS constraint_row
+                          JOIN pg_class AS table_row
+                            ON table_row.oid = constraint_row.conrelid
+                          JOIN pg_namespace AS namespace
+                            ON namespace.oid = table_row.relnamespace
+                          JOIN unnest(constraint_row.conkey) WITH ORDINALITY
+                               AS keys(attnum, ordinality) ON TRUE
+                          JOIN pg_attribute AS attribute
+                            ON attribute.attrelid = table_row.oid
+                           AND attribute.attnum = keys.attnum
+                         WHERE namespace.nspname = current_schema()
+                           AND table_row.relname = ?
+                           AND constraint_row.contype = 'p'
+                        """,
+                        (table_name,),
+                        connection=connection,
+                    )
+                ) or {}
+                primary_key = str(pk_row.get("primary_key_columns") or "").split(",")
+                check_rows = self.execute(
+                    """
+                    SELECT pg_catalog.pg_get_constraintdef(constraint_row.oid, true)
+                               AS definition
+                      FROM pg_catalog.pg_constraint AS constraint_row
+                      JOIN pg_catalog.pg_class AS table_row
+                        ON table_row.oid = constraint_row.conrelid
+                      JOIN pg_catalog.pg_namespace AS namespace
+                        ON namespace.oid = table_row.relnamespace
+                     WHERE namespace.nspname = current_schema()
+                       AND table_row.relname = ?
+                       AND constraint_row.contype = 'c'
+                    """,
+                    (table_name,),
+                    connection=connection,
+                ).rows
+                checks_valid = {
+                    self._compact_postgres_catalog_sql(row["definition"])
+                    for row in check_rows
+                } == expected_postgres_checks[table_name]
+                index_rows = self.execute(
+                    """
+                    SELECT indexname, indexdef FROM pg_indexes
+                     WHERE schemaname = current_schema() AND tablename = ?
+                    """,
+                    (table_name,),
+                    connection=connection,
+                ).rows
+                index = next(
+                    (
+                        row
+                        for row in index_rows
+                        if row.get("indexname") == expected_indexes[table_name]
+                    ),
+                    None,
+                )
+                index_columns_valid = index is not None and "(device_id, dataset_id)" in str(
+                    index.get("indexdef")
+                )
+            else:
+                raw_info = self.execute(
+                    f"PRAGMA table_info({table_name})",  # nosec B608 - fixed catalog names.
+                    connection=connection,
+                ).rows
+                primary_key = [
+                    str(row["name"])
+                    for row in sorted(raw_info, key=lambda row: int(row["pk"]))
+                    if int(row["pk"])
+                ]
+                table_row = _first(
+                    self.execute(
+                        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                        (table_name,),
+                        connection=connection,
+                    )
+                )
+                checks_valid = self._compact_catalog_sql(
+                    None if table_row is None else table_row.get("sql")
+                ) == expected_sqlite_table_sql.get(table_name)
+                index_rows = self.execute(
+                    f"PRAGMA index_list({table_name})",  # nosec B608 - fixed catalog names.
+                    connection=connection,
+                ).rows
+                index = next(
+                    (
+                        row
+                        for row in index_rows
+                        if row.get("name") == expected_indexes[table_name]
+                    ),
+                    None,
+                )
+                index_columns = (
+                    []
+                    if index is None
+                    else [
+                        row["name"]
+                        for row in self.execute(
+                            f"PRAGMA index_info({expected_indexes[table_name]})",  # nosec B608
+                            connection=connection,
+                        ).rows
+                    ]
+                )
+                index_columns_valid = index_columns == ["device_id", "dataset_id"]
+            if (
+                primary_key != expected_primary_keys[table_name]
+                or not checks_valid
+                or not index_columns_valid
+            ):
+                raise SyncStoreError("Sync adapter-state migration catalog is incompatible")
+
+    def _reconcile_versioned_device_state(self, *, connection: Any) -> None:
+        """Seed and reconcile rollback-compatible adapter-v1 cursor/ack state."""
+
+        self.execute(
+            """
+            INSERT INTO sync_device_adapter_cursors (
+                dataset_id, device_id, domain, adapter_version,
+                last_pulled_sequence, max_delivered_sequence, updated_at
+            )
+            SELECT dataset_id, device_id, domain, 1,
+                   last_pulled_sequence, last_pulled_sequence, updated_at
+              FROM sync_device_cursors
+             WHERE 1 = 1
+            ON CONFLICT (dataset_id, device_id, domain, adapter_version)
+            DO UPDATE SET
+                last_pulled_sequence = CASE
+                    WHEN excluded.last_pulled_sequence
+                         > sync_device_adapter_cursors.last_pulled_sequence
+                    THEN excluded.last_pulled_sequence
+                    ELSE sync_device_adapter_cursors.last_pulled_sequence END,
+                max_delivered_sequence = CASE
+                    WHEN excluded.last_pulled_sequence
+                         > sync_device_adapter_cursors.last_pulled_sequence
+                    THEN excluded.max_delivered_sequence
+                    ELSE sync_device_adapter_cursors.max_delivered_sequence END,
+                updated_at = CASE
+                    WHEN excluded.last_pulled_sequence
+                         > sync_device_adapter_cursors.last_pulled_sequence
+                    THEN excluded.updated_at
+                    ELSE sync_device_adapter_cursors.updated_at END
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            INSERT INTO sync_device_cursors (
+                dataset_id, device_id, domain, last_pulled_sequence, updated_at
+            )
+            SELECT dataset_id, device_id, domain, last_pulled_sequence, updated_at
+              FROM sync_device_adapter_cursors
+             WHERE adapter_version = 1
+            ON CONFLICT (dataset_id, device_id, domain)
+            DO UPDATE SET
+                last_pulled_sequence = CASE
+                    WHEN excluded.last_pulled_sequence
+                         > sync_device_cursors.last_pulled_sequence
+                    THEN excluded.last_pulled_sequence
+                    ELSE sync_device_cursors.last_pulled_sequence END,
+                updated_at = CASE
+                    WHEN excluded.last_pulled_sequence
+                         > sync_device_cursors.last_pulled_sequence
+                    THEN excluded.updated_at ELSE sync_device_cursors.updated_at END
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            UPDATE sync_device_cursors
+               SET last_pulled_sequence = (
+                       SELECT versioned.last_pulled_sequence
+                         FROM sync_device_adapter_cursors AS versioned
+                        WHERE versioned.dataset_id = sync_device_cursors.dataset_id
+                          AND versioned.device_id = sync_device_cursors.device_id
+                          AND versioned.domain = sync_device_cursors.domain
+                          AND versioned.adapter_version = 1
+                   ),
+                   updated_at = (
+                       SELECT versioned.updated_at
+                         FROM sync_device_adapter_cursors AS versioned
+                        WHERE versioned.dataset_id = sync_device_cursors.dataset_id
+                          AND versioned.device_id = sync_device_cursors.device_id
+                          AND versioned.domain = sync_device_cursors.domain
+                          AND versioned.adapter_version = 1
+                   )
+             WHERE EXISTS (
+                       SELECT 1 FROM sync_device_adapter_cursors AS versioned
+                        WHERE versioned.dataset_id = sync_device_cursors.dataset_id
+                          AND versioned.device_id = sync_device_cursors.device_id
+                          AND versioned.domain = sync_device_cursors.domain
+                          AND versioned.adapter_version = 1
+                          AND versioned.last_pulled_sequence > sync_device_cursors.last_pulled_sequence
+                   )
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            INSERT INTO sync_device_adapter_domain_acks (
+                dataset_id, device_id, domain, adapter_version,
+                through_server_sequence, applied_at, updated_at, idempotency_key
+            )
+            SELECT dataset_id, device_id, domain, 1, through_server_sequence,
+                   applied_at, updated_at, idempotency_key
+              FROM sync_device_domain_acks
+             WHERE 1 = 1
+            ON CONFLICT (dataset_id, device_id, domain, adapter_version)
+            DO UPDATE SET
+                through_server_sequence = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_adapter_domain_acks.through_server_sequence
+                    THEN excluded.through_server_sequence
+                    ELSE sync_device_adapter_domain_acks.through_server_sequence END,
+                applied_at = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_adapter_domain_acks.through_server_sequence
+                    THEN excluded.applied_at
+                    ELSE sync_device_adapter_domain_acks.applied_at END,
+                updated_at = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_adapter_domain_acks.through_server_sequence
+                    THEN excluded.updated_at
+                    ELSE sync_device_adapter_domain_acks.updated_at END,
+                idempotency_key = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_adapter_domain_acks.through_server_sequence
+                    THEN excluded.idempotency_key
+                    ELSE sync_device_adapter_domain_acks.idempotency_key END
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            INSERT INTO sync_device_domain_acks (
+                dataset_id, device_id, domain, through_server_sequence,
+                applied_at, updated_at, idempotency_key
+            )
+            SELECT dataset_id, device_id, domain, through_server_sequence,
+                   applied_at, updated_at, idempotency_key
+              FROM sync_device_adapter_domain_acks
+             WHERE adapter_version = 1
+            ON CONFLICT (dataset_id, device_id, domain)
+            DO UPDATE SET
+                through_server_sequence = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_domain_acks.through_server_sequence
+                    THEN excluded.through_server_sequence
+                    ELSE sync_device_domain_acks.through_server_sequence END,
+                applied_at = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_domain_acks.through_server_sequence
+                    THEN excluded.applied_at ELSE sync_device_domain_acks.applied_at END,
+                updated_at = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_domain_acks.through_server_sequence
+                    THEN excluded.updated_at ELSE sync_device_domain_acks.updated_at END,
+                idempotency_key = CASE
+                    WHEN excluded.through_server_sequence
+                         > sync_device_domain_acks.through_server_sequence
+                    THEN excluded.idempotency_key
+                    ELSE sync_device_domain_acks.idempotency_key END
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            UPDATE sync_device_domain_acks
+               SET through_server_sequence = (
+                       SELECT versioned.through_server_sequence
+                         FROM sync_device_adapter_domain_acks AS versioned
+                        WHERE versioned.dataset_id = sync_device_domain_acks.dataset_id
+                          AND versioned.device_id = sync_device_domain_acks.device_id
+                          AND versioned.domain = sync_device_domain_acks.domain
+                          AND versioned.adapter_version = 1
+                   ),
+                   applied_at = (
+                       SELECT versioned.applied_at
+                         FROM sync_device_adapter_domain_acks AS versioned
+                        WHERE versioned.dataset_id = sync_device_domain_acks.dataset_id
+                          AND versioned.device_id = sync_device_domain_acks.device_id
+                          AND versioned.domain = sync_device_domain_acks.domain
+                          AND versioned.adapter_version = 1
+                   ),
+                   updated_at = (
+                       SELECT versioned.updated_at
+                         FROM sync_device_adapter_domain_acks AS versioned
+                        WHERE versioned.dataset_id = sync_device_domain_acks.dataset_id
+                          AND versioned.device_id = sync_device_domain_acks.device_id
+                          AND versioned.domain = sync_device_domain_acks.domain
+                          AND versioned.adapter_version = 1
+                   )
+             WHERE EXISTS (
+                       SELECT 1 FROM sync_device_adapter_domain_acks AS versioned
+                        WHERE versioned.dataset_id = sync_device_domain_acks.dataset_id
+                          AND versioned.device_id = sync_device_domain_acks.device_id
+                          AND versioned.domain = sync_device_domain_acks.domain
+                          AND versioned.adapter_version = 1
+                          AND versioned.through_server_sequence
+                              > sync_device_domain_acks.through_server_sequence
+                   )
+            """,
+            connection=connection,
+        )
+        mismatch = _first(
+            self.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM sync_device_cursors) AS legacy_cursor_count,
+                    (SELECT COUNT(*) FROM sync_device_adapter_cursors
+                      WHERE adapter_version = 1) AS version_cursor_count,
+                    (SELECT COUNT(*) FROM sync_device_domain_acks) AS legacy_ack_count,
+                    (SELECT COUNT(*) FROM sync_device_adapter_domain_acks
+                      WHERE adapter_version = 1) AS version_ack_count,
+                    (SELECT COUNT(*) FROM sync_device_cursors AS legacy
+                      JOIN sync_device_adapter_cursors AS versioned
+                        ON versioned.dataset_id = legacy.dataset_id
+                       AND versioned.device_id = legacy.device_id
+                       AND versioned.domain = legacy.domain
+                       AND versioned.adapter_version = 1
+                     WHERE legacy.last_pulled_sequence <> versioned.last_pulled_sequence)
+                        AS cursor_mismatches,
+                    (SELECT COUNT(*) FROM sync_device_domain_acks AS legacy
+                      JOIN sync_device_adapter_domain_acks AS versioned
+                        ON versioned.dataset_id = legacy.dataset_id
+                       AND versioned.device_id = legacy.device_id
+                       AND versioned.domain = legacy.domain
+                       AND versioned.adapter_version = 1
+                     WHERE legacy.through_server_sequence <> versioned.through_server_sequence)
+                        AS ack_mismatches
+                """,
+                connection=connection,
+            )
+        ) or {}
+        if (
+            int(mismatch.get("legacy_cursor_count") or 0)
+            != int(mismatch.get("version_cursor_count") or 0)
+            or int(mismatch.get("legacy_ack_count") or 0)
+            != int(mismatch.get("version_ack_count") or 0)
+            or int(mismatch.get("cursor_mismatches") or 0)
+            or int(mismatch.get("ack_mismatches") or 0)
+        ):
+            raise SyncStoreError("Sync adapter cursor/ack migration verification failed")
     def _ensure_device_lifecycle_tables(self, *, connection: Any) -> None:
         if self.backend_type == BackendType.POSTGRESQL:
             schema = """
@@ -5309,6 +13730,10 @@ class SyncDatabase:
             column_specs = {
                 "client_profile_id": "TEXT",
                 "client_sequence": "BIGINT",
+                "mutation_group_id": "TEXT",
+                "mutation_step": "INTEGER",
+                "mutation_step_count": "INTEGER",
+                "mutation_plan_hash": "TEXT",
                 "base_server_cursor": "BIGINT",
                 "base_object_revision": "BIGINT",
                 "base_object_hash": "TEXT",
@@ -5330,6 +13755,10 @@ class SyncDatabase:
             column_specs = {
                 "client_profile_id": "TEXT",
                 "client_sequence": "INTEGER",
+                "mutation_group_id": "TEXT",
+                "mutation_step": "INTEGER",
+                "mutation_step_count": "INTEGER",
+                "mutation_plan_hash": "TEXT",
                 "base_server_cursor": "INTEGER",
                 "base_object_revision": "INTEGER",
                 "base_object_hash": "TEXT",
@@ -5393,11 +13822,867 @@ class SyncDatabase:
             connection=connection,
         )
 
+    def _ensure_sync_current_heads_table(
+        self, *, connection: Any, projection_exists: bool
+    ) -> None:
+        cursor_type = "BIGINT" if self.backend_type == BackendType.POSTGRESQL else "INTEGER"
+        self.backend.create_tables(
+            f"""
+            CREATE TABLE IF NOT EXISTS sync_current_heads (
+                dataset_id TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                object_id TEXT NOT NULL,
+                latest_server_cursor {cursor_type} NOT NULL,
+                PRIMARY KEY (dataset_id, domain, object_id)
+            )
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_current_heads_dataset_domain_cursor
+                ON sync_current_heads(dataset_id, domain, latest_server_cursor, object_id)
+            """,
+            connection=connection,
+        )
+        invalid_heads = self.execute(
+            """
+            SELECT heads.dataset_id, heads.domain, heads.object_id
+              FROM sync_current_heads AS heads
+              LEFT JOIN sync_envelopes AS envelope
+                ON envelope.server_sequence = heads.latest_server_cursor
+               AND envelope.dataset_id = heads.dataset_id
+               AND envelope.domain = heads.domain
+               AND envelope.entity_id = heads.object_id
+             WHERE envelope.server_sequence IS NULL
+                OR envelope.status <> 'accepted'
+                OR envelope.apply_status = 'superseded'
+            """,
+            connection=connection,
+        ).rows
+        for head in invalid_heads:
+            latest = _first(
+                self.execute(
+                    """
+                    SELECT server_sequence
+                     FROM sync_envelopes
+                     WHERE dataset_id = ? AND domain = ? AND entity_id = ?
+                       AND status = 'accepted'
+                       AND apply_status <> 'superseded'
+                     ORDER BY server_sequence DESC
+                     LIMIT 1
+                    """,
+                    (head["dataset_id"], head["domain"], head["object_id"]),
+                    connection=connection,
+                )
+            )
+            if latest is None:
+                self.execute(
+                    """
+                    DELETE FROM sync_current_heads
+                     WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                    """,
+                    (head["dataset_id"], head["domain"], head["object_id"]),
+                    connection=connection,
+                )
+                continue
+            self.execute(
+                """
+                UPDATE sync_current_heads
+                   SET latest_server_cursor = ?
+                 WHERE dataset_id = ? AND domain = ? AND object_id = ?
+                """,
+                (
+                    latest["server_sequence"],
+                    head["dataset_id"],
+                    head["domain"],
+                    head["object_id"],
+                ),
+                connection=connection,
+            )
+        if not projection_exists:
+            self.execute(
+                """
+                INSERT INTO sync_current_heads (
+                    dataset_id, domain, object_id, latest_server_cursor
+                )
+                SELECT dataset_id, domain, entity_id, MAX(server_sequence)
+                  FROM sync_envelopes
+                 WHERE status = 'accepted'
+                   AND apply_status <> 'superseded'
+                 GROUP BY dataset_id, domain, entity_id
+                ON CONFLICT (dataset_id, domain, object_id)
+                DO UPDATE SET latest_server_cursor = excluded.latest_server_cursor
+                 WHERE excluded.latest_server_cursor > sync_current_heads.latest_server_cursor
+                """,
+                connection=connection,
+            )
+
+    def _ensure_sync_materialization_locks_table(self, *, connection: Any) -> None:
+        timestamp_type = (
+            "TIMESTAMPTZ" if self.backend_type == BackendType.POSTGRESQL else "TEXT"
+        )
+        self.backend.create_tables(
+            f"""
+            CREATE TABLE IF NOT EXISTS sync_materialization_locks (
+                dataset_id TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                object_id TEXT NOT NULL,
+                updated_at {timestamp_type} NOT NULL,
+                PRIMARY KEY (dataset_id, domain, object_id)
+            )
+            """,
+            connection=connection,
+        )
+
+    def _ensure_attachment_binding_tables(self, *, connection: Any) -> None:
+        """Ensure additive attachment binding and opaque namespace authority."""
+
+        if self.backend_type == BackendType.POSTGRESQL:
+            schema = """
+            CREATE TABLE IF NOT EXISTS sync_attachment_revision_bindings (
+                dataset_id TEXT NOT NULL,
+                attachment_id TEXT NOT NULL,
+                attachment_revision BIGINT NOT NULL,
+                blob_hash TEXT NOT NULL,
+                size_bytes BIGINT NOT NULL,
+                establishing_server_cursor BIGINT NOT NULL,
+                availability_at_acceptance TEXT NOT NULL,
+                resolved_blob_id TEXT,
+                retention_released_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL,
+                PRIMARY KEY (dataset_id, attachment_id, attachment_revision),
+                CHECK (length(dataset_id) > 0),
+                CHECK (attachment_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'),
+                CHECK (attachment_revision > 0),
+                CHECK (blob_hash ~ '^sha256:[0-9a-f]{64}$'),
+                CHECK (size_bytes > 0),
+                CHECK (establishing_server_cursor > 0),
+                CHECK (availability_at_acceptance IN ('available', 'metadata_only')),
+                CHECK (resolved_blob_id IS NULL OR length(resolved_blob_id) > 0)
+            );
+            CREATE TABLE IF NOT EXISTS sync_dataset_storage_namespaces (
+                dataset_id TEXT NOT NULL PRIMARY KEY,
+                owner_user_id TEXT NOT NULL,
+                storage_namespace_id TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                CHECK (length(dataset_id) > 0),
+                CHECK (length(owner_user_id) > 0),
+                CHECK (storage_namespace_id ~ '^[0-9a-f]{32}$')
+            );
+            """
+        else:
+            schema = """
+            CREATE TABLE IF NOT EXISTS sync_attachment_revision_bindings (
+                dataset_id TEXT NOT NULL,
+                attachment_id TEXT NOT NULL,
+                attachment_revision INTEGER NOT NULL,
+                blob_hash TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                establishing_server_cursor INTEGER NOT NULL,
+                availability_at_acceptance TEXT NOT NULL,
+                resolved_blob_id TEXT,
+                retention_released_at TEXT,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (dataset_id, attachment_id, attachment_revision),
+                CHECK (length(dataset_id) > 0),
+                CHECK (
+                    length(attachment_id) = 36
+                    AND lower(attachment_id) = attachment_id
+                    AND substr(attachment_id, 9, 1) = '-'
+                    AND substr(attachment_id, 14, 1) = '-'
+                    AND substr(attachment_id, 15, 1) = '4'
+                    AND substr(attachment_id, 19, 1) = '-'
+                    AND substr(attachment_id, 20, 1) IN ('8', '9', 'a', 'b')
+                    AND substr(attachment_id, 24, 1) = '-'
+                    AND length(replace(attachment_id, '-', '')) = 32
+                    AND replace(attachment_id, '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                CHECK (attachment_revision > 0),
+                CHECK (length(blob_hash) = 71),
+                CHECK (substr(blob_hash, 1, 7) = 'sha256:'),
+                CHECK (substr(blob_hash, 8) NOT GLOB '*[^0-9a-f]*'),
+                CHECK (size_bytes > 0),
+                CHECK (establishing_server_cursor > 0),
+                CHECK (availability_at_acceptance IN ('available', 'metadata_only')),
+                CHECK (resolved_blob_id IS NULL OR length(resolved_blob_id) > 0)
+            );
+            CREATE TABLE IF NOT EXISTS sync_dataset_storage_namespaces (
+                dataset_id TEXT NOT NULL PRIMARY KEY,
+                owner_user_id TEXT NOT NULL,
+                storage_namespace_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                CHECK (length(dataset_id) > 0),
+                CHECK (length(owner_user_id) > 0),
+                CHECK (length(storage_namespace_id) = 32),
+                CHECK (storage_namespace_id NOT GLOB '*[^0-9a-f]*')
+            );
+            """
+        self.backend.create_tables(schema, connection=connection)
+        for statement in (
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_unresolved
+                ON sync_attachment_revision_bindings(
+                    dataset_id, establishing_server_cursor, attachment_id,
+                    attachment_revision
+                )
+                WHERE resolved_blob_id IS NULL AND retention_released_at IS NULL
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob
+                ON sync_attachment_revision_bindings(dataset_id, resolved_blob_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_blob_retention
+                ON sync_attachment_revision_bindings(
+                    dataset_id, resolved_blob_id, establishing_server_cursor,
+                    attachment_id, attachment_revision
+                )
+                WHERE retention_released_at IS NULL
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_retention_release
+                ON sync_attachment_revision_bindings(dataset_id, establishing_server_cursor, attachment_id, attachment_revision)
+                WHERE retention_released_at IS NULL
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_pending_digest
+                ON sync_attachment_revision_bindings(
+                    dataset_id, blob_hash, size_bytes, establishing_server_cursor,
+                    attachment_id, attachment_revision
+                )
+                WHERE resolved_blob_id IS NULL
+                  AND retention_released_at IS NULL
+            """,
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_dataset_storage_namespace_id
+                ON sync_dataset_storage_namespaces(storage_namespace_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_dataset_storage_namespaces_owner
+                ON sync_dataset_storage_namespaces(owner_user_id, dataset_id)
+            """,
+        ):
+            self.execute(statement, connection=connection)
+        if self.backend_type == BackendType.POSTGRESQL:
+            self._verify_attachment_binding_tables_postgres(connection=connection)
+        else:
+            self._verify_attachment_binding_tables_sqlite(
+                connection=connection,
+                canonical_schema=schema,
+            )
+
+    def _ensure_notes_attachment_bootstrap_tables(self, *, connection: Any) -> None:
+        """Verify bounded legacy-source identity and cleanup evidence authority."""
+
+        if self.backend_type == BackendType.POSTGRESQL:
+            self._verify_notes_attachment_bootstrap_tables_postgres(
+                connection=connection,
+            )
+        else:
+            self._verify_notes_attachment_bootstrap_tables_sqlite(
+                connection=connection,
+                canonical_schema=SYNC_SQLITE_SCHEMA,
+                verify_indexes=True,
+            )
+
+    def _preflight_notes_attachment_bootstrap_tables(self, *, connection: Any) -> None:
+        """Reject partial or malformed pre-existing bootstrap authority."""
+
+        table_names = (
+            "sync_notes_attachment_source_map",
+            "sync_notes_attachment_cleanup_candidates",
+        )
+        existing = [
+            self.backend.table_exists(table_name, connection=connection)
+            for table_name in table_names
+        ]
+        if not any(existing):
+            return
+        if not all(existing):
+            raise SyncStoreError("Sync attachment bootstrap catalog is malformed")
+        self._ensure_notes_attachment_bootstrap_tables(connection=connection)
+
+    def _verify_notes_attachment_bootstrap_tables_sqlite(
+        self,
+        *,
+        connection: Any,
+        canonical_schema: str,
+        verify_indexes: bool,
+    ) -> None:
+        expected_columns = {
+            "sync_notes_attachment_source_map": [
+                ("dataset_id", "TEXT", 1, 1),
+                ("bootstrap_id", "TEXT", 1, 2),
+                ("source_key_hash", "TEXT", 1, 3),
+                ("note_id", "TEXT", 1, 0),
+                ("attachment_id", "TEXT", 1, 0),
+                ("created_at", "TEXT", 1, 0),
+            ],
+            "sync_notes_attachment_cleanup_candidates": [
+                ("dataset_id", "TEXT", 1, 1),
+                ("bootstrap_id", "TEXT", 1, 2),
+                ("source_key_hash", "TEXT", 1, 3),
+                ("attachment_id", "TEXT", 1, 0),
+                ("source_relative_path", "TEXT", 1, 0),
+                ("source_path_hash", "TEXT", 1, 0),
+                ("source_blob_hash", "TEXT", 1, 0),
+                ("source_size_bytes", "INTEGER", 1, 0),
+                ("source_modified_ns", "INTEGER", 1, 0),
+                ("created_at", "TEXT", 1, 0),
+            ],
+        }
+        expected_table_sql: dict[str, str] = {}
+        for statement in canonical_schema.split(";"):
+            compact = self._compact_catalog_sql(statement)
+            for table_name in expected_columns:
+                if f"createtableifnotexists{table_name}(" in compact:
+                    expected_table_sql[table_name] = compact.replace(
+                        "createtableifnotexists",
+                        "createtable",
+                        1,
+                    )
+        for table_name, expected in expected_columns.items():
+            actual = [
+                (row["name"], row["type"], int(row["notnull"]), int(row["pk"]))
+                for row in self.execute(
+                    f"PRAGMA table_info({table_name})",  # nosec B608 - fixed names.
+                    connection=connection,
+                ).rows
+            ]
+            table_row = _first(
+                self.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                    (table_name,),
+                    connection=connection,
+                )
+            )
+            table_sql = self._compact_catalog_sql(
+                None if table_row is None else table_row.get("sql")
+            )
+            if actual != expected or table_sql != expected_table_sql.get(table_name):
+                raise SyncStoreError("Sync attachment bootstrap catalog is malformed")
+        if not verify_indexes:
+            return
+        rows = self.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'index' "
+            "AND name IN (?, ?) ORDER BY name",
+            (
+                "idx_sync_notes_attachment_cleanup_page",
+                "uq_sync_notes_attachment_source_id",
+            ),
+            connection=connection,
+        ).rows
+        actual_indexes = {
+            row["name"]: self._compact_catalog_sql(row["sql"]) for row in rows
+        }
+        expected_indexes = {
+            "idx_sync_notes_attachment_cleanup_page": "createindexidx_sync_notes_attachment_cleanup_pageonsync_notes_attachment_cleanup_candidates(dataset_id,bootstrap_id,source_key_hash)",
+            "uq_sync_notes_attachment_source_id": "createuniqueindexuq_sync_notes_attachment_source_idonsync_notes_attachment_source_map(dataset_id,attachment_id)",
+        }
+        if actual_indexes != expected_indexes:
+            raise SyncStoreError("Sync attachment bootstrap catalog is malformed")
+
+    def _verify_notes_attachment_bootstrap_tables_postgres(
+        self,
+        *,
+        connection: Any,
+    ) -> None:
+        expected_columns = {
+            "sync_notes_attachment_cleanup_candidates": [
+                ("dataset_id", "text", True),
+                ("bootstrap_id", "text", True),
+                ("source_key_hash", "text", True),
+                ("attachment_id", "text", True),
+                ("source_relative_path", "text", True),
+                ("source_path_hash", "text", True),
+                ("source_blob_hash", "text", True),
+                ("source_size_bytes", "bigint", True),
+                ("source_modified_ns", "bigint", True),
+                ("created_at", "timestamp with time zone", True),
+            ],
+            "sync_notes_attachment_source_map": [
+                ("dataset_id", "text", True),
+                ("bootstrap_id", "text", True),
+                ("source_key_hash", "text", True),
+                ("note_id", "text", True),
+                ("attachment_id", "text", True),
+                ("created_at", "timestamp with time zone", True),
+            ],
+        }
+        rows = self.execute(
+            """
+            SELECT relation.relname AS table_name,
+                   attribute.attname AS column_name,
+                   pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS data_type,
+                   attribute.attnotnull AS is_not_null
+              FROM pg_catalog.pg_class AS relation
+              JOIN pg_catalog.pg_namespace AS namespace
+                ON namespace.oid = relation.relnamespace
+              JOIN pg_catalog.pg_attribute AS attribute
+                ON attribute.attrelid = relation.oid
+             WHERE namespace.nspname = current_schema()
+               AND relation.relname IN (
+                    'sync_notes_attachment_source_map',
+                    'sync_notes_attachment_cleanup_candidates'
+               )
+               AND relation.relkind = 'r'
+               AND attribute.attnum > 0
+               AND NOT attribute.attisdropped
+             ORDER BY relation.relname, attribute.attnum
+            """,
+            connection=connection,
+        ).rows
+        actual_columns = {name: [] for name in expected_columns}
+        for row in rows:
+            actual_columns[row["table_name"]].append(
+                (row["column_name"], row["data_type"], bool(row["is_not_null"]))
+            )
+        if actual_columns != expected_columns:
+            raise SyncStoreError("Sync attachment bootstrap catalog is malformed")
+        constraints = self.execute(
+            """
+            SELECT relation.relname AS table_name,
+                   constraint_record.contype AS kind,
+                   constraint_record.convalidated AS is_validated,
+                   pg_catalog.pg_get_constraintdef(
+                       constraint_record.oid, true
+                   ) AS definition
+              FROM pg_catalog.pg_constraint AS constraint_record
+              JOIN pg_catalog.pg_class AS relation
+                ON relation.oid = constraint_record.conrelid
+              JOIN pg_catalog.pg_namespace AS namespace
+                ON namespace.oid = relation.relnamespace
+             WHERE namespace.nspname = current_schema()
+               AND relation.relname IN (
+                    'sync_notes_attachment_source_map',
+                    'sync_notes_attachment_cleanup_candidates'
+               )
+               AND constraint_record.contype IN ('p', 'c')
+             ORDER BY relation.relname,
+                      constraint_record.contype,
+                      constraint_record.conname
+            """,
+            connection=connection,
+        ).rows
+        uuid_definition = (
+            "checkattachment_id~"
+            "'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+            "[89ab][0-9a-f]{3}-[0-9a-f]{12}$'"
+        )
+        expected_constraints = {
+            "sync_notes_attachment_source_map": {
+                ("p", "primarykeydataset_id,bootstrap_id,source_key_hash"),
+                ("c", "checklengthdataset_id>0"),
+                (
+                    "c",
+                    "checklengthbootstrap_id>=1andlengthbootstrap_id<=128",
+                ),
+                ("c", "checksource_key_hash~'^sha256:[0-9a-f]{64}$'"),
+                ("c", "checklengthnote_id>0"),
+                ("c", uuid_definition),
+            },
+            "sync_notes_attachment_cleanup_candidates": {
+                ("p", "primarykeydataset_id,bootstrap_id,source_key_hash"),
+                ("c", "checklengthdataset_id>0"),
+                (
+                    "c",
+                    "checklengthbootstrap_id>=1andlengthbootstrap_id<=128",
+                ),
+                ("c", "checksource_key_hash~'^sha256:[0-9a-f]{64}$'"),
+                ("c", uuid_definition),
+                (
+                    "c",
+                    "checklengthsource_relative_path>=1and"
+                    "lengthsource_relative_path<=4096",
+                ),
+                ("c", "checksource_path_hash~'^sha256:[0-9a-f]{64}$'"),
+                ("c", "checksource_path_hash=source_key_hash"),
+                ("c", "checksource_blob_hash~'^sha256:[0-9a-f]{64}$'"),
+                ("c", "checksource_size_bytes>0"),
+                ("c", "checksource_modified_ns>=0"),
+            },
+        }
+        actual_constraints = {
+            table_name: {
+                (
+                    str(row["kind"]),
+                    self._compact_postgres_catalog_sql(row["definition"]),
+                )
+                for row in constraints
+                if row["table_name"] == table_name
+                and bool(row["is_validated"])
+            }
+            for table_name in expected_constraints
+        }
+        if actual_constraints != expected_constraints or not all(
+            bool(row["is_validated"]) for row in constraints
+        ):
+            raise SyncStoreError("Sync attachment bootstrap catalog is malformed")
+        indexes = self.execute(
+            """
+            SELECT index_relation.relname AS index_name,
+                   table_relation.relname AS table_name,
+                   index_record.indisunique AS is_unique,
+                   index_record.indisvalid AS is_valid,
+                   index_record.indisready AS is_ready,
+                   pg_catalog.pg_get_indexdef(index_record.indexrelid) AS definition
+              FROM pg_catalog.pg_index AS index_record
+              JOIN pg_catalog.pg_class AS index_relation
+                ON index_relation.oid = index_record.indexrelid
+              JOIN pg_catalog.pg_class AS table_relation
+                ON table_relation.oid = index_record.indrelid
+              JOIN pg_catalog.pg_namespace AS namespace
+                ON namespace.oid = table_relation.relnamespace
+             WHERE namespace.nspname = current_schema()
+               AND index_relation.relname IN (
+                    'idx_sync_notes_attachment_cleanup_page',
+                    'uq_sync_notes_attachment_source_id'
+               )
+             ORDER BY index_relation.relname
+            """,
+            connection=connection,
+        ).rows
+        expected_indexes = {
+            "idx_sync_notes_attachment_cleanup_page": (
+                "sync_notes_attachment_cleanup_candidates",
+                False,
+                "dataset_id,bootstrap_id,source_key_hash",
+            ),
+            "uq_sync_notes_attachment_source_id": (
+                "sync_notes_attachment_source_map",
+                True,
+                "dataset_id,attachment_id",
+            ),
+        }
+        if {row["index_name"] for row in indexes} != set(expected_indexes):
+            raise SyncStoreError("Sync attachment bootstrap catalog is malformed")
+        for row in indexes:
+            table_name, unique, columns = expected_indexes[row["index_name"]]
+            definition = self._compact_postgres_catalog_sql(row["definition"])
+            try:
+                definition_tail = definition.split("usingbtree", 1)[1]
+            except IndexError:
+                definition_tail = ""
+            if (
+                row["table_name"] != table_name
+                or bool(row["is_unique"]) != unique
+                or not row["is_valid"]
+                or not row["is_ready"]
+                or definition_tail != columns
+            ):
+                raise SyncStoreError("Sync attachment bootstrap catalog is malformed")
+
+    @staticmethod
+    def _compact_catalog_sql(value: Any) -> str:
+        return "".join(str(value or "").lower().replace('"', "").split())
+
+    def _verify_attachment_binding_tables_sqlite(
+        self,
+        *,
+        connection: Any,
+        canonical_schema: str,
+    ) -> None:
+        expected_columns = {
+            "sync_attachment_revision_bindings": [
+                ("dataset_id", "TEXT", 1, 1),
+                ("attachment_id", "TEXT", 1, 2),
+                ("attachment_revision", "INTEGER", 1, 3),
+                ("blob_hash", "TEXT", 1, 0),
+                ("size_bytes", "INTEGER", 1, 0),
+                ("establishing_server_cursor", "INTEGER", 1, 0),
+                ("availability_at_acceptance", "TEXT", 1, 0),
+                ("resolved_blob_id", "TEXT", 0, 0),
+                ("retention_released_at", "TEXT", 0, 0),
+                ("created_at", "TEXT", 1, 0),
+            ],
+            "sync_dataset_storage_namespaces": [
+                ("dataset_id", "TEXT", 1, 1),
+                ("owner_user_id", "TEXT", 1, 0),
+                ("storage_namespace_id", "TEXT", 1, 0),
+                ("created_at", "TEXT", 1, 0),
+            ],
+        }
+        expected_table_sql = {}
+        for statement in canonical_schema.split(";"):
+            compact_statement = self._compact_catalog_sql(statement)
+            for table_name in expected_columns:
+                if f"createtableifnotexists{table_name}(" in compact_statement:
+                    expected_table_sql[table_name] = compact_statement.replace(
+                        "createtableifnotexists",
+                        "createtable",
+                        1,
+                    )
+        expected_indexes = {
+            "idx_sync_attachment_bindings_unresolved": "createindexidx_sync_attachment_bindings_unresolvedonsync_attachment_revision_bindings(dataset_id,establishing_server_cursor,attachment_id,attachment_revision)whereresolved_blob_idisnullandretention_released_atisnull",
+            "idx_sync_attachment_bindings_blob": "createindexidx_sync_attachment_bindings_blobonsync_attachment_revision_bindings(dataset_id,resolved_blob_id)",
+            "idx_sync_attachment_bindings_blob_retention": "createindexidx_sync_attachment_bindings_blob_retentiononsync_attachment_revision_bindings(dataset_id,resolved_blob_id,establishing_server_cursor,attachment_id,attachment_revision)whereretention_released_atisnull",
+            "idx_sync_attachment_bindings_retention_release": "createindexidx_sync_attachment_bindings_retention_releaseonsync_attachment_revision_bindings(dataset_id,establishing_server_cursor,attachment_id,attachment_revision)whereretention_released_atisnull",
+            "idx_sync_attachment_bindings_pending_digest": "createindexidx_sync_attachment_bindings_pending_digestonsync_attachment_revision_bindings(dataset_id,blob_hash,size_bytes,establishing_server_cursor,attachment_id,attachment_revision)whereresolved_blob_idisnullandretention_released_atisnull",
+            "uq_sync_dataset_storage_namespace_id": "createuniqueindexuq_sync_dataset_storage_namespace_idonsync_dataset_storage_namespaces(storage_namespace_id)",
+            "idx_sync_dataset_storage_namespaces_owner": "createindexidx_sync_dataset_storage_namespaces_owneronsync_dataset_storage_namespaces(owner_user_id,dataset_id)",
+        }
+        for table_name, expected in expected_columns.items():
+            rows = self.execute(
+                f"PRAGMA table_info({table_name})",  # nosec B608 - fixed catalog names.
+                connection=connection,
+            ).rows
+            actual = [
+                (row["name"], row["type"], int(row["notnull"]), int(row["pk"]))
+                for row in rows
+            ]
+            table_row = _first(
+                self.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                    (table_name,),
+                    connection=connection,
+                )
+            )
+            compact = self._compact_catalog_sql(
+                None if table_row is None else table_row.get("sql")
+            )
+            if actual != expected or compact != expected_table_sql.get(table_name):
+                raise SyncStoreError("Sync attachment authority catalog is malformed")
+        rows = self.execute(
+            """
+            SELECT name, sql FROM sqlite_master
+             WHERE type = 'index'
+               AND name IN (
+                    'idx_sync_attachment_bindings_unresolved',
+                    'idx_sync_attachment_bindings_blob',
+                    'idx_sync_attachment_bindings_blob_retention',
+                    'idx_sync_attachment_bindings_retention_release',
+                    'idx_sync_attachment_bindings_pending_digest',
+                    'uq_sync_dataset_storage_namespace_id',
+                    'idx_sync_dataset_storage_namespaces_owner'
+               )
+             ORDER BY name
+            """,
+            connection=connection,
+        ).rows
+        actual_indexes = {
+            row["name"]: self._compact_catalog_sql(row["sql"])
+            for row in rows
+        }
+        if actual_indexes != expected_indexes:
+            raise SyncStoreError("Sync attachment authority catalog is malformed")
+
+    def _verify_attachment_binding_tables_postgres(self, *, connection: Any) -> None:
+        expected_columns = {
+            "sync_attachment_revision_bindings": [
+                ("dataset_id", "text", True),
+                ("attachment_id", "text", True),
+                ("attachment_revision", "bigint", True),
+                ("blob_hash", "text", True),
+                ("size_bytes", "bigint", True),
+                ("establishing_server_cursor", "bigint", True),
+                ("availability_at_acceptance", "text", True),
+                ("resolved_blob_id", "text", False),
+                ("retention_released_at", "timestamp with time zone", False),
+                ("created_at", "timestamp with time zone", True),
+            ],
+            "sync_dataset_storage_namespaces": [
+                ("dataset_id", "text", True),
+                ("owner_user_id", "text", True),
+                ("storage_namespace_id", "text", True),
+                ("created_at", "timestamp with time zone", True),
+            ],
+        }
+        rows = self.execute(
+            """
+            SELECT relation.relname AS table_name,
+                   attribute.attname AS column_name,
+                   pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS data_type,
+                   attribute.attnotnull AS is_not_null
+              FROM pg_catalog.pg_class AS relation
+              JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+              JOIN pg_catalog.pg_attribute AS attribute ON attribute.attrelid = relation.oid
+             WHERE namespace.nspname = current_schema()
+               AND relation.relname IN ('sync_attachment_revision_bindings', 'sync_dataset_storage_namespaces')
+               AND relation.relkind = 'r' AND attribute.attnum > 0 AND NOT attribute.attisdropped
+             ORDER BY relation.relname, attribute.attnum
+            """,
+            connection=connection,
+        ).rows
+        actual_columns = {name: [] for name in expected_columns}
+        for row in rows:
+            actual_columns[row["table_name"]].append(
+                (row["column_name"], row["data_type"], bool(row["is_not_null"]))
+            )
+        if actual_columns != expected_columns:
+            raise SyncStoreError("Sync attachment authority catalog is malformed")
+        constraints = self.execute(
+            """
+            SELECT relation.relname AS table_name, constraint_record.contype AS kind,
+                   pg_catalog.pg_get_constraintdef(constraint_record.oid, true) AS definition
+              FROM pg_catalog.pg_constraint AS constraint_record
+              JOIN pg_catalog.pg_class AS relation ON relation.oid = constraint_record.conrelid
+              JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+             WHERE namespace.nspname = current_schema()
+               AND relation.relname IN ('sync_attachment_revision_bindings', 'sync_dataset_storage_namespaces')
+               AND constraint_record.contype IN ('p', 'c')
+             ORDER BY relation.relname, constraint_record.contype, constraint_record.conname
+            """,
+            connection=connection,
+        ).rows
+        expected_constraints = {
+            "sync_attachment_revision_bindings": {
+                ("p", "primarykeydataset_id,attachment_id,attachment_revision"),
+                ("c", "checklengthdataset_id>0"),
+                (
+                    "c",
+                    "checkattachment_id~'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'",
+                ),
+                ("c", "checkattachment_revision>0"),
+                ("c", "checkblob_hash~'^sha256:[0-9a-f]{64}$'"),
+                ("c", "checksize_bytes>0"),
+                ("c", "checkestablishing_server_cursor>0"),
+                (
+                    "c",
+                    "checkavailability_at_acceptance=anyarray['available','metadata_only']",
+                ),
+                ("c", "checkresolved_blob_idisnullorlengthresolved_blob_id>0"),
+            },
+            "sync_dataset_storage_namespaces": {
+                ("p", "primarykeydataset_id"),
+                ("c", "checklengthdataset_id>0"),
+                ("c", "checklengthowner_user_id>0"),
+                ("c", "checkstorage_namespace_id~'^[0-9a-f]{32}$'"),
+            },
+        }
+        actual_constraints = {
+            table_name: {
+                (
+                    str(row["kind"]),
+                    self._compact_postgres_catalog_sql(row["definition"]),
+                )
+                for row in constraints
+                if row["table_name"] == table_name
+            }
+            for table_name in expected_constraints
+        }
+        if actual_constraints != expected_constraints:
+            raise SyncStoreError("Sync attachment authority catalog is malformed")
+        indexes = self.execute(
+            """
+            SELECT index_relation.relname AS index_name,
+                   table_relation.relname AS table_name,
+                   index_record.indisunique AS is_unique,
+                   index_record.indisvalid AS is_valid,
+                   index_record.indisready AS is_ready,
+                   pg_catalog.pg_get_indexdef(index_record.indexrelid) AS definition,
+                   pg_catalog.pg_get_expr(index_record.indpred, index_record.indrelid) AS predicate
+              FROM pg_catalog.pg_index AS index_record
+              JOIN pg_catalog.pg_class AS index_relation ON index_relation.oid = index_record.indexrelid
+              JOIN pg_catalog.pg_class AS table_relation ON table_relation.oid = index_record.indrelid
+              JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = table_relation.relnamespace
+             WHERE namespace.nspname = current_schema()
+               AND index_relation.relname IN (
+                    'idx_sync_attachment_bindings_unresolved',
+                    'idx_sync_attachment_bindings_blob',
+                    'idx_sync_attachment_bindings_blob_retention',
+                    'idx_sync_attachment_bindings_retention_release',
+                    'idx_sync_attachment_bindings_pending_digest',
+                    'uq_sync_dataset_storage_namespace_id',
+                    'idx_sync_dataset_storage_namespaces_owner'
+               )
+             ORDER BY index_relation.relname
+            """,
+            connection=connection,
+        ).rows
+        expected_indexes = {
+            "idx_sync_attachment_bindings_unresolved": (
+                "sync_attachment_revision_bindings",
+                False,
+                "dataset_id,establishing_server_cursor,attachment_id,attachment_revision",
+                "resolved_blob_idisnullandretention_released_atisnull",
+            ),
+            "idx_sync_attachment_bindings_blob": (
+                "sync_attachment_revision_bindings",
+                False,
+                "dataset_id,resolved_blob_id",
+                "",
+            ),
+            "idx_sync_attachment_bindings_blob_retention": (
+                "sync_attachment_revision_bindings",
+                False,
+                "dataset_id,resolved_blob_id,establishing_server_cursor,attachment_id,attachment_revision",
+                "retention_released_atisnull",
+            ),
+            "idx_sync_attachment_bindings_retention_release": (
+                "sync_attachment_revision_bindings",
+                False,
+                "dataset_id,establishing_server_cursor,attachment_id,attachment_revision",
+                "retention_released_atisnull",
+            ),
+            "idx_sync_attachment_bindings_pending_digest": (
+                "sync_attachment_revision_bindings",
+                False,
+                "dataset_id,blob_hash,size_bytes,establishing_server_cursor,attachment_id,attachment_revision",
+                "resolved_blob_idisnullandretention_released_atisnull",
+            ),
+            "uq_sync_dataset_storage_namespace_id": (
+                "sync_dataset_storage_namespaces",
+                True,
+                "storage_namespace_id",
+                "",
+            ),
+            "idx_sync_dataset_storage_namespaces_owner": (
+                "sync_dataset_storage_namespaces",
+                False,
+                "owner_user_id,dataset_id",
+                "",
+            ),
+        }
+        if {row["index_name"] for row in indexes} != set(expected_indexes):
+            raise SyncStoreError("Sync attachment authority catalog is malformed")
+        for row in indexes:
+            table_name, unique, columns, predicate = expected_indexes[
+                row["index_name"]
+            ]
+            actual_predicate = self._compact_postgres_catalog_sql(
+                row.get("predicate")
+            )
+            definition = self._compact_postgres_catalog_sql(row["definition"])
+            try:
+                definition_tail = definition.split("usingbtree", 1)[1]
+            except IndexError:
+                definition_tail = ""
+            expected_tail = columns + (f"where{predicate}" if predicate else "")
+            if (
+                row["table_name"] != table_name
+                or bool(row["is_unique"]) != unique
+                or not row["is_valid"] or not row["is_ready"]
+                or definition_tail != expected_tail
+                or actual_predicate != predicate
+            ):
+                raise SyncStoreError("Sync attachment authority catalog is malformed")
+
+    @classmethod
+    def _compact_postgres_catalog_sql(cls, value: Any) -> str:
+        compact = cls._compact_catalog_sql(value)
+        for cast in ("::text", "::bigint"):
+            compact = compact.replace(cast, "")
+        return compact.replace("(", "").replace(")", "")
+
     def _ensure_envelope_m1_indexes(self, *, connection: Any) -> None:
         statements = [
             """
             CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_object
                 ON sync_envelopes(dataset_id, domain, entity_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_entity_status_sequence
+                ON sync_envelopes(dataset_id, domain, entity_id, status, server_sequence)
+            """,
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_envelopes_dataset_mutation_group_step
+                ON sync_envelopes(dataset_id, mutation_group_id, mutation_step)
+                WHERE mutation_group_id IS NOT NULL AND mutation_step IS NOT NULL
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_mutation_group_step
+                ON sync_envelopes(dataset_id, mutation_group_id, mutation_step)
             """,
             """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_client_sequence
@@ -5413,9 +14698,121 @@ class SyncDatabase:
                 ON sync_envelopes(dataset_id, apply_status, server_sequence)
                 WHERE apply_status = 'failed'
             """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_envelopes_outstanding_apply
+                ON sync_envelopes(dataset_id, server_sequence)
+                WHERE status = 'accepted'
+                  AND apply_status NOT IN ('applied', 'superseded')
+            """,
         ]
         for statement in statements:
             self.execute(statement, connection=connection)
+
+    def _ensure_conflict_indexes(self, *, connection: Any) -> None:
+        if self._conflict_identity_index_exists(connection=connection):
+            return
+        self._dedupe_legacy_conflict_identities(connection=connection)
+        self.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_conflicts_dataset_envelope_cursor
+                ON sync_conflicts(dataset_id, local_envelope_id, server_sequence)
+                WHERE local_envelope_id IS NOT NULL AND server_sequence IS NOT NULL
+            """,
+            connection=connection,
+        )
+
+    def _conflict_identity_index_exists(self, *, connection: Any) -> bool:
+        index_name = "uq_sync_conflicts_dataset_envelope_cursor"
+        if self.backend_type == BackendType.POSTGRESQL:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT indexname
+                      FROM pg_indexes
+                     WHERE schemaname = current_schema()
+                       AND tablename = ?
+                       AND indexname = ?
+                    """,
+                    ("sync_conflicts", index_name),
+                    connection=connection,
+                )
+            )
+            return row is not None
+        rows = self.execute(
+            "PRAGMA index_list(sync_conflicts)",
+            connection=connection,
+        ).rows
+        return any(str(row.get("name")) == index_name for row in rows)
+
+    def _dedupe_legacy_conflict_identities(self, *, connection: Any) -> None:
+        rows = self.execute(
+            """
+            SELECT *
+              FROM sync_conflicts
+             WHERE local_envelope_id IS NOT NULL
+               AND server_sequence IS NOT NULL
+             ORDER BY dataset_id, local_envelope_id, server_sequence,
+                      created_at, conflict_id
+            """,
+            connection=connection,
+        ).rows
+        grouped: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
+        for row in rows:
+            key = (
+                str(row["dataset_id"]),
+                str(row["local_envelope_id"]),
+                int(row["server_sequence"]),
+            )
+            grouped.setdefault(key, []).append(row)
+
+        losers: list[str] = []
+        for duplicates in grouped.values():
+            if len(duplicates) < 2:
+                continue
+            winner = min(
+                duplicates,
+                key=lambda row: (str(row.get("created_at") or ""), str(row["conflict_id"])),
+            )
+            fingerprint = self._legacy_conflict_fingerprint(winner)
+            if any(
+                self._legacy_conflict_fingerprint(row) != fingerprint
+                for row in duplicates
+            ):
+                raise SyncStoreError(
+                    "Sync conflict index migration found incompatible legacy duplicates"
+                )
+            losers.extend(
+                str(row["conflict_id"])
+                for row in duplicates
+                if row["conflict_id"] != winner["conflict_id"]
+            )
+
+        for conflict_id in sorted(losers):
+            self.execute(
+                "DELETE FROM sync_conflicts WHERE conflict_id = ?",
+                (conflict_id,),
+                connection=connection,
+            )
+
+    @staticmethod
+    def _legacy_conflict_fingerprint(row: Mapping[str, Any]) -> tuple[Any, ...]:
+        return (
+            row.get("dataset_id"),
+            row.get("domain"),
+            row.get("entity_id"),
+            row.get("conflict_type"),
+            row.get("status"),
+            row.get("base_envelope_id"),
+            row.get("local_envelope_id"),
+            row.get("remote_envelope_id"),
+            row.get("server_sequence"),
+            encode_json(decode_json(row.get("metadata_json"), default={}), default={}),
+            row.get("resolved_by_envelope_id"),
+            row.get("resolved_by_device_id"),
+            row.get("resolution_action"),
+            row.get("resolution_notes"),
+            row.get("resolved_at"),
+        )
 
     def _ensure_key_record_user_id_column(self, *, connection: Any) -> None:
         columns = {

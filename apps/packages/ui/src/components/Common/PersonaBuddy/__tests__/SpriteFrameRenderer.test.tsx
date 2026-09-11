@@ -70,7 +70,10 @@ describe("SpriteFrameRenderer", () => {
       />
     )
 
-    expect(currentFrame()).toHaveAttribute("src", expect.stringContaining("/assets/idle-1.png"))
+    expect(currentFrame()).toHaveAttribute(
+      "src",
+      expect.stringContaining("/assets/idle-1.png")
+    )
     expect(currentFrame()).toHaveAttribute("data-visual-state", "idle")
   })
 
@@ -95,7 +98,10 @@ describe("SpriteFrameRenderer", () => {
       />
     )
 
-    expect(currentFrame()).toHaveAttribute("src", expect.stringContaining("/assets/idle-2.png"))
+    expect(currentFrame()).toHaveAttribute(
+      "src",
+      expect.stringContaining("/assets/idle-2.png")
+    )
   })
 
   it("respects explicit frame order instead of asset id or upload order", () => {
@@ -118,13 +124,19 @@ describe("SpriteFrameRenderer", () => {
       />
     )
 
-    expect(currentFrame()).toHaveAttribute("src", expect.stringContaining("/assets/idle-2.png"))
+    expect(currentFrame()).toHaveAttribute(
+      "src",
+      expect.stringContaining("/assets/idle-2.png")
+    )
 
     act(() => {
       vi.advanceTimersByTime(50)
     })
 
-    expect(currentFrame()).toHaveAttribute("src", expect.stringContaining("/assets/idle-1.png"))
+    expect(currentFrame()).toHaveAttribute(
+      "src",
+      expect.stringContaining("/assets/idle-1.png")
+    )
   })
 
   it("renders sprite-sheet region frames as cropped background regions", () => {
@@ -204,7 +216,10 @@ describe("SpriteFrameRenderer", () => {
       />
     )
 
-    expect(currentFrame()).toHaveAttribute("src", expect.stringContaining("/assets/idle-1.png"))
+    expect(currentFrame()).toHaveAttribute(
+      "src",
+      expect.stringContaining("/assets/idle-1.png")
+    )
     expect(currentFrame()).toHaveAttribute("data-visual-state", "speaking")
   })
 
@@ -268,7 +283,10 @@ describe("SpriteFrameRenderer", () => {
     )
 
     expect(onRenderError).toHaveBeenLastCalledWith(null)
-    expect(currentFrame()).toHaveAttribute("src", expect.stringContaining("/assets/idle-1.png"))
+    expect(currentFrame()).toHaveAttribute(
+      "src",
+      expect.stringContaining("/assets/idle-1.png")
+    )
   })
 
   it("reports unsupported regions before trying to render them", () => {
@@ -297,4 +315,76 @@ describe("SpriteFrameRenderer", () => {
     expect(screen.getByText("Buddy")).toBeInTheDocument()
     expect(onRenderError).toHaveBeenCalledWith("unsupported_region")
   })
+})
+
+it("freezes frame playback in Static mode and resumes in Dynamic mode", () => {
+  vi.useFakeTimers()
+  const manifest = baseManifest({
+    animations: {
+      idle: {
+        frames: [
+          { asset_id: "idle-1", duration_ms: 100 },
+          { asset_id: "idle-2", duration_ms: 100 }
+        ]
+      }
+    }
+  })
+  const { rerender } = render(
+    <SpriteFrameRenderer
+      manifest={manifest}
+      assets={assets}
+      state="idle"
+      fallbackLabel="Buddy"
+      animate={false}
+    />
+  )
+  act(() => {
+    vi.advanceTimersByTime(500)
+  })
+  expect(currentFrame()).toHaveAttribute(
+    "src",
+    expect.stringContaining("idle-1.png")
+  )
+  rerender(
+    <SpriteFrameRenderer
+      manifest={manifest}
+      assets={assets}
+      state="idle"
+      fallbackLabel="Buddy"
+      animate
+    />
+  )
+  act(() => {
+    vi.advanceTimersByTime(100)
+  })
+  expect(currentFrame()).toHaveAttribute(
+    "src",
+    expect.stringContaining("idle-2.png")
+  )
+})
+it("fits an atlas region without shrinking its crop coordinates", () => {
+  const manifest = baseManifest({
+    animations: {
+      idle: {
+        frames: [
+          {
+            asset_id: "sheet-1",
+            region: { x: 32, y: 0, width: 32, height: 64 }
+          }
+        ]
+      }
+    }
+  })
+  render(
+    <SpriteFrameRenderer
+      manifest={manifest}
+      assets={assets}
+      state="idle"
+      fallbackLabel="Buddy"
+      fitSize={112}
+    />
+  )
+  expect(currentFrame()).toHaveAttribute("viewBox", "32 0 32 64")
+  expect(currentFrame()).toHaveAttribute("width", "112")
+  expect(currentFrame().querySelector("image")).toHaveAttribute("width", "64")
 })

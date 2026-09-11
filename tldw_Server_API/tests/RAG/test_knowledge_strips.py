@@ -10,22 +10,28 @@ These tests cover:
 """
 
 import asyncio
+import builtins
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
+
 import pytest
-from dataclasses import dataclass
-from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import tldw_Server_API.app.core.RAG.rag_service.knowledge_strips as knowledge_strips
+from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
 from tldw_Server_API.app.core.RAG.rag_service.knowledge_strips import (
     KnowledgeStrip,
-    KnowledgeStripsResult,
     KnowledgeStripsProcessor,
-    process_knowledge_strips,
-    _split_into_strips,
-    _score_strip_relevance,
+    KnowledgeStripsResult,
     _estimate_tokens,
+    _score_strip_relevance,
+    _split_into_strips,
+    process_knowledge_strips,
 )
-from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
+from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+from tldw_Server_API.tests.RAG_NEW.unit.test_generation_executor import (
+    _RecordingCredentialRuntime,
+)
 
 
 class TestHelperFunctions:
@@ -175,7 +181,7 @@ class TestKnowledgeStripsProcessor:
     """Tests for KnowledgeStripsProcessor class."""
 
     @pytest.fixture
-    def sample_documents(self) -> List[Document]:
+    def sample_documents(self) -> list[Document]:
         """Create sample documents for testing."""
         return [
             Document(
@@ -341,6 +347,39 @@ class TestKnowledgeStripsProcessor:
         assert result.strips[0].relevance_score == pytest.approx(0.92, rel=1e-6)
 
     @pytest.mark.asyncio
+    async def test_legacy_analyzer_keeps_six_positional_call_without_kwargs(self):
+        calls: list[tuple[Any, ...]] = []
+
+        def legacy_analyze(api_name, input_data, custom_prompt, api_key, system_message, temp):
+            calls.append(
+                (api_name, input_data, custom_prompt, api_key, system_message, temp)
+            )
+            return '[{"strip_num": 1, "relevance": 0.87}]'
+
+        docs = [
+            Document(
+                id="legacy-doc",
+                content="Historical analyzer compatibility.",
+                source=DataSource.MEDIA_DB,
+                metadata={},
+            )
+        ]
+        processor = KnowledgeStripsProcessor(
+            strip_size_tokens=200,
+            min_relevance_score=0.0,
+            analyze_fn=legacy_analyze,
+        )
+
+        result = await processor.process("compatibility", docs)
+
+        assert len(calls) == 1
+        assert calls[0][0] == "openai"
+        assert calls[0][1] == ""
+        assert "Historical analyzer compatibility" in calls[0][2]
+        assert calls[0][3] is None
+        assert result.strips[0].relevance_score == pytest.approx(0.87, rel=1e-6)
+
+    @pytest.mark.asyncio
     async def test_llm_scoring_fallback_log_sanitizes_exception_details(self):
         """LLM fallback logs should not expose raw scorer exception details."""
         secret_path = "/private/rag-knowledge-strips.db?token=strip-secret-token"
@@ -387,12 +426,431 @@ class TestKnowledgeStripsProcessor:
         assert "rag-knowledge-strips.db" not in joined
         assert "strip-secret-token" not in joined
 
+    @pytest.mark.asyncio
+    async def test_reused_runtime_processor_resets_per_process_state(self):
+        """Runtime trust and usage state should not leak across process calls."""
+        runtime = _RecordingCredentialRuntime()
+        outcomes = iter(
+            [
+                RuntimeError("provider unavailable"),
+                '[{"strip_num": 1, "relevance": 0.9}]',
+                '[{"strip_num": 1, "relevance": 0.8}]',
+            ]
+        )
+
+        def _mock_analyze(*args, **kwargs):
+            outcome = next(outcomes)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        docs = [
+            Document(
+                id="doc1",
+                content="Machine learning relies on data.",
+                source=DataSource.MEDIA_DB,
+                metadata={},
+            )
+        ]
+        processor = KnowledgeStripsProcessor(
+            strip_size_tokens=200,
+            min_relevance_score=0.0,
+            analyze_fn=_mock_analyze,
+            llm_provider="anthropic",
+            credential_runtime=runtime,
+            credential_handle=runtime.handle,
+        )
+
+        failed = await processor.process("machine learning", docs)
+        recovered = await processor.process("machine learning", docs)
+        repeated = await processor.process("machine learning", docs)
+
+        assert failed.metadata["verification_available"] is False
+        assert failed.metadata["failure_code"] == "provider_unavailable"
+        assert recovered.metadata["verification_available"] is True
+        assert "failure_code" not in recovered.metadata
+        assert repeated.metadata["verification_available"] is True
+        assert runtime.marked == [runtime.handle, runtime.handle]
+
+    @pytest.mark.asyncio
+    async def test_direct_runtime_processor_resolves_missing_handle(self):
+        runtime = _RecordingCredentialRuntime()
+        calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+        def _mock_analyze(*args, **kwargs):
+            calls.append((args, kwargs))
+            return '[{"strip_num": 1, "relevance": 0.91}]'
+
+        docs = [
+            Document(
+                id="direct-runtime",
+                content="Runtime-scoped grading evidence.",
+                source=DataSource.MEDIA_DB,
+                metadata={},
+            )
+        ]
+        processor = KnowledgeStripsProcessor(
+            strip_size_tokens=200,
+            min_relevance_score=0.0,
+            analyze_fn=_mock_analyze,
+            llm_provider="anthropic",
+            llm_model="claude-test",
+            credential_runtime=runtime,
+        )
+
+        result = await processor.process("grading evidence", docs)
+
+        assert runtime.resolved == ["anthropic"]
+        assert runtime.marked == [runtime.handle]
+        assert len(calls) == 1
+        args, kwargs = calls[0]
+        assert args[0] == "anthropic"
+        assert args[3] == "runtime-only-key"
+        assert kwargs["app_config"] == runtime.handle.app_config
+        assert kwargs["credentials_resolved"] is True
+        assert kwargs["provider_credentials"] is runtime.handle
+        assert kwargs["raise_on_error"] is True
+        assert result.metadata["verification_available"] is True
+
+    @pytest.mark.asyncio
+    async def test_runtime_scoring_bypasses_saturated_default_executor(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        runtime = _RecordingCredentialRuntime()
+        pool = BoundedDaemonPool(capacity=1)
+        analyzer_started = threading.Event()
+        blocker_started = threading.Event()
+        release_blocker = threading.Event()
+
+        def block_default_executor() -> None:
+            blocker_started.set()
+            release_blocker.wait(timeout=2.0)
+
+        def analyze(*_args: Any, **_kwargs: Any) -> str:
+            analyzer_started.set()
+            return '[{"strip_num": 1, "relevance": 0.91}]'
+
+        monkeypatch.setattr(
+            knowledge_strips,
+            "SYNC_ADAPTER_CALL_POOL",
+            pool,
+            raising=False,
+        )
+        processor = KnowledgeStripsProcessor(
+            strip_size_tokens=200,
+            min_relevance_score=0.0,
+            analyze_fn=analyze,
+            llm_provider="anthropic",
+            credential_runtime=runtime,
+            credential_handle=runtime.handle,
+        )
+        loop = asyncio.get_running_loop()
+        previous_executor = getattr(loop, "_default_executor", None)
+        saturated_executor = ThreadPoolExecutor(max_workers=1)
+        loop.set_default_executor(saturated_executor)
+        blocker = loop.run_in_executor(None, block_default_executor)
+        while not blocker_started.is_set():
+            await asyncio.sleep(0)
+
+        task = asyncio.create_task(
+            processor.process(
+                "grading evidence",
+                [
+                    Document(
+                        id="direct-start-runtime",
+                        content="Runtime-scoped grading evidence.",
+                        source=DataSource.MEDIA_DB,
+                        metadata={},
+                    )
+                ],
+            )
+        )
+        try:
+            for _attempt in range(100):
+                if analyzer_started.is_set():
+                    break
+                await asyncio.sleep(0.001)
+            started_before_release = analyzer_started.is_set()
+        finally:
+            release_blocker.set()
+            await blocker
+            replacement_executor = previous_executor or ThreadPoolExecutor()
+            loop.set_default_executor(replacement_executor)
+            saturated_executor.shutdown(wait=True, cancel_futures=True)
+
+        result = await asyncio.wait_for(task, timeout=1.0)
+        assert started_before_release is True
+        assert runtime.marked == [runtime.handle]
+        assert result.metadata["verification_available"] is True
+        assert result.strips[0].relevance_score == pytest.approx(0.91)
+        assert pool.active_count == 0
+
+    @pytest.mark.asyncio
+    async def test_runtime_scoring_capacity_rejects_before_dispatch(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        runtime = _RecordingCredentialRuntime()
+        release_holder = threading.Event()
+        holder_started = threading.Event()
+        holder_released = threading.Event()
+        call_count = 0
+        release_count = 0
+        private_secret = "knowledge-strip-capacity-private-secret"
+
+        class TrackingPool(BoundedDaemonPool):
+            def _release_capacity(self) -> None:
+                nonlocal release_count
+                release_count += 1
+                super()._release_capacity()
+
+        def hold_capacity() -> None:
+            holder_started.set()
+            release_holder.wait(timeout=2.0)
+
+        def analyze(*_args: Any, **_kwargs: Any) -> str:
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError(private_secret)
+
+        pool = TrackingPool(capacity=1)
+        pool.start(
+            hold_capacity,
+            name="knowledge-strip-capacity-holder",
+            released_event=holder_released,
+        )
+        assert holder_started.wait(timeout=1.0)
+        monkeypatch.setattr(
+            knowledge_strips,
+            "SYNC_ADAPTER_CALL_POOL",
+            pool,
+            raising=False,
+        )
+        processor = KnowledgeStripsProcessor(
+            strip_size_tokens=200,
+            min_relevance_score=0.0,
+            analyze_fn=analyze,
+            llm_provider="anthropic",
+            credential_runtime=runtime,
+            credential_handle=runtime.handle,
+        )
+
+        try:
+            result = await processor.process(
+                "grading evidence",
+                [
+                    Document(
+                        id="capacity-runtime",
+                        content="Runtime-scoped grading evidence.",
+                        source=DataSource.MEDIA_DB,
+                        metadata={},
+                    )
+                ],
+            )
+            await asyncio.sleep(0.03)
+            assert call_count == 0
+            assert runtime.marked == []
+            assert pool.active_count == 1
+            assert release_count == 0
+            assert result.metadata == {
+                "strip_size_tokens": 200,
+                "min_relevance_score": 0.0,
+                "top_k": 20,
+                "verification_available": False,
+                "failure_code": "provider_unavailable",
+            }
+            assert private_secret not in str(result.metadata)
+        finally:
+            release_holder.set()
+            assert holder_released.wait(timeout=1.0)
+
+        await asyncio.sleep(0.03)
+        assert call_count == 0
+        assert pool.active_count == 0
+        assert release_count == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.concurrent
+    async def test_runtime_scoring_cancellation_drains_and_marks_completed_call(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        lifecycle: list[str] = []
+        entered = threading.Event()
+        release = threading.Event()
+
+        class OrderedRuntime(_RecordingCredentialRuntime):
+            async def mark_used(self, handle: Any) -> None:
+                lifecycle.append("mark-used")
+                await super().mark_used(handle)
+
+        class TrackingPool(BoundedDaemonPool):
+            def _release_capacity(self) -> None:
+                lifecycle.append("capacity-release")
+                super()._release_capacity()
+
+        runtime = OrderedRuntime()
+        pool = TrackingPool(capacity=1)
+        monkeypatch.setattr(
+            knowledge_strips,
+            "SYNC_ADAPTER_CALL_POOL",
+            pool,
+            raising=False,
+        )
+
+        def blocking_analyze(*_args, **_kwargs):
+            lifecycle.append("provider-start")
+            entered.set()
+            assert release.wait(timeout=1.0)
+            lifecycle.append("provider-exit")
+            return '[{"strip_num": 1, "relevance": 0.91}]'
+
+        processor = KnowledgeStripsProcessor(
+            strip_size_tokens=200,
+            min_relevance_score=0.0,
+            analyze_fn=blocking_analyze,
+            llm_provider="anthropic",
+            credential_runtime=runtime,
+            credential_handle=runtime.handle,
+        )
+        async def invoke_with_runtime() -> Any:
+            try:
+                return await processor.process(
+                    "grading evidence",
+                    [
+                        Document(
+                            id="cancel-runtime",
+                            content="Runtime-scoped grading evidence.",
+                            source=DataSource.MEDIA_DB,
+                            metadata={},
+                        )
+                    ],
+                )
+            finally:
+                lifecycle.append("runtime-close")
+
+        task = asyncio.create_task(invoke_with_runtime())
+        try:
+            assert await asyncio.to_thread(entered.wait, 1.0)
+            task.cancel()
+            await asyncio.sleep(0.03)
+            assert not task.done()
+            assert runtime.marked == []
+            assert pool.active_count == 1
+            assert lifecycle == ["provider-start"]
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=1.0)
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        assert runtime.marked == [runtime.handle]
+        assert pool.active_count == 0
+        assert lifecycle == [
+            "provider-start",
+            "provider-exit",
+            "capacity-release",
+            "mark-used",
+            "runtime-close",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_runtime_error_result_releases_without_marking(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        runtime = _RecordingCredentialRuntime()
+        release_count = 0
+        private_secret = "knowledge-strip-error-private-secret"
+
+        class TrackingPool(BoundedDaemonPool):
+            def _release_capacity(self) -> None:
+                nonlocal release_count
+                release_count += 1
+                super()._release_capacity()
+
+        pool = TrackingPool(capacity=1)
+        monkeypatch.setattr(
+            knowledge_strips,
+            "SYNC_ADAPTER_CALL_POOL",
+            pool,
+            raising=False,
+        )
+        processor = KnowledgeStripsProcessor(
+            strip_size_tokens=200,
+            min_relevance_score=0.0,
+            analyze_fn=lambda *_args, **_kwargs: f"Error: {private_secret}",
+            llm_provider="anthropic",
+            credential_runtime=runtime,
+            credential_handle=runtime.handle,
+        )
+
+        result = await processor.process(
+            "grading evidence",
+            [
+                Document(
+                    id="error-runtime",
+                    content="Runtime-scoped grading evidence.",
+                    source=DataSource.MEDIA_DB,
+                    metadata={},
+                )
+            ],
+        )
+
+        assert runtime.marked == []
+        assert pool.active_count == 0
+        assert release_count == 1
+        assert result.metadata["verification_available"] is False
+        assert result.metadata["failure_code"] == "provider_unavailable"
+        assert private_secret not in str(result.metadata)
+
+    @pytest.mark.asyncio
+    async def test_direct_runtime_processor_resolution_failure_skips_analyzer(self):
+        analyzer_called = False
+
+        class FailingRuntime:
+            async def resolve(self, _provider):
+                raise RuntimeError("secret-key /private/provider-store.db")
+
+        def _unexpected_analyze(*_args, **_kwargs):
+            nonlocal analyzer_called
+            analyzer_called = True
+            raise AssertionError("analyzer must not run without runtime credentials")
+
+        docs = [
+            Document(
+                id="direct-runtime-failure",
+                content="Heuristic fallback evidence.",
+                source=DataSource.MEDIA_DB,
+                metadata={},
+            )
+        ]
+        processor = KnowledgeStripsProcessor(
+            strip_size_tokens=200,
+            min_relevance_score=0.0,
+            analyze_fn=_unexpected_analyze,
+            llm_provider="anthropic",
+            credential_runtime=FailingRuntime(),
+        )
+
+        result = await processor.process("fallback evidence", docs)
+
+        assert analyzer_called is False
+        assert result.metadata["verification_available"] is False
+        assert result.metadata["failure_code"] == "provider_unavailable"
+        assert "secret-key" not in str(result.metadata)
+        assert "/private/" not in str(result.metadata)
+
 
 class TestProcessKnowledgeStrips:
     """Tests for the convenience function."""
 
     @pytest.fixture
-    def sample_documents(self) -> List[Document]:
+    def sample_documents(self) -> list[Document]:
         """Create sample documents."""
         return [
             Document(
@@ -434,6 +892,110 @@ class TestProcessKnowledgeStrips:
 
         assert docs == []
         assert metadata["total_strips"] == 0
+
+    @pytest.mark.asyncio
+    async def test_runtime_llm_grading_dispatches_explicit_credentials(
+        self,
+        monkeypatch,
+        sample_documents,
+    ):
+        import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+        runtime = _RecordingCredentialRuntime()
+        calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+        def fake_dispatch(*args, **kwargs):
+            calls.append((args, kwargs))
+            return '[{"strip_num": 1, "relevance": 0.95}]'
+
+        monkeypatch.setattr(sgl, "_dispatch_to_api", fake_dispatch)
+
+        docs, metadata = await process_knowledge_strips(
+            query="Python programming",
+            documents=sample_documents,
+            strip_size_tokens=200,
+            min_relevance=0.0,
+            max_strips=10,
+            use_llm_grading=True,
+            llm_provider="anthropic",
+            llm_model="claude-test",
+            credential_runtime=runtime,
+        )
+
+        assert docs
+        assert len(calls) == 1
+        args, kwargs = calls[0]
+        assert args[0].strip()
+        assert args[1] is None
+        assert args[2] == "anthropic"
+        assert args[3] == "runtime-only-key"
+        assert kwargs["app_config"] == runtime.handle.app_config
+        assert kwargs["credentials_resolved"] is True
+        assert kwargs["raise_on_error"] is True
+        assert runtime.resolved == ["anthropic"]
+        assert runtime.marked == [runtime.handle]
+        assert metadata["verification_available"] is True
+
+    @pytest.mark.asyncio
+    async def test_runtime_llm_grading_failure_degrades_with_bounded_trust(
+        self,
+        sample_documents,
+    ):
+        class FailingRuntime:
+            async def resolve(self, _provider):
+                raise RuntimeError("secret-key /private/credential-store.db")
+
+        docs, metadata = await process_knowledge_strips(
+            query="Python programming",
+            documents=sample_documents,
+            strip_size_tokens=200,
+            min_relevance=0.0,
+            max_strips=10,
+            use_llm_grading=True,
+            llm_provider="anthropic",
+            llm_model="claude-test",
+            credential_runtime=FailingRuntime(),
+        )
+
+        assert docs
+        assert metadata["verification_available"] is False
+        assert metadata["failure_code"] == "provider_unavailable"
+        assert "secret-key" not in str(metadata)
+        assert "/private/" not in str(metadata)
+
+    @pytest.mark.asyncio
+    async def test_runtime_llm_import_failure_records_unavailable_trust(
+        self,
+        monkeypatch,
+        sample_documents,
+    ):
+        runtime = _RecordingCredentialRuntime()
+        real_import = builtins.__import__
+
+        def fail_sgl_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == (
+                "tldw_Server_API.app.core.LLM_Calls."
+                "Summarization_General_Lib"
+            ):
+                raise ImportError("provider module unavailable")
+            return real_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", fail_sgl_import)
+
+        docs, metadata = await process_knowledge_strips(
+            query="Python programming",
+            documents=sample_documents,
+            strip_size_tokens=200,
+            min_relevance=0.0,
+            max_strips=10,
+            use_llm_grading=True,
+            llm_provider="anthropic",
+            credential_runtime=runtime,
+        )
+
+        assert docs
+        assert metadata["verification_available"] is False
+        assert metadata["failure_code"] == "provider_unavailable"
 
 
 class TestDocumentRebuilding:

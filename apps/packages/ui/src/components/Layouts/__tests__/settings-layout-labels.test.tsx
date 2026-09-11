@@ -88,4 +88,18 @@ describe("settings navigation labels", () => {
       "Settings"
     )
   })
+
+  it("labels the prompt settings destination as Workflow prompts", () => {
+    renderSettingsLayout("/settings/prompt")
+
+    expect(screen.getByRole("link", { name: "Workflow prompts" })).toBeVisible()
+    expect(screen.queryByRole("link", { name: "Manage Prompts" }))
+      .not.toBeInTheDocument()
+  })
+
+  it("keeps chat macros in the preferences and workflow navigation", () => {
+    renderSettingsLayout("/settings/chat-macros")
+
+    expect(screen.getByRole("link", { name: /^chat macros$/i })).toBeVisible()
+  })
 })

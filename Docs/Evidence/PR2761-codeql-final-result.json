@@ -1,0 +1,75 @@
+{
+  "verified_head": "58070a0fea5e636d5426b25ced16b66e7147f397",
+  "production_source": "2e037be4452ddae74807ab672fec94a88c030cc0",
+  "analyses": [
+    {
+      "id": 1759451338,
+      "category": "/language:python",
+      "commit_sha": "58070a0fea5e636d5426b25ced16b66e7147f397",
+      "created_at": "2026-09-11T05:08:23Z",
+      "raw_results_count": 364,
+      "error": "",
+      "warning": "121 relatedLocations were ignored"
+    },
+    {
+      "id": 1759415368,
+      "category": "/language:javascript-typescript",
+      "commit_sha": "58070a0fea5e636d5426b25ced16b66e7147f397",
+      "created_at": "2026-09-11T04:56:17Z",
+      "raw_results_count": 71,
+      "error": "",
+      "warning": ""
+    },
+    {
+      "id": 1759389568,
+      "category": "/language:actions",
+      "commit_sha": "58070a0fea5e636d5426b25ced16b66e7147f397",
+      "created_at": "2026-09-11T04:47:03Z",
+      "raw_results_count": 241,
+      "error": "",
+      "warning": ""
+    }
+  ],
+  "open_pr_alerts": 0,
+  "codeql_check": {
+    "link": "https://github.com/rmusser01/tldw_server/runs/103150801083",
+    "name": "CodeQL",
+    "state": "SUCCESS"
+  },
+  "ci_snapshot": {
+    "SKIPPED": 38,
+    "IN_PROGRESS": 2,
+    "SUCCESS": 73
+  },
+  "pending_checks": [
+    {
+      "link": "https://github.com/rmusser01/tldw_server/actions/runs/34563383626/job/103153287142",
+      "name": "frontend-required",
+      "state": "IN_PROGRESS"
+    },
+    {
+      "link": "https://github.com/rmusser01/tldw_server/actions/runs/34563383449/job/103150659966",
+      "name": "coverage-required",
+      "state": "IN_PROGRESS"
+    }
+  ],
+  "dispositions": {
+    "count": 424,
+    "reasons": {
+      "false positive": 410,
+      "used in tests": 14
+    },
+    "verified_fields": [
+      "rule",
+      "reason",
+      "comment",
+      "dismissed_at",
+      "effective_state"
+    ]
+  },
+  "main_findings_preserved_open": [
+    2281,
+    2282
+  ],
+  "release_ready": false
+}

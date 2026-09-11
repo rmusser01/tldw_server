@@ -1,5 +1,6 @@
-import pytest
 from pathlib import Path
+
+import pytest
 
 from tldw_Server_API.app.core.DB_Management import db_path_utils
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -96,17 +97,48 @@ def test_get_user_base_directory_multi_user_none_raises(monkeypatch, tmp_path):
         DatabasePaths.get_user_base_directory(None)
 
 
-def test_user_db_base_dir_settings_override_env_outside_tests(monkeypatch, tmp_path):
+def test_user_db_base_dir_env_overrides_settings_outside_tests(monkeypatch, tmp_path):
     env_base = tmp_path / "env_base"
     settings_base = tmp_path / "settings_base"
-    monkeypatch.setenv("USER_DB_BASE_DIR", str(env_base))
+    monkeypatch.setenv("USER_DB_BASE_DIR", f"  {env_base}\t")
     monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(settings_base))
     monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
 
     base_dir = DatabasePaths.get_user_db_base_dir()
 
-    _expect_equal(base_dir, settings_base, "settings USER_DB_BASE_DIR should override env outside tests")
+    _expect_equal(base_dir, env_base, "env USER_DB_BASE_DIR should override settings outside tests")
     _expect_true(base_dir.exists(), "resolved user DB base dir should exist")
+
+
+def test_user_db_base_dir_blank_env_falls_back_to_settings(monkeypatch, tmp_path):
+    settings_base = tmp_path / "settings_base"
+    monkeypatch.setenv("USER_DB_BASE_DIR", "  \t")
+    monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(settings_base))
+    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+
+    resolved = DatabasePaths.resolve_user_db_base_dir()
+
+    _expect_equal(
+        resolved,
+        settings_base,
+        "blank env USER_DB_BASE_DIR should not override configured settings",
+    )
+
+
+def test_user_db_base_dir_env_overrides_stale_settings_in_tests(monkeypatch, tmp_path):
+    env_base = tmp_path / "current_env_base"
+    stale_settings_base = tmp_path / "stale_settings_base"
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(env_base))
+    monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(stale_settings_base))
+    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: True)
+
+    resolved = DatabasePaths.resolve_user_db_base_dir()
+
+    _expect_equal(
+        resolved,
+        env_base,
+        "current env USER_DB_BASE_DIR should override a stale settings snapshot",
+    )
 
 
 def test_invalid_user_id_rejected_outside_tests(monkeypatch, tmp_path):

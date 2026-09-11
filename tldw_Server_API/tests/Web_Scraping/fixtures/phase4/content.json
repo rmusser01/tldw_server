@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "expected": "Fixture & Title\n\nFirst paragraph.\n\n\n\n\nSecond \n\nbold\n\n paragraph.\n\n\n",
+      "html": "<html><body><h1>Fixture &amp; Title</h1><p>First paragraph.</p><p>Second <strong>bold</strong> paragraph.</p></body></html>",
+      "name": "paragraph_and_inline_formatting",
+      "operation": "convert_html_to_markdown"
+    },
+    {
+      "expected": "Lead\n\ninline\n\nTail paragraph.\n\n\n",
+      "html": "<div>Lead<span>inline</span></div><p>Tail paragraph.</p>",
+      "name": "mixed_block_and_paragraph_formatting",
+      "operation": "convert_html_to_markdown"
+    }
+  ],
+  "category": "content"
+}

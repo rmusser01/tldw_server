@@ -88,6 +88,33 @@ describe('media read-along cache keys', () => {
     expect(base).not.toEqual(changedSpeed)
   })
 
+  it('isolates explicit backend requests in settings signatures', () => {
+    const legacy = buildTtsSettingsSignature({
+      provider: 'tldw',
+      model: 'Vendor/Model',
+      voice: 'Narrator',
+      format: 'mp3'
+    })
+    const openrouter = buildTtsSettingsSignature({
+      provider: 'tldw',
+      backend: 'openrouter',
+      model: 'Vendor/Model',
+      voice: 'Narrator',
+      format: 'mp3'
+    })
+    const gateway = buildTtsSettingsSignature({
+      provider: 'tldw',
+      backend: 'gateway:company-proxy',
+      model: 'Vendor/Model',
+      voice: 'Narrator',
+      format: 'mp3'
+    })
+
+    expect(legacy).toContain('backend:')
+    expect(openrouter).toContain('backend:openrouter')
+    expect(new Set([legacy, openrouter, gateway]).size).toBe(3)
+  })
+
   it('preserves opaque model and voice id casing in settings signatures', () => {
     const mixedCase = buildTtsSettingsSignature({
       provider: ' OpenAI ',

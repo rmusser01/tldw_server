@@ -24,23 +24,23 @@ import contextlib
 import hashlib
 import re
 import time
+from collections.abc import Iterator
 from typing import Any, Literal
 
 from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.DB_Management.media_db.api import (
+    create_media_database,  # noqa: F401 - compatibility export
+)
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+    SummaryProviderError,
+)
 
 from . import agentic_execution as _agentic_execution
 from .advanced_cache import AGENTIC_CACHE
-from .agentic_execution import (
-    AgenticConfig,
-    AgenticToolbox,
-    _get_media_db_for_structure,
-    assemble_ephemeral_chunk as _assemble_ephemeral_chunk,
-    build_agentic_derived_evidence,
-    decompose_query as _decompose_query,
-    tool_loop as _tool_loop,
-)
 from .database_retrievers import MultiDatabaseRetriever, RetrievalConfig
 from .evidence_models import RetrievedEvidence
 from .request_resolution import ResolvedRAGRequest
@@ -61,6 +61,29 @@ except ImportError:
 # Simple in-process caches (namespaced via adapter)
 _EPHEMERAL_CACHE: dict[str, Any] = {}
 _INTRA_DOC_VEC_CACHE = _agentic_execution._INTRA_DOC_VEC_CACHE
+AgenticConfig = _agentic_execution.AgenticConfig
+AgenticToolbox = _agentic_execution.AgenticToolbox
+_get_media_db_for_structure = _agentic_execution._get_media_db_for_structure
+build_agentic_derived_evidence = _agentic_execution.build_agentic_derived_evidence
+_assemble_ephemeral_chunk = _agentic_execution.assemble_ephemeral_chunk
+_decompose_query = _agentic_execution.decompose_query
+_tool_loop = _agentic_execution.tool_loop
+
+
+def _bounded_provider_failure_code(exc: BaseException) -> str:
+    """Map a typed provider failure to an allowlisted metadata code."""
+    code = str(getattr(exc, "code", "") or getattr(exc, "error_code", "") or "")
+    if code in {
+        "invalid_provider_credentials",
+        "missing_provider_credentials",
+        "provider_configuration_invalid",
+        "credential_store_unavailable",
+        "credential_scope_revoked",
+    }:
+        return code
+    if getattr(exc, "status_code", None) in {401, 403}:
+        return "invalid_provider_credentials"
+    return "provider_unavailable"
 
 
 def _cache_get(key: str) -> dict[str, Any] | None:
@@ -246,6 +269,7 @@ async def agentic_rag_pipeline(
     low_confidence_behavior: str = "continue",
     resolved_request: ResolvedRAGRequest | None = None,
     retrieval_plan: RetrievalPlan | None = None,
+    credential_runtime: Any = None,
 ) -> UnifiedSearchResult:
     """Agentic RAG: coarse retrieve, assemble ephemeral chunk, optional answer.
 
@@ -264,7 +288,6 @@ async def agentic_rag_pipeline(
         retrieval_plan=retrieval_plan,
     )
     effective_query = str(resolved_request.query or query)
-    effective_sources = list(effective_retrieval_plan.sources or ("media_db",))
     effective_search_mode = effective_retrieval_plan.search_mode
     effective_top_k = max(1, int(effective_retrieval_plan.top_k or top_k or 10))
     effective_min_score = float(effective_retrieval_plan.min_score if effective_retrieval_plan.min_score is not None else min_score or 0.0)
@@ -299,6 +322,7 @@ async def agentic_rag_pipeline(
         user_id=str(resolved_request.user_id or "rag_agentic"),
         media_db=media_db,
         chacha_db=chacha_db,
+        credential_runtime=credential_runtime,
     )
 
     # 2) Coarse retrieval (prefer media-level)
@@ -320,8 +344,13 @@ async def agentic_rag_pipeline(
             allowed_media_ids=allowed_media_ids,
         )
         docs = list(retrieved_evidence.documents)
+    except (ByokResolutionError, ChatAPIError):
+        if credential_runtime is not None:
+            raise
+        logger.warning("Agentic coarse retrieval failed")
+        docs = []
     except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError):
-        logger.opt(exception=True).warning("Agentic coarse retrieval failed")
+        logger.warning("Agentic coarse retrieval failed")
         docs = []
 
     # Fallback: if no documents were retrieved via MultiDatabaseRetriever but we
@@ -345,6 +374,7 @@ async def agentic_rag_pipeline(
                 config=fb_cfg,
                 user_id=str(resolved_request.user_id or "rag_agentic"),
                 media_db=media_db,
+                credential_runtime=credential_runtime,
             )
             fallback_docs = await fb_retriever.retrieve(
                 query=effective_query,
@@ -353,6 +383,10 @@ async def agentic_rag_pipeline(
             )
             if fallback_docs:
                 docs = fallback_docs
+        except (ByokResolutionError, ChatAPIError):
+            if credential_runtime is not None:
+                raise
+            logger.warning("Agentic Media DB fallback retrieval failed")
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError):
             logger.warning("Agentic Media DB fallback retrieval failed")
 
@@ -465,7 +499,12 @@ async def agentic_rag_pipeline(
 
     key_raw = "|".join([effective_query.strip().lower()] + sorted(_hashable_doc(d) for d in docs[: cfg.top_k_docs]))
     cache_key = hashlib.sha256(key_raw.encode("utf-8")).hexdigest()
-    cached = _cache_get(cache_key)
+    agentic_embedding_metadata: dict[str, Any] = {}
+    use_ephemeral_cache = not (
+        credential_runtime is not None
+        and cfg.agentic_use_provider_embeddings_within
+    )
+    cached = _cache_get(cache_key) if use_ephemeral_cache else None
     if cached:
         chunk_text = cached.get("chunk_text", "")
         prov = cached.get("provenance", [])
@@ -481,11 +520,18 @@ async def agentic_rag_pipeline(
         # 4) Assemble ephemeral chunk (either tools or heuristics)
         tool_trace: list[dict[str, Any]] = []
         if cfg.enable_tools:
-            chunk_text, prov, tool_trace = await _tool_loop(docs, effective_query, cfg)
+            chunk_text, prov, tool_trace = await _tool_loop(
+                docs,
+                effective_query,
+                cfg,
+                credential_runtime=credential_runtime,
+                stage_metadata=agentic_embedding_metadata,
+            )
         else:
             chunk_text, prov = _assemble_ephemeral_chunk(docs, effective_query, cfg)
             tool_trace = []
-        _cache_set(cache_key, {"chunk_text": chunk_text, "provenance": prov}, cfg.cache_ttl_sec)
+        if use_ephemeral_cache:
+            _cache_set(cache_key, {"chunk_text": chunk_text, "provenance": prov}, cfg.cache_ttl_sec)
 
     # Represent the ephemeral chunk as a Document so the existing
     # generation and response formatting utilities can handle it.
@@ -558,6 +604,16 @@ async def agentic_rag_pipeline(
         security_report=None,
         total_time=0.0,
     )
+    planner_metadata = agentic_embedding_metadata.get("planner")
+    embedding_metadata = {
+        key: value
+        for key, value in agentic_embedding_metadata.items()
+        if key != "planner"
+    }
+    if embedding_metadata:
+        result.metadata["agentic_embeddings"] = embedding_metadata
+    if isinstance(planner_metadata, dict):
+        result.metadata["agentic_planner"] = dict(planner_metadata)
 
     # Attach lightweight coverage/precision metrics
     try:
@@ -626,6 +682,7 @@ async def agentic_rag_pipeline(
             gen = AnswerGenerator(
                 model=generation_model,
                 provider=generation_provider,
+                credential_runtime=credential_runtime,
             )
             ctx = chunk_text
             gen_out = await gen.generate(
@@ -637,8 +694,10 @@ async def agentic_rag_pipeline(
             ans = gen_out["answer"] if isinstance(gen_out, dict) else str(gen_out)
             result.generated_answer = ans
         except (ImportError, AttributeError, ConnectionError, RuntimeError, TypeError, ValueError, TimeoutError) as e:
+            if isinstance(e, (ByokResolutionError, ChatAPIError)):
+                raise
             logger.warning("Agentic generation failed")
-            result.errors.append(str(e))
+            result.errors.append("Answer generation failed")
 
     # Guardrails and verification: hard citations + numeric fidelity + optional claims/NLI
     if result.generated_answer:
@@ -649,31 +708,133 @@ async def agentic_rag_pipeline(
                 import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
 
                 from .claims import ClaimsEngine
+
+                claims_handle = None
+                claims_provider = None
+                claims_state = {"used": False}
+                if credential_runtime is not None:
+                    from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+                        _resolve_claims_llm_config,
+                    )
+
+                    claims_provider, claims_model, _ = _resolve_claims_llm_config()
+                    claims_handle = await credential_runtime.resolve(
+                        claims_provider,
+                        model=claims_model,
+                    )
+
                 def _analyze(api_name: str, input_data: Any, custom_prompt_arg: str | None = None,
                              api_key: str | None = None, system_message: str | None = None,
                              temp: float | None = None, **kwargs):
-                    return sgl.analyze(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, **kwargs)
+                    if claims_handle is None:
+                        return sgl.analyze(
+                            api_name,
+                            input_data,
+                            custom_prompt_arg,
+                            api_key,
+                            system_message,
+                            temp,
+                            **kwargs,
+                        )
+                    for key in (
+                        "app_config",
+                        "credentials_resolved",
+                        "provider_credentials",
+                        "_provider_call_credentials",
+                        "raise_on_error",
+                    ):
+                        kwargs.pop(key, None)
+                    response = sgl.analyze(
+                        claims_provider or claims_handle.provider,
+                        input_data,
+                        custom_prompt_arg,
+                        claims_handle.api_key,
+                        system_message,
+                        temp,
+                        app_config=claims_handle.app_config,
+                        credentials_resolved=True,
+                        provider_credentials=claims_handle,
+                        raise_on_error=True,
+                        **kwargs,
+                    )
+                    if isinstance(response, Iterator):
+                        from .generation import (
+                            _classify_stream_content,
+                            _extract_stream_text,
+                        )
+
+                        chunks = []
+                        for chunk in response:
+                            chunks.append(str(chunk))
+                            has_content, has_error = _classify_stream_content(
+                                _extract_stream_text(chunk)
+                            )
+                            if has_content:
+                                claims_state["used"] = True
+                            if has_error:
+                                raise SummaryProviderError(
+                                    code="provider_failure",
+                                    provider=claims_provider or claims_handle.provider,
+                                )
+                        response = "".join(chunks)
+                    if isinstance(response, str) and response.startswith("Error:"):
+                        raise SummaryProviderError(
+                            code="provider_failure",
+                            provider=claims_provider or claims_handle.provider,
+                        )
+                    claims_state["used"] = True
+                    return response
                 engine = ClaimsEngine(_analyze)
                 async def _retrieve_for_claim(_c_text: str, top_k: int = 3):
                     return [synthetic]
-                claims_run = await engine.run(
-                    answer=result.generated_answer,
-                    query=effective_query,
-                    documents=[synthetic],
-                    claim_extractor="auto",
-                    claim_verifier=claim_verifier,
-                    claims_top_k=claims_top_k,
-                    claims_conf_threshold=claims_conf_threshold,
-                    claims_max=claims_max,
-                    retrieve_fn=_retrieve_for_claim,
-                    nli_model=nli_model,
-                    claims_concurrency=claims_concurrency,
+
+                async def _run_and_mark_claims() -> dict[str, Any]:
+                    try:
+                        return await engine.run(
+                            answer=result.generated_answer,
+                            query=effective_query,
+                            documents=[synthetic],
+                            claim_extractor="auto",
+                            claim_verifier=claim_verifier,
+                            claims_top_k=claims_top_k,
+                            claims_conf_threshold=claims_conf_threshold,
+                            claims_max=claims_max,
+                            retrieve_fn=_retrieve_for_claim,
+                            nli_model=nli_model,
+                            claims_concurrency=claims_concurrency,
+                        )
+                    finally:
+                        if claims_handle is not None and claims_state["used"]:
+                            await credential_runtime.mark_used(claims_handle)
+
+                claims_operation = _run_and_mark_claims()
+                claims_run = (
+                    await await_owned_worker(claims_operation)
+                    if claims_handle is not None
+                    else await claims_operation
                 )
                 claims_payload = claims_run.get("claims")
                 result.metadata["claims"] = claims_payload
                 result.metadata["factuality"] = claims_run.get("summary")
+            except (ByokResolutionError, SummaryProviderError) as exc:
+                result.metadata["claims"] = {
+                    "failure_code": (
+                        exc.code
+                        if isinstance(exc, ByokResolutionError)
+                        else "provider_unavailable"
+                    ),
+                    "verification_available": False,
+                }
+                logger.warning("Agentic claims provider unavailable")
             except (ImportError, AttributeError, ConnectionError, RuntimeError, TypeError, ValueError, TimeoutError):
-                logger.debug("Agentic claims verification skipped")
+                if credential_runtime is not None:
+                    result.metadata["claims"] = {
+                        "failure_code": "provider_unavailable",
+                        "verification_available": False,
+                    }
+                    logger.warning("Agentic claims provider unavailable")
+                else:
+                    logger.debug("Agentic claims verification skipped")
 
         # Hard citations using assembled spans
         try:
@@ -720,6 +881,7 @@ async def agentic_rag_pipeline(
                                         user_id=str(resolved_request.user_id or "rag_agentic"),
                                         media_db=media_db,
                                         chacha_db=chacha_db,
+                                        credential_runtime=credential_runtime,
                                     )
                                     conf = RetrievalConfig(
                                         max_results=min(10, effective_top_k),
@@ -740,6 +902,14 @@ async def agentic_rag_pipeline(
                                                     index_namespace=effective_index_namespace,
                                                 )
                                             )
+                                        except (ByokResolutionError, ChatAPIError) as exc:
+                                            if credential_runtime is None:
+                                                raise
+                                            result.metadata.setdefault("numeric_fidelity", {}).update(
+                                                embedding_coverage="degraded",
+                                                failure_code=_bounded_provider_failure_code(exc),
+                                            )
+                                            break
                                         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError):
                                             continue
                                     if added:
@@ -756,9 +926,39 @@ async def agentic_rag_pipeline(
 
         # NLI low-confidence gate (lightweight, optional)
         try:
-            if enable_claims and result.generated_answer:
+            claims_stage = result.metadata.get("claims")
+            claims_unavailable = (
+                isinstance(claims_stage, dict)
+                and claims_stage.get("verification_available") is False
+            )
+            if enable_claims and result.generated_answer and claims_unavailable:
+                failure_code = claims_stage.get("failure_code")
+                if failure_code not in {
+                    "invalid_provider_credentials",
+                    "missing_provider_credentials",
+                    "provider_configuration_invalid",
+                    "credential_store_unavailable",
+                    "credential_scope_revoked",
+                    "provider_unavailable",
+                }:
+                    failure_code = "provider_unavailable"
+                result.metadata["post_verification"] = {
+                    "unsupported_ratio": 0.0,
+                    "total_claims": 0,
+                    "unsupported_count": 0,
+                    "fixed": False,
+                    "reason": "verification_unavailable",
+                    "verification_available": False,
+                    "failure_code": failure_code,
+                }
+            elif enable_claims and result.generated_answer:
                 from .post_generation_verifier import PostGenerationVerifier as _PGV
-                verifier = _PGV(max_retries=0, unsupported_threshold=float(adaptive_unsupported_threshold or 0.15), max_claims=min(10, int(claims_max or 25)))
+                verifier = _PGV(
+                    max_retries=0,
+                    unsupported_threshold=float(adaptive_unsupported_threshold or 0.15),
+                    max_claims=min(10, int(claims_max or 25)),
+                    credential_runtime=credential_runtime,
+                )
                 vres = await verifier.verify_and_maybe_fix(
                     query=effective_query,
                     answer=result.generated_answer,
@@ -782,7 +982,29 @@ async def agentic_rag_pipeline(
                     "unsupported_count": vres.unsupported_count,
                     "fixed": vres.fixed,
                     "reason": vres.reason,
+                    "verification_available": getattr(
+                        vres,
+                        "verification_available",
+                        True,
+                    ),
                 })
+                failure_code = getattr(vres, "failure_code", None)
+                if failure_code:
+                    result.metadata["post_verification"]["failure_code"] = failure_code
+                if getattr(vres, "embedding_coverage", None) == "degraded":
+                    result.metadata["post_verification"]["embedding_coverage"] = "degraded"
+                embedding_failure_code = getattr(vres, "embedding_failure_code", None)
+                if embedding_failure_code in {
+                    "invalid_provider_credentials",
+                    "missing_provider_credentials",
+                    "provider_configuration_invalid",
+                    "credential_store_unavailable",
+                    "credential_scope_revoked",
+                    "provider_unavailable",
+                }:
+                    result.metadata["post_verification"]["embedding_failure_code"] = (
+                        embedding_failure_code
+                    )
                 # Gauge and gate behavior
                 try:
                     from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter, set_gauge
@@ -809,7 +1031,14 @@ async def agentic_rag_pipeline(
                     elif low_confidence_behavior == "decline":
                         result.generated_answer = "Insufficient evidence found to answer confidently."
         except (ImportError, AttributeError, ConnectionError, RuntimeError, TypeError, ValueError, TimeoutError) as _enlv:
-            result.errors.append(f"NLI verification failed: {str(_enlv)}")
+            if credential_runtime is not None:
+                result.metadata["post_verification"] = {
+                    "failure_code": "provider_unavailable",
+                    "verification_available": False,
+                }
+                logger.warning("Agentic NLI verification provider unavailable")
+            else:
+                result.errors.append(f"NLI verification failed: {str(_enlv)}")
 
     # Include tool trace on debug
     if (debug_mode or cfg.debug_trace) and (not cached_hit) and cfg.enable_tools:

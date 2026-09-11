@@ -1,7 +1,190 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from typing import Any
+from urllib.parse import quote, urlsplit
+
+
+_HTTP_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+_SERVER_MANAGED_EXTRA_HEADERS = frozenset(
+    {
+        "api-key",
+        "authorization",
+        "cf-connecting-ip",
+        "connection",
+        "content-length",
+        "content-md5",
+        "content-type",
+        "cookie",
+        "digest",
+        "expect",
+        "forwarded",
+        "host",
+        "keep-alive",
+        "ocp-apim-subscription-key",
+        "openai-organization",
+        "openai-project",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "proxy-connection",
+        "set-cookie",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "true-client-ip",
+        "upgrade",
+        "via",
+        "www-authenticate",
+        "x-amz-security-token",
+        "x-amz-target",
+        "x-api-key",
+        "x-goog-api-key",
+        "x-goog-user-project",
+        "x-http-method",
+        "x-http-method-override",
+        "x-method-override",
+        "x-original-url",
+        "x-real-ip",
+        "x-rewrite-url",
+        "x-envoy-original-path",
+    }
+)
+_SERVER_MANAGED_EXTRA_HEADER_SUFFIXES = (
+    "-api-key",
+    "-auth",
+    "-authorization",
+    "-credential",
+    "-credentials",
+    "-host",
+    "-token",
+)
+_SERVER_MANAGED_EXTRA_HEADER_COMPACT_MARKERS = (
+    "apikey",
+    "authorization",
+    "credential",
+    "accesskeyid",
+    "secretaccesskey",
+    "sessiontoken",
+    "baseurl",
+    "apiurl",
+    "endpoint",
+)
+
+
+def encode_provider_model_path(model: Any) -> str:
+    """Return a URL-safe provider model path or raise a bounded validation error."""
+    if not isinstance(model, str) or not model:
+        raise ValueError("Invalid provider model identifier.")
+    if any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in model):
+        raise ValueError("Invalid provider model identifier.")
+    if any(delimiter in model for delimiter in ("\\", "%", "?", "#")):
+        raise ValueError("Invalid provider model identifier.")
+
+    segments = model.split("/")
+    if any(not segment or segment in {".", ".."} for segment in segments):
+        raise ValueError("Invalid provider model identifier.")
+    return "/".join(quote(segment, safe="-._~:@") for segment in segments)
+
+
+def encode_google_model_path(model: Any) -> str:
+    """Normalize Google's optional ``models/`` resource prefix and encode its model path."""
+    if isinstance(model, str) and model.startswith("models/"):
+        model = model[len("models/") :]
+    return encode_provider_model_path(model)
+
+
+def encode_huggingface_model_path(model: Any) -> str:
+    """Encode a Hugging Face model path, accepting its legacy single leading slash."""
+    if isinstance(model, str) and model.startswith("/") and not model.startswith("//"):
+        model = model[1:]
+    return encode_provider_model_path(model)
+
+
+def is_server_managed_extra_header(header_name: Any) -> bool:
+    """Return whether a public extension header can alter request trust or routing."""
+    if not isinstance(header_name, str):
+        return True
+    normalized = header_name.strip().casefold()
+    if not normalized or normalized != header_name.casefold():
+        return True
+    if _HTTP_HEADER_NAME_RE.fullmatch(header_name) is None:
+        return True
+    if "_" in normalized:
+        return True
+    if normalized in _SERVER_MANAGED_EXTRA_HEADERS:
+        return True
+    if normalized.startswith("x-amz-"):
+        return True
+    if normalized.startswith("x-forwarded-"):
+        return True
+    compact = re.sub(r"[^a-z0-9]", "", normalized)
+    if any(marker in compact for marker in _SERVER_MANAGED_EXTRA_HEADER_COMPACT_MARKERS):
+        return True
+    return normalized.endswith(_SERVER_MANAGED_EXTRA_HEADER_SUFFIXES)
+
+
+def is_safe_extra_header_value(value: Any) -> bool:
+    """Return whether a public extension header value contains no controls."""
+    try:
+        rendered = "" if value is None else str(value)
+    except (TypeError, ValueError):
+        return False
+    return not any(ord(char) < 32 or ord(char) == 127 for char in rendered)
+
+
+def resolve_runtime_embedding_base_url(
+    request: Mapping[str, Any],
+    *,
+    provider: str,
+) -> str | None:
+    """Return the server-proven request endpoint or reject an incomplete contract."""
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        is_runtime_base_url_override,
+    )
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+
+    base_url = request.get("base_url")
+    provenance = request.get("_runtime_base_url_override")
+    credentials_resolved = request.get("credentials_resolved") is True
+
+    if not credentials_resolved:
+        if base_url is None and provenance is None:
+            return None
+        raise ChatConfigurationError(
+            provider=provider,
+            message="Invalid runtime embedding endpoint configuration.",
+        )
+    if not is_runtime_base_url_override(provenance) or not isinstance(base_url, str):
+        raise ChatConfigurationError(
+            provider=provider,
+            message="Invalid runtime embedding endpoint configuration.",
+        )
+
+    cleaned = base_url.strip()
+    try:
+        parsed = urlsplit(cleaned)
+        invalid = (
+            not cleaned
+            or cleaned != base_url
+            or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in cleaned)
+            or "\\" in cleaned
+            or parsed.scheme.casefold() not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or bool(parsed.query)
+            or bool(parsed.fragment)
+        )
+        _ = parsed.port
+    except (TypeError, ValueError):
+        invalid = True
+    if invalid:
+        raise ChatConfigurationError(
+            provider=provider,
+            message="Invalid runtime embedding endpoint configuration.",
+        )
+    return cleaned.rstrip("/")
 
 
 def _summarize_message_content(content: Any) -> tuple[int, bool]:
@@ -194,7 +377,7 @@ def merge_extra_body(payload: dict[str, Any], request: Mapping[str, Any]) -> dic
 
 
 def merge_extra_headers(headers: dict[str, str], request: Mapping[str, Any]) -> dict[str, str]:
-    """Merge extra_headers into headers without overriding existing header keys."""
+    """Merge safe extension headers without overriding server-managed headers."""
     extra = request.get("extra_headers")
     if not isinstance(extra, Mapping) or not extra:
         return headers
@@ -203,10 +386,24 @@ def merge_extra_headers(headers: dict[str, str], request: Mapping[str, Any]) -> 
     for key, value in extra.items():
         if not isinstance(key, str):
             continue
-        if key.lower() in existing_lower:
+        normalized = key.casefold()
+        if is_server_managed_extra_header(key) or normalized in existing_lower:
             continue
+        if not is_safe_extra_header_value(value):
+            raise ValueError("Invalid provider extension header value.")
         merged[key] = str(value) if value is not None else ""
+        existing_lower.add(normalized)
     return merged
 
 
-__all__ = ["_sanitize_payload_for_logging", "merge_extra_body", "merge_extra_headers"]
+__all__ = [
+    "_sanitize_payload_for_logging",
+    "encode_google_model_path",
+    "encode_huggingface_model_path",
+    "encode_provider_model_path",
+    "is_safe_extra_header_value",
+    "is_server_managed_extra_header",
+    "merge_extra_body",
+    "merge_extra_headers",
+    "resolve_runtime_embedding_base_url",
+]

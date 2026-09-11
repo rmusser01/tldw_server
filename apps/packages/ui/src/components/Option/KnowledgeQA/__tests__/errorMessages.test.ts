@@ -14,6 +14,77 @@ describe("Knowledge QA error message mapping", () => {
     )
   })
 
+  it("uses client-owned provider copy and ignores the error message", () => {
+    const sentinel = "sk-provider-secret-/Users/private/provider.log"
+    const error = Object.assign(new Error(sentinel), {
+      code: "invalid_provider_credentials",
+      status: 503,
+    })
+
+    const message = mapKnowledgeQaSearchErrorMessage(error)
+
+    expect(message).toBe("The selected provider credentials are invalid.")
+    expect(message).not.toContain(sentinel)
+  })
+
+  it.each([
+    [
+      "provider_disabled",
+      "The selected provider is disabled by administrator policy.",
+    ],
+    [
+      "model_not_allowed",
+      "The selected model is not allowed for this provider.",
+    ],
+  ])(
+    "preserves policy code %s for stream and non-stream failures",
+    (code, expected) => {
+      const sentinel = "sk-policy-secret-/Users/private/provider.log"
+      const terminalMessage = mapKnowledgeQaSearchErrorMessage({
+        event: {
+          type: "error",
+          code,
+          status_code: 403,
+          message: sentinel,
+        },
+      })
+      const nonStreamMessage = mapKnowledgeQaSearchErrorMessage(
+        Object.assign(new Error(sentinel), { code, status: 403 })
+      )
+
+      expect(terminalMessage).toBe(expected)
+      expect(nonStreamMessage).toBe(expected)
+      expect(terminalMessage).not.toContain(sentinel)
+      expect(nonStreamMessage).not.toContain(sentinel)
+    }
+  )
+
+  it.each([
+    [502, "RAG search failed due to a server error."],
+    [503, "RAG search failed due to a server error."],
+    [429, "RAG search is rate limited. Please wait and try again."],
+  ])("uses status-safe copy for HTTP %i", (status, expected) => {
+    const sentinel = "sk-provider-secret-/Users/private/provider.log"
+    const error = Object.assign(new Error(sentinel), { status })
+
+    const message = mapKnowledgeQaSearchErrorMessage(error)
+
+    expect(message).toBe(expected)
+    expect(message).not.toContain(sentinel)
+  })
+
+  it("does not return unknown raw error text", () => {
+    const sentinel = "sk-provider-secret-/Users/private/provider.log"
+
+    const message = mapKnowledgeQaSearchErrorMessage(
+      new Error(sentinel),
+      "Search failed"
+    )
+
+    expect(message).toBe("Search failed")
+    expect(message).not.toContain(sentinel)
+  })
+
   it("maps export failures to chatbook-specific messaging", () => {
     expect(mapKnowledgeQaExportErrorMessage(new Error("404 not found"))).toBe(
       "Chatbook export failed. Thread was not found."

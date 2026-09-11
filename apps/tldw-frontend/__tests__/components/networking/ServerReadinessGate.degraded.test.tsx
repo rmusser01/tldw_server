@@ -88,14 +88,16 @@ describe("ServerReadinessGate degraded health", () => {
         "href",
         "/settings/health"
       )
-      expect(readinessListener).toHaveBeenCalledWith(
-        expect.objectContaining({
-          detail: expect.objectContaining({
-            state: "degraded",
-            degradedChecks: ["chacha_notes"]
+      await waitFor(() => {
+        expect(readinessListener).toHaveBeenCalledWith(
+          expect.objectContaining({
+            detail: expect.objectContaining({
+              state: "degraded",
+              degradedChecks: ["chacha_notes"]
+            })
           })
-        })
-      )
+        )
+      })
     } finally {
       window.removeEventListener(
         "tldw:server-readiness-state",

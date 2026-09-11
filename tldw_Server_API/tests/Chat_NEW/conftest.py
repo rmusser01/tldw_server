@@ -7,6 +7,8 @@ of unit, integration, and property tests. Focuses on the OpenAI-compatible
 """
 
 import os
+from contextlib import contextmanager
+
 # Set test environment variables before any imports
 os.environ["TEST_MODE"] = "true"
 os.environ["DEFAULT_LLM_PROVIDER"] = "openai"
@@ -417,6 +419,59 @@ def test_client(test_env_vars):
     with TestClient(app) as client:
         yield client
 
+
+@contextmanager
+def _test_openai_server_credential() -> Generator[None, None, None]:
+    """Install and restore an explicit OpenAI server credential for one test."""
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import LLMProviderOverride
+
+    with llm_provider_overrides._OVERRIDE_LOCK:
+        original_cache = dict(llm_provider_overrides._OVERRIDE_CACHE)
+        original_healthy = llm_provider_overrides._OVERRIDE_CACHE_HEALTHY
+        original_ttl_enabled = (
+            not llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
+        )
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+        {
+            "openai": LLMProviderOverride(
+                provider="openai",
+                api_key="test-openai-key",
+            )
+        }
+    )
+    try:
+        yield
+    finally:
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+            original_cache,
+            healthy=original_healthy,
+            ttl_enabled=original_ttl_enabled,
+        )
+
+
+@contextmanager
+def _credentialed_test_client_context(app) -> Generator[TestClient, None, None]:
+    """Start app lifespan before installing the test server credential."""
+    with TestClient(app) as client:
+        with _test_openai_server_credential():
+            yield client
+
+
+@pytest.fixture
+def credentialed_test_client_factory():
+    """Return a client context that installs credentials after app startup."""
+    return _credentialed_test_client_context
+
+
+@pytest.fixture
+def credentialed_test_client(test_env_vars):
+    """Provide a client with an explicit test-only OpenAI server credential."""
+    from tldw_Server_API.app.main import app
+
+    with _credentialed_test_client_context(app) as client:
+        yield client
+
 @pytest_asyncio.fixture
 async def async_client(test_env_vars):
     """Create an async test client for streaming tests."""
@@ -426,6 +481,13 @@ async def async_client(test_env_vars):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+
+@pytest_asyncio.fixture
+async def credentialed_async_client(async_client):
+    """Provide an async client with an explicit test-only OpenAI credential."""
+    with _test_openai_server_credential():
+        yield async_client
 
 @pytest.fixture
 def auth_headers():

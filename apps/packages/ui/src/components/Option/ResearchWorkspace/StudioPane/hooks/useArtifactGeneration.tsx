@@ -2039,14 +2039,16 @@ async function generateAudioOverview(
 
   // Generate audio using TTS API with user settings
   try {
-    const audioBuffer = await tldwClient.synthesizeSpeech(script, {
+    const result = await tldwClient.synthesizeSpeechDetailed(script, {
       model: options.audioSettings.model,
       voice: options.audioSettings.voice,
       responseFormat: options.audioSettings.format,
       speed: options.audioSettings.speed,
+      backend: options.audioSettings.backend || undefined,
+      allowFallback: options.audioSettings.allowFallback ?? true,
       signal: options.abortSignal
     })
-    if (!(audioBuffer instanceof ArrayBuffer) || audioBuffer.byteLength === 0) {
+    if (!(result.buffer instanceof ArrayBuffer) || result.buffer.byteLength === 0) {
       throw new Error("Audio generation failed because speech synthesis did not return audio.")
     }
 
@@ -2060,7 +2062,7 @@ async function generateAudioOverview(
     }
 
     // Create a blob URL for playback
-    const audioBlob = new Blob([audioBuffer], {
+    const audioBlob = new Blob([result.buffer], {
       type: mimeTypes[options.audioSettings.format] || "audio/mpeg"
     })
     const audioUrl = URL.createObjectURL(audioBlob)
@@ -2069,7 +2071,13 @@ async function generateAudioOverview(
       ...verifiedScript,
       content: script,
       audioUrl,
-      audioFormat: options.audioSettings.format
+      audioFormat: options.audioSettings.format,
+      data: {
+        ...(verifiedScript.data || {}),
+        requestedBackend: options.audioSettings.backend || undefined,
+        actualBackend: result.actualBackend,
+        fallbackUsed: result.fallbackUsed
+      }
     }
   } catch (ttsError) {
     if (isAbortLikeError(ttsError)) {

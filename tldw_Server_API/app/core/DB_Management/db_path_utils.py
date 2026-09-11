@@ -448,22 +448,13 @@ class DatabasePaths:
         """
         env_user_db_base = os.getenv("USER_DB_BASE_DIR")
         settings_user_db_base = settings.get("USER_DB_BASE_DIR")
+        if env_user_db_base is not None:
+            env_user_db_base = env_user_db_base.strip() or None
+        if isinstance(settings_user_db_base, str):
+            settings_user_db_base = settings_user_db_base.strip() or None
         project_root = Path(get_project_root())
         default_base = (project_root / "Databases" / "user_databases").resolve()
-        user_db_base = settings_user_db_base or env_user_db_base
-        if _is_test_context() and env_user_db_base:
-            try:
-                settings_candidate = Path(settings_user_db_base) if settings_user_db_base else None
-                if settings_candidate is not None:
-                    settings_candidate = settings_candidate.expanduser()
-                    if not settings_candidate.is_absolute():
-                        settings_candidate = (project_root / settings_candidate).resolve()
-                    else:
-                        settings_candidate = settings_candidate.resolve()
-            except Exception:
-                settings_candidate = None
-            if settings_candidate is None or settings_candidate == default_base:
-                user_db_base = env_user_db_base
+        user_db_base = env_user_db_base or settings_user_db_base
         if _is_test_context() and not env_user_db_base:
             try:
                 candidate = Path(settings_user_db_base) if settings_user_db_base else None
@@ -727,6 +718,12 @@ class DatabasePaths:
     def get_slides_db_path(user_id: Optional[UserId]) -> Path:
         """Get the path to the user's Slides database."""
         user_dir = DatabasePaths.get_user_base_directory(user_id)
+        return user_dir / DatabasePaths.SLIDES_DB_NAME
+
+    @staticmethod
+    def resolve_slides_db_path(user_id: Optional[UserId]) -> Path:
+        """Resolve the user's Slides DB path without creating directories."""
+        user_dir = DatabasePaths.resolve_user_base_directory(user_id)
         return user_dir / DatabasePaths.SLIDES_DB_NAME
 
     @staticmethod

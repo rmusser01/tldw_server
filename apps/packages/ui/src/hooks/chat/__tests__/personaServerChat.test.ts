@@ -21,6 +21,14 @@ const createSetterBundle = () => ({
   setServerChatExternalRef: vi.fn()
 })
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 describe("ensurePersonaServerChat", () => {
   it("creates a persona-backed chat with read_only default and updates chat state", async () => {
     const setters = createSetterBundle()
@@ -84,6 +92,64 @@ describe("ensurePersonaServerChat", () => {
       historyId: "history-1",
       personaMemoryMode: "read_only"
     })
+  })
+
+  it("does not publish a newly created persona chat when scope changes during history linking", async () => {
+    const setters = createSetterBundle()
+    const historyLink = deferred<string | null>()
+    const ensureServerChatHistoryId = vi.fn(() => historyLink.promise)
+    const invalidateServerChatHistory = vi.fn()
+    const scopeController = new AbortController()
+    const pending = ensurePersonaServerChat({
+      assistant: {
+        kind: "persona",
+        id: "garden-helper",
+        name: "Garden Helper"
+      },
+      serverChatId: null,
+      serverChatTitle: null,
+      serverChatAssistantKind: null,
+      serverChatAssistantId: null,
+      serverChatPersonaMemoryMode: null,
+      serverChatMetaLoaded: false,
+      serverChatState: "in-progress",
+      serverChatTopic: null,
+      serverChatClusterId: null,
+      serverChatSource: null,
+      serverChatExternalRef: null,
+      historyId: null,
+      temporaryChat: false,
+      scopeInvalidatedSignal: scopeController.signal,
+      createChat: vi.fn().mockResolvedValue({
+        id: "persona-chat-scoped",
+        title: "Scoped persona chat",
+        assistant_kind: "persona",
+        assistant_id: "garden-helper",
+        persona_memory_mode: "read_only",
+        state: "resolved",
+        version: 4
+      }),
+      ensureServerChatHistoryId,
+      invalidateServerChatHistory,
+      ...setters
+    })
+
+    await vi.waitFor(() =>
+      expect(ensureServerChatHistoryId).toHaveBeenCalledTimes(1)
+    )
+    scopeController.abort()
+    historyLink.resolve("history-stale")
+
+    await expect(pending).rejects.toMatchObject({ status: 412 })
+    expect(ensureServerChatHistoryId).toHaveBeenCalledWith(
+      "persona-chat-scoped",
+      undefined,
+      scopeController.signal
+    )
+    for (const setter of Object.values(setters)) {
+      expect(setter).not.toHaveBeenCalled()
+    }
+    expect(invalidateServerChatHistory).not.toHaveBeenCalled()
   })
 
   it("passes workspace scope through when creating a persona-backed chat", async () => {
@@ -272,6 +338,54 @@ describe("ensurePersonaServerChat", () => {
       historyId: "history-2",
       personaMemoryMode: "read_write"
     })
+  })
+
+  it("does not publish reused persona metadata when scope changes during history linking", async () => {
+    const setters = createSetterBundle()
+    const historyLink = deferred<string | null>()
+    const ensureServerChatHistoryId = vi.fn(() => historyLink.promise)
+    const scopeController = new AbortController()
+    const pending = ensurePersonaServerChat({
+      assistant: {
+        kind: "persona",
+        id: "garden-helper",
+        name: "Garden Helper"
+      },
+      serverChatId: "persona-chat-existing",
+      serverChatTitle: "Existing persona chat",
+      serverChatAssistantKind: "persona",
+      serverChatAssistantId: "garden-helper",
+      serverChatPersonaMemoryMode: "read_write",
+      serverChatMetaLoaded: true,
+      serverChatState: "in-progress",
+      serverChatTopic: null,
+      serverChatClusterId: null,
+      serverChatSource: null,
+      serverChatExternalRef: null,
+      historyId: null,
+      temporaryChat: false,
+      scopeInvalidatedSignal: scopeController.signal,
+      createChat: vi.fn(),
+      ensureServerChatHistoryId,
+      invalidateServerChatHistory: vi.fn(),
+      ...setters
+    })
+
+    await vi.waitFor(() =>
+      expect(ensureServerChatHistoryId).toHaveBeenCalledTimes(1)
+    )
+    scopeController.abort()
+    historyLink.resolve("history-stale")
+
+    await expect(pending).rejects.toMatchObject({ status: 412 })
+    expect(ensureServerChatHistoryId).toHaveBeenCalledWith(
+      "persona-chat-existing",
+      "Existing persona chat",
+      scopeController.signal
+    )
+    for (const setter of Object.values(setters)) {
+      expect(setter).not.toHaveBeenCalled()
+    }
   })
 
   it("resets stale character-backed server chat metadata before creating persona chat", async () => {

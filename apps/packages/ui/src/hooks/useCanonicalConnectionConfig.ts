@@ -6,6 +6,7 @@ import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
+import { REFRESH_ROTATION_KEY } from "@/services/tldw/single-user-credential"
 
 const DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 
@@ -85,6 +86,7 @@ export const useCanonicalConnectionConfig = (): {
   const [legacyAuthMode] = useStorage("authMode", "single-user")
   const [legacyApiKey] = useStorage("apiKey", "")
   const [legacyAccessToken] = useStorage("accessToken", "")
+  const [refreshRotation] = useStorage<unknown>(REFRESH_ROTATION_KEY)
 
   const fallbackConfig = React.useMemo<TldwConfig>(
     () => ({
@@ -133,7 +135,7 @@ export const useCanonicalConnectionConfig = (): {
     return () => {
       cancelled = true
     }
-  }, [fallbackConfig])
+  }, [fallbackConfig, refreshRotation])
 
   return { config, loading }
 }

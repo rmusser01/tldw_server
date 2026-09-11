@@ -201,6 +201,17 @@ class DatabaseError(UserRegistrationException):
     pass
 
 
+class RollbackSignal(Exception):
+    """Trusted control-flow signal that requires transaction rollback."""
+
+
+class DatabaseConcurrencyConflict(DatabaseError):
+    """Sanitized deadlock or serialization conflict."""
+
+    def __init__(self):
+        super().__init__("Database transaction conflicted. Please retry.")
+
+
 class ConnectionPoolExhaustedError(DatabaseError):
     """Database connection pool is exhausted"""
     def __init__(self):

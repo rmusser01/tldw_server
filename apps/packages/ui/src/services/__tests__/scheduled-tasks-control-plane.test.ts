@@ -10,16 +10,24 @@ vi.mock("@/services/background-proxy", () => ({
 
 import {
   archiveScheduledTaskDefinition,
+  createScheduledTaskRun,
   createScheduledTaskPreview,
   createScheduledTaskReminder,
   deleteScheduledTaskReminder,
   getScheduledTaskCapabilities,
   getScheduledTaskDefinition,
+  getScheduledTaskResult,
+  getScheduledTaskRun,
   getScheduledTask,
   listScheduledTaskDefinitionAudit,
   listScheduledTaskDefinitions,
+  listScheduledTaskResults,
+  listScheduledTaskRuns,
   listScheduledTasks,
+  markScheduledTaskDefinitionSolved,
   pauseScheduledTaskDefinition,
+  reopenScheduledTaskDefinition,
+  updateScheduledTaskResultReview,
   updateScheduledTaskReminder,
   type CreateScheduledTaskReminderPayload,
   type ScheduledTaskPreviewCreateRequest,
@@ -272,6 +280,153 @@ describe("scheduled-tasks control-plane contract", () => {
       expect.objectContaining({
         method: "GET",
         path: "/api/v1/scheduled-tasks/definitions/def_1/audit?limit=10&event_type=paused"
+      })
+    )
+  })
+
+  it("creates a manual recurring question run with an idempotency header", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      id: "run_1",
+      definition_id: "def_1",
+      definition_version: 2,
+      trigger_reason: "manual",
+      status: "queued",
+      outcome: "none"
+    })
+
+    const response = await createScheduledTaskRun("automation_definition:def_1", {
+      idempotencyKey: "run-now-1"
+    })
+
+    expect(response.status).toBe("queued")
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "POST",
+        path: "/api/v1/scheduled-tasks/definitions/def_1/runs",
+        headers: { "Idempotency-Key": "run-now-1" }
+      })
+    )
+  })
+
+  it("lists definition runs with encoded filters", async () => {
+    mocks.bgRequest.mockResolvedValue({ items: [], total: 0 })
+
+    await listScheduledTaskRuns("automation_definition:def_1", {
+      limit: 20,
+      offset: 40,
+      status: "failed"
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "GET",
+        path: "/api/v1/scheduled-tasks/definitions/def_1/runs?limit=20&offset=40&status=failed"
+      })
+    )
+  })
+
+  it("fetches a run by encoded id", async () => {
+    mocks.bgRequest.mockResolvedValue({ id: "run/1" })
+
+    await getScheduledTaskRun("run/1")
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "GET",
+        path: "/api/v1/scheduled-tasks/runs/run%2F1"
+      })
+    )
+  })
+
+  it("lists normalized results with filters", async () => {
+    mocks.bgRequest.mockResolvedValue({ items: [], total: 0 })
+
+    await listScheduledTaskResults({
+      definition_id: "def_1",
+      run_id: "run_1",
+      review_state: "unread",
+      kind: "finding",
+      limit: 10,
+      offset: 5
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "GET",
+        path: "/api/v1/scheduled-tasks/results?definition_id=def_1&run_id=run_1&review_state=unread&kind=finding&limit=10&offset=5"
+      })
+    )
+  })
+
+  it("fetches result detail and updates review state with an idempotency header", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce({ id: "result/1" })
+      .mockResolvedValueOnce({ id: "result/1", review_state: "dismissed" })
+
+    await getScheduledTaskResult("result/1")
+    const updated = await updateScheduledTaskResultReview(
+      "result/1",
+      {
+        review_state: "dismissed",
+        review_note: "No longer useful"
+      },
+      { idempotencyKey: "review-1" }
+    )
+
+    expect(updated.review_state).toBe("dismissed")
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        method: "GET",
+        path: "/api/v1/scheduled-tasks/results/result%2F1"
+      })
+    )
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        method: "POST",
+        path: "/api/v1/scheduled-tasks/results/result%2F1/review",
+        body: {
+          review_state: "dismissed",
+          review_note: "No longer useful"
+        },
+        headers: { "Idempotency-Key": "review-1" }
+      })
+    )
+  })
+
+  it("marks a definition solved and reopens it through resolution routes", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce({ id: "def_1", resolution_state: "solved" })
+      .mockResolvedValueOnce({ id: "def_1", resolution_state: "open" })
+
+    await markScheduledTaskDefinitionSolved(
+      "automation_definition:def_1",
+      { resolved_result_id: "result_1" },
+      { idempotencyKey: "solved-1" }
+    )
+    await reopenScheduledTaskDefinition(
+      "automation_definition:def_1",
+      { target_lifecycle: "paused", reason: "Need to keep watching" },
+      { idempotencyKey: "reopen-1" }
+    )
+
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        method: "POST",
+        path: "/api/v1/scheduled-tasks/definitions/def_1/mark-solved",
+        body: { resolved_result_id: "result_1" },
+        headers: { "Idempotency-Key": "solved-1" }
+      })
+    )
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        method: "POST",
+        path: "/api/v1/scheduled-tasks/definitions/def_1/reopen",
+        body: { target_lifecycle: "paused", reason: "Need to keep watching" },
+        headers: { "Idempotency-Key": "reopen-1" }
       })
     )
   })

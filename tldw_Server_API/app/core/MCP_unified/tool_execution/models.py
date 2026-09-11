@@ -3,7 +3,50 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
+
+from .canonical import JsonValue
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalJsonSnapshot:
+    """Immutable canonical bytes and their lowercase SHA-256 digest."""
+
+    encoded: bytes
+    sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class IdempotencyExecutionPolicy:
+    """All bounded idempotency decisions fixed during preparation."""
+
+    inject_argument: bool
+    ttl_seconds: int
+    contention_wait_seconds: int
+    finalize_seconds: int
+    lock_ttl_seconds: int
+    max_entries: int
+    max_result_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class IdempotencyRunResult:
+    """Outcome of one bound idempotency ownership attempt."""
+
+    payload: dict[str, JsonValue]
+    from_cache: bool
+    persistence: Literal["durable", "local", "none"]
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedExecutionPolicy:
+    """Immutable security-relevant decisions for one prepared tool call."""
+
+    version: Literal[1]
+    effect: Literal["read", "write"]
+    rate_limit_category: str
+    rate_limit_fail_closed: bool
+    idempotency: IdempotencyExecutionPolicy
 
 
 @dataclass(slots=True)

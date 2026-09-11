@@ -313,6 +313,23 @@ def _should_cancel(jm: JobManager, job_id: int) -> bool:
         return False
 
 
+def _finalize_owned_cancelled(
+    jm: JobManager,
+    job: dict[str, Any],
+    *,
+    reason: str,
+) -> bool:
+    """Cancel only the acquired job incarnation represented by ``job``."""
+
+    return jm.finalize_cancelled(
+        int(job["id"]),
+        reason=reason,
+        expected_uuid=str(job.get("uuid") or ""),
+        worker_id=str(job.get("worker_id") or ""),
+        lease_id=str(job.get("lease_id") or ""),
+    )
+
+
 def _cleanup_temp_dir(temp_dir: str | None) -> None:
     if not temp_dir:
         return
@@ -395,7 +412,7 @@ async def _handle_workspace_source_job(job: dict[str, Any], jm: JobManager, prog
     db = None
     try:
         if _should_cancel(jm, job_id):
-            jm.finalize_cancelled(job_id, reason="cancel requested before start")
+            _finalize_owned_cancelled(jm, job, reason="cancel requested before start")
             return {}
 
         progress.percent = 10.0
@@ -495,7 +512,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
                 latest_job_id=latest_job_id,
                 error_summary="cancel requested before start",
             )
-            jm.finalize_cancelled(job_id, reason="cancel requested before start")
+            _finalize_owned_cancelled(jm, job, reason="cancel requested before start")
             return {}
 
         _mark_collection_item_status(
@@ -589,7 +606,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
                 latest_job_id=latest_job_id,
                 error_summary="cancel requested during processing",
             )
-            jm.finalize_cancelled(job_id, reason="cancel requested during processing")
+            _finalize_owned_cancelled(jm, job, reason="cancel requested during processing")
             return {}
 
         progress.percent = 90.0

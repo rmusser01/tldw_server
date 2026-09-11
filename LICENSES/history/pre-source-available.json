@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "record_type": "pre_source_available_history",
+  "recorded_on": "2026-07-21",
+  "repository": "https://github.com/rmusser01/tldw_server",
+  "public_refs": {
+    "refs/heads/dev": "29acaca8c781213e27b12066372df13855e2e7a6",
+    "refs/heads/main": "7a23be3202e360f2d8e7cfe208e13ba406cf0507",
+    "refs/pull/2727/head": "e8bcc4c8b705df50a5f7e6299335ba8001ff4811"
+  },
+  "pull_request": "https://github.com/rmusser01/tldw_server/pull/2727",
+  "prior_grants_preserved": true,
+  "ref_snapshot_is_exhaustive": false,
+  "statement": "All permissions already granted on code made public before the prospective cutoff remain available. This ref snapshot is evidence, not an exhaustive list of every previously public commit or artifact."
+}

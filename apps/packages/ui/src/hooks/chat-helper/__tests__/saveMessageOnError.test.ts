@@ -12,6 +12,20 @@ const mocks = vi.hoisted(() => ({
   setLastUsedChatSystemPrompt: vi.fn(async () => undefined),
   updateChatHistoryCreatedAt: vi.fn(async () => undefined),
   generateTitle: vi.fn(async () => "Generated title"),
+  runTransaction: vi.fn(
+    async (
+      signal: AbortSignal | undefined,
+      operation: () => Promise<unknown>,
+      shouldAbort?: () => boolean
+    ) => {
+      if (signal?.aborted && (shouldAbort?.() ?? true)) {
+        const error = new Error("Request scope changed")
+        error.name = "AbortError"
+        throw error
+      }
+      return operation()
+    }
+  ),
   updatePageTitle: vi.fn(),
   buildAssistantErrorContent: vi.fn((_botMessage: string, error: unknown) =>
     error instanceof Error ? `ERR: ${error.message}` : "ERR"
@@ -40,6 +54,10 @@ vi.mock("@/services/title", () => ({
   generateTitle: mocks.generateTitle
 }))
 
+vi.mock("@/db/dexie/chat-persistence-transaction", () => ({
+  runChatPersistenceTransaction: mocks.runTransaction
+}))
+
 vi.mock("@/utils/update-page-title", () => ({
   updatePageTitle: mocks.updatePageTitle
 }))
@@ -59,6 +77,7 @@ describe("saveMessageOnError", () => {
     mocks.setLastUsedChatSystemPrompt.mockClear()
     mocks.updateChatHistoryCreatedAt.mockClear()
     mocks.generateTitle.mockClear()
+    mocks.runTransaction.mockClear()
     mocks.updatePageTitle.mockClear()
     mocks.buildAssistantErrorContent.mockClear()
   })
@@ -182,5 +201,184 @@ describe("saveMessageOnError", () => {
         }
       })
     )
+  })
+
+  it("writes nothing when an error save starts after a scope-only abort", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const setHistory = vi.fn()
+
+    await expect(
+      saveMessageOnError({
+        e: new Error("provider failed"),
+        history: [],
+        setHistory,
+        image: "",
+        userMessage: "Scoped question",
+        botMessage: "partial",
+        historyId: "history-1",
+        selectedModel: "model-1",
+        setHistoryId: vi.fn(),
+        isRegenerating: false,
+        scopeSignal: controller.signal,
+        scopeInvalidatedSignal: controller.signal,
+        shouldAbortForScopeChange: () => true
+      } as any)
+    ).rejects.toMatchObject({ name: "AbortError" })
+
+    expect(mocks.saveMessage).not.toHaveBeenCalled()
+    expect(setHistory).not.toHaveBeenCalled()
+  })
+
+  it("defers scoped Compare metadata while preserving error messages", async () => {
+    const controller = new AbortController()
+    const scopeInvalidatedController = new AbortController()
+
+    await expect(
+      saveMessageOnError({
+        e: new Error("provider failed"),
+        history: [],
+        setHistory: vi.fn(),
+        image: "",
+        userMessage: "Scoped question",
+        botMessage: "",
+        historyId: "history-1",
+        selectedModel: "model-1",
+        setHistoryId: vi.fn(),
+        isRegenerating: false,
+        scopeSignal: controller.signal,
+        scopeInvalidatedSignal: scopeInvalidatedController.signal,
+        deferHistoryMetadata: true,
+        prompt_id: "prompt-1"
+      } as any)
+    ).resolves.toBe("history-1")
+
+    expect(mocks.saveMessage).toHaveBeenCalledTimes(2)
+    expect(mocks.setLastUsedChatModel).not.toHaveBeenCalled()
+    expect(mocks.setLastUsedChatSystemPrompt).not.toHaveBeenCalled()
+  })
+
+  it("still persists a manual-stop partial when the scope lease signal is aborted", async () => {
+    const controller = new AbortController()
+    const scopeInvalidatedController = new AbortController()
+    controller.abort()
+
+    await expect(
+      saveMessageOnError({
+        e: Object.assign(new Error("Request cancelled"), { name: "AbortError" }),
+        history: [],
+        setHistory: vi.fn(),
+        image: "",
+        userMessage: "Scoped question",
+        botMessage: "partial answer",
+        historyId: "history-1",
+        selectedModel: "model-1",
+        setHistoryId: vi.fn(),
+        isRegenerating: false,
+        scopeSignal: controller.signal,
+        scopeInvalidatedSignal: scopeInvalidatedController.signal,
+        shouldAbortForScopeChange: () => false
+      } as any)
+    ).resolves.toBe("history-1")
+
+    expect(mocks.runTransaction).toHaveBeenCalledWith(
+      scopeInvalidatedController.signal,
+      expect.any(Function),
+      expect.any(Function)
+    )
+    expect(mocks.saveMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "assistant", content: "ERR: Request cancelled" })
+    )
+  })
+
+  it("does not turn a scoped title 412 into an unscoped fallback history", async () => {
+    const scopeInvalidatedController = new AbortController()
+    const scopeChangedError = Object.assign(new Error("scope changed"), {
+      status: 412,
+      details: { code: "request_config_scope_changed" }
+    })
+    const requestScope = Object.freeze({
+      config: Object.freeze({
+        serverUrl: "https://scope.example",
+        authMode: "multi-user" as const
+      }),
+      userId: 7
+    })
+    mocks.generateTitle.mockRejectedValueOnce(scopeChangedError)
+
+    await expect(
+      saveMessageOnError({
+        e: new Error("provider failed"),
+        history: [],
+        setHistory: vi.fn(),
+        image: "",
+        userMessage: "Scoped question",
+        botMessage: "partial answer",
+        historyId: null,
+        selectedModel: "model-1",
+        setHistoryId: vi.fn(),
+        isRegenerating: false,
+        scopeSignal: new AbortController().signal,
+        scopeInvalidatedSignal: scopeInvalidatedController.signal,
+        requestScope,
+        shouldAbortForScopeChange: () => false
+      } as any)
+    ).rejects.toBe(scopeChangedError)
+
+    expect(mocks.generateTitle).toHaveBeenCalledWith(
+      "model-1",
+      "Scoped question",
+      "Scoped question",
+      { requestScope, signal: expect.any(AbortSignal) }
+    )
+    expect(mocks.saveHistory).not.toHaveBeenCalled()
+    expect(mocks.saveMessage).not.toHaveBeenCalled()
+  })
+
+  it("cancels scoped title generation when the account scope changes", async () => {
+    const controller = new AbortController()
+    const requestScope = Object.freeze({
+      config: Object.freeze({
+        serverUrl: "https://scope.example",
+        authMode: "multi-user" as const
+      }),
+      userId: 7
+    })
+    mocks.generateTitle.mockImplementationOnce(
+      async (
+        _model: string,
+        _message: string,
+        _fallback: string,
+        options?: { signal?: AbortSignal }
+      ) => await new Promise<string>((_resolve, reject) => {
+        options?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"))
+        }, { once: true })
+      })
+    )
+
+    const pending = saveMessageOnError({
+      e: new Error("provider failed"),
+      history: [],
+      setHistory: vi.fn(),
+      image: "",
+      userMessage: "Scoped question",
+      botMessage: "partial answer",
+      historyId: null,
+      selectedModel: "model-1",
+      setHistoryId: vi.fn(),
+      isRegenerating: false,
+      scopeSignal: controller.signal,
+      scopeInvalidatedSignal: controller.signal,
+      requestScope,
+      shouldAbortForScopeChange: () => controller.signal.aborted
+    })
+    await vi.waitFor(() => expect(mocks.generateTitle).toHaveBeenCalledOnce())
+
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    expect(mocks.saveHistory).not.toHaveBeenCalled()
+    expect(mocks.saveMessage).not.toHaveBeenCalled()
   })
 })

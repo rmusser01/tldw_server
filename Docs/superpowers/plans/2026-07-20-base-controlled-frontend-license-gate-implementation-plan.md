@@ -84,8 +84,8 @@ pytest, PyYAML, actionlint, Bandit, Backlog.md CLI/MCP.
 | 1 | Prepare isolated `main` bootstrap | Exact current refs/state captured; clean bootstrap worktree contains the approved design, plan, and task | Baseline focused CI-policy tests | Complete |
 | 2 | Harden the classifier | Exact protected boundaries and NUL-safe parsing fail closed | Focused pytest + Bandit | Complete |
 | 3 | Add the trusted workflow | Base-controlled workflow publishes only a trusted, fail-closed status and passes contract linting | Workflow contract pytest + actionlint | Complete |
-| 4 | Land and activate | Robert's human-reviewed bootstrap merges, temporary `/main` validation and the licensing PR prove both source-bound contexts, and branch-specific rules protect `main` and `dev` | Live run/status/ruleset evidence | Not Started |
-| 5 | Reconcile licensing branch | Rejected PR-controlled gate is replaced and TASK-12976 resumes on the trusted contract | Focused policy/workflow tests + Bandit + diff review | Not Started |
+| 4 | Land and activate | The bootstrap is on `main`, temporary `/main` validation and the licensing PR proved both source-bound contexts, and branch-specific rules protect `main` and `dev`; PR #2753's missing human-written Change summary remains recorded policy noncompliance | Live run/status/ruleset evidence | Complete (technical rollout; policy noncompliance recorded) |
+| 5 | Reconcile licensing branch | Rejected PR-controlled gate is replaced and TASK-12976 resumes on the trusted contract | Focused policy/workflow tests + Bandit + diff review | Complete |
 
 ## Task 1: Prepare the `main` Bootstrap Worktree
 
@@ -980,29 +980,29 @@ license-only PR to `dev`. The merge order remains:
 
 ## Final Verification Checklist
 
-- [ ] Bootstrap diff contains only TASK-12977 trust-root files.
+- [x] Bootstrap diff contains only TASK-12977 trust-root files.
 - [ ] Robert supplied the bootstrap PR `Change summary` in his own words.
-- [ ] Workflow exists on `main` before ruleset activation.
-- [ ] Temporary empty-commit validation records a successful source-bound
+- [x] Workflow exists on `main` before ruleset activation.
+- [x] Temporary empty-commit validation records a successful source-bound
       `frontend-license-policy/trusted/main` result before the main rule is
       added; the draft PR is then closed and its branch removed.
-- [ ] Privileged workflow checks out only `${{ github.sha }}`.
-- [ ] PR head is fetched as Git objects and never checked out/executed.
-- [ ] Classifier input is NUL-delimited, bounded, and decoded with
+- [x] Privileged workflow checks out only `${{ github.sha }}`.
+- [x] PR head is fetched as Git objects and never checked out/executed.
+- [x] Classifier input is NUL-delimited, bounded, and decoded with
       `surrogateescape` without trimming.
-- [ ] Owner allow and external protected deny cases pass.
-- [ ] Pending is posted first; only an explicit allow publishes success.
-- [ ] The trusted status is documented and tested as exact head-SHA/base
+- [x] Owner allow and external protected deny cases pass.
+- [x] Pending is posted first; only an explicit allow publishes success.
+- [x] The trusted status is documented and tested as exact head-SHA/base
       authorization, not proof of the current pull-request author.
-- [ ] `frontend-license-policy/trusted/main` and
+- [x] `frontend-license-policy/trusted/main` and
       `frontend-license-policy/trusted/dev` are each bound to the observed
       integration and required only by their matching base ruleset.
-- [ ] Main ruleset `5653432` retains every prior rule and condition.
-- [ ] Dev ruleset targets only `refs/heads/dev`, requires PR plus
+- [x] Main ruleset `5653432` retains every prior rule and condition.
+- [x] Dev ruleset targets only `refs/heads/dev`, requires PR plus
       `frontend-license-policy/trusted/dev`, and has no bypass actors.
-- [ ] Focused pytest suites, actionlint, Bandit, and `git diff --check` pass.
-- [ ] Public before/after ruleset evidence and rollback IDs are recorded.
-- [ ] TASK-12977 and TASK-12976 statuses accurately reflect live state.
+- [x] Focused pytest suites, actionlint, Bandit, and `git diff --check` pass.
+- [x] Public before/after ruleset evidence and rollback IDs are recorded.
+- [x] TASK-12977 and TASK-12976 statuses accurately reflect live state.
 
 ## Primary References
 

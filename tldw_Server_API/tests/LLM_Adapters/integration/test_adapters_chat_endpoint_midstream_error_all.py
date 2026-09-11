@@ -8,7 +8,6 @@ terminal [DONE], with earlier normal chunks preserved.
 
 from __future__ import annotations
 
-from typing import AsyncIterator, Iterator, Tuple
 import pytest
 
 # Ensure chat fixtures (client/auth) are registered
@@ -25,7 +24,7 @@ def _enable(monkeypatch):
     yield
 
 
-_CASES: Tuple[Tuple[str, str, str, str], ...] = (
+_CASES: tuple[tuple[str, str, str, str], ...] = (
     ("openai", "tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter", "OpenAIAdapter", "sk-openai-test"),
     ("anthropic", "tldw_Server_API.app.core.LLM_Calls.providers.anthropic_adapter", "AnthropicAdapter", "sk-ant-test"),
     ("groq", "tldw_Server_API.app.core.LLM_Calls.providers.groq_adapter", "GroqAdapter", "sk-groq-test"),
@@ -37,6 +36,18 @@ _CASES: Tuple[Tuple[str, str, str, str], ...] = (
     ("huggingface", "tldw_Server_API.app.core.LLM_Calls.providers.huggingface_adapter", "HuggingFaceAdapter", "sk-hf-test"),
     ("custom-openai-api", "tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter", "CustomOpenAIAdapter", "sk-custom1-test"),
 )
+
+_API_KEY_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "google": "GOOGLE_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "qwen": "QWEN_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "huggingface": "HUGGINGFACE_API_KEY",
+}
 
 
 def _payload(provider: str) -> dict:
@@ -63,9 +74,8 @@ def _payload(provider: str) -> dict:
 @pytest.mark.integration
 @pytest.mark.parametrize("provider, modname, cls_name, key_value", _CASES)
 def test_endpoint_midstream_error_single_sse_and_done(monkeypatch, authenticated_client, provider: str, modname: str, cls_name: str, key_value: str):
-    # Wire API key in endpoint module
-    import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
-    chat_endpoint.API_KEYS = {**(chat_endpoint.API_KEYS or {}), provider: key_value}
+    if provider_key_env := _API_KEY_ENV.get(provider):
+        monkeypatch.setenv(provider_key_env, key_value)
 
     # Patch adapter.stream to yield some chunks, then raise a provider error
     mod = __import__(modname, fromlist=[cls_name])
@@ -75,7 +85,7 @@ def test_endpoint_midstream_error_single_sse_and_done(monkeypatch, authenticated
     def _stream_miderror(*args, **kwargs):
         def _gen():
             yield "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"
-            yield "data: {\"choices\":[{\"delta\":\" world\"}]}\n\n"
+            yield "data: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n\n"
             raise ChatProviderError(provider=provider, message="boom")
         return _gen()
 
@@ -84,9 +94,19 @@ def test_endpoint_midstream_error_single_sse_and_done(monkeypatch, authenticated
     client = authenticated_client
     with client.stream("POST", "/api/v1/chat/completions", json=_payload(provider)) as resp:
         assert resp.status_code == 200
-        lines = list(resp.iter_lines())
-        # Should include normal chunks first
-        assert any("\"hello\"" in ln for ln in lines)
-        # And then exactly one error and one [DONE]
-        assert sum(1 for ln in lines if '"error"' in ln) == 1
-        assert sum(1 for ln in lines if ln.strip().lower() == "data: [done]") == 1
+        assert resp.headers.get("content-type", "").lower().startswith("text/event-stream")
+        lines = [line for line in resp.iter_lines() if line.strip()]
+        content_index = next(index for index, line in enumerate(lines) if '"hello"' in line)
+        continuation_index = next(
+            index for index, line in enumerate(lines) if '" world"' in line
+        )
+        error_indexes = [index for index, line in enumerate(lines) if '"error"' in line]
+        done_indexes = [
+            index
+            for index, line in enumerate(lines)
+            if line.strip().lower() == "data: [done]"
+        ]
+        assert len(error_indexes) == 1
+        assert len(done_indexes) == 1
+        assert content_index < continuation_index < error_indexes[0] < done_indexes[0]
+        assert done_indexes[0] == len(lines) - 1

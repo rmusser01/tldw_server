@@ -142,6 +142,8 @@ async def run_audio_batch(
         "api_name": form_data.api_name if form_data.perform_analysis else None,
         "custom_prompt_input": form_data.custom_prompt,
         "system_prompt_input": form_data.system_prompt,
+        # The synchronous endpoint already resolved both parts, including empty overrides.
+        "prompts_resolved": True,
         "summarize_recursively": form_data.summarize_recursively,
         "use_cookies": form_data.use_cookies,
         "cookies": form_data.cookies,

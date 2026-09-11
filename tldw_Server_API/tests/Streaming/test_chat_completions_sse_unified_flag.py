@@ -5,15 +5,60 @@ and validates heartbeat presence with a slow async producer.
 """
 
 import asyncio
-import os
 import shutil
 import tempfile
-from typing import Any, AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 
 import httpx
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+
+@contextmanager
+def _openai_server_credential():
+    """Seed and restore one explicit override without ambient credential state."""
+
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        LLMProviderOverride,
+    )
+
+    with llm_provider_overrides._OVERRIDE_LOCK:
+        original = dict(llm_provider_overrides._OVERRIDE_CACHE)
+        original_healthy = llm_provider_overrides._OVERRIDE_CACHE_HEALTHY
+        original_ttl_enabled = not (
+            llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
+        )
+    configured = dict(original)
+    configured["openai"] = LLMProviderOverride(
+        provider="openai",
+        api_key="test-openai-server-key",
+    )
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(configured)
+    try:
+        yield
+    finally:
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+            original,
+            healthy=original_healthy,
+            ttl_enabled=original_ttl_enabled,
+        )
+
+
+@asynccontextmanager
+async def _lifespan_async_client(app):
+    """Drive app startup and shutdown around an isolated ASGI client."""
+
+    async with app.router.lifespan_context(app):
+        with _openai_server_credential():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://test",
+            ) as client:
+                yield client
 
 
 def _fake_provider_stream_simple() -> Iterator[str]:
@@ -75,9 +120,9 @@ def _isolate_chat_rate_limiter(monkeypatch):
 @pytest.mark.asyncio
 async def test_chat_completions_streaming_unified_sse_simple(monkeypatch):
     tmpdir = tempfile.mkdtemp(prefix="unified_sse_chat_simple_")
-    os.environ["USER_DB_BASE_DIR"] = tmpdir
-    os.environ["STREAMS_UNIFIED"] = "1"
-    os.environ["TEST_MODE"] = "true"
+    monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)
+    monkeypatch.setenv("STREAMS_UNIFIED", "1")
+    monkeypatch.setenv("TEST_MODE", "true")
     try:
         from tldw_Server_API.app.main import app
         settings = get_settings()
@@ -90,17 +135,16 @@ async def test_chat_completions_streaming_unified_sse_simple(monkeypatch):
 
             return _fake_provider_stream_simple()
 
-        chat_ep.perform_chat_api_call = _stub_perform_chat_api_call  # type: ignore
+        monkeypatch.setattr(chat_ep, "perform_chat_api_call", _stub_perform_chat_api_call)
 
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with _lifespan_async_client(app) as client:
             payload = {
                 "model": "gpt-test",
                 "messages": [
                     {"role": "user", "content": "Say hi"},
                 ],
                 "stream": True,
-                "provider": "openai",
+                "api_provider": "openai",
             }
             async with client.stream(
                 "POST",
@@ -135,12 +179,12 @@ async def test_chat_completions_streaming_unified_sse_simple(monkeypatch):
 @pytest.mark.asyncio
 async def test_chat_completions_streaming_unified_sse_slow_async_heartbeat(monkeypatch):
     tmpdir = tempfile.mkdtemp(prefix="unified_sse_chat_slow_")
-    os.environ["USER_DB_BASE_DIR"] = tmpdir
-    os.environ["STREAMS_UNIFIED"] = "1"
-    os.environ["TEST_MODE"] = "true"
+    monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)
+    monkeypatch.setenv("STREAMS_UNIFIED", "1")
+    monkeypatch.setenv("TEST_MODE", "true")
     # Short heartbeats in unified SSE layer
-    os.environ["STREAM_HEARTBEAT_INTERVAL_S"] = "0.02"
-    os.environ["STREAM_HEARTBEAT_MODE"] = "data"
+    monkeypatch.setenv("STREAM_HEARTBEAT_INTERVAL_S", "0.02")
+    monkeypatch.setenv("STREAM_HEARTBEAT_MODE", "data")
     try:
         from tldw_Server_API.app.main import app
         settings = get_settings()
@@ -152,17 +196,16 @@ async def test_chat_completions_streaming_unified_sse_slow_async_heartbeat(monke
 
             return _fake_provider_stream_slow_async()
 
-        chat_ep.perform_chat_api_call = _stub_perform_chat_api_call  # type: ignore
+        monkeypatch.setattr(chat_ep, "perform_chat_api_call", _stub_perform_chat_api_call)
 
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with _lifespan_async_client(app) as client:
             payload = {
                 "model": "gpt-test",
                 "messages": [
                     {"role": "user", "content": "Slow please"},
                 ],
                 "stream": True,
-                "provider": "openai",
+                "api_provider": "openai",
             }
             async with client.stream(
                 "POST",
@@ -194,17 +237,15 @@ async def test_chat_completions_streaming_unified_sse_slow_async_heartbeat(monke
         assert lines[-1].strip().lower() == "data: [done]"
         assert done_count == 1
     finally:
-        for k in ("STREAM_HEARTBEAT_INTERVAL_S", "STREAM_HEARTBEAT_MODE"):
-            os.environ.pop(k, None)
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 @pytest.mark.asyncio
 async def test_chat_completions_streaming_unified_sse_provider_duplicate_done(monkeypatch):
     tmpdir = tempfile.mkdtemp(prefix="unified_sse_chat_dupdone_")
-    os.environ["USER_DB_BASE_DIR"] = tmpdir
-    os.environ["STREAMS_UNIFIED"] = "1"
-    os.environ["TEST_MODE"] = "true"
+    monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)
+    monkeypatch.setenv("STREAMS_UNIFIED", "1")
+    monkeypatch.setenv("TEST_MODE", "true")
     try:
         from tldw_Server_API.app.main import app
         settings = get_settings()
@@ -216,17 +257,16 @@ async def test_chat_completions_streaming_unified_sse_provider_duplicate_done(mo
 
             return _fake_provider_stream_with_duplicate_done()
 
-        chat_ep.perform_chat_api_call = _stub_perform_chat_api_call  # type: ignore
+        monkeypatch.setattr(chat_ep, "perform_chat_api_call", _stub_perform_chat_api_call)
 
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with _lifespan_async_client(app) as client:
             payload = {
                 "model": "gpt-test",
                 "messages": [
                     {"role": "user", "content": "Emit duplicate DONE"},
                 ],
                 "stream": True,
-                "provider": "openai",
+                "api_provider": "openai",
             }
             async with client.stream(
                 "POST",

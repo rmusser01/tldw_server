@@ -1,4 +1,6 @@
 import configparser
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -564,7 +566,9 @@ def test_resolve_tokenizer_metadata_contains_strict_fields(monkeypatch):
     assert metadata["tokenizer"] == "tiktoken:cl100k_base"
 
 
-def test_google_count_only_adapter_falls_back_to_query_key_auth(monkeypatch):
+def test_google_count_only_adapter_uses_query_key_fallback_only_for_custom_endpoint(
+    monkeypatch,
+):
     from tldw_Server_API.app.core.LLM_Calls import tokenizer_resolver as resolver
 
     calls: list[tuple[str, dict[str, str]]] = []
@@ -587,15 +591,99 @@ def test_google_count_only_adapter_falls_back_to_query_key_auth(monkeypatch):
     monkeypatch.setenv("GOOGLE_COUNTTOKENS_ALLOW_QUERY_KEY_FALLBACK", "true")
 
     adapter = resolver.GoogleCountOnlyHTTPAdapter(
-        base_url="https://generativelanguage.googleapis.com/v1beta",
-        model="gemini-2.5-flash",
+        base_url="https://google-compatible.example/v1beta",
+        model="models/gemini-2.5-flash",
         api_key="test-google-key",
     )
 
     count = adapter.count_tokens("hello world")
     assert count == 7
-    assert any("?key=test-google-key" in url for url, _headers in calls)
-    assert any(headers.get("x-goog-api-key") == "test-google-key" for _url, headers in calls)
+    assert calls == [
+        (
+            "https://google-compatible.example/v1beta/models/gemini-2.5-flash:countTokens",
+            {"Content-Type": "application/json", "x-goog-api-key": "test-google-key"},
+        ),
+        (
+            "https://google-compatible.example/v1beta/models/gemini-2.5-flash:countTokens?key=test-google-key",
+            {"Content-Type": "application/json"},
+        ),
+    ]
+
+
+def test_google_count_only_adapter_never_puts_key_in_official_google_url(monkeypatch):
+    from tldw_Server_API.app.core.LLM_Calls import tokenizer_resolver as resolver
+
+    calls: list[str] = []
+
+    class _FakeResponse:
+        status_code = 401
+
+    def _fake_post(*, url: str, payload, headers, timeout):  # noqa: ANN001, ARG001
+        calls.append(url)
+        return _FakeResponse()
+
+    monkeypatch.setattr(resolver, "_http_post", _fake_post)
+    monkeypatch.setenv("GOOGLE_COUNTTOKENS_ALLOW_QUERY_KEY_FALLBACK", "true")
+    adapter = resolver.GoogleCountOnlyHTTPAdapter(
+        base_url="https://generativelanguage.googleapis.com/v1beta",
+        model="gemini-2.5-flash",
+        api_key="official-google-secret",
+    )
+
+    with pytest.raises(resolver.TokenizerUnavailable, match="401"):
+        adapter.count_tokens("hello")
+
+    assert calls == [
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:countTokens"
+    ]
+    assert all("?key=" not in url for url in calls)
+    assert all("official-google-secret" not in url for url in calls)
+
+
+@pytest.mark.parametrize(
+    ("model", "expected_model_path"),
+    [
+        ("gemini-2.5-flash", "models/gemini-2.5-flash"),
+        ("models/gemini-2.5-flash", "models/gemini-2.5-flash"),
+        ("models/org/mødel", "models/org/m%C3%B8del"),
+    ],
+)
+def test_google_count_only_adapter_encodes_model_and_uses_header_auth(
+    monkeypatch,
+    model,
+    expected_model_path,
+):
+    from tldw_Server_API.app.core.LLM_Calls import tokenizer_resolver as resolver
+
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"totalTokens": 7}
+
+    def fake_post(*, url, payload, headers, timeout):
+        calls.append((url, dict(headers), payload, timeout))
+        return FakeResponse()
+
+    monkeypatch.setattr(resolver, "_http_post", fake_post)
+    adapter = resolver.GoogleCountOnlyHTTPAdapter(
+        base_url="https://generativelanguage.googleapis.com/v1beta",
+        model=model,
+        api_key="google-boundary-key",
+        timeout_seconds=7,
+    )
+
+    assert adapter.count_tokens("hello") == 7
+    assert calls == [
+        (
+            f"https://generativelanguage.googleapis.com/v1beta/{expected_model_path}:countTokens",
+            {"Content-Type": "application/json", "x-goog-api-key": "google-boundary-key"},
+            {"contents": [{"role": "user", "parts": [{"text": "hello"}]}]},
+            7.0,
+        )
+    ]
 
 
 def test_google_count_only_adapter_does_not_use_query_key_fallback_by_default(monkeypatch):
@@ -628,6 +716,100 @@ def test_google_count_only_adapter_does_not_use_query_key_fallback_by_default(mo
         adapter.count_tokens("hello world")
 
     assert all("?key=" not in url for url in calls)
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["../files", "models/../../files#", "models/org\\model", "models/%2e%2e/files"],
+)
+def test_google_count_only_adapter_rejects_unsafe_model_before_transport(
+    monkeypatch,
+    model,
+):
+    from tldw_Server_API.app.core.LLM_Calls import tokenizer_resolver as resolver
+
+    def fail_post(**_kwargs):
+        pytest.fail("unsafe Google tokenizer model must fail before HTTP dispatch")
+
+    monkeypatch.setattr(resolver, "_http_post", fail_post)
+    adapter = resolver.GoogleCountOnlyHTTPAdapter(
+        base_url="https://generativelanguage.googleapis.com/v1beta",
+        model=model,
+        api_key="google-secret-key",
+    )
+
+    with pytest.raises(resolver.TokenizerUnavailable, match="model identifier") as exc_info:
+        adapter.count_tokens("hello")
+
+    assert model not in str(exc_info.value)
+    assert "google-secret-key" not in str(exc_info.value)
+
+
+@pytest.mark.concurrent
+def test_concurrent_google_count_only_calls_keep_model_key_and_payload_request_local(
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.LLM_Calls import tokenizer_resolver as resolver
+
+    calls = []
+    calls_lock = threading.Lock()
+    both_valid_arrived = threading.Event()
+    release = threading.Event()
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"totalTokens": 7}
+
+    def gated_post(*, url, payload, headers, timeout):
+        del timeout
+        text = payload["contents"][0]["parts"][0]["text"]
+        call = (url, headers.get("x-goog-api-key"), text)
+        with calls_lock:
+            calls.append(call)
+            valid_texts = {item[2] for item in calls if item[2] in {"alpha", "beta"}}
+            if valid_texts == {"alpha", "beta"}:
+                both_valid_arrived.set()
+        if not release.wait(10):
+            raise TimeoutError("concurrent Google tokenizer calls were not released")
+        return FakeResponse()
+
+    monkeypatch.setattr(resolver, "_http_post", gated_post)
+
+    def invoke(model, key, text):
+        return resolver.GoogleCountOnlyHTTPAdapter(
+            base_url="https://generativelanguage.googleapis.com/v1beta",
+            model=model,
+            api_key=key,
+        ).count_tokens(text)
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        alpha = executor.submit(invoke, "models/gemini-alpha", "key-alpha", "alpha")
+        beta = executor.submit(invoke, "gemini-beta", "key-beta", "beta")
+        unsafe = executor.submit(invoke, "models/../../files#", "key-unsafe", "unsafe")
+        try:
+            assert both_valid_arrived.wait(10)
+        finally:
+            release.set()
+        assert alpha.result(timeout=10) == 7
+        assert beta.result(timeout=10) == 7
+        with pytest.raises(resolver.TokenizerUnavailable, match="model identifier"):
+            unsafe.result(timeout=10)
+
+    assert len(calls) == 2
+    assert set(calls) == {
+        (
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-alpha:countTokens",
+            "key-alpha",
+            "alpha",
+        ),
+        (
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-beta:countTokens",
+            "key-beta",
+            "beta",
+        ),
+    }
 
 
 def test_coerce_int_rejects_non_integral_float():

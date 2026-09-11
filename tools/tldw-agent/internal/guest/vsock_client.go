@@ -68,13 +68,13 @@ func (c *VSockClient) Run(ctx context.Context, server *Server) error {
 			return err
 		}
 
-		err = c.primeConnection(ctx, conn, server, reconnect)
+		reader, err := c.primeConnection(ctx, conn, server, reconnect)
 		if err != nil {
 			_ = conn.Close()
 			return err
 		}
 
-		err = server.ServeStream(conn, conn)
+		err = server.ServeStream(reader, conn)
 		_ = conn.Close()
 		if err != nil {
 			return err
@@ -97,24 +97,24 @@ func (c *VSockClient) primeConnection(
 	conn io.ReadWriteCloser,
 	server *Server,
 	reconnect bool,
-) error {
+) (*bufio.Reader, error) {
 	reader := bufio.NewReader(conn)
 	if reconnect {
 		if err := c.sendReconnect(conn, reader); err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		if err := c.sendHandshake(conn, reader); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if err := c.sendReady(conn, reader, server); err != nil {
-		return err
+		return nil, err
 	}
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
-	return nil
+	return reader, nil
 }
 
 func (c *VSockClient) sendHandshake(conn io.Writer, reader *bufio.Reader) error {

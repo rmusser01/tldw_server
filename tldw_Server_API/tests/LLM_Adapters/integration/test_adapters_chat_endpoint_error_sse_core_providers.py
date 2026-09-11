@@ -1,11 +1,13 @@
 """
-Endpoint SSE error-path tests for OpenAI, Anthropic, Groq, and OpenRouter adapters.
+Endpoint pre-output error tests for OpenAI, Anthropic, Groq, and OpenRouter.
 
-Ensures a provider-side error during streaming results in exactly one structured
-SSE error frame in the response and a single [DONE] sentinel.
+Provider failures raised before any stream output must be returned as bounded
+HTTP errors before the response is handed off as SSE.
 """
 
 from __future__ import annotations
+
+from threading import Event
 
 import pytest
 
@@ -38,91 +40,99 @@ def _payload(provider: str) -> dict:
 
 @pytest.mark.integration
 def test_chat_endpoint_streaming_error_openai(monkeypatch, authenticated_client):
-    import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
-    chat_endpoint.API_KEYS = {**(chat_endpoint.API_KEYS or {}), "openai": "sk-openai-test"}
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
+    adapter_called = Event()
 
-    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
     import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
 
     def _stream_raises(*args, **kwargs):
+        adapter_called.set()
         raise ChatBadRequestError(provider="openai", message="invalid input")
 
     monkeypatch.setattr(openai_mod.OpenAIAdapter, "stream", _stream_raises, raising=True)
 
-    client = authenticated_client
-    with client.stream("POST", "/api/v1/chat/completions", json=_payload("openai")) as resp:
-        assert resp.status_code == 200
-        lines = list(resp.iter_lines())
-        saw_error = any((ln.startswith("data:") and '"error"' in ln) for ln in lines)
-        saw_done = sum(1 for ln in lines if ln.strip().lower() == "data: [done]") == 1
-        assert saw_error, f"Expected SSE error, got: {lines[:5]}"
-        assert saw_done, "Expected a single [DONE] sentinel"
+    response = authenticated_client.post(
+        "/api/v1/chat/completions",
+        json=_payload("openai"),
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["error_code"] == "provider_unavailable"
+    assert "invalid input" not in response.text
+    assert adapter_called.is_set()
 
 
 @pytest.mark.integration
 def test_chat_endpoint_streaming_error_anthropic(monkeypatch, authenticated_client):
-    import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
-    chat_endpoint.API_KEYS = {**(chat_endpoint.API_KEYS or {}), "anthropic": "sk-ant-test"}
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    adapter_called = Event()
 
-    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
     import tldw_Server_API.app.core.LLM_Calls.providers.anthropic_adapter as ant_mod
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
 
     def _stream_raises(*args, **kwargs):
+        adapter_called.set()
         raise ChatProviderError(provider="anthropic", message="server error", status_code=500)
 
     monkeypatch.setattr(ant_mod.AnthropicAdapter, "stream", _stream_raises, raising=True)
 
-    client = authenticated_client
-    with client.stream("POST", "/api/v1/chat/completions", json=_payload("anthropic")) as resp:
-        assert resp.status_code == 200
-        lines = list(resp.iter_lines())
-        saw_error = any((ln.startswith("data:") and '"error"' in ln) for ln in lines)
-        saw_done = sum(1 for ln in lines if ln.strip().lower() == "data: [done]") == 1
-        assert saw_error, f"Expected SSE error, got: {lines[:5]}"
-        assert saw_done, "Expected a single [DONE] sentinel"
+    response = authenticated_client.post(
+        "/api/v1/chat/completions",
+        json=_payload("anthropic"),
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["error_code"] == "provider_unavailable"
+    assert "server error" not in response.text
+    assert adapter_called.is_set()
 
 
 @pytest.mark.integration
 def test_chat_endpoint_streaming_error_groq(monkeypatch, authenticated_client):
-    import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
-    chat_endpoint.API_KEYS = {**(chat_endpoint.API_KEYS or {}), "groq": "sk-groq-test"}
+    monkeypatch.setenv("GROQ_API_KEY", "sk-groq-test")
+    adapter_called = Event()
 
-    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatRateLimitError
     import tldw_Server_API.app.core.LLM_Calls.providers.groq_adapter as groq_mod
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatRateLimitError
 
     def _stream_raises(*args, **kwargs):
+        adapter_called.set()
         raise ChatRateLimitError(provider="groq", message="too many requests")
 
     monkeypatch.setattr(groq_mod.GroqAdapter, "stream", _stream_raises, raising=True)
 
-    client = authenticated_client
-    with client.stream("POST", "/api/v1/chat/completions", json=_payload("groq")) as resp:
-        assert resp.status_code == 200
-        lines = list(resp.iter_lines())
-        saw_error = any((ln.startswith("data:") and '"error"' in ln) for ln in lines)
-        saw_done = sum(1 for ln in lines if ln.strip().lower() == "data: [done]") == 1
-        assert saw_error, f"Expected SSE error, got: {lines[:5]}"
-        assert saw_done, "Expected a single [DONE] sentinel"
+    response = authenticated_client.post(
+        "/api/v1/chat/completions",
+        json=_payload("groq"),
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["error_code"] == "provider_unavailable"
+    assert "too many requests" not in response.text
+    assert adapter_called.is_set()
 
 
 @pytest.mark.integration
 def test_chat_endpoint_streaming_error_openrouter(monkeypatch, authenticated_client):
-    import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
-    chat_endpoint.API_KEYS = {**(chat_endpoint.API_KEYS or {}), "openrouter": "sk-or-test"}
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    adapter_called = Event()
 
-    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
     import tldw_Server_API.app.core.LLM_Calls.providers.openrouter_adapter as or_mod
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
 
     def _stream_raises(*args, **kwargs):
+        adapter_called.set()
         raise ChatAuthenticationError(provider="openrouter", message="bad key")
 
     monkeypatch.setattr(or_mod.OpenRouterAdapter, "stream", _stream_raises, raising=True)
 
-    client = authenticated_client
-    with client.stream("POST", "/api/v1/chat/completions", json=_payload("openrouter")) as resp:
-        assert resp.status_code == 200
-        lines = list(resp.iter_lines())
-        saw_error = any((ln.startswith("data:") and '"error"' in ln) for ln in lines)
-        saw_done = sum(1 for ln in lines if ln.strip().lower() == "data: [done]") == 1
-        assert saw_error, f"Expected SSE error, got: {lines[:5]}"
-        assert saw_done, "Expected a single [DONE] sentinel"
+    response = authenticated_client.post(
+        "/api/v1/chat/completions",
+        json=_payload("openrouter"),
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["error_code"] == "provider_authentication_failed"
+    assert "bad key" not in response.text
+    assert adapter_called.is_set()

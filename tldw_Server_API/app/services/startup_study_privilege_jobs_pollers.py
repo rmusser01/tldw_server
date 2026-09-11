@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.services.lifecycle_worker_specs import (
     ShutdownPhase,
     WorkerLifecycleContext,
@@ -67,6 +68,26 @@ def provide_study_privilege_jobs_worker_specs(
             ),
         ),
         stop_event_worker_spec(
+            name="notes_graph_suggestions_jobs_task",
+            worker_service=_run_notes_graph_suggestions_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: _notes_graph_worker_enabled(
+                context,
+                "NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED",
+            ),
+        ),
+        stop_event_worker_spec(
+            name="notes_graph_suggestions_maintenance_task",
+            worker_service=_run_notes_graph_suggestions_maintenance_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: _notes_graph_worker_enabled(
+                context,
+                "NOTES_GRAPH_SUGGESTIONS_MAINTENANCE_ENABLED",
+            ),
+        ),
+        stop_event_worker_spec(
             name="privilege_snapshot_task",
             worker_service=_run_privilege_snapshot_worker_service,
             category="jobs",
@@ -76,6 +97,17 @@ def provide_study_privilege_jobs_worker_specs(
                 "privileges",
             ),
         ),
+    )
+
+
+def _notes_graph_worker_enabled(
+    context: WorkerLifecycleContext,
+    flag: str,
+) -> bool:
+    return (
+        not context.sidecar_mode
+        and env_flag_enabled(flag)
+        and bool(context.route_enabled("notes"))
     )
 
 
@@ -277,6 +309,22 @@ def _run_study_suggestions_jobs_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_study_suggestions_jobs_worker(stop_event)
+
+
+def _run_notes_graph_suggestions_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.notes_graph_suggestions_worker import (
+        run_notes_graph_suggestions_worker,
+    )
+
+    return run_notes_graph_suggestions_worker(stop_event)
+
+
+def _run_notes_graph_suggestions_maintenance_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.notes_graph_suggestions_maintenance import (
+        run_notes_graph_suggestions_maintenance,
+    )
+
+    return run_notes_graph_suggestions_maintenance(stop_event)
 
 
 def _run_privilege_snapshot_worker_service(stop_event: Any) -> Any:

@@ -19,6 +19,7 @@ Usage:
 """
 
 import asyncio  # Re-export for tests that patch adapters.asyncio
+from typing import Any
 
 # Re-export exceptions and internal module references for backward compatibility
 from tldw_Server_API.app.core.exceptions import AdapterError
@@ -26,21 +27,6 @@ from tldw_Server_API.app.core.http_client import create_client as _wf_create_cli
 
 # Import all category modules to register their adapters
 # Each module's import triggers the @registry.register decorators
-from tldw_Server_API.app.core.Workflows.adapters import (
-    audio,
-    content,
-    control,
-    evaluation,
-    integration,
-    knowledge,
-    llm,
-    media,
-    rag,
-    research,
-    text,
-    utility,
-    video,
-)
 from tldw_Server_API.app.core.Workflows.adapters._base import (
     AdapterContext,
     AdapterFunc,
@@ -97,181 +83,231 @@ from tldw_Server_API.app.core.Workflows.adapters._registry import (
 # Re-export all adapter functions for backward compatibility
 # This allows existing code to import like: from ...adapters import run_llm_adapter
 # Audio adapters
-from tldw_Server_API.app.core.Workflows.adapters.audio import (
-    run_audio_concat_adapter,
-    run_audio_convert_adapter,
-    run_audio_diarize_adapter,
-    run_audio_extract_adapter,
-    run_audio_mix_adapter,
-    run_audio_normalize_adapter,
-    run_audio_trim_adapter,
-    run_stt_transcribe_adapter,
-    run_tts_adapter,
-)
 
 # Content adapters
-from tldw_Server_API.app.core.Workflows.adapters.content import (
-    run_bibliography_generate_adapter,
-    run_citations_adapter,
-    run_diagram_generate_adapter,
-    run_flashcard_generate_adapter,
-    run_glossary_extract_adapter,
-    run_image_describe_adapter,
-    run_image_gen_adapter,
-    run_mindmap_generate_adapter,
-    run_newsletter_generate_adapter,
-    run_outline_generate_adapter,
-    run_quiz_generate_adapter,
-    run_report_generate_adapter,
-    run_rerank_adapter,
-    run_slides_generate_adapter,
-    run_summarize_adapter,
-)
 
 # Control adapters
-from tldw_Server_API.app.core.Workflows.adapters.control import (
-    run_batch_adapter,
-    run_branch_adapter,
-    run_cache_result_adapter,
-    run_checkpoint_adapter,
-    run_delay_adapter,
-    run_log_adapter,
-    run_map_adapter,
-    run_parallel_adapter,
-    run_prompt_adapter,
-    run_retry_adapter,
-    run_workflow_call_adapter,
-)
 
 # Evaluation adapters
-from tldw_Server_API.app.core.Workflows.adapters.evaluation import (
-    run_context_window_check_adapter,
-    run_eval_readability_adapter,
-    run_evaluations_adapter,
-    run_quiz_evaluate_adapter,
-)
 
 # Integration adapters
-from tldw_Server_API.app.core.Workflows.adapters.integration import (
-    run_acp_stage_adapter,
-    run_character_chat_adapter,
-    run_chatbooks_adapter,
-    run_email_send_adapter,
-    run_github_create_issue_adapter,
-    run_kanban_adapter,
-    run_mcp_tool_adapter,
-    run_notify_adapter,
-    run_podcast_rss_publish_adapter,
-    run_s3_download_adapter,
-    run_s3_upload_adapter,
-    run_webhook_adapter,
-)
 
 # Knowledge adapters
-from tldw_Server_API.app.core.Workflows.adapters.knowledge import (
-    run_chunking_adapter,
-    run_claims_extract_adapter,
-    run_collections_adapter,
-    run_notes_adapter,
-    run_prompts_adapter,
-    run_voice_intent_adapter,
-)
 
 # LLM adapters
-from tldw_Server_API.app.core.Workflows.adapters.llm import (
-    run_llm_adapter,
-    run_llm_compare_adapter,
-    run_llm_critique_adapter,
-    run_llm_with_tools_adapter,
-    run_moderation_adapter,
-    run_policy_check_adapter,
-    run_translate_adapter,
-)
 
 # Media adapters
-from tldw_Server_API.app.core.Workflows.adapters.media import (
-    run_document_table_extract_adapter,
-    run_media_ingest_adapter,
-    run_ocr_adapter,
-    run_pdf_extract_adapter,
-    run_process_media_adapter,
-)
 
 # RAG adapters
-from tldw_Server_API.app.core.Workflows.adapters.rag import (
-    run_hyde_generate_adapter,
-    run_query_expand_adapter,
-    run_query_rewrite_adapter,
-    run_rag_search_adapter,
-    run_rss_fetch_adapter,
-    run_search_aggregate_adapter,
-    run_semantic_cache_check_adapter,
-    run_web_search_adapter,
-)
 
 # Research adapters
-from tldw_Server_API.app.core.Workflows.adapters.research import (
-    run_arxiv_download_adapter,
-    run_arxiv_search_adapter,
-    run_bibtex_generate_adapter,
-    run_deep_research_adapter,
-    run_deep_research_load_bundle_adapter,
-    run_deep_research_select_bundle_fields_adapter,
-    run_deep_research_wait_adapter,
-    run_doi_resolve_adapter,
-    run_google_scholar_search_adapter,
-    run_literature_review_adapter,
-    run_patent_search_adapter,
-    run_pubmed_search_adapter,
-    run_reference_parse_adapter,
-    run_semantic_scholar_search_adapter,
-)
 
 # Text adapters
-from tldw_Server_API.app.core.Workflows.adapters.text import (
-    run_csv_to_json_adapter,
-    run_entity_extract_adapter,
-    run_html_to_markdown_adapter,
-    run_json_to_csv_adapter,
-    run_json_transform_adapter,
-    run_json_validate_adapter,
-    run_keyword_extract_adapter,
-    run_language_detect_adapter,
-    run_markdown_to_html_adapter,
-    run_regex_extract_adapter,
-    run_sentiment_analyze_adapter,
-    run_template_render_adapter,
-    run_text_clean_adapter,
-    run_token_count_adapter,
-    run_topic_model_adapter,
-    run_xml_transform_adapter,
-)
 
 # Utility adapters
-from tldw_Server_API.app.core.Workflows.adapters.utility import (
-    run_context_build_adapter,
-    run_diff_change_adapter,
-    run_document_diff_adapter,
-    run_document_merge_adapter,
-    run_embed_adapter,
-    run_sandbox_exec_adapter,
-    run_schedule_workflow_adapter,
-    run_screenshot_capture_adapter,
-    run_timing_start_adapter,
-    run_timing_stop_adapter,
-)
 
 # Video adapters
-from tldw_Server_API.app.core.Workflows.adapters.video import (
-    run_subtitle_burn_adapter,
-    run_subtitle_generate_adapter,
-    run_subtitle_translate_adapter,
-    run_video_concat_adapter,
-    run_video_convert_adapter,
-    run_video_extract_frames_adapter,
-    run_video_thumbnail_adapter,
-    run_video_trim_adapter,
+
+# ---------------------------------------------------------------------------
+# Lazy category loading
+#
+# Importing every category module at package import time ran each module's
+# @registry.register decorators, which is what made the registry work -- but it
+# also reached RAG.query_features (nltk -> scipy -> sklearn -> pandas),
+# Kanban_DB (chromadb) and TTS (av). That cost roughly 1.4 s and ~1,800 modules
+# in every process that imported workflows, including CLI runs and pytest.
+#
+# Categories are now imported on first registry access, or on first attribute
+# access for a re-exported adapter function.
+# ---------------------------------------------------------------------------
+
+_ADAPTER_CATEGORIES: tuple[str, ...] = (
+    "audio",
+    "content",
+    "control",
+    "evaluation",
+    "integration",
+    "knowledge",
+    "llm",
+    "media",
+    "rag",
+    "research",
+    "text",
+    "utility",
+    "video",
 )
+
+# Re-exported adapter function name -> category module that defines it.
+_LAZY_ADAPTER_EXPORTS: dict[str, str] = {
+    "run_acp_stage_adapter": "integration",
+    "run_arxiv_download_adapter": "research",
+    "run_arxiv_search_adapter": "research",
+    "run_audio_concat_adapter": "audio",
+    "run_audio_convert_adapter": "audio",
+    "run_audio_diarize_adapter": "audio",
+    "run_audio_extract_adapter": "audio",
+    "run_audio_mix_adapter": "audio",
+    "run_audio_normalize_adapter": "audio",
+    "run_audio_trim_adapter": "audio",
+    "run_batch_adapter": "control",
+    "run_bibliography_generate_adapter": "content",
+    "run_bibtex_generate_adapter": "research",
+    "run_branch_adapter": "control",
+    "run_cache_result_adapter": "control",
+    "run_character_chat_adapter": "integration",
+    "run_chatbooks_adapter": "integration",
+    "run_checkpoint_adapter": "control",
+    "run_chunking_adapter": "knowledge",
+    "run_citations_adapter": "content",
+    "run_claims_extract_adapter": "knowledge",
+    "run_collections_adapter": "knowledge",
+    "run_context_build_adapter": "utility",
+    "run_context_window_check_adapter": "evaluation",
+    "run_csv_to_json_adapter": "text",
+    "run_deep_research_adapter": "research",
+    "run_deep_research_load_bundle_adapter": "research",
+    "run_deep_research_select_bundle_fields_adapter": "research",
+    "run_deep_research_wait_adapter": "research",
+    "run_delay_adapter": "control",
+    "run_diagram_generate_adapter": "content",
+    "run_diff_change_adapter": "utility",
+    "run_document_diff_adapter": "utility",
+    "run_document_merge_adapter": "utility",
+    "run_document_table_extract_adapter": "media",
+    "run_doi_resolve_adapter": "research",
+    "run_email_send_adapter": "integration",
+    "run_embed_adapter": "utility",
+    "run_entity_extract_adapter": "text",
+    "run_eval_readability_adapter": "evaluation",
+    "run_evaluations_adapter": "evaluation",
+    "run_flashcard_generate_adapter": "content",
+    "run_github_create_issue_adapter": "integration",
+    "run_glossary_extract_adapter": "content",
+    "run_google_scholar_search_adapter": "research",
+    "run_html_to_markdown_adapter": "text",
+    "run_hyde_generate_adapter": "rag",
+    "run_image_describe_adapter": "content",
+    "run_image_gen_adapter": "content",
+    "run_json_to_csv_adapter": "text",
+    "run_json_transform_adapter": "text",
+    "run_json_validate_adapter": "text",
+    "run_kanban_adapter": "integration",
+    "run_keyword_extract_adapter": "text",
+    "run_language_detect_adapter": "text",
+    "run_literature_review_adapter": "research",
+    "run_llm_adapter": "llm",
+    "run_llm_compare_adapter": "llm",
+    "run_llm_critique_adapter": "llm",
+    "run_llm_with_tools_adapter": "llm",
+    "run_log_adapter": "control",
+    "run_map_adapter": "control",
+    "run_markdown_to_html_adapter": "text",
+    "run_mcp_tool_adapter": "integration",
+    "run_media_ingest_adapter": "media",
+    "run_mindmap_generate_adapter": "content",
+    "run_moderation_adapter": "llm",
+    "run_newsletter_generate_adapter": "content",
+    "run_notes_adapter": "knowledge",
+    "run_notify_adapter": "integration",
+    "run_ocr_adapter": "media",
+    "run_outline_generate_adapter": "content",
+    "run_parallel_adapter": "control",
+    "run_patent_search_adapter": "research",
+    "run_pdf_extract_adapter": "media",
+    "run_podcast_rss_publish_adapter": "integration",
+    "run_policy_check_adapter": "llm",
+    "run_process_media_adapter": "media",
+    "run_prompt_adapter": "control",
+    "run_prompts_adapter": "knowledge",
+    "run_pubmed_search_adapter": "research",
+    "run_query_expand_adapter": "rag",
+    "run_query_rewrite_adapter": "rag",
+    "run_quiz_evaluate_adapter": "evaluation",
+    "run_quiz_generate_adapter": "content",
+    "run_rag_search_adapter": "rag",
+    "run_reference_parse_adapter": "research",
+    "run_regex_extract_adapter": "text",
+    "run_report_generate_adapter": "content",
+    "run_rerank_adapter": "content",
+    "run_retry_adapter": "control",
+    "run_rss_fetch_adapter": "rag",
+    "run_s3_download_adapter": "integration",
+    "run_s3_upload_adapter": "integration",
+    "run_sandbox_exec_adapter": "utility",
+    "run_schedule_workflow_adapter": "utility",
+    "run_screenshot_capture_adapter": "utility",
+    "run_search_aggregate_adapter": "rag",
+    "run_semantic_cache_check_adapter": "rag",
+    "run_semantic_scholar_search_adapter": "research",
+    "run_sentiment_analyze_adapter": "text",
+    "run_slides_generate_adapter": "content",
+    "run_stt_transcribe_adapter": "audio",
+    "run_subtitle_burn_adapter": "video",
+    "run_subtitle_generate_adapter": "video",
+    "run_subtitle_translate_adapter": "video",
+    "run_summarize_adapter": "content",
+    "run_template_render_adapter": "text",
+    "run_text_clean_adapter": "text",
+    "run_timing_start_adapter": "utility",
+    "run_timing_stop_adapter": "utility",
+    "run_token_count_adapter": "text",
+    "run_topic_model_adapter": "text",
+    "run_translate_adapter": "llm",
+    "run_tts_adapter": "audio",
+    "run_video_concat_adapter": "video",
+    "run_video_convert_adapter": "video",
+    "run_video_extract_frames_adapter": "video",
+    "run_video_thumbnail_adapter": "video",
+    "run_video_trim_adapter": "video",
+    "run_voice_intent_adapter": "knowledge",
+    "run_web_search_adapter": "rag",
+    "run_webhook_adapter": "integration",
+    "run_workflow_call_adapter": "control",
+    "run_xml_transform_adapter": "text",
+}
+
+
+def _load_all_categories() -> None:
+    """Import every adapter category so its @registry.register calls run."""
+    from importlib import import_module
+
+    for _cat in _ADAPTER_CATEGORIES:
+        import_module(f"{__name__}.{_cat}")
+
+
+registry.set_loader(_load_all_categories)
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve category modules and re-exported adapters on first access.
+
+    Args:
+        name: Attribute requested from this package.
+
+    Returns:
+        The category module or adapter function bound to ``name``.
+
+    Raises:
+        AttributeError: If ``name`` is neither a category nor a known adapter.
+    """
+    from importlib import import_module
+
+    if name in _ADAPTER_CATEGORIES:
+        module = import_module(f"{__name__}.{name}")
+        globals()[name] = module
+        return module
+    category = _LAZY_ADAPTER_EXPORTS.get(name)
+    if category is not None:
+        value = getattr(import_module(f"{__name__}.{category}"), name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    """List the lazily resolvable names alongside the eager ones."""
+    return sorted(set(globals()) | set(__all__))
+
 
 __all__ = [
     # Compatibility exports

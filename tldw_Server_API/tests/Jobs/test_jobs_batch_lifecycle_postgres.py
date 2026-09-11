@@ -1,4 +1,5 @@
 import os
+
 import pytest
 
 pytestmark = pytest.mark.pg_jobs
@@ -52,6 +53,14 @@ def test_batch_renew_complete_fail_postgres(monkeypatch):
     ]
     failed = jm.batch_fail_jobs(fail_items)
     assert failed == 1
+
+    for job_id, expected_status in zip(ids, ("completed", "completed", "failed")):
+        terminal = jm.get_job(job_id)
+        assert terminal is not None
+        assert terminal["status"] == expected_status
+        assert terminal["leased_until"] is None
+        assert terminal["worker_id"] is None
+        assert terminal["lease_id"] is None
 
     # Idempotency
     again = jm.batch_complete_jobs(complete_items)

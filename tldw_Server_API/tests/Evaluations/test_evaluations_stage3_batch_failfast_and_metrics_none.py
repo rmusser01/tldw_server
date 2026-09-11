@@ -1,4 +1,6 @@
 import asyncio
+import contextlib
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -9,7 +11,248 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Evaluations.eval_runner import EvaluationRunner
 
 
+class _CancellationTrackingRuntime:
+    """Record credential lifecycle ordering for endpoint cancellation tests."""
+
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.handle = SimpleNamespace(
+            api_key="test_api_key",
+            app_config={"openai_api": {"model": "test-model"}},
+            credentials_resolved=True,
+        )
+        self.closed = False
+        self.mark_count = 0
+
+    async def mark_used(self, handle) -> None:
+        assert handle is self.handle
+        self.mark_count += 1
+        self.events.append("mark")
+
+    async def close(self) -> None:
+        self.closed = True
+        self.events.append("close")
+
+
+class _AllowingLimiter:
+    async def check_rate_limit(self, *_args, **_kwargs):
+        return True, {"retry_after": 0}
+
+
+class _NoopWebhookManager:
+    async def send_webhook(self, **_kwargs) -> None:
+        return None
+
+
+def _install_cancellation_endpoint_dependencies(monkeypatch, runtime, service) -> None:
+    """Install deterministic direct-call dependencies for evaluation endpoints."""
+
+    async def _resolve(*_args, **_kwargs):
+        return "openai", "test-model", runtime.handle, runtime
+
+    monkeypatch.setattr(eval_unified, "_resolve_and_validate_eval_provider", _resolve)
+    monkeypatch.setattr(eval_unified, "_build_eval_credential_runtime", lambda **_kwargs: runtime)
+    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowingLimiter())
+    monkeypatch.setattr(eval_unified, "get_unified_evaluation_service_for_user", lambda _uid: service)
+    monkeypatch.setattr(eval_unified, "_get_webhook_manager_for_user", lambda _uid: _NoopWebhookManager())
+    monkeypatch.setattr(eval_unified, "_is_eval_test_mode", lambda: True)
+
+
+async def _await_cancelled(task: asyncio.Task) -> None:
+    """Consume an endpoint task that must preserve cancellation semantics."""
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_geval_cancellation_drains_provider_and_marks_before_runtime_close(monkeypatch):
+    events: list[str] = []
+    provider_started = asyncio.Event()
+    release_provider = asyncio.Event()
+    runtime = _CancellationTrackingRuntime(events)
+
+    class _Service:
+        async def evaluate_geval(self, **_kwargs):
+            async def _provider_call():
+                provider_started.set()
+                await release_provider.wait()
+                events.append("provider_done")
+                return {
+                    "evaluation_id": "eval-1",
+                    "evaluation_time": 0.1,
+                    "results": {"metrics": {}, "average_score": 1.0},
+                }
+
+            return await asyncio.shield(asyncio.create_task(_provider_call()))
+
+    _install_cancellation_endpoint_dependencies(monkeypatch, runtime, _Service())
+    endpoint_task = asyncio.create_task(
+        eval_unified.evaluate_geval(
+            request=eval_unified.GEvalRequest(
+                source_text="source text long enough",
+                summary="summary text long enough",
+                api_name="openai",
+            ),
+            http_request=SimpleNamespace(),
+            response=None,
+            user_id="user-1",
+            current_user=User(id=1, username="tester", email=None, is_active=True),
+        )
+    )
+
+    await provider_started.wait()
+    endpoint_task.cancel()
+    try:
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert runtime.closed is False
+        release_provider.set()
+        await _await_cancelled(endpoint_task)
+        assert events == ["provider_done", "mark", "close"]
+    finally:
+        release_provider.set()
+        if not endpoint_task.done():
+            endpoint_task.cancel()
+        with contextlib.suppress(BaseException):
+            await endpoint_task
+
+
+@pytest.mark.asyncio
+async def test_sequential_batch_cancellation_drains_provider_and_marks_before_close(monkeypatch):
+    events: list[str] = []
+    provider_started = asyncio.Event()
+    release_provider = asyncio.Event()
+    runtime = _CancellationTrackingRuntime(events)
+
+    class _Service:
+        async def evaluate_geval(self, **_kwargs):
+            async def _provider_call():
+                provider_started.set()
+                await release_provider.wait()
+                events.append("provider_done")
+                return {"evaluation_id": "eval-1", "results": {}}
+
+            return await asyncio.shield(asyncio.create_task(_provider_call()))
+
+    _install_cancellation_endpoint_dependencies(monkeypatch, runtime, _Service())
+    endpoint_task = asyncio.create_task(
+        eval_unified.batch_evaluate(
+            request=eval_unified.BatchEvaluationRequest(
+                evaluation_type="geval",
+                parallel_workers=1,
+                items=[{"source_text": "source", "summary": "summary"}],
+            ),
+            http_request=SimpleNamespace(),
+            user_id="user-1",
+            current_user=User(id=1, username="tester", email=None, is_active=True),
+            response=None,
+        )
+    )
+
+    await provider_started.wait()
+    endpoint_task.cancel()
+    try:
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert runtime.closed is False
+        release_provider.set()
+        await _await_cancelled(endpoint_task)
+        assert events == ["provider_done", "mark", "close"]
+    finally:
+        release_provider.set()
+        if not endpoint_task.done():
+            endpoint_task.cancel()
+        with contextlib.suppress(BaseException):
+            await endpoint_task
+
+
+@pytest.mark.asyncio
+async def test_parallel_batch_cancellation_drains_all_children_before_runtime_close(monkeypatch):
+    events: list[str] = []
+    both_started = asyncio.Event()
+    release_provider = asyncio.Event()
+    runtime = _CancellationTrackingRuntime(events)
+    started = 0
+
+    class _Service:
+        async def evaluate_geval(self, *, source_text: str, **_kwargs):
+            async def _provider_call():
+                nonlocal started
+                started += 1
+                events.append(f"start:{source_text}")
+                if started == 2:
+                    both_started.set()
+                await release_provider.wait()
+                events.append(f"done:{source_text}")
+                return {"evaluation_id": source_text, "results": {}}
+
+            return await asyncio.shield(asyncio.create_task(_provider_call()))
+
+    _install_cancellation_endpoint_dependencies(monkeypatch, runtime, _Service())
+    endpoint_task = asyncio.create_task(
+        eval_unified.batch_evaluate(
+            request=eval_unified.BatchEvaluationRequest(
+                evaluation_type="geval",
+                parallel_workers=2,
+                items=[
+                    {"source_text": "item-1", "summary": "summary"},
+                    {"source_text": "item-2", "summary": "summary"},
+                ],
+            ),
+            http_request=SimpleNamespace(),
+            user_id="user-1",
+            current_user=User(id=1, username="tester", email=None, is_active=True),
+            response=None,
+        )
+    )
+
+    await both_started.wait()
+    endpoint_task.cancel()
+    try:
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert runtime.closed is False
+        release_provider.set()
+        await _await_cancelled(endpoint_task)
+        assert runtime.mark_count == 2
+        assert events[-1] == "close"
+        assert events.index("close") > events.index("done:item-1")
+        assert events.index("close") > events.index("done:item-2")
+    finally:
+        release_provider.set()
+        if not endpoint_task.done():
+            endpoint_task.cancel()
+        with contextlib.suppress(BaseException):
+            await endpoint_task
+
+
+def _install_eval_runtime(monkeypatch) -> None:
+    """Install a deterministic authoritative credential runtime for endpoint tests."""
+
+    class _Runtime:
+        def __init__(self, **_kwargs):
+            self.handle = SimpleNamespace(
+                api_key="test_api_key",
+                app_config={"openai_api": {"model": "test-model"}},
+                credentials_resolved=True,
+            )
+
+        async def resolve(self, _provider: str, *, model: str | None = None):
+            _ = model
+            return self.handle
+
+        async def mark_used(self, handle):
+            assert handle is self.handle
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(eval_unified, "ProviderCredentialRuntime", _Runtime)
+
+
 def test_batch_parallel_strict_fail_fast_cancels_remaining(monkeypatch):
+    _install_eval_runtime(monkeypatch)
     app = FastAPI()
     app.include_router(eval_unified.router, prefix="/api/v1")
 
@@ -37,10 +280,25 @@ def test_batch_parallel_strict_fail_fast_cancels_remaining(monkeypatch):
             metrics,
             api_name: str,
             api_key: str,
+            model: str | None,
             user_id: str,
             webhook_user_id: str | None = None,
+            app_config=None,
+            credentials_resolved: bool = False,
+            provider_credentials=None,
         ):
-            _ = (summary, metrics, api_name, api_key, user_id, webhook_user_id)
+            _ = (
+                summary,
+                metrics,
+                api_name,
+                api_key,
+                model,
+                user_id,
+                webhook_user_id,
+                app_config,
+                credentials_resolved,
+                provider_credentials,
+            )
             idx = int(source_text.split("_")[-1])
             started_items.append(idx)
             if idx == 0:
@@ -107,6 +365,7 @@ def test_batch_parallel_strict_fail_fast_cancels_remaining(monkeypatch):
 
 
 def test_batch_parallel_sanitizes_item_failure(monkeypatch):
+    _install_eval_runtime(monkeypatch)
     app = FastAPI()
     app.include_router(eval_unified.router, prefix="/api/v1")
 
@@ -131,10 +390,26 @@ def test_batch_parallel_sanitizes_item_failure(monkeypatch):
             metrics,
             api_name: str,
             api_key: str,
+            model: str | None,
             user_id: str,
             webhook_user_id: str | None = None,
+            app_config=None,
+            credentials_resolved: bool = False,
+            provider_credentials=None,
         ):
-            _ = (source_text, summary, metrics, api_name, api_key, user_id, webhook_user_id)
+            _ = (
+                source_text,
+                summary,
+                metrics,
+                api_name,
+                api_key,
+                model,
+                user_id,
+                webhook_user_id,
+                app_config,
+                credentials_resolved,
+                provider_credentials,
+            )
             raise RuntimeError("evaluation backend exploded at /private/evals.db")
 
     async def _verify_api_key_override():

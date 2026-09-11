@@ -8,6 +8,8 @@ import type {
   PersonaVisualStateId
 } from "@/types/persona-visuals"
 
+import { usePersonaVisualAssetUrls } from "./usePersonaVisualAssetUrls"
+
 import { normalizeFrames } from "./personaVisualAssets"
 import type {
   PersonaVisualRenderError,
@@ -21,6 +23,8 @@ export type SpriteFrameRendererProps = {
   fallbackLabel: string
   className?: string
   onRenderError?: PersonaVisualRenderErrorHandler
+  animate?: boolean
+  fitSize?: number
 }
 
 type ResolvedAnimation = {
@@ -86,13 +90,15 @@ const renderFrame = ({
   asset,
   visualState,
   fallbackLabel,
-  className
+  className,
+  fitSize
 }: {
   frame: PersonaVisualFrame
   asset: PersonaVisualAsset
   visualState: PersonaVisualStateId
   fallbackLabel: string
   className?: string
+  fitSize?: number
 }) => {
   const sharedProps = {
     "data-testid": "persona-visual-frame",
@@ -101,6 +107,25 @@ const renderFrame = ({
   }
   if (frame.region) {
     const region = frame.region
+    if (fitSize) {
+      return (
+        <svg
+          {...sharedProps}
+          role="img"
+          aria-label={fallbackLabel}
+          width={fitSize}
+          height={fitSize}
+          viewBox={`${region.x} ${region.y} ${region.width} ${region.height}`}
+          preserveAspectRatio="xMidYMid meet"
+        >
+          <image
+            href={asset.url}
+            width={asset.width ?? undefined}
+            height={asset.height ?? undefined}
+          />
+        </svg>
+      )
+    }
     const offsetX = region.x === 0 ? 0 : -region.x
     const offsetY = region.y === 0 ? 0 : -region.y
     return (
@@ -169,7 +194,9 @@ export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
   state,
   fallbackLabel,
   className,
-  onRenderError
+  onRenderError,
+  animate = true,
+  fitSize
 }) => {
   const resolved = React.useMemo(
     () => resolveAnimationForState(manifest, state),
@@ -180,8 +207,7 @@ export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
     [resolved]
   )
   const initialFrameIndex = React.useMemo(
-    () =>
-      resolved ? resolveInitialFrameIndex(resolved.animation, frames) : 0,
+    () => (resolved ? resolveInitialFrameIndex(resolved.animation, frames) : 0),
     [frames, resolved]
   )
   const [frameIndex, setFrameIndex] = React.useState(initialFrameIndex)
@@ -190,39 +216,48 @@ export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
     setFrameIndex(initialFrameIndex)
   }, [initialFrameIndex, resolved?.animationId, state])
 
-  React.useEffect(() => {
-    if (!resolved || frames.length <= 1) return undefined
-    const currentFrame = frames[frameIndex] ?? frames[0]
-    const timer = window.setTimeout(() => {
-      setFrameIndex((current) => (current + 1) % frames.length)
-    }, resolveFrameDuration(currentFrame, resolved.animation))
-    return () => window.clearTimeout(timer)
-  }, [frameIndex, frames, resolved])
-
   const frame = frames[frameIndex] ?? frames[0]
   const asset = frame ? assets[frame.asset_id] : null
-  const error: PersonaVisualRenderError | null = !resolved || !frame
-    ? "missing_animation"
-    : !asset
-      ? "missing_asset"
-      : hasUnsupportedRegion(frame, asset)
-        ? "unsupported_region"
-        : null
+  const resolveAssetUrl = usePersonaVisualAssetUrls(assets, asset ?? null)
+  const assetUrl = asset ? resolveAssetUrl(asset) : null
+
+  React.useEffect(() => {
+    if (!animate || !assetUrl || !resolved || frames.length <= 1)
+      return undefined
+    const currentFrame = frames[frameIndex] ?? frames[0]
+    const timer = window.setTimeout(
+      () => {
+        setFrameIndex((current) => (current + 1) % frames.length)
+      },
+      resolveFrameDuration(currentFrame, resolved.animation)
+    )
+    return () => window.clearTimeout(timer)
+  }, [animate, assetUrl, frameIndex, frames, resolved])
+
+  const error: PersonaVisualRenderError | null =
+    !resolved || !frame
+      ? "missing_animation"
+      : !asset || assetUrl === null
+        ? "missing_asset"
+        : hasUnsupportedRegion(frame, asset)
+          ? "unsupported_region"
+          : null
 
   React.useEffect(() => {
     onRenderError?.(error)
   }, [error, onRenderError])
 
-  if (error || !frame || !asset) {
+  if (error || !frame || !asset || !assetUrl) {
     return <span>{fallbackLabel}</span>
   }
 
   return renderFrame({
     frame,
-    asset,
+    asset: { ...asset, url: assetUrl },
     visualState: state,
     fallbackLabel,
-    className
+    className,
+    fitSize
   })
 }
 

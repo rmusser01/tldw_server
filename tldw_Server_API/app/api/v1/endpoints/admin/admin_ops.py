@@ -144,6 +144,7 @@ if TYPE_CHECKING:
     )
 
 router = APIRouter()
+legacy_webhooks_router = APIRouter()
 
 _INCIDENT_ASSIGNABLE_ROLES = frozenset({"admin", "owner", "super_admin"})
 
@@ -839,7 +840,10 @@ async def notify_incident_stakeholders(
     return IncidentNotifyResponse(**result)
 
 
-@router.post("/incidents/{incident_id}/notify-webhooks", response_model=IncidentNotifyResponse)
+@legacy_webhooks_router.post(
+    "/incidents/{incident_id}/notify-webhooks",
+    response_model=IncidentNotifyResponse,
+)
 async def notify_incident_webhooks(
     incident_id: str,
     request: Request,
@@ -894,7 +898,7 @@ async def notify_incident_webhooks(
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-@router.get("/webhooks", response_model=WebhookListResponse)
+@legacy_webhooks_router.get("/webhooks", response_model=WebhookListResponse)
 async def list_webhooks(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> WebhookListResponse:
@@ -914,7 +918,7 @@ async def list_webhooks(
     )
 
 
-@router.post("/webhooks", response_model=WebhookCreateResponse)
+@legacy_webhooks_router.post("/webhooks", response_model=WebhookCreateResponse)
 async def create_webhook(
     payload: WebhookCreateRequest,
     request: Request,
@@ -941,12 +945,15 @@ async def create_webhook(
         resource_type="webhook",
         resource_id=webhook.get("id"),
         action="webhook.create",
-        metadata={"url": webhook.get("url"), "events": webhook.get("events")},
+        metadata={
+            "event_count": len(webhook.get("events") or []),
+            "enabled": bool(webhook.get("enabled")),
+        },
     )
     return WebhookCreateResponse(**webhook)
 
 
-@router.patch("/webhooks/{webhook_id}", response_model=WebhookItem)
+@legacy_webhooks_router.patch("/webhooks/{webhook_id}", response_model=WebhookItem)
 async def update_webhook(
     webhook_id: str,
     payload: WebhookUpdateRequest,
@@ -977,12 +984,15 @@ async def update_webhook(
         resource_type="webhook",
         resource_id=webhook_id,
         action="webhook.update",
-        metadata={"url": webhook.get("url"), "events": webhook.get("events")},
+        metadata={
+            "event_count": len(webhook.get("events") or []),
+            "enabled": bool(webhook.get("enabled")),
+        },
     )
     return WebhookItem(**webhook)
 
 
-@router.delete("/webhooks/{webhook_id}", response_model=MessageResponse)
+@legacy_webhooks_router.delete("/webhooks/{webhook_id}", response_model=MessageResponse)
 async def delete_webhook(
     webhook_id: str,
     request: Request,
@@ -1010,7 +1020,10 @@ async def delete_webhook(
     return MessageResponse(message="webhook_deleted")
 
 
-@router.get("/webhooks/{webhook_id}/deliveries", response_model=WebhookDeliveryListResponse)
+@legacy_webhooks_router.get(
+    "/webhooks/{webhook_id}/deliveries",
+    response_model=WebhookDeliveryListResponse,
+)
 async def list_webhook_deliveries(
     webhook_id: str,
     limit: int = Query(default=50, ge=1, le=1000),
@@ -1038,7 +1051,10 @@ async def list_webhook_deliveries(
     )
 
 
-@router.post("/webhooks/{webhook_id}/test", response_model=WebhookDeliveryItem)
+@legacy_webhooks_router.post(
+    "/webhooks/{webhook_id}/test",
+    response_model=WebhookDeliveryItem,
+)
 async def test_webhook(
     webhook_id: str,
     request: Request,

@@ -1,7 +1,7 @@
-from hypothesis import given, strategies as st
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.LLM_Calls.anthropic_messages import anthropic_messages_to_openai
-
 
 _ASCII_TEXT = st.text(
     alphabet=st.characters(min_codepoint=32, max_codepoint=126),
@@ -45,6 +45,7 @@ def _message_strategy(draw):
     messages=st.lists(_message_strategy(), min_size=1, max_size=5),
     system=st.one_of(st.none(), _ASCII_TEXT, st.lists(_block_strategy(), max_size=2)),
 )
+@settings(suppress_health_check=[HealthCheck.too_slow])
 def test_anthropic_messages_conversion_roles(messages, system):
     openai_messages, system_message = anthropic_messages_to_openai(messages, system)
 

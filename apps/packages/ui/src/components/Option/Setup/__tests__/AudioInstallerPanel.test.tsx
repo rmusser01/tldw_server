@@ -225,7 +225,7 @@ describe("AudioInstallerPanel", () => {
     expect(screen.getByText("Apple Silicon Local")).toBeInTheDocument()
     expect(screen.getByText("Recommended profile")).toBeInTheDocument()
     expect(screen.getByRole("radio", { name: "Balanced" })).toBeChecked()
-    expect(screen.getByRole("button", { name: "Provision bundle" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Provision bundle/ })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Run verification" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Safe rerun" })).toBeInTheDocument()
   })
@@ -315,7 +315,7 @@ describe("AudioInstallerPanel", () => {
 
     render(<AudioInstallerPanel />)
 
-    const provisionButton = await screen.findByRole("button", { name: "Provision bundle" })
+    const provisionButton = await screen.findByRole("button", { name: /Provision bundle/ })
     vi.useFakeTimers()
     await act(async () => {
       fireEvent.click(provisionButton)
@@ -443,7 +443,7 @@ describe("AudioInstallerPanel", () => {
     expect(screen.getByText("Curated TTS")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("radio", { name: "KittenTTS" }))
-    fireEvent.click(screen.getByRole("button", { name: "Provision bundle" }))
+    fireEvent.click(screen.getByRole("button", { name: /Provision bundle/ }))
 
     await waitFor(() => {
       expect(mocks.bgRequest).toHaveBeenCalledWith(
@@ -512,7 +512,7 @@ describe("AudioInstallerPanel", () => {
     expect(
       await screen.findByText("Audio model installation requires server admin access.")
     ).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Provision bundle" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Provision bundle/ })).not.toBeInTheDocument()
   })
 
   it("shows an unavailable message when the admin installer endpoint is missing", async () => {

@@ -8,7 +8,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.timeout(30)]
 
 
 def test_postgres_workspace_source_review_schema_backfill_and_batch_transition(
@@ -19,34 +19,38 @@ def test_postgres_workspace_source_review_schema_backfill_and_batch_transition(
 
     try:
         db.upsert_workspace("ws-pg", "Postgres Workspace")
-        backend.execute("DROP TABLE workspace_sources")
-        backend.execute(
-            """
-            CREATE TABLE workspace_sources (
-                id            TEXT NOT NULL,
-                workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-                media_id      INTEGER NOT NULL,
-                title         TEXT NOT NULL,
-                source_type   TEXT NOT NULL,
-                url           TEXT,
-                position      INTEGER NOT NULL DEFAULT 0,
-                selected      BOOLEAN NOT NULL DEFAULT true,
-                added_at      TEXT NOT NULL,
-                version       INTEGER NOT NULL DEFAULT 1,
-                PRIMARY KEY (workspace_id, id)
+        db.close_connection()
+        with backend.transaction() as conn:
+            backend.execute("DROP TABLE workspace_sources", connection=conn)
+            backend.execute(
+                """
+                CREATE TABLE workspace_sources (
+                    id            TEXT NOT NULL,
+                    workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    media_id      INTEGER NOT NULL,
+                    title         TEXT NOT NULL,
+                    source_type   TEXT NOT NULL,
+                    url           TEXT,
+                    position      INTEGER NOT NULL DEFAULT 0,
+                    selected      BOOLEAN NOT NULL DEFAULT true,
+                    added_at      TEXT NOT NULL,
+                    version       INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (workspace_id, id)
+                )
+                """,
+                connection=conn,
             )
-            """
-        )
-        backend.execute(
-            """
-            INSERT INTO workspace_sources (
-                id, workspace_id, media_id, title, source_type, added_at
-            ) VALUES
-                ('src-a', 'ws-pg', 1, 'A', 'pdf', '2026-01-02T03:04:05.000Z'),
-                ('src-b', 'ws-pg', 2, 'B', 'pdf', '   '),
-                ('src-c', 'ws-pg', 3, 'C', 'pdf', '2026-01-03T03:04:05.000Z')
-            """
-        )
+            backend.execute(
+                """
+                INSERT INTO workspace_sources (
+                    id, workspace_id, media_id, title, source_type, added_at
+                ) VALUES
+                    ('src-a', 'ws-pg', 1, 'A', 'pdf', '2026-01-02T03:04:05.000Z'),
+                    ('src-b', 'ws-pg', 2, 'B', 'pdf', '   '),
+                    ('src-c', 'ws-pg', 3, 'C', 'pdf', '2026-01-03T03:04:05.000Z')
+                """,
+                connection=conn,
+            )
 
         with db.transaction() as conn:
             db._ensure_workspace_subresource_schema_postgres(conn)

@@ -18,7 +18,11 @@ from tldw_Server_API.app.core.LLM_Calls.cache_intents import (
     apply_billing_prompt_cache_intent,
     attach_cache_intent_metadata,
 )
-from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
+from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
+    encode_google_model_path,
+    merge_extra_body,
+    merge_extra_headers,
+)
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     finalize_stream,
     is_done_line,
@@ -171,6 +175,8 @@ class GoogleAdapter(ChatProvider):
                 return base.strip().rstrip("/")
         except _GOOGLE_ADAPTER_RUNTIME_EXCEPTIONS:
             pass
+        if (request or {}).get("credentials_resolved") is True:
+            return "https://generativelanguage.googleapis.com/v1beta"
         return os.getenv("GOOGLE_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
 
     def _headers(self, api_key: str | None) -> dict[str, str]:
@@ -179,6 +185,16 @@ class GoogleAdapter(ChatProvider):
         if api_key:
             h["x-goog-api-key"] = api_key
         return h
+
+    def _model_path(self, model: Any) -> str:
+        """Return one bounded, URL-safe Google model resource tail."""
+        try:
+            return encode_google_model_path(model)
+        except ValueError:
+            raise ChatBadRequestError(
+                provider=self.name,
+                message="Invalid provider model identifier.",
+            ) from None
 
     def _resolve_timeout(self, request: dict[str, Any], fallback: float | None) -> float:
         try:
@@ -510,6 +526,9 @@ class GoogleAdapter(ChatProvider):
         state["tool_index"] = tool_index
 
     def normalize_error(self, exc: Exception):  # type: ignore[override]
+        """Delegate to the shared bounded error policy."""
+        return super().normalize_error(exc)
+
         from tldw_Server_API.app.core.LLM_Calls.error_utils import (
             get_http_error_text,
             get_http_status_from_exception,
@@ -553,6 +572,7 @@ class GoogleAdapter(ChatProvider):
         return super().normalize_error(exc)
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         request = normalize_payload(self.name, request or {})
         request = self._apply_config_defaults(request)
         request = validate_payload(self.name, request)
@@ -561,7 +581,7 @@ class GoogleAdapter(ChatProvider):
         if not api_key:
             from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
             raise ChatConfigurationError(provider=self.name, message="Google API Key required.")
-        url = f"{self._base_url(request)}/models/{model}:generateContent"
+        url = f"{self._base_url(request)}/models/{self._model_path(model)}:generateContent"
         headers = self._headers(api_key)
         payload = self._build_payload(request)
         payload, cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
@@ -573,14 +593,16 @@ class GoogleAdapter(ChatProvider):
                 resp = client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
+                self._raise_if_in_band_provider_error(data, phase="chat_response")
                 return attach_cache_intent_metadata(
                     self._normalize_to_openai_shape(data),
                     cache_intent_diagnostic,
                 )
         except _GOOGLE_ADAPTER_RUNTIME_EXCEPTIONS as e:
-            raise self.normalize_error(e) from e
+            self._raise_sanitized_provider_failure(e, phase="chat")
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
         request = normalize_payload(self.name, request or {})
         request = self._apply_config_defaults(request)
         request = validate_payload(self.name, request)
@@ -589,7 +611,10 @@ class GoogleAdapter(ChatProvider):
         if not api_key:
             from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
             raise ChatConfigurationError(provider=self.name, message="Google API Key required.")
-        url = f"{self._base_url(request)}/models/{model}:streamGenerateContent?alt=sse"
+        url = (
+            f"{self._base_url(request)}/models/"
+            f"{self._model_path(model)}:streamGenerateContent?alt=sse"
+        )
         headers = self._headers(api_key)
         payload = self._build_payload(request)
         payload, _cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
@@ -608,11 +633,15 @@ class GoogleAdapter(ChatProvider):
                         if not raw:
                             continue
                         if debug_stream:
-                            logger.debug(f"{self.name} stream raw: {raw!r}")
+                            logger.debug("{} stream chunk received", self.name)
                         try:
                             line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
                         except (TypeError, UnicodeDecodeError, ValueError):
                             line = str(raw)
+                        self._raise_if_in_band_provider_error(
+                            line,
+                            phase="stream_response",
+                        )
                         if is_done_line(line):
                             if not seen_done:
                                 seen_done = True
@@ -655,7 +684,7 @@ class GoogleAdapter(ChatProvider):
                     yield from finalize_stream(response=resp, done_already=seen_done)
             return
         except _GOOGLE_ADAPTER_RUNTIME_EXCEPTIONS as e:
-            raise self.normalize_error(e) from e
+            self._raise_sanitized_provider_failure(e, phase="stream")
 
     async def achat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self.chat, request, timeout=timeout)

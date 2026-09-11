@@ -16,10 +16,29 @@ class _RecordingPromptStudioDB:
             "id": evaluation_id,
             "prompt_id": 10,
             "project_id": 20,
+            "test_case_ids": [1],
+            "model_configs": [{"provider": "test"}],
         }
 
-    def ensure_prompt_stub(self, **kwargs):
-        return None
+    def get_project(self, project_id, *, include_deleted=False):
+        del include_deleted
+        return {"id": project_id, "deleted": False}
+
+    def get_prompt_with_project(self, prompt_id, *, include_deleted=False):
+        del include_deleted
+        return {
+            "id": prompt_id,
+            "project_id": 20,
+            "deleted": False,
+        }
+
+    def get_test_case(self, test_case_id, *, include_deleted=False):
+        del include_deleted
+        return {
+            "id": test_case_id,
+            "project_id": 20,
+            "deleted": False,
+        }
 
     def update_evaluation(self, evaluation_id, updates):
         self.updates.append((evaluation_id, dict(updates)))

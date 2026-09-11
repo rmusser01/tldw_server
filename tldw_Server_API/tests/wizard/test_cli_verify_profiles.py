@@ -4,11 +4,11 @@ import json
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
+from tldw_Server_API.app.api.v1.endpoints import auth as auth_endpoint
 from tldw_Server_API.cli.wizard import cli as wizard_cli
 from tldw_Server_API.cli.wizard import profile_verify
-from tldw_Server_API.app.api.v1.endpoints import auth as auth_endpoint
+from tldw_Server_API.tests.wizard.cli_runner import CliRunner
 from tldw_Server_API.tests.wizard.helpers import assert_action_field, assert_wizard_json
 
 runner = CliRunner()

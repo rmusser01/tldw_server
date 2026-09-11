@@ -6,20 +6,19 @@ Tests the new modular chunker and strategy pattern.
 
 import asyncio
 import re
+from unittest.mock import Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from typing import List
 
 from tldw_Server_API.app.core.Chunking import (
-    Chunker,
-    create_chunker,
-    ChunkingMethod,
-    ChunkResult,
-    ChunkMetadata,
-    ChunkingError,
-    InvalidInputError,
-    InvalidChunkingMethodError,
     DEFAULT_CHUNK_OPTIONS,
+    Chunker,
+    ChunkingMethod,
+    ChunkMetadata,
+    ChunkResult,
+    InvalidChunkingMethodError,
+    InvalidInputError,
+    ProcessingError,
 )
 from tldw_Server_API.app.core.Chunking.base import ChunkerConfig
 
@@ -920,7 +919,7 @@ class TestTokensStrategy:
 
     def test_tokens_fallback_clamps_minimum_chunk_size(self):
         """Fallback tokenization should still emit chunks for very small max_size."""
-        from tldw_Server_API.app.core.Chunking.strategies.tokens import TokenChunkingStrategy, FallbackTokenizer
+        from tldw_Server_API.app.core.Chunking.strategies.tokens import FallbackTokenizer, TokenChunkingStrategy
 
         strategy = TokenChunkingStrategy()
         # Force fallback mode regardless of available libraries
@@ -1143,15 +1142,12 @@ class TestRollingSummarizeStrategy:
     """Test the rolling summarize strategy."""
 
     def test_rolling_summarize_without_llm(self):
-        """Test that rolling summarize works without LLM (returns raw chunks)."""
+        """Rolling summarize fails closed when no LLM is configured."""
         from tldw_Server_API.app.core.Chunking.strategies.rolling_summarize import RollingSummarizeStrategy
 
         strategy = RollingSummarizeStrategy()
-        # Without LLM, should return raw chunks (not summarized)
-        result = strategy.chunk("Some text to summarize", max_size=100)
-        assert isinstance(result, list)
-        # Should return the text as-is since it's shorter than max_size
-        assert len(result) >= 1
+        with pytest.raises(ProcessingError, match="unavailable"):
+            strategy.chunk("Some text to summarize", max_size=100)
 
     @patch("tldw_Server_API.app.core.Chunking.strategies.rolling_summarize.RollingSummarizeStrategy._call_llm")
     def test_rolling_summarize_with_llm(self, mock_llm):
@@ -1172,20 +1168,16 @@ class TestRollingSummarizeStrategy:
         assert len(chunks) > 0
 
     def test_rolling_summarize_chunk_with_metadata_without_llm(self):
-        """chunk_with_metadata should return source-aligned spans when no LLM is used."""
+        """Metadata mode also fails closed when no LLM is configured."""
         from tldw_Server_API.app.core.Chunking.strategies.rolling_summarize import RollingSummarizeStrategy
 
-        text = "Sentence 1. Sentence 2. Sentence 3. Sentence 4."
         strategy = RollingSummarizeStrategy()
-        results = strategy.chunk_with_metadata(text, max_size=2, overlap=1)
-
-        assert results
-        for res in results:
-            s = res.metadata.start_char
-            e = res.metadata.end_char
-            assert isinstance(s, int) and isinstance(e, int)
-            assert 0 <= s <= e <= len(text)
-            assert res.text == text[s:e]
+        with pytest.raises(ProcessingError, match="unavailable"):
+            strategy.chunk_with_metadata(
+                "Sentence 1. Sentence 2. Sentence 3. Sentence 4.",
+                max_size=2,
+                overlap=1,
+            )
 
     @patch("tldw_Server_API.app.core.Chunking.strategies.rolling_summarize.RollingSummarizeStrategy._call_llm")
     def test_rolling_summarize_chunk_with_metadata_with_llm(self, mock_llm):
@@ -1256,7 +1248,6 @@ class TestBackwardCompatibility:
 
     def test_default_options_exported(self):
         """Test that DEFAULT_CHUNK_OPTIONS is properly exported."""
-        from tldw_Server_API.app.core.Chunking import DEFAULT_CHUNK_OPTIONS
 
         assert isinstance(DEFAULT_CHUNK_OPTIONS, dict)
         assert "method" in DEFAULT_CHUNK_OPTIONS

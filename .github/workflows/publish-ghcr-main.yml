@@ -31,25 +31,6 @@ jobs:
             dockerfile: Dockerfiles/Dockerfile.prod
             image_suffix: ""
             build_args: ""
-          - name: webui
-            dockerfile: Dockerfiles/Dockerfile.webui
-            image_suffix: "-webui"
-            build_args: |
-              NEXT_PUBLIC_API_URL=
-              NEXT_PUBLIC_API_BASE_URL=
-              NEXT_PUBLIC_API_VERSION=v1
-              NEXT_PUBLIC_X_API_KEY=
-              NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart
-              TLDW_INTERNAL_API_ORIGIN=http://app:8000
-          - name: admin-ui
-            dockerfile: Dockerfiles/Dockerfile.admin-ui
-            image_suffix: "-admin-ui"
-            build_args: |
-              NEXT_PUBLIC_API_URL=http://app:8000
-              NEXT_PUBLIC_API_VERSION=v1
-              NEXT_PUBLIC_DEFAULT_AUTH_MODE=multi_user
-              NEXT_PUBLIC_ALLOW_ADMIN_API_KEY_LOGIN=false
-              NEXT_PUBLIC_BILLING_ENABLED=false
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd

@@ -1,11 +1,11 @@
-"""Helpers to construct a sync session facade with retries for legacy streaming paths.
+"""Helpers to construct a sync session facade for legacy streaming paths.
 
 This module avoids importing chat_calls to prevent recursion. It uses the
 centralized http_client underneath while preserving a minimal Session-like API.
+Provider POSTs are deliberately single-attempt because no idempotency contract exists.
 """
 
 import contextlib
-import time
 from collections.abc import Iterable
 from typing import Any, Optional
 
@@ -18,7 +18,6 @@ from tldw_Server_API.app.core.http_client import (
 from tldw_Server_API.app.core.http_client import (
     fetch as _hc_fetch,
 )
-from tldw_Server_API.app.core.LLM_Calls.error_utils import is_network_error
 
 
 class _StreamResponse:
@@ -62,16 +61,10 @@ class _RetrySession:
         status_forcelist: Optional[Iterable[int]] = None,
         allowed_methods: Optional[Iterable[str]] = None,
     ) -> None:
-        methods = tuple(m.upper() for m in (allowed_methods or ["POST"]))
-        retry_on_status = tuple(status_forcelist or (429, 500, 502, 503, 504))
-        backoff_ms = max(0, int(float(backoff_factor) * 1000))
-        self._retry = _HC_RetryPolicy(
-            attempts=max(1, int(total)),
-            backoff_base_ms=backoff_ms,
-            retry_on_status=retry_on_status,
-            retry_on_methods=methods,
-            retry_on_unsafe=any(m not in {"GET", "HEAD", "OPTIONS"} for m in methods),
-        )
+        # Compatibility arguments are intentionally ignored: this facade only
+        # exposes provider POSTs, which cannot be replayed without idempotency.
+        _ = total, backoff_factor, status_forcelist, allowed_methods
+        self._retry = _HC_RetryPolicy(attempts=1)
         self._client = None
 
     def _get_client(self) -> Any:
@@ -91,32 +84,19 @@ class _RetrySession:
                 client=self._get_client(),
             )
 
-        attempts = max(1, int(self._retry.attempts))
-        for attempt in range(attempts):
-            ctx = None
-            resp = None
-            try:
-                client = self._get_client()
-                ctx = client.stream("POST", url, headers=headers, json=json, timeout=timeout)
-                resp = ctx.__enter__()
-                # Retry on status codes before returning the stream
-                if resp.status_code in self._retry.retry_on_status and attempt + 1 < attempts:
-                    resp.close()
-                    ctx.__exit__(None, None, None)
-                    time.sleep(float(self._retry.backoff_base_ms) / 1000.0)
-                    continue
-                return _StreamResponse(resp, ctx)
-            except Exception as exc:
-                if resp is not None:
-                    with contextlib.suppress(Exception):
-                        resp.close()
-                if ctx is not None:
-                    with contextlib.suppress(Exception):
-                        ctx.__exit__(None, None, None)
-                if attempt + 1 >= attempts or not is_network_error(exc):
-                    raise
-                time.sleep(float(self._retry.backoff_base_ms) / 1000.0)
-        raise RuntimeError("Streaming request exhausted retry attempts")
+        ctx = self._get_client().stream(
+            "POST",
+            url,
+            headers=headers,
+            json=json,
+            timeout=timeout,
+        )
+        try:
+            return _StreamResponse(ctx.__enter__(), ctx)
+        except Exception:
+            with contextlib.suppress(Exception):
+                ctx.__exit__(None, None, None)
+            raise
 
     def close(self) -> None:
         try:
@@ -132,6 +112,7 @@ def create_session_with_retries(
     status_forcelist: Optional[Iterable[int]] = None,
     allowed_methods: Optional[Iterable[str]] = None,
 ):
+    """Return the legacy Session facade with single-attempt POST semantics."""
     return _RetrySession(
         total=total,
         backoff_factor=backoff_factor,

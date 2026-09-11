@@ -12,6 +12,7 @@ Note: This implementation requires psycopg (v3) to be installed:
 """
 
 import os
+import threading
 import time
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
@@ -125,6 +126,8 @@ class PostgreSQLConnectionPool(ConnectionPool):
         self._connections: list[Any] = []
         self._free: list[Any] = []
         self._max = max(1, int(config.pool_size or 10))
+        self._fallback_lock = threading.Lock()
+        self._managed_connecting = 0
 
         # Prefer an explicit connection string when provided (e.g. DATABASE_URL)
         # Fall back to composing a DSN from individual pg_* fields
@@ -155,12 +158,13 @@ class PostgreSQLConnectionPool(ConnectionPool):
                     timeout=timeout,
                     max_lifetime=recycle,
                     max_idle=recycle,
+                    open=True,
                     # Ensure JSON is parsed into Python objects consistently
                     configure=lambda conn: setattr(conn, 'row_factory', dict_row),
                 )
             except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
                 # Fallback to defaults if parameters unsupported
-                self._pool = psycopg_pool.ConnectionPool(self._dsn)
+                self._pool = psycopg_pool.ConnectionPool(self._dsn, open=True)
         else:
             self._pool = None
 
@@ -171,9 +175,9 @@ class PostgreSQLConnectionPool(ConnectionPool):
         return conn
 
     def get_connection(self) -> Any:
-        if self._closed:
-            raise DatabaseError("Connection pool is closed")
         if self._use_psycopg_pool:
+            if self._closed:
+                raise DatabaseError("Connection pool is closed")
             # Standardize on getconn/putconn for clarity
             conn = self._pool.getconn()
             if hasattr(conn, 'row_factory'):
@@ -181,30 +185,49 @@ class PostgreSQLConnectionPool(ConnectionPool):
             try:
                 self._apply_scope_settings(conn)
             except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:
-                logger.debug(f"Scope config failed for pooled connection: {scope_exc}")
+                logger.bind(exception_type=type(scope_exc).__name__).debug(
+                    "Scope config failed for pooled connection"
+                )
             return conn
         # Fallback minimal pool
-        if self._free:
-            conn = self._free.pop()
+        managed_slot = False
+        with self._fallback_lock:
+            if self._closed:
+                raise DatabaseError("Connection pool is closed")
+            if self._free:
+                conn = self._free.pop()
+            else:
+                conn = None
+                if len(self._connections) + self._managed_connecting < self._max:
+                    self._managed_connecting += 1
+                    managed_slot = True
+
+        if conn is None:
             try:
-                self._apply_scope_settings(conn)
-            except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:
-                logger.debug(f"Scope config failed for pooled connection: {scope_exc}")
-            return conn
-        if len(self._connections) < self._max:
-            conn = self._new_connection()
-            self._connections.append(conn)
-            try:
-                self._apply_scope_settings(conn)
-            except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:
-                logger.debug(f"Scope config failed for new connection: {scope_exc}")
-            return conn
-        # As a last resort, create a new connection (no hard block)
-        conn = self._new_connection()
+                conn = self._new_connection()
+            except BaseException:  # noqa: BLE001 - always release the reserved slot
+                if managed_slot:
+                    with self._fallback_lock:
+                        self._managed_connecting -= 1
+                raise
+
+            with self._fallback_lock:
+                if managed_slot:
+                    self._managed_connecting -= 1
+                    if not self._closed:
+                        self._connections.append(conn)
+                pool_closed = self._closed
+            if pool_closed:
+                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                    conn.close()
+                raise DatabaseError("Connection pool is closed")
+
         try:
             self._apply_scope_settings(conn)
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:
-            logger.debug(f"Scope config failed for fallback connection: {scope_exc}")
+            logger.bind(exception_type=type(scope_exc).__name__).debug(
+                "Scope config failed for fallback connection"
+            )
         return conn
 
     def return_connection(self, connection: Any) -> None:
@@ -223,10 +246,97 @@ class PostgreSQLConnectionPool(ConnectionPool):
         # Minimal pool:
         # - keep only managed connections in the reusable free list
         # - close overflow/fallback connections immediately to avoid growth
-        is_managed = connection in self._connections
-        if is_managed and len(self._free) < self._max:
-            self._free.append(connection)
+        with self._fallback_lock:
+            if self._closed:
+                is_managed = False
+            elif any(conn is connection for conn in self._free):
+                return
+            else:
+                is_managed = any(
+                    conn is connection for conn in self._connections
+                )
+
+        if not is_managed:
+            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                connection.close()
             return
+
+        status = getattr(
+            getattr(connection, "info", None),
+            "transaction_status",
+            None,
+        )
+        status_name = str(getattr(status, "name", status) or "").upper()
+        if status_name in {"INTRANS", "INERROR"}:
+            try:
+                connection.rollback()
+            except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
+                self.discard_connection(connection)
+                return
+            status = getattr(
+                getattr(connection, "info", None),
+                "transaction_status",
+                None,
+            )
+            status_name = str(getattr(status, "name", status) or "").upper()
+        if bool(getattr(connection, "closed", False)) or status_name != "IDLE":
+            self.discard_connection(connection)
+            return
+
+        with self._fallback_lock:
+            if not self._closed:
+                if any(conn is connection for conn in self._free):
+                    return
+                if any(conn is connection for conn in self._connections):
+                    self._free.append(connection)
+                    return
+
+        with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            connection.close()
+
+    def invalidate_connection(self, connection: Any) -> None:
+        """Discard a failed checkout while preserving pool capacity bookkeeping.
+
+        Delegates to ``discard_connection()``: psycopg receives the closed
+        checkout through ``putconn``; fallback tracking and free lists drop it.
+
+        Args:
+            connection: Checkout owned by the caller from this pool, or None
+                for a no-op. The caller must not reuse or return it afterward.
+
+        Returns:
+            None.
+
+        Raises:
+            Exception: Unexpected close or pool errors outside the backend's
+                noncritical exception set propagate. Known driver and cleanup
+                errors are suppressed by ``discard_connection()``.
+        """
+        self.discard_connection(connection)
+
+    def discard_connection(self, connection: Any) -> None:
+        """Remove a poisoned checkout without making it reusable."""
+
+        if connection is None:
+            return
+        if self._use_psycopg_pool:
+            # psycopg_pool must receive every checkout back for bookkeeping.
+            # A closed connection is recognized as broken and replaced.
+            try:
+                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                    connection.close()
+            finally:
+                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                    self._pool.putconn(connection)
+            return
+
+        with self._fallback_lock:
+            self._free[:] = [
+                conn for conn in self._free if conn is not connection
+            ]
+            self._connections[:] = [
+                conn for conn in self._connections if conn is not connection
+            ]
         with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
             connection.close()
 
@@ -239,22 +349,25 @@ class PostgreSQLConnectionPool(ConnectionPool):
             self.return_connection(conn)
 
     def close_all(self) -> None:
-        self._closed = True
         if self._use_psycopg_pool:
+            self._closed = True
             with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 self._pool.close()
             return
         # Close all tracked connections (both managed and currently free).
+        with self._fallback_lock:
+            self._closed = True
+            connections = [*self._connections, *self._free]
+            self._connections.clear()
+            self._free.clear()
         seen_ids: set[int] = set()
-        for conn in [*self._connections, *self._free]:
+        for conn in connections:
             conn_id = id(conn)
             if conn_id in seen_ids:
                 continue
             seen_ids.add(conn_id)
             with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 conn.close()
-        self._connections.clear()
-        self._free.clear()
 
     def get_stats(self) -> dict[str, Any]:
         return {"closed": self._closed, "backend": "postgresql"}
@@ -295,7 +408,112 @@ class PostgreSQLBackend(DatabaseBackend):
             if connection is not None:
                 self._apply_scope_settings(connection)
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"apply_scope: unable to apply scope settings: {exc}")
+            logger.bind(exception_type=type(exc).__name__).debug(
+                "apply_scope: unable to apply scope settings"
+            )
+
+    def apply_and_verify_scope(
+        self,
+        connection: Any,
+        *,
+        fallback_user_id: str | int | None = None,
+    ) -> None:
+        """Strictly establish and verify snapshot RLS scope on one connection."""
+        try:
+            scope = get_scope()
+            user_id = fallback_user_id
+            org_ids: list[Any] = []
+            team_ids: list[Any] = []
+            is_admin = False
+            session_role: str | None = None
+            if scope is not None:
+                if scope.user_id is not None:
+                    user_id = scope.user_id
+                org_ids = list(scope.org_ids or [])
+                team_ids = list(scope.team_ids or [])
+                is_admin = bool(scope.is_admin)
+                session_role = getattr(scope, "session_role", None) or None
+
+            expected = {
+                "current_user_id": "" if user_id is None else str(user_id),
+                "user_id": "" if user_id is None else str(user_id),
+                "org_ids": ",".join(str(value) for value in org_ids),
+                "team_ids": ",".join(str(value) for value in team_ids),
+                "is_admin": "1" if is_admin else "0",
+                "row_security": "on",
+            }
+
+            role_switch = os.getenv("TLDW_CONTENT_PG_ROLE_SWITCH", "").strip().lower()
+            allowed_roles = {
+                role.strip()
+                for role in os.getenv("TLDW_CONTENT_PG_ROLE_WHITELIST", "").split(",")
+                if role.strip()
+            }
+            if not (
+                session_role
+                and role_switch
+                and is_truthy(role_switch)
+                and (not allowed_roles or session_role in allowed_roles)
+            ):
+                session_role = None
+
+            with connection.cursor() as cursor:
+                if session_role is not None:
+                    escaped_role = session_role.replace('"', '""')
+                    cursor.execute(f'SET ROLE "{escaped_role}"')
+                else:
+                    cursor.execute("RESET ROLE")
+                    cursor.execute("RESET SESSION AUTHORIZATION")
+                cursor.execute("SET row_security = on")
+                cursor.execute(
+                    "SELECT set_config('app.current_user_id', %s, false)",
+                    (expected["current_user_id"],),
+                )
+                cursor.execute(
+                    "SELECT set_config('app.user_id', %s, false)",
+                    (expected["user_id"],),
+                )
+                cursor.execute(
+                    "SELECT set_config('app.org_ids', %s, false)",
+                    (expected["org_ids"],),
+                )
+                cursor.execute(
+                    "SELECT set_config('app.team_ids', %s, false)",
+                    (expected["team_ids"],),
+                )
+                cursor.execute(
+                    "SELECT set_config('app.is_admin', %s, false)",
+                    (expected["is_admin"],),
+                )
+
+            rows = self.execute(
+                "SELECT current_setting('app.current_user_id', true) AS current_user_id, "
+                "current_setting('app.user_id', true) AS user_id, "
+                "current_setting('app.org_ids', true) AS org_ids, "
+                "current_setting('app.team_ids', true) AS team_ids, "
+                "current_setting('app.is_admin', true) AS is_admin, "
+                "current_setting('row_security', true) AS row_security, "
+                "current_role::text AS current_role, session_user::text AS session_user",
+                connection=connection,
+                log_errors=False,
+            ).rows
+            if len(rows) != 1:
+                raise DatabaseError("PostgreSQL scope verification failed")
+            observed = rows[0]
+            if any(str(observed.get(key, "")) != value for key, value in expected.items()):
+                raise DatabaseError("PostgreSQL scope verification failed")
+            expected_role = session_role or str(observed.get("session_user", ""))
+            if str(observed.get("current_role", "")) != expected_role:
+                raise DatabaseError("PostgreSQL scope verification failed")
+            connection.commit()
+        except BaseException as exc:  # noqa: BLE001 - preserve non-Exception signals
+            if not isinstance(exc, Exception):
+                raise
+            logger.bind(
+                exception_type=type(exc).__name__,
+                context="clone_snapshot_scope",
+            ).warning("PostgreSQL snapshot scope setup failed")
+            raise DatabaseError("PostgreSQL scope verification failed") from None
 
     def _apply_scope_settings(self, connection: Any) -> None:
         """Apply scope-related GUC settings for row-level security.
@@ -400,13 +618,17 @@ class PostgreSQLBackend(DatabaseBackend):
                     try:
                         connection.execute(sql_stmt, params)
                     except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as cfg_exc:
-                        logger.debug(f"Unable to apply scope settings via execute: {cfg_exc}")
+                        logger.bind(exception_type=type(cfg_exc).__name__).debug(
+                            "Unable to apply scope settings via execute"
+                        )
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
             # If we failed (e.g., transaction aborted), rollback and try once more
             try:
                 connection.rollback()
             except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as rollback_exc:
-                logger.debug("Rollback while configuring scope failed: {}", rollback_exc)
+                logger.bind(exception_type=type(rollback_exc).__name__).debug(
+                    "Rollback while configuring scope failed"
+                )
             try:
                 if cursor_factory:
                     with cursor_factory() as cur:
@@ -429,9 +651,13 @@ class PostgreSQLBackend(DatabaseBackend):
                         try:
                             connection.execute(sql_stmt, params)
                         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as cfg_exc:
-                            logger.debug(f"Unable to apply scope settings via execute (after rollback): {cfg_exc}")
+                            logger.bind(exception_type=type(cfg_exc).__name__).debug(
+                                "Unable to apply scope settings via execute after rollback"
+                            )
             except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as final_exc:
-                logger.debug(f"Failed to configure session scope settings: {final_exc}")
+                logger.bind(exception_type=type(final_exc).__name__).debug(
+                    "Failed to configure session scope settings"
+                )
 
     def _tx_depth(self, connection: Any) -> int:
         return self._managed_tx_depths.get(id(connection), 0)
@@ -684,37 +910,59 @@ class PostgreSQLBackend(DatabaseBackend):
             conn = self.get_pool().get_connection()
             owns_connection = True
 
+        primary_failure: BaseException | None = None
+
+        def _rollback() -> None:
+            try:
+                conn.rollback()
+            except BaseException as rollback_exc:  # noqa: BLE001
+                logger.bind(exception_type=type(rollback_exc).__name__).warning(
+                    "PostgreSQL transaction rollback failed"
+                )
+
+        self._tx_depth_inc(conn)
+        is_outermost = self._tx_depth(conn) == 1
         try:
-            # Track managed transaction depth per-connection so we can
-            # reliably commit/rollback only at the outermost boundary,
-            # regardless of whether we own the connection or it was
-            # supplied by the caller.
-            self._tx_depth_inc(conn)
-            is_outermost = self._tx_depth(conn) == 1
-            # PostgreSQL uses implicit transactions
-            yield conn
-            # Commit only when we're at the outermost depth for this connection.
+            try:
+                yield conn
+            except BaseException as exc:  # noqa: BLE001
+                primary_failure = exc
+                if is_outermost:
+                    _rollback()
+                raise
             if is_outermost:
                 try:
                     conn.commit()
-                except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as e:
-                    # Surface commit failures consistently
-                    logger.error(f"Transaction commit failed: {e}")
-                    raise
-        except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as e:
-            # Roll back only when we're at the outermost depth for this connection.
-            try:
-                if self._tx_depth(conn) == 1:
-                    conn.rollback()
-            except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
-                # Swallow rollback errors to avoid masking the original
-                pass
-            logger.error(f"Transaction failed: {e}")
-            raise
+                except BaseException as exc:  # noqa: BLE001
+                    primary_failure = exc
+                    _rollback()
+                    if not isinstance(exc, Exception):
+                        raise
+                    logger.bind(exception_type=type(exc).__name__).error(
+                        "PostgreSQL transaction commit failed"
+                    )
+                    raise DatabaseError(
+                        "PostgreSQL transaction commit failed"
+                    ) from None
         finally:
             self._tx_depth_dec(conn)
             if owns_connection:
-                self.get_pool().return_connection(conn)
+                try:
+                    self.get_pool().return_connection(conn)
+                except BaseException as cleanup_exc:  # noqa: BLE001
+                    if primary_failure is not None:
+                        logger.bind(
+                            exception_type=type(cleanup_exc).__name__
+                        ).warning("PostgreSQL transaction connection return failed")
+                    elif not isinstance(cleanup_exc, Exception):
+                        raise
+                    else:
+                        logger.bind(
+                            exception_type=type(cleanup_exc).__name__
+                        ).error("PostgreSQL transaction connection return failed")
+                        raise DatabaseError(
+                            "PostgreSQL transaction connection return failed"
+                        ) from None
 
     def get_pool(self) -> ConnectionPool:
         """Get or create the connection pool."""
@@ -749,12 +997,18 @@ class PostgreSQLBackend(DatabaseBackend):
         self,
         query: str,
         params: Optional[Union[tuple, dict]] = None,
-        connection: Optional[Any] = None
+        connection: Optional[Any] = None,
+        *,
+        log_errors: bool = True,
     ) -> QueryResult:
-        """Execute a query and return results."""
+        """Execute a query and return results.
+
+        ``log_errors`` remains accepted for backend-interface compatibility;
+        driver and rollback details are always redacted.
+        """
         start_time = time.time()
         query, params = self._prepare_query(query, params)
-
+        redacted_failure = False
         if connection:
             conn = connection
             external_conn = True
@@ -802,7 +1056,9 @@ class PostgreSQLBackend(DatabaseBackend):
                     try:
                         conn.rollback()
                     except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as rollback_exc:  # noqa: BLE001
-                        logger.debug(f"Rollback after read-only execute() failed: {rollback_exc}")
+                        logger.bind(
+                            exception_type=type(rollback_exc).__name__,
+                        ).debug("Rollback after read-only execute() failed")
 
             execution_time = time.time() - start_time
 
@@ -824,12 +1080,19 @@ class PostgreSQLBackend(DatabaseBackend):
                 try:
                     conn.rollback()
                 except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as rollback_exc:  # noqa: BLE001
-                    logger.debug(f"Rollback after failed execute() also failed: {rollback_exc}")
-            logger.error(f"Query execution failed: {e}")
-            raise DatabaseError(f"PostgreSQL error: {e}") from e
+                    logger.bind(
+                        exception_type=type(rollback_exc).__name__,
+                    ).debug("Rollback after failed execute() also failed")
+            logger.bind(exception_type=type(e).__name__).error(
+                "PostgreSQL query execution failed"
+            )
+            redacted_failure = True
         finally:
             if not external_conn:
                 self.get_pool().return_connection(conn)
+
+        if redacted_failure:
+            raise DatabaseError("PostgreSQL query execution failed")
 
     def execute_many(
         self,
@@ -873,7 +1136,9 @@ class PostgreSQLBackend(DatabaseBackend):
                     try:
                         conn.rollback()
                     except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as rollback_exc:  # noqa: BLE001
-                        logger.debug(f"Rollback after read-only execute_many() failed: {rollback_exc}")
+                        logger.bind(
+                            exception_type=type(rollback_exc).__name__,
+                        ).debug("Rollback after read-only execute_many() failed")
 
             execution_time = time.time() - start_time
 
@@ -890,9 +1155,13 @@ class PostgreSQLBackend(DatabaseBackend):
                 try:
                     conn.rollback()
                 except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as rollback_exc:  # noqa: BLE001
-                    logger.debug(f"Rollback after failed execute_many() also failed: {rollback_exc}")
-            logger.error(f"Batch execution failed: {e}")
-            raise DatabaseError(f"PostgreSQL error: {e}") from e
+                    logger.bind(
+                        exception_type=type(rollback_exc).__name__,
+                    ).debug("Rollback after failed execute_many() also failed")
+            logger.bind(exception_type=type(e).__name__).error(
+                "PostgreSQL batch execution failed"
+            )
+            raise DatabaseError("PostgreSQL batch execution failed") from None
         finally:
             if not external_conn:
                 self.get_pool().return_connection(conn)

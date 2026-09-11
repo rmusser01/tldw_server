@@ -8,6 +8,29 @@ const jsonResponse = (data: unknown, status = 200): Response =>
   })
 
 describe("deriveRequestTimeout generation defaults", () => {
+  it.each([
+    ["/api/v1/media/?page=1", 10000],
+    ["/api/v1/files/download", 10000],
+    ["/api/v1/slides/projects", 120000],
+    ["/api/v1/llm/models/metadata?provider=local", 60000],
+    ["/api/v1/chat/completions", 120000],
+    ["/api/v1/rag/search", 120000],
+    ["/api/v1/notes/", 10000]
+  ])("preserves absent-config defaults for %s", (path, expected) => {
+    expect(deriveRequestTimeout(undefined, path)).toBe(expected)
+  })
+
+  it.each([
+    ["/api/v1/chat/completions", { chatRequestTimeoutMs: "20000" }],
+    ["/api/v1/rag/search", { ragRequestTimeoutMs: "20000" }],
+    ["/api/v1/media/process", { mediaRequestTimeoutMs: "20000" }],
+    ["/api/v1/files/download", { mediaRequestTimeoutMs: "20000" }]
+  ])("preserves endpoint-specific precedence for %s", (path, specific) => {
+    const config = { requestTimeoutMs: 15000, ...specific }
+    expect(deriveRequestTimeout(config, path)).toBe(20000)
+    expect(deriveRequestTimeout(config, path, 5000)).toBe(5000)
+  })
+
   it("defaults chat completions to a generation-appropriate timeout (not 10s)", () => {
     const timeout = deriveRequestTimeout(null, "/api/v1/chat/completions")
     expect(timeout).toBeGreaterThanOrEqual(120000)
@@ -16,6 +39,21 @@ describe("deriveRequestTimeout generation defaults", () => {
   it("defaults rag endpoints to a generation-appropriate timeout (not 10s)", () => {
     const timeout = deriveRequestTimeout(null, "/api/v1/rag/search")
     expect(timeout).toBeGreaterThanOrEqual(120000)
+  })
+
+  it("keeps the model metadata catalog above the generic 10-second timeout", () => {
+    expect(
+      deriveRequestTimeout(
+        { requestTimeoutMs: 10000 },
+        "/api/v1/llm/models/metadata"
+      )
+    ).toBeGreaterThanOrEqual(60000)
+    expect(
+      deriveRequestTimeout(
+        { requestTimeoutMs: 90000 },
+        "/api/v1/llm/models/metadata"
+      )
+    ).toBe(90000)
   })
 
   it("still honors an explicit chatRequestTimeoutMs override", () => {
@@ -70,6 +108,49 @@ describe("tldwRequest post-refresh retry", () => {
     // The retried request must send the SAME FormData instance, not "{}".
     expect(bodies[0]).toBe(form)
     expect(bodies[1]).toBe(form)
+  })
+
+  it("does not dispatch the retry when the request aborts during refresh", async () => {
+    let releaseRefresh!: () => void
+    let signalRefreshStarted!: () => void
+    const refreshStarted = new Promise<void>((resolve) => {
+      signalRefreshStarted = resolve
+    })
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve
+    })
+    const fetchFn = vi.fn(async () =>
+      new Response("unauthorized", { status: 401 })) as unknown as typeof fetch
+    const abort = new AbortController()
+    const runtime = {
+      getConfig: async () => ({
+        serverUrl: "https://api.example.com",
+        authMode: "multi-user",
+        accessToken: "stale-access",
+        refreshToken: "refresh-token"
+      }),
+      refreshAuth: async () => {
+        signalRefreshStarted()
+        await refreshGate
+      },
+      fetchFn
+    }
+
+    const pending = tldwRequest(
+      {
+        path: "https://api.example.com/api/v1/chat/completions",
+        method: "POST",
+        body: { messages: [] },
+        abortSignal: abort.signal
+      },
+      runtime
+    )
+    await refreshStarted
+    abort.abort()
+    releaseRefresh()
+
+    await expect(pending).resolves.toMatchObject({ ok: false, status: 0 })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
   })
 })
 

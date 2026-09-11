@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard
@@ -15,13 +15,16 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     IngestWebContentRequest,
 )
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
 )
+from tldw_Server_API.app.core.Web_Scraping.summary_prompts import resolve_web_summary_overrides
 from tldw_Server_API.app.services.web_scraping_service import (
     ingest_web_content_orchestrate,
 )
@@ -45,10 +48,12 @@ router = APIRouter()
 )
 async def ingest_web_content(
     request: IngestWebContentRequest,
+    http_request: Request,
     background_tasks: BackgroundTasks,  # Parity with legacy signature
     token: str = Header(..., description="Authentication token"),
     db: Any = Depends(get_media_db_for_user),
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
+    current_user: User = Depends(get_request_user),
 ) -> dict[str, Any]:
     """
     Ingest and process web content from various scraping strategies.
@@ -68,10 +73,17 @@ async def ingest_web_content(
     # handled by the orchestration helper.
     raw_results: list[dict[str, Any]] = []
     try:
+        summary_prompt_overrides = await resolve_web_summary_overrides(
+            lambda: get_prompts_db_for_user(http_request, current_user),
+            enabled=request.perform_analysis,
+            system_prompt=request.system_prompt,
+            custom_prompt=request.custom_prompt,
+        )
         helper_results = await ingest_web_content_orchestrate(
             request=request,
             db=db,
             usage_log=usage_log,
+            summary_prompt_overrides=summary_prompt_overrides,
         )
     except HTTPException:
         # Preserve explicit HTTP errors from downstream helpers (e.g., cookie

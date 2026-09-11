@@ -47,16 +47,22 @@ export const createSaveMessageOnSuccess = (
 ) => {
   return async (e: any): Promise<string | null> => {
     if (!temporaryChat) {
-      const historyId = await saveSuccess({
-        ...e,
-        setHistoryId: e?.setHistoryId ?? setHistoryId
-      })
       const conversationId =
         typeof e?.conversationId === "string"
           ? e.conversationId.trim()
           : e?.conversationId != null
             ? String(e.conversationId).trim()
             : ""
+      const setHistoryIdTarget =
+        typeof e?.setHistoryId === "function" ? e.setHistoryId : setHistoryId
+      const resolvedSetHistoryId = conversationId
+        ? (id: string) =>
+            setHistoryIdTarget(id, { preserveServerChatId: true })
+        : setHistoryIdTarget
+      const historyId = await saveSuccess({
+        ...e,
+        setHistoryId: resolvedSetHistoryId
+      })
       if (conversationId.length > 0) {
         options?.onServerConversationLinked?.(conversationId)
       }

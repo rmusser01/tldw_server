@@ -17,6 +17,138 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.42] - 2026-09-10
+
+> Rollup coverage: frozen `dev` commit
+> `6c4bdcbc48f4fe4bab7019d59ad8cf962ab240da`, through PR #2941, plus
+> the trusted license-gate bootstrap on `main`. This refresh includes the
+> original July candidate and the subsequent merged development train.
+
+### Added
+
+- **Chat And Service Prompts** — Added chat macros, prompt improvement/review
+  workflows, scoped conversation history, resumable character-chat contracts,
+  and service-prompt customization for titles, ingestion, summaries, document
+  insights, study assistance, and writing (#2618, #2771, #2799, #2833, #2811,
+  #2812, #2867, #2868, #2880–#2882, #2887, #2901, #2904, #2907, #2913,
+  #2914, #2923, #2926, #2930).
+- **Notes And Personal Context** — Added notes/link/organization/attachment and
+  task-activity synchronization, personal-context profile and ongoing sync
+  surfaces, and shared-workspace cloning (#2775, #2781, #2782, #2784–#2788,
+  #2793, #2794, #2813, #2818, #2823, #2844, #2845, #2886).
+- **Research And Presentations** — Expanded article extraction, ClinicalTrials
+  and PMC discovery, and Research Workspace workflows. Added default-off
+  standalone HTML presentations with Jobs generation, immutable versions,
+  strong-ETag editing, attachment downloads, and a text-only outline; the WebUI
+  does not execute or preview generated HTML (#2769, #2776, #2792, #2800,
+  #2802, #2808, #2809).
+- **Audio, Persona And MCP** — Added OpenRouter/generic TTS gateways,
+  audio.cpp TTS support, a realtime speech endpoint, Migu/persona voice and
+  buddy workflows, and MCP Unified HTTP/SSE transports (#2751, #2599, #2572,
+  #2861, #2884, #2902, #2906, #2908, #2927, #2928, #2933, #2934).
+- **Administration And Automation** — Added durable webhook delivery and
+  producer activation, admin workflow improvements, automation-definition and
+  agent-task execution surfaces, and a production reference deployment with
+  health, backup, and rollback checks (#2806, #2798, #2801, #2803, #2804,
+  #2840, #2841, #2842, #2846, #2879, #2900, #2905, #2925).
+
+- **Embeddings Workflow Architecture** — Added the inline embeddings workflow
+  facade and hardened its runtime and CI contracts.
+- **Skills Live Certification** — Added strict live-integration certification
+  for Skills discovery and execution.
+- **Capacity Measurements** — Added a reusable HTTP steady/overload/recovery
+  runner with explicit workload thresholds, artifact identity checks and fresh
+  queue, pool and storage observations. A passing profile measures only its
+  configured operating envelope.
+
+### Changed
+
+- **Provider Credentials** — Consolidated server-side provider credential
+  resolution across Chat, RAG, embeddings, and audio, with fail-closed BYOK
+  handling and safer streaming behavior.
+- **Frontend Licensing And CI Admission** — Applied the protected frontend
+  source-available boundary, bootstrapped the trusted license gate, repaired
+  protected-branch prerequisites, and prepared license-first PR sequencing.
+- **Jobs Admission** — Hardened admission transactions, quotas, idempotency,
+  and concurrent capacity enforcement.
+- **Release Metadata** — Bumped package, FastAPI, README, release-note, and
+  MkDocs metadata to `0.1.42`.
+
+### Fixed
+
+- **Buddy Artwork Credits** — Preserve and validate artwork attribution across
+  Buddy copies and native visual-pack exports/imports. Added lifecycle coverage
+  for bounded visual-pack loads across live route updates (#2940, #2941).
+
+- **Release Hardening** — Repaired worker package/configuration inputs and added
+  backend image import checks. Enforced SQLite foreign keys during erasure and
+  removed raw exception details from DSR logs, ACP health, and embedding requeue
+  warnings. Aligned shared frontend dependency majors and added strict checks
+  for URL/API-key guards and request timeout selection. Restored shared UI hook
+  enforcement, corrected moderation/workflow clocks, validated local model
+  directories before loading, and honored manual CI comparison base commits.
+- **Voice And Privacy Follow-up** — Prevented delayed voice-message saves from
+  discarding newer turns, reset empty-conversation token totals, and removed raw
+  exception text from additional DSR preview and erasure diagnostics.
+
+- **Authentication And Data Integrity** — Hardened trusted-proxy identity and
+  login lockout isolation, embeddings authentication/metrics access, SQLite
+  migration atomicity and recovery, media-original cleanup, and session-schema
+  compatibility (#2838, #2857, #2859, #2627, #2612, #2939).
+- **Runtime And CI** — Reduced repeated provider probes and schema setup,
+  restored required CI enforcement on dev, addressed stale security findings,
+  and repaired frontend test and live-UAT regressions (#2834, #2836, #2837,
+  #2847, #2848, #2849, #2854, #2822, #2911, #2924).
+
+- **Release Candidate Repairs** — Excluded unexpected credential fields from
+  persisted speech settings, restored missing extension role-play error copy,
+  restored media artifact dictionaries used by full-account export, and
+  prevented quadratic slash-command parsing on malformed multiline input.
+- **API Container Packaging** — Include the local Personal Context core package
+  required at startup and check local package imports while building the image.
+- **Frontend Type Safety** — Repaired WebUI type errors and added a required
+  nonincremental TypeScript check to the frontend CI gate.
+- **Notification And Storage Follow-Ups** — Unread counts recover after account
+  changes without displaying the previous account's data. Notification adapters
+  preserve shared APIs, and web-clipper extension storage is checked under strict
+  TypeScript while retaining callback and Promise compatibility.
+- **DSR Preview Coverage** — Query only requested data categories and report
+  unavailable embedding counts instead of zero or partial totals. Failed coverage
+  prevents intake records from storing a misleading preview.
+- **RAG Hook Validation** — Keep the search input ref in its owning component,
+  preserving focus behavior while clearing the search-state refs diagnostic cluster.
+
+### Upgrade And Release Readiness
+
+- Repository entries for 0.1.39–0.1.41 describe development rollups, not proof
+  of distribution publication. At candidate preparation, GitHub's latest
+  release and GHCR app `latest` were 0.1.38, while public PyPI listed 0.1.32.
+  Verify the installed artifact's version and digest before selecting a
+  migration or rollback baseline.
+- Back up databases, uploaded content, and configuration before upgrading. The
+  accumulated release train changes authentication, conversation, notes-sync,
+  personal-context, presentation, and webhook schemas. Rollback must restore a
+  compatible data snapshot; do not assume binary-only downgrade is safe. See
+  `Docs/Deployment/Production_Reference_Deployment.md` and
+  `Docs/Admin_Webhooks_Migration_Runbook.md`.
+- Standalone HTML presentation generation remains disabled by default. Follow
+  `Docs/Deployment/Standalone_HTML_Presentations.md` before enabling it;
+  downloaded HTML may execute JavaScript when opened outside tldw.
+- Candidate preparation is not release certification: final-head CI and the
+  open release-readiness dependencies are tracked in TASK-13013.3 and
+  `Docs/superpowers/plans/2026-09-10-pr2761-release-refresh-plan.md`.
+
+### Licensing
+
+- The tagged source release contains protected frontend source under PolyForm
+  Perimeter 1.0.1. Its release-specific Countdown grant adds
+  `AGPL-3.0-only` as an additional option beginning
+  `2028-09-10T12:00:00Z`; see `LICENSES/releases/0.1.42/`.
+- No WebUI, Admin UI, shared UI, or extension binary is published in this
+  release. PyPI and the `app`, `worker`, and `audio-worker` images remain
+  server-only and GPL-3.0-only.
+
+
 ## [0.1.41] - 2026-07-16
 
 > Rollup coverage: this entry covers the frozen `dev` release train after

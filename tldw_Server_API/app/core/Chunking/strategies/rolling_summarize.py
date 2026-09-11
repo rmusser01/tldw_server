@@ -13,6 +13,10 @@ from loguru import logger
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 from ..base import BaseChunkingStrategy, ChunkMetadata, ChunkResult
+from ..exceptions import ProcessingError
+
+LLM_USAGE_TRACKER_KEY = "_provider_usage_tracker"
+LLM_USAGE_SUCCEEDED_KEY = "provider_succeeded"
 
 
 class RollingSummarizeStrategy(BaseChunkingStrategy):
@@ -74,11 +78,6 @@ class RollingSummarizeStrategy(BaseChunkingStrategy):
             return []
         segments = [segment for segment, _start, _end, _count in segments_with_spans]
 
-        # If no LLM function provided, return segments as-is
-        if not self.llm_call_func:
-            logger.warning("No LLM function provided for rolling_summarize, returning raw segments")
-            return segments
-
         # Process segments with rolling summarization
         summarized_chunks = []
         rolling_context = []
@@ -100,26 +99,9 @@ class RollingSummarizeStrategy(BaseChunkingStrategy):
                 i == 0  # First segment
             )
 
-            try:
-                # Call LLM for summarization
-                summary = self._call_llm(prompt)
-
-                if summary:
-                    summarized_chunks.append(summary)
-                    # Add to rolling context (keep it concise)
-                    context_summary = self._create_context_summary(summary)
-                    rolling_context.append(context_summary)
-                else:
-                    # Fallback to original segment if summarization fails
-                    logger.warning(f"Summarization failed for segment {i}, using original text")
-                    summarized_chunks.append(segment)
-                    rolling_context.append(segment[:200] + "...")  # Truncate for context
-
-            except Exception as e:
-                logger.error(f"Error during summarization of segment {i}: {e}")
-                # Fallback to original segment
-                summarized_chunks.append(segment)
-                rolling_context.append(segment[:200] + "...")
+            summary = self._call_llm(prompt)
+            summarized_chunks.append(summary)
+            rolling_context.append(self._create_context_summary(summary))
 
         return summarized_chunks
 
@@ -242,13 +224,29 @@ Maintain continuity with the previous context."""
 
         return summary[:150] + "..."
 
-    def _call_llm(self, prompt: str) -> Optional[str]:
+    def _call_llm(self, prompt: str) -> str:
         """Call LLM for summarization."""
         if not self.llm_call_func:
-            return None
+            raise ProcessingError(
+                "Rolling summarization provider is unavailable.",
+                stage="summarization",
+                operation="provider_call",
+            )
+
+        provider_failed = False
+        result: Any = None
         try:
             # Prepare config for LLM call
             config = self.llm_config.copy()
+            snapshot_kwargs = {}
+            if 'app_config' in config:
+                snapshot_kwargs['app_config'] = config['app_config']
+            if 'credentials_resolved' in config:
+                snapshot_kwargs['credentials_resolved'] = config['credentials_resolved']
+            if 'provider_credentials' in config:
+                snapshot_kwargs['provider_credentials'] = config['provider_credentials']
+            if config.get('model'):
+                snapshot_kwargs['model_override'] = config['model']
 
             # Use the provided LLM function
             # The analyze function signature: analyze(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, ...)
@@ -262,20 +260,37 @@ Maintain continuity with the previous context."""
                 False,  # streaming
                 False,  # recursive_summarization
                 False,  # chunked_summarization
-                None  # chunk_options
+                None,  # chunk_options
+                **snapshot_kwargs,
+            )
+        except Exception:
+            logger.error("Rolling summarization provider call failed")
+            provider_failed = True
+
+        if provider_failed:
+            raise ProcessingError(
+                "Rolling summarization provider call failed.",
+                stage="summarization",
+                operation="provider_call",
             )
 
-            if result and isinstance(result, tuple) and len(result) > 0:
-                return result[0]  # Extract summary from result tuple
-            elif isinstance(result, str):
-                return result
-            else:
-                logger.warning(f"Unexpected LLM response format: {type(result)}")
-                return None
+        summary = result[0] if isinstance(result, tuple) and result else result
+        if (
+            not isinstance(summary, str)
+            or not summary.strip()
+            or summary.lstrip().casefold().startswith("error:")
+        ):
+            logger.warning("Rolling summarization provider returned an invalid response")
+            raise ProcessingError(
+                "Rolling summarization provider returned an invalid response.",
+                stage="summarization",
+                operation="provider_response",
+            )
 
-        except Exception as e:
-            logger.error(f"Error calling LLM: {e}")
-            return None
+        tracker = self.llm_config.get(LLM_USAGE_TRACKER_KEY)
+        if isinstance(tracker, dict):
+            tracker[LLM_USAGE_SUCCEEDED_KEY] = True
+        return summary
 
     def chunk_with_metadata(self,
                             text: str,
@@ -304,27 +319,15 @@ Maintain continuity with the previous context."""
                 context_items = rolling_context[-context_window:]
                 context = "Previous context:\n" + "\n".join(context_items) + "\n\n"
 
-            summary = segment
-            if self.llm_call_func:
-                prompt = self._create_summarization_prompt(
-                    segment,
-                    context,
-                    summarization_detail,
-                    preserve_structure,
-                    i == 0,
-                )
-                try:
-                    llm_summary = self._call_llm(prompt)
-                    if llm_summary:
-                        summary = llm_summary
-                        rolling_context.append(self._create_context_summary(llm_summary))
-                    else:
-                        rolling_context.append(segment[:200] + "...")
-                except Exception as e:
-                    logger.error(f"Error during summarization of segment {i}: {e}")
-                    rolling_context.append(segment[:200] + "...")
-            else:
-                rolling_context.append(segment[:200] + "...")
+            prompt = self._create_summarization_prompt(
+                segment,
+                context,
+                summarization_detail,
+                preserve_structure,
+                i == 0,
+            )
+            summary = self._call_llm(prompt)
+            rolling_context.append(self._create_context_summary(summary))
 
             metadata = ChunkMetadata(
                 index=i,

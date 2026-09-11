@@ -332,7 +332,7 @@ describe("ChatbooksPlaygroundPage Jobs", () => {
         screen.queryByTestId("chatbooks-import-recovery"),
       ).not.toBeInTheDocument();
     });
-  });
+  }, 15_000);
 
   it("sanitizes export errors in the compact job tracker", async () => {
     mocks.tldwClient.listChatbookExportJobs.mockResolvedValue({

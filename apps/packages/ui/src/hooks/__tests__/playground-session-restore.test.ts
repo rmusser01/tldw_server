@@ -44,6 +44,42 @@ describe("shouldRestorePersistedPlaygroundSession", () => {
     ).toBe(true)
   })
 
+  it("does not restore when the conversation changes after the playground mounts", () => {
+    expect(
+      shouldRestorePersistedPlaygroundSession({
+        hasPersistedSession: true,
+        persistedHistoryId: null,
+        persistedServerChatId: "persisted-chat",
+        initialHistoryId: null,
+        initialServerChatId: null,
+        initialMessagesLength: 0,
+        initialHistoryLength: 0,
+        currentHistoryId: null,
+        currentServerChatId: "selected-chat",
+        currentMessagesLength: 0,
+        currentHistoryLength: 0
+      })
+    ).toBe(false)
+  })
+
+  it("restores a stale conversation that was already present when the playground mounted", () => {
+    expect(
+      shouldRestorePersistedPlaygroundSession({
+        hasPersistedSession: true,
+        persistedHistoryId: null,
+        persistedServerChatId: "persisted-chat",
+        initialHistoryId: null,
+        initialServerChatId: "stale-chat",
+        initialMessagesLength: 2,
+        initialHistoryLength: 2,
+        currentHistoryId: null,
+        currentServerChatId: "stale-chat",
+        currentMessagesLength: 2,
+        currentHistoryLength: 2
+      })
+    ).toBe(true)
+  })
+
   it("does not restore when current conversation already matches persisted session", () => {
     expect(
       shouldRestorePersistedPlaygroundSession({

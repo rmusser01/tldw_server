@@ -1,4 +1,7 @@
 import {
+  createRealServerWorkflowStorageSeed,
+  createRealServerWorkflowTldwConfig,
+  REAL_SERVER_WORKFLOW_LOCAL_STORAGE_SEED,
   registerRealServerWorkflows,
   type CreateWorkflowDriver,
 } from '../../test-utils/real-server-workflows';
@@ -29,7 +32,10 @@ const createWebDriver: CreateWorkflowDriver = async ({
   const payload = {
     serverUrl,
     apiKey,
+    tldwConfig: createRealServerWorkflowTldwConfig(serverUrl, apiKey),
     featureFlags: featureFlags || {},
+    storageSeed: createRealServerWorkflowStorageSeed(),
+    localStorageSeed: REAL_SERVER_WORKFLOW_LOCAL_STORAGE_SEED,
   };
 
   const initScript = (cfg: typeof payload) => {
@@ -49,19 +55,24 @@ const createWebDriver: CreateWorkflowDriver = async ({
     try {
       localStorage.setItem(
         'tldwConfig',
-        JSON.stringify({
-          serverUrl: cfg.serverUrl,
-          apiKey: cfg.apiKey,
-          authMode: 'single-user',
-        })
+        JSON.stringify(cfg.tldwConfig)
       );
     } catch {
       // ignore localStorage errors
     }
-    try {
-      localStorage.setItem('__tldw_first_run_complete', 'true');
-    } catch {
-      // ignore localStorage errors
+    for (const [key, value] of Object.entries(cfg.storageSeed)) {
+      try {
+        localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+      } catch {
+        // ignore localStorage errors
+      }
+    }
+    for (const [key, value] of Object.entries(cfg.localStorageSeed)) {
+      try {
+        localStorage.setItem(key, value);
+      } catch {
+        // ignore localStorage errors
+      }
     }
     try {
       localStorage.setItem('__e2eSeeded', 'true');
@@ -109,6 +120,9 @@ const createWebDriver: CreateWorkflowDriver = async ({
         if (!p.isClosed()) {
           await p.close();
         }
+      }
+      if (!page.isClosed()) {
+        await page.close();
       }
     },
   };

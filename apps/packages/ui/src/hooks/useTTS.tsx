@@ -42,19 +42,31 @@ export const useTTS = () => {
   const currentUrlRef = useRef<string | null>(null)
   const currentAudioRef = useRef<HTMLAudioElement | null>(null)
   const settlePlaybackRef = useRef<(() => void) | null>(null)
-  const cancelledRef = useRef(false)
+  // Every async provider result and playback callback belongs to one speech call.
+  // Cancelling or starting another call permanently retires that authority.
+  const speechGenerationRef = useRef(0)
   const notification = useAntdNotification()
   const { t } = useTranslation("playground")
 
   const speak = async ({ utterance, saveClip, clipMeta }: VoiceOptions) => {
-    cancelledRef.current = false
-    let debugMeta: { provider?: string; mimeType?: string; size?: number } | null =
-      null
+    cancel()
+    const generation = speechGenerationRef.current
+    const isCurrent = () => generation === speechGenerationRef.current
+    let debugMeta: {
+      provider?: string
+      mimeType?: string
+      size?: number
+    } | null = null
     try {
-      const resolveArrayBuffer = async (value: unknown): Promise<ArrayBuffer | null> => {
+      const resolveArrayBuffer = async (
+        value: unknown
+      ): Promise<ArrayBuffer | null> => {
         if (!value) return null
         if (value instanceof ArrayBuffer) return value
-        if (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer) {
+        if (
+          typeof SharedArrayBuffer !== "undefined" &&
+          value instanceof SharedArrayBuffer
+        ) {
           return new Uint8Array(value).slice(0).buffer
         }
         if (ArrayBuffer.isView(value)) {
@@ -64,21 +76,32 @@ export const useTTS = () => {
             view.buffer instanceof SharedArrayBuffer
           ) {
             const copy = new Uint8Array(view.byteLength)
-            copy.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength))
+            copy.set(
+              new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
+            )
             return copy.buffer
           }
           if (view.buffer instanceof ArrayBuffer) {
-            return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength)
+            return view.buffer.slice(
+              view.byteOffset,
+              view.byteOffset + view.byteLength
+            )
           }
         }
         if (value instanceof Blob) {
           return await value.arrayBuffer()
         }
         const tag = Object.prototype.toString.call(value)
-        if (tag === "[object ArrayBuffer]" && typeof (value as any).slice === "function") {
+        if (
+          tag === "[object ArrayBuffer]" &&
+          typeof (value as any).slice === "function"
+        ) {
           return (value as any).slice(0)
         }
-        if (Array.isArray(value) && value.every((entry) => typeof entry === "number")) {
+        if (
+          Array.isArray(value) &&
+          value.every((entry) => typeof entry === "number")
+        ) {
           return new Uint8Array(value).buffer
         }
         if (typeof value === "object") {
@@ -138,6 +161,7 @@ export const useTTS = () => {
       }
 
       let context = await resolveTtsProviderContext(utterance)
+      if (!isCurrent()) return
 
       if (context.provider === "tldw") {
         const resolvedFormat = context.formatInfo?.resolved || "mp3"
@@ -164,6 +188,7 @@ export const useTTS = () => {
           context = await resolveTtsProviderContext(utterance, {
             tldwResponseFormat: "mp3"
           })
+          if (!isCurrent()) return
         }
       }
 
@@ -180,7 +205,11 @@ export const useTTS = () => {
       const savedSegments: TtsClipSegment[] = []
       let clipFormat: string | undefined
       let clipMimeType: string | undefined
-      const providerMeta = shouldSaveClip ? await resolveProviderMeta(provider) : {}
+      const requestedBackend = context.cacheSettings?.backend || undefined
+      const providerMeta = shouldSaveClip
+        ? await resolveProviderMeta(provider)
+        : {}
+      if (!isCurrent()) return
 
       if (!supported) {
         throw new Error(`Unsupported TTS provider: ${provider}`)
@@ -188,42 +217,84 @@ export const useTTS = () => {
 
       if (provider === "browser") {
         const voice = await getVoice()
-        if (isChromiumTarget && typeof chrome !== "undefined" && chrome.tts) {
-          chrome.tts.speak(processedUtterance, {
-            voiceName: voice,
-            rate: playbackSpeed,
-            onEvent(event) {
-              if (event.type === "start") {
-                setIsSpeaking(true)
-              } else if (event.type === "end") {
-                setIsSpeaking(false)
+        if (!isCurrent()) return
+        await new Promise<void>((resolve, reject) => {
+          let done = false
+          let cleanup = () => {}
+          const finish = (error?: Error) => {
+            if (done) return
+            done = true
+            if (settlePlaybackRef.current === settle)
+              settlePlaybackRef.current = null
+            cleanup()
+            if (error) reject(error)
+            else resolve()
+          }
+          const settle = () => finish()
+          settlePlaybackRef.current = settle
+          if (isChromiumTarget && typeof chrome !== "undefined" && chrome.tts) {
+            chrome.tts.speak(processedUtterance, {
+              voiceName: voice,
+              rate: playbackSpeed,
+              onEvent(event) {
+                if (done || !isCurrent()) return
+                if (event.type === "start") {
+                  setIsSpeaking(true)
+                } else if (event.type === "error") {
+                  finish(
+                    new Error(event.errorMessage || "Browser speech failed")
+                  )
+                } else if (
+                  ["end", "interrupted", "cancelled"].includes(event.type)
+                ) {
+                  finish()
+                }
+              }
+            })
+          } else if (typeof window !== "undefined" && window.speechSynthesis) {
+            const synthesisUtterance = new SpeechSynthesisUtterance(
+              processedUtterance
+            )
+            synthesisUtterance.rate = playbackSpeed
+            synthesisUtterance.onstart = () => {
+              if (!done && isCurrent()) setIsSpeaking(true)
+            }
+            synthesisUtterance.onend = () => finish()
+            synthesisUtterance.onerror = (event) => {
+              if (isCurrent())
+                finish(new Error(event.error || "Browser speech failed"))
+            }
+            let voicesChanged: (() => void) | null = null
+            cleanup = () => {
+              synthesisUtterance.onstart = null
+              synthesisUtterance.onend = null
+              synthesisUtterance.onerror = null
+              if (
+                voicesChanged &&
+                window.speechSynthesis.onvoiceschanged === voicesChanged
+              ) {
+                window.speechSynthesis.onvoiceschanged = null
               }
             }
-          })
-        } else if (typeof window !== "undefined" && window.speechSynthesis) {
-          const synthesisUtterance = new SpeechSynthesisUtterance(processedUtterance)
-          synthesisUtterance.rate = playbackSpeed
-          synthesisUtterance.onstart = () => {
-            setIsSpeaking(true)
-          }
-          synthesisUtterance.onend = () => {
-            setIsSpeaking(false)
-          }
-          const voices = window.speechSynthesis.getVoices()
-          const selectedVoice = voices.find((v) => v.name === voice)
-          if (selectedVoice) {
-            synthesisUtterance.voice = selectedVoice
-          } else {
-            window.speechSynthesis.onvoiceschanged = () => {
-              const updatedVoices = window.speechSynthesis.getVoices()
-              const newVoice = updatedVoices.find((v) => v.name === voice)
-              if (newVoice) {
-                synthesisUtterance.voice = newVoice
+            const voices = window.speechSynthesis.getVoices()
+            const selectedVoice = voices.find((v) => v.name === voice)
+            if (selectedVoice) {
+              synthesisUtterance.voice = selectedVoice
+            } else {
+              voicesChanged = () => {
+                if (!isCurrent()) return
+                const updatedVoices = window.speechSynthesis.getVoices()
+                const newVoice = updatedVoices.find((v) => v.name === voice)
+                if (newVoice) {
+                  synthesisUtterance.voice = newVoice
+                }
               }
+              window.speechSynthesis.onvoiceschanged = voicesChanged
             }
-          }
-          window.speechSynthesis.speak(synthesisUtterance)
-        }
+            window.speechSynthesis.speak(synthesisUtterance)
+          } else finish()
+        })
+        if (isCurrent()) setIsSpeaking(false)
         return
       }
 
@@ -238,7 +309,7 @@ export const useTTS = () => {
       let nextAudioPromise: Promise<AudioResult> | null = null
 
       for (let i = 0; i < sentences.length; i++) {
-        if (cancelledRef.current) break
+        if (!isCurrent()) return
         setIsSpeaking(true)
 
         let currentAudioData: AudioResult
@@ -248,14 +319,12 @@ export const useTTS = () => {
         } else {
           currentAudioData = await synthesizeSegment(sentences[i])
         }
-
-        if (i < sentences.length - 1) {
-          nextAudioPromise = synthesizeSegment(sentences[i + 1])
-        }
+        if (!isCurrent()) return
 
         const resolvedBuffer = await resolveArrayBuffer(
           (currentAudioData as any)?.buffer ?? currentAudioData
         )
+        if (!isCurrent()) return
         if (!resolvedBuffer) {
           throw new Error("TTS returned an invalid audio buffer.")
         }
@@ -273,12 +342,15 @@ export const useTTS = () => {
         })
         if (shouldSaveClip && clipId) {
           const formatValue =
-            currentAudioData.format ||
-            context.formatInfo?.resolved ||
-            "mp3"
+            currentAudioData.format || context.formatInfo?.resolved || "mp3"
           const mimeValue = currentAudioData.mimeType || "audio/mpeg"
           if (!clipFormat) clipFormat = formatValue
           if (!clipMimeType) clipMimeType = mimeValue
+          const hasGatewayMetadata = Boolean(
+            requestedBackend ||
+            currentAudioData.actualBackend ||
+            currentAudioData.fallbackUsed
+          )
           savedSegments.push({
             id: `${clipId}:${i}`,
             index: i,
@@ -286,7 +358,13 @@ export const useTTS = () => {
             format: formatValue,
             mimeType: mimeValue,
             blob,
-            sizeBytes: blob.size
+            sizeBytes: blob.size,
+            ...(hasGatewayMetadata
+              ? {
+                  actualBackend: currentAudioData.actualBackend,
+                  fallbackUsed: Boolean(currentAudioData.fallbackUsed)
+                }
+              : {})
           })
         }
         const url = URL.createObjectURL(blob)
@@ -306,13 +384,15 @@ export const useTTS = () => {
         currentAudioRef.current = audio
         setAudioElement(audio)
 
+        let settleSegment: (() => void) | null = null
         const playAudio = () =>
           new Promise<void>((resolve, reject) => {
             let done = false
             const finish = (err?: unknown) => {
               if (done) return
               done = true
-              settlePlaybackRef.current = null
+              if (settlePlaybackRef.current === settleSegment)
+                settlePlaybackRef.current = null
               audio.onended = null
               audio.onerror = null
               if (err) reject(err)
@@ -320,12 +400,12 @@ export const useTTS = () => {
             }
             // Allow cancel()/unmount to resolve this promise even though
             // audio.pause() fires neither onended nor onerror.
-            settlePlaybackRef.current = () => finish()
+            settleSegment = () => finish()
+            settlePlaybackRef.current = settleSegment
             audio.onended = () => finish()
             audio.onerror = () =>
               finish(
-                audio.error ||
-                  new Error("Audio playback failed to start.")
+                audio.error || new Error("Audio playback failed to start.")
               )
             const playPromise = audio.play()
             if (playPromise && typeof playPromise.catch === "function") {
@@ -334,27 +414,28 @@ export const useTTS = () => {
           })
 
         try {
+          nextAudioPromise =
+            i < sentences.length - 1
+              ? synthesizeSegment(sentences[i + 1])
+              : null
           await Promise.all([
             playAudio(),
-            nextAudioPromise
-              ?.then((data) => {
-                nextAudioData = data
-              })
-              .catch(console.error) || Promise.resolve()
+            nextAudioPromise?.then((data) => {
+              if (isCurrent()) nextAudioData = data
+            }) || Promise.resolve()
           ])
         } finally {
-          settlePlaybackRef.current = null
-          URL.revokeObjectURL(url)
-          if (currentUrlRef.current === url) currentUrlRef.current = null
+          settleSegment?.()
+          audio.pause()
+          if (currentAudioRef.current === audio) currentAudioRef.current = null
+          if (currentUrlRef.current === url) {
+            URL.revokeObjectURL(url)
+            currentUrlRef.current = null
+          }
         }
       }
 
-      if (
-        shouldSaveClip &&
-        clipId &&
-        savedSegments.length > 0 &&
-        !cancelledRef.current
-      ) {
+      if (shouldSaveClip && clipId && savedSegments.length > 0 && isCurrent()) {
         const textPreview = processedUtterance.replace(/\s+/g, " ").trim()
         const preview =
           textPreview.length > 160
@@ -363,6 +444,19 @@ export const useTTS = () => {
         const totalBytes = savedSegments.reduce(
           (sum, segment) => sum + segment.sizeBytes,
           0
+        )
+        const actualBackends = Array.from(
+          new Set(
+            savedSegments
+              .map((segment) => segment.actualBackend)
+              .filter((backend): backend is string => Boolean(backend))
+          )
+        )
+        const fallbackUsed = savedSegments.some(
+          (segment) => segment.fallbackUsed
+        )
+        const hasGatewayMetadata = Boolean(
+          requestedBackend || actualBackends.length || fallbackUsed
         )
         try {
           await saveTtsClip({
@@ -374,6 +468,9 @@ export const useTTS = () => {
             format: clipFormat || context.formatInfo?.resolved,
             mimeType: clipMimeType,
             playbackSpeed,
+            ...(requestedBackend ? { requestedBackend } : {}),
+            ...(actualBackends.length ? { actualBackends } : {}),
+            ...(hasGatewayMetadata ? { fallbackUsed } : {}),
             utterance: processedUtterance,
             textPreview: preview,
             totalBytes,
@@ -390,13 +487,13 @@ export const useTTS = () => {
         }
       }
 
+      if (!isCurrent()) return
       currentAudioRef.current = null
       setIsSpeaking(false)
       setAudioElement(null)
     } catch (error) {
-      currentAudioRef.current = null
-      setIsSpeaking(false)
-      setAudioElement(null)
+      if (!isCurrent()) return
+      cancel()
       // eslint-disable-next-line no-console
       console.error("[tldw][tts] Playback failed", error, debugMeta)
       notification.error({
@@ -413,7 +510,7 @@ export const useTTS = () => {
   }
 
   const cancel = () => {
-    cancelledRef.current = true
+    speechGenerationRef.current++
 
     // Settle the in-flight playAudio() promise so speak()'s loop unwinds and its
     // `finally { URL.revokeObjectURL }` runs (pause() alone fires no event).
@@ -444,11 +541,7 @@ export const useTTS = () => {
       return
     }
 
-    if (
-      isChromiumTarget &&
-      typeof chrome !== "undefined" &&
-      chrome.tts
-    ) {
+    if (isChromiumTarget && typeof chrome !== "undefined" && chrome.tts) {
       chrome.tts.stop()
     } else if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel()

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { Dropdown, Empty, Input, Modal, Tooltip } from "antd"
 import type { InputRef } from "antd"
+import type { TextAreaRef } from "antd/es/input/TextArea"
 import type { ItemType, MenuItemType } from "antd/es/menu/interface"
 import { BookIcon, ComputerIcon, ZapIcon, Search } from "lucide-react"
 import React, { useState, useMemo, useRef, useEffect } from "react"
@@ -18,10 +19,21 @@ import {
   scheduleFocusFirstVisibleElement
 } from "@/utils/focus-return"
 import { IconButton } from "./IconButton"
+import { PromptAssistMenu } from "./PromptAssist/PromptAssistMenu"
+import { PromptAssistPanel } from "./PromptAssist/PromptAssistPanel"
 import {
+  usePromptAssist,
+  type PromptTargetAdapter
+} from "./PromptAssist/usePromptAssist"
+import type { PromptImproveModelSelection } from "@/services/prompt-improvement"
+import { fetchPromptCapabilities } from "@/services/prompts-api"
+import {
+  captureSystemPromptOverrideSnapshot,
   normalizeSystemPromptOverrideValue,
   resolveEffectiveSystemPromptState,
-  resolveSelectedSystemPromptContent
+  resolveSelectedSystemPromptContent,
+  restoreSystemPromptOverrideSnapshot,
+  type SystemPromptOverrideSnapshot
 } from "./system-prompt-utils"
 
 type Props = {
@@ -29,9 +41,19 @@ type Props = {
   setSelectedQuickPrompt: (prompt: string | undefined) => void
   selectedSystemPrompt: string | undefined
   systemPrompt: string | undefined
-  setSystemPrompt: (prompt: string) => void
+  setSystemPrompt: (prompt: string | undefined) => void
+  selectedModel?: string | null
+  currentProvider?: string | null
+  promptAssistContextKey?: string
+  promptAssistBackendKey?: string | null
+  onSelectModel?: () => void
   className?: string
   iconClassName?: string
+}
+
+type SystemPromptUndoSnapshot = {
+  override: SystemPromptOverrideSnapshot
+  editorDraft: string
 }
 
 export const PromptSelect: React.FC<Props> = ({
@@ -40,6 +62,11 @@ export const PromptSelect: React.FC<Props> = ({
   selectedSystemPrompt,
   systemPrompt,
   setSystemPrompt,
+  selectedModel,
+  currentProvider,
+  promptAssistContextKey = "system-prompt",
+  promptAssistBackendKey = null,
+  onSelectModel,
   className = "text-text-muted",
   iconClassName = "size-5"
 }) => {
@@ -53,7 +80,162 @@ export const PromptSelect: React.FC<Props> = ({
   const [editorTemplateContent, setEditorTemplateContent] = useState("")
   const [editorOverrideActive, setEditorOverrideActive] = useState(false)
   const searchInputRef = useRef<InputRef | null>(null)
+  const editorInputRef = useRef<TextAreaRef | null>(null)
+  const editorFocusRequestedRef = useRef(false)
   const returnFocusSelectorRef = useRef<string | null>(null)
+  const editorDraftRef = useRef("")
+  const editorTemplateContentRef = useRef("")
+  const editorRevisionRef = useRef(0)
+  const editorLookupEpochRef = useRef(0)
+  const editorMountedRef = useRef(true)
+  const editorOpenRef = useRef(false)
+  const rawSystemPromptRef = useRef(systemPrompt)
+  const assistEntryDraftRef = useRef("")
+
+  rawSystemPromptRef.current = systemPrompt
+
+  const modelSelection = useMemo<PromptImproveModelSelection | null>(() => {
+    const normalizedModel = selectedModel?.trim()
+    if (!normalizedModel) return null
+    const normalizedProvider = currentProvider?.trim()
+    return {
+      selected_model: normalizedModel,
+      ...(normalizedProvider ? { provider_hint: normalizedProvider } : {})
+    }
+  }, [currentProvider, selectedModel])
+  const modelSelectionRef = useRef(modelSelection)
+  modelSelectionRef.current = modelSelection
+
+  const normalizedPromptAssistBackendKey =
+    promptAssistBackendKey?.trim() || null
+  const editorLifecycleKey = JSON.stringify([
+    promptAssistContextKey,
+    selectedSystemPrompt ?? "",
+    currentProvider?.trim() ?? "",
+    selectedModel?.trim() ?? "",
+    normalizedPromptAssistBackendKey ?? ""
+  ])
+  const editorLifecycleKeyRef = useRef(editorLifecycleKey)
+  if (editorLifecycleKeyRef.current !== editorLifecycleKey) {
+    editorLifecycleKeyRef.current = editorLifecycleKey
+    editorLookupEpochRef.current += 1
+  }
+
+  const { data: promptCapabilities } = useQuery({
+    queryKey: ["promptCapabilities", normalizedPromptAssistBackendKey],
+    queryFn: fetchPromptCapabilities,
+    enabled: Boolean(normalizedPromptAssistBackendKey),
+    retry: false
+  })
+  const promptAssistCapability = !promptCapabilities
+    ? "unknown"
+    : promptCapabilities.availability === "available" &&
+        promptCapabilities.prompt_improvement_v1.supported
+      ? "supported"
+      : "unsupported"
+
+  const updateEditorDraft = React.useCallback((nextDraft: string) => {
+    editorLookupEpochRef.current += 1
+    setEditorLoading(false)
+    editorDraftRef.current = nextDraft
+    editorRevisionRef.current += 1
+    setEditorDraft(nextDraft)
+  }, [])
+
+  const applySystemPromptCandidate = React.useCallback(
+    (candidate: string) => {
+      const normalized = normalizeSystemPromptOverrideValue({
+        draft: candidate,
+        templateContent: editorTemplateContentRef.current
+      })
+      updateEditorDraft(candidate)
+      setSystemPrompt(normalized)
+      setEditorOverrideActive(
+        Boolean(selectedSystemPrompt) && normalized.trim().length > 0
+      )
+    },
+    [selectedSystemPrompt, setSystemPrompt, updateEditorDraft]
+  )
+
+  const promptTargetAdapter = useMemo<PromptTargetAdapter>(
+    () => ({
+      target: "system",
+      read: () => editorDraftRef.current,
+      readRevision: () => String(editorRevisionRef.current),
+      apply: applySystemPromptCandidate,
+      captureUndo: (): SystemPromptUndoSnapshot => ({
+        override: captureSystemPromptOverrideSnapshot(
+          rawSystemPromptRef.current
+        ),
+        editorDraft: editorDraftRef.current
+      }),
+      restoreUndo: (snapshot) => {
+        const restored = snapshot as SystemPromptUndoSnapshot
+        const rawOverride = restoreSystemPromptOverrideSnapshot(
+          restored.override
+        )
+        updateEditorDraft(restored.editorDraft)
+        setSystemPrompt(rawOverride)
+        setEditorOverrideActive(
+          Boolean(selectedSystemPrompt) &&
+            typeof rawOverride === "string" &&
+            rawOverride.trim().length > 0 &&
+            rawOverride !== editorTemplateContentRef.current
+        )
+      }
+    }),
+    [
+      applySystemPromptCandidate,
+      selectedSystemPrompt,
+      setSystemPrompt,
+      updateEditorDraft
+    ]
+  )
+
+  const promptAssist = usePromptAssist({
+    adapter: promptTargetAdapter,
+    readActiveRoute: () =>
+      modelSelectionRef.current ?? { selected_model: "" },
+    limits:
+      promptCapabilities?.prompt_improvement_v1.supported === true
+        ? promptCapabilities.prompt_improvement_v1.limits
+        : null,
+    contextKey: editorLifecycleKey,
+    surfaceOpen: editorOpen
+  })
+
+  useEffect(() => {
+    editorMountedRef.current = true
+    return () => {
+      editorMountedRef.current = false
+      editorLookupEpochRef.current += 1
+    }
+  }, [])
+
+  useEffect(() => {
+    setEditorLoading(false)
+  }, [editorLifecycleKey])
+
+  const requestEditorFocus = React.useCallback(() => {
+    editorFocusRequestedRef.current = true
+    if (editorInputRef.current) {
+      editorFocusRequestedRef.current = false
+      editorInputRef.current.focus()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (
+      !editorOpen ||
+      !editorFocusRequestedRef.current ||
+      (promptAssist.state.status !== "idle" &&
+        promptAssist.state.status !== "applied")
+    ) {
+      return
+    }
+    editorFocusRequestedRef.current = false
+    editorInputRef.current?.focus()
+  }, [editorOpen, promptAssist.state.status])
 
   const restorePromptSelectFocus = React.useCallback(() => {
     const returnFocusSelector =
@@ -122,22 +304,32 @@ export const PromptSelect: React.FC<Props> = ({
 
   const openSystemPromptEditor = React.useCallback(async () => {
     setDropdownOpen(false)
+    promptAssist.dismiss()
+    editorOpenRef.current = true
     setEditorOpen(true)
+    const lookupEpoch = ++editorLookupEpochRef.current
+    const lifecycleKey = editorLifecycleKeyRef.current
     setEditorLoading(true)
     const resolved = await resolveEffectiveSystemPromptState({
       selectedSystemPrompt,
       systemPrompt
     })
+    if (
+      !editorMountedRef.current ||
+      !editorOpenRef.current ||
+      editorLookupEpochRef.current !== lookupEpoch ||
+      editorLifecycleKeyRef.current !== lifecycleKey
+    ) {
+      return
+    }
+    editorTemplateContentRef.current = resolved.templateContent
+    editorDraftRef.current = resolved.effectiveContent
+    editorRevisionRef.current += 1
     setEditorTemplateContent(resolved.templateContent)
     setEditorDraft(resolved.effectiveContent)
-    setEditorOverrideActive(
-      Boolean(selectedSystemPrompt) &&
-        typeof systemPrompt === "string" &&
-        systemPrompt.trim().length > 0 &&
-        systemPrompt !== resolved.templateContent
-    )
+    setEditorOverrideActive(resolved.overrideActive)
     setEditorLoading(false)
-  }, [selectedSystemPrompt, systemPrompt])
+  }, [promptAssist, selectedSystemPrompt, systemPrompt])
 
   const handleEditorSave = React.useCallback(() => {
     const nextValue = normalizeSystemPromptOverrideValue({
@@ -145,20 +337,73 @@ export const PromptSelect: React.FC<Props> = ({
       templateContent: editorTemplateContent
     })
     setSystemPrompt(nextValue)
+    promptAssist.notifySendOrSave()
+    editorOpenRef.current = false
+    editorLookupEpochRef.current += 1
+    setEditorLoading(false)
     setEditorOpen(false)
-  }, [editorDraft, editorTemplateContent, setSystemPrompt])
+  }, [editorDraft, editorTemplateContent, promptAssist, setSystemPrompt])
 
   const handleEditorReset = React.useCallback(async () => {
+    const lookupEpoch = ++editorLookupEpochRef.current
+    const lifecycleKey = editorLifecycleKeyRef.current
     setEditorLoading(true)
     const nextValue = await resolveSelectedSystemPromptContent(
       selectedSystemPrompt
     )
+    if (
+      !editorMountedRef.current ||
+      !editorOpenRef.current ||
+      editorLookupEpochRef.current !== lookupEpoch ||
+      editorLifecycleKeyRef.current !== lifecycleKey
+    ) {
+      return
+    }
+    editorTemplateContentRef.current = nextValue
+    editorDraftRef.current = nextValue
+    editorRevisionRef.current += 1
     setEditorTemplateContent(nextValue)
     setEditorDraft(nextValue)
     setEditorOverrideActive(false)
     setSystemPrompt(nextValue)
+    promptAssist.notifySendOrSave()
     setEditorLoading(false)
-  }, [selectedSystemPrompt, setSystemPrompt])
+  }, [promptAssist, selectedSystemPrompt, setSystemPrompt])
+
+  const closeEditor = React.useCallback(() => {
+    promptAssist.dismiss()
+    editorOpenRef.current = false
+    editorLookupEpochRef.current += 1
+    setEditorLoading(false)
+    setEditorOpen(false)
+  }, [promptAssist])
+
+  const handleSelectModel = React.useCallback(() => {
+    if (!onSelectModel) return
+    promptAssist.dismiss()
+    editorOpenRef.current = false
+    editorLookupEpochRef.current += 1
+    setEditorLoading(false)
+    setEditorOpen(false)
+    window.setTimeout(onSelectModel, 0)
+  }, [onSelectModel, promptAssist])
+
+  const enterPromptAssist = React.useCallback(
+    (action: () => void) => {
+      assistEntryDraftRef.current = editorDraftRef.current
+      action()
+    },
+    []
+  )
+
+  const cancelPromptAssist = React.useCallback(() => {
+    editorLookupEpochRef.current += 1
+    setEditorLoading(false)
+    editorDraftRef.current = assistEntryDraftRef.current
+    editorRevisionRef.current += 1
+    setEditorDraft(assistEntryDraftRef.current)
+    promptAssist.dismiss()
+  }, [promptAssist])
 
   // Group prompts by category: Favorites, System, Quick
   const groupedMenuItems = useMemo<ItemType[]>(() => {
@@ -517,24 +762,41 @@ export const PromptSelect: React.FC<Props> = ({
       <Modal
         open={editorOpen}
         title={t("promptSelect.editSystemPrompt", "Edit system prompt")}
-        onCancel={() => setEditorOpen(false)}
+        onCancel={closeEditor}
         footer={
-          <div className="flex items-center justify-end gap-2">
-            <button type="button" onClick={() => setEditorOpen(false)}>
-              {t("common:cancel", "Cancel")}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void handleEditorReset()
-              }}
-            >
-              {t("common:reset", "Reset")}
-            </button>
-            <button type="button" onClick={handleEditorSave}>
-              {t("common:save", "Save")}
-            </button>
-          </div>
+          promptAssist.state.status === "idle" ||
+          promptAssist.state.status === "applied" ? (
+            <div className="flex items-center justify-end gap-2">
+              <button type="button" onClick={closeEditor}>
+                {t("common:cancel", "Cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleEditorReset()
+                }}
+              >
+                {t("common:reset", "Reset")}
+              </button>
+              {promptAssist.state.status === "idle" ? (
+                <PromptAssistMenu
+                  draft={editorDraft}
+                  capability={promptAssistCapability}
+                  modelSelection={modelSelection}
+                  onImproveNow={() =>
+                    enterPromptAssist(promptAssist.improveNow)
+                  }
+                  onReviewChanges={() =>
+                    enterPromptAssist(promptAssist.reviewChanges)
+                  }
+                  onSelectModel={onSelectModel ? handleSelectModel : undefined}
+                />
+              ) : null}
+              <button type="button" onClick={handleEditorSave}>
+                {t("common:save", "Save")}
+              </button>
+            </div>
+          ) : null
         }>
         <div className="space-y-3">
           {editorOverrideActive ? (
@@ -546,20 +808,38 @@ export const PromptSelect: React.FC<Props> = ({
             </div>
           ) : null}
           <Input.TextArea
+            ref={editorInputRef}
             rows={6}
             placeholder={t(
               "promptSelect.systemPromptPlaceholder",
               "Enter system prompt"
             )}
             value={editorDraft}
-            onChange={(event) => setEditorDraft(event.target.value)}
+            onChange={(event) => {
+              updateEditorDraft(event.target.value)
+              promptAssist.notifyTargetEdited()
+            }}
           />
           {editorLoading ? (
             <div className="text-xs text-text-subtle">
-              {t("common:loading", getDesignSystemState("loading")?.label)}
+              {t("common:loading.title", getDesignSystemState("loading")?.label)}
             </div>
           ) : null}
         </div>
+        {promptAssist.state.status !== "idle" ||
+        promptAssist.state.notice === "no_change" ? (
+          <PromptAssistPanel
+            state={promptAssist.state}
+            onCancel={cancelPromptAssist}
+            onRetry={promptAssist.retry}
+            onSelectModel={onSelectModel ? handleSelectModel : undefined}
+            onCandidateChange={promptAssist.editCandidate}
+            onApply={promptAssist.applyCandidate}
+            onConfirmReplace={promptAssist.confirmReplaceCurrent}
+            onUndo={promptAssist.undo}
+            onRequestReturnFocus={requestEditorFocus}
+          />
+        ) : null}
       </Modal>
     </>
   )

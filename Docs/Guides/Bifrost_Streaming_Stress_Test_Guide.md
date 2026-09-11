@@ -10,7 +10,7 @@ It is focused on `/api/v1/chat/completions` streaming behavior (TTFT and per-chu
 
 ### 1.1 Environment
 
-- Python 3.10+.
+- Python 3.11+.
 - Dependencies installed (from repo root):
 
   ```bash

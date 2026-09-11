@@ -224,7 +224,6 @@ export const TldwConnectionSettings = ({
           <Form.Item
             name="rememberApiKey"
             valuePropName="checked"
-            initialValue={rememberApiKey}
           >
             <Checkbox
               onChange={(event) => {

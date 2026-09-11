@@ -7,7 +7,8 @@ import {
   Progress,
   Alert,
   Empty,
-  Select
+  Select,
+  Switch
 } from "antd"
 import { useTranslation } from "react-i18next"
 import { useQuery } from "@tanstack/react-query"
@@ -47,20 +48,29 @@ export const GenerationPanel: React.FC = () => {
 
   const provider = defaultVoiceConfig.provider || ttsSettings?.ttsProvider || "browser"
   const isTldw = provider === "tldw"
+  const hasLocalBackendChoice = defaultVoiceConfig.tldwBackend !== undefined
+  const configuredBackend =
+    defaultVoiceConfig.tldwBackend ?? ttsSettings?.tldwTtsBackend ?? ""
+  const configuredTldwModel =
+    defaultVoiceConfig.tldwModel ||
+    (hasLocalBackendChoice ? undefined : ttsSettings?.tldwTtsModel)
+  const configuredTldwVoice =
+    defaultVoiceConfig.tldwVoice ||
+    (hasLocalBackendChoice ? undefined : ttsSettings?.tldwTtsVoice)
   const inferredProviderKey = React.useMemo(() => {
     if (!isTldw) return null
-    return inferTldwProviderFromModel(
-      defaultVoiceConfig.tldwModel || ttsSettings?.tldwTtsModel
-    )
-  }, [isTldw, defaultVoiceConfig.tldwModel, ttsSettings?.tldwTtsModel])
+    return inferTldwProviderFromModel(configuredTldwModel)
+  }, [configuredTldwModel, isTldw])
 
   const {
-    hasAudio,
+    providersInfo,
     tldwTtsModels,
     tldwVoiceCatalog,
     elevenLabsData
   } = useTtsProviderData({
     provider,
+    backend: configuredBackend || undefined,
+    model: configuredTldwModel,
     elevenLabsApiKey: ttsSettings?.elevenLabsApiKey,
     inferredProviderKey
   })
@@ -90,6 +100,54 @@ export const GenerationPanel: React.FC = () => {
     }
     return []
   }, [tldwVoiceCatalog])
+
+  const explicitBackendSupported =
+    providersInfo?.supports_explicit_backend === true
+  const handleBackendChange = (backend: string) => {
+    const capabilities = providersInfo?.providers?.[backend]
+    const model =
+      capabilities?.default_model || capabilities?.models?.[0] || undefined
+    const modelCapabilities = model
+      ? capabilities?.model_capabilities?.[model]
+      : undefined
+    const firstVoice = capabilities?.voices?.[0]
+    const voice =
+      modelCapabilities?.default_voice ||
+      modelCapabilities?.voices?.[0] ||
+      firstVoice?.voice_id ||
+      firstVoice?.id ||
+      firstVoice?.name ||
+      undefined
+
+    setDefaultVoiceConfig({
+      ...defaultVoiceConfig,
+      provider: "tldw",
+      tldwBackend: backend,
+      tldwAllowFallback: defaultVoiceConfig.tldwAllowFallback ?? true,
+      tldwModel: model,
+      tldwVoice: voice
+    })
+  }
+  const backendOptions = React.useMemo(
+    () => [
+      {
+        label: "Automatic (legacy model inference)",
+        value: ""
+      },
+      ...Object.entries(providersInfo?.providers || {})
+        .filter(
+          ([backend, caps]) =>
+            typeof caps.display_name === "string" ||
+            backend === "openrouter" ||
+            backend.startsWith("gateway:")
+        )
+        .map(([backend, caps]) => ({
+          label: caps.display_name || backend,
+          value: backend
+        }))
+    ],
+    [providersInfo]
+  )
 
   const openAiVoiceOptions = React.useMemo(() => {
     const model = defaultVoiceConfig.openAiModel || ttsSettings?.openAITTSModel
@@ -159,7 +217,35 @@ export const GenerationPanel: React.FC = () => {
             </Text>
           </div>
 
-          {isTldw && providerVoices.length > 0 && (
+          {isTldw && explicitBackendSupported && (
+            <div className="flex flex-wrap items-center gap-4">
+              <div aria-label="Audiobook backend">
+                <label className="block text-xs mb-1">Backend</label>
+                <Select
+                  style={{ minWidth: 220 }}
+                  value={configuredBackend}
+                  options={backendOptions}
+                  onChange={handleBackendChange}
+                />
+              </div>
+              <label className="flex items-center gap-2 text-xs">
+                <Switch
+                  size="small"
+                  aria-label="Allow configured fallback"
+                  checked={defaultVoiceConfig.tldwAllowFallback !== false}
+                  onChange={(checked) =>
+                    setDefaultVoiceConfig({
+                      ...defaultVoiceConfig,
+                      tldwAllowFallback: checked
+                    })
+                  }
+                />
+                Allow configured fallback
+              </label>
+            </div>
+          )}
+
+          {isTldw && (
             <div className="flex flex-wrap gap-4">
               <div>
                 <label className="block text-xs mb-1">
@@ -175,7 +261,7 @@ export const GenerationPanel: React.FC = () => {
                       label: m.label,
                       value: m.id
                     }))}
-                    value={defaultVoiceConfig.tldwModel || ttsSettings?.tldwTtsModel}
+                    value={configuredTldwModel}
                     onChange={(val) =>
                       setDefaultVoiceConfig({ ...defaultVoiceConfig, tldwModel: val })
                     }
@@ -186,25 +272,27 @@ export const GenerationPanel: React.FC = () => {
                   </Text>
                 )}
               </div>
-              <div>
-                <label className="block text-xs mb-1">
-                  {t("audiobook:generation.voice", "Voice")}
-                </label>
-                <Select
-                  style={{ minWidth: 200 }}
-                  placeholder={t("audiobook:generation.selectVoice", "Select voice")}
-                  options={providerVoices.map((v, idx) => ({
-                    label: `${v.name || v.id || `Voice ${idx + 1}`}${
-                      v.language ? ` (${v.language})` : ""
-                    }`,
-                    value: v.id || v.name || ""
-                  }))}
-                  value={defaultVoiceConfig.tldwVoice || ttsSettings?.tldwTtsVoice}
-                  onChange={(val) =>
-                    setDefaultVoiceConfig({ ...defaultVoiceConfig, tldwVoice: val })
-                  }
-                />
-              </div>
+              {providerVoices.length > 0 && (
+                <div>
+                  <label className="block text-xs mb-1">
+                    {t("audiobook:generation.voice", "Voice")}
+                  </label>
+                  <Select
+                    style={{ minWidth: 200 }}
+                    placeholder={t("audiobook:generation.selectVoice", "Select voice")}
+                    options={providerVoices.map((v, idx) => ({
+                      label: `${v.name || v.voice_id || v.id || `Voice ${idx + 1}`}${
+                        v.language ? ` (${v.language})` : ""
+                      }`,
+                      value: v.voice_id || v.id || v.name || ""
+                    }))}
+                    value={configuredTldwVoice}
+                    onChange={(val) =>
+                      setDefaultVoiceConfig({ ...defaultVoiceConfig, tldwVoice: val })
+                    }
+                  />
+                </div>
+              )}
             </div>
           )}
 

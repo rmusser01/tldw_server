@@ -1,9 +1,11 @@
-from datetime import datetime, timedelta, timezone
 import json
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+from threading import Barrier
 
 import pytest
 
-from tldw_Server_API.app.core.Persona.session_manager import SessionManager
+from tldw_Server_API.app.core.Persona.session_manager import PlanConfirmationError, SessionManager
 
 
 pytestmark = pytest.mark.unit
@@ -278,3 +280,138 @@ def test_session_manager_applies_payload_caps_with_truncation_markers():
     retention = metadata.get("_retention") or {}
     assert retention.get("content_truncated") is True
     assert retention.get("metadata_truncated") is True
+
+
+def test_latest_pending_plan_snapshot_is_owned_detached_and_non_consuming():
+    manager = SessionManager()
+    for plan_id in ("old", "latest"):
+        manager.put_plan(
+            session_id="s",
+            user_id="u",
+            persona_id="p",
+            plan_id=plan_id,
+            steps=[{"idx": 0, "tool": "rag_search", "args": {"query": plan_id}}],
+        )
+    snapshot = manager.get_latest_plan_snapshot(session_id="s", user_id="u", persona_id="p")
+    assert snapshot["plan_id"] == "latest"
+    assert snapshot["steps"][0]["args"] == {"query": "latest"}
+    assert "policy" not in snapshot["steps"][0]
+    snapshot["steps"][0]["args"]["query"] = "mutated"
+    assert manager.get_plan(session_id="s", user_id="u", plan_id="latest").steps[0].args == {"query": "latest"}
+    assert manager.get_latest_plan_snapshot(session_id="s", user_id="other", persona_id="p") is None
+    assert manager.get_latest_plan_snapshot(session_id="s", user_id="u", persona_id="other") is None
+    manager.get_plan(session_id="s", user_id="u", plan_id="latest", consume=True)
+    assert manager.get_latest_plan_snapshot(session_id="s", user_id="u", persona_id="p")["plan_id"] == "old"
+
+
+def test_latest_pending_plan_read_does_not_revive_expired_runtime():
+    manager = SessionManager(session_ttl_seconds=1)
+    manager.put_plan(
+        session_id="s", user_id="u", persona_id="p", plan_id="plan", steps=[{"idx": 0, "tool": "rag_search"}]
+    )
+    manager.get("s").updated_at = datetime.now(timezone.utc) - timedelta(seconds=2)
+    assert manager.get_latest_plan_snapshot(session_id="s", user_id="u", persona_id="p") is None
+    assert manager.get("s") is None
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        [{"idx": i, "tool": "rag_search"} for i in range(101)],
+        [{"idx": 0, "tool": "rag_search", "args": {"query": "x" * 65536}}],
+    ],
+)
+def test_latest_pending_plan_projection_omits_oversized_plan_without_consuming(steps):
+    manager = SessionManager()
+    manager.put_plan(session_id="s", user_id="u", persona_id="p", plan_id="plan", steps=steps)
+    assert manager.get_latest_plan_snapshot(session_id="s", user_id="u", persona_id="p") is None
+    assert manager.get_plan(session_id="s", user_id="u", plan_id="plan") is not None
+
+
+@pytest.fixture
+def confirmation_plan():
+    manager = SessionManager()
+    pending = manager.put_plan(
+        session_id="confirmation-session",
+        user_id="owner",
+        persona_id="research_assistant",
+        plan_id="confirmation-plan",
+        steps=[{"idx": 0, "tool": "rag_search", "args": {}}],
+        requires_persisted_session=True,
+    )
+    return manager, pending
+
+
+@pytest.mark.parametrize(
+    "user_id,session_exists,session_terminal,reason",
+    [
+        ("other", True, False, "PLAN_NOT_FOUND"),
+        ("owner", True, True, "SESSION_TERMINAL"),
+        ("owner", False, False, "SESSION_NOT_FOUND"),
+    ],
+)
+def test_confirmation_rejects_without_consuming(confirmation_plan, user_id, session_exists, session_terminal, reason):
+    manager, pending = confirmation_plan
+    with pytest.raises(PlanConfirmationError) as error:
+        manager.consume_plan_for_confirmation(
+            session_id=pending.session_id,
+            plan_id=pending.plan_id,
+            user_id=user_id,
+            session_exists=session_exists,
+            session_terminal=session_terminal,
+        )
+    assert error.value.reason_code == reason
+    assert manager.get_plan(session_id=pending.session_id, plan_id=pending.plan_id, user_id="owner") is pending
+
+
+def test_confirmation_prunes_expired_plan(confirmation_plan):
+    manager, pending = confirmation_plan
+    manager._sessions[pending.session_id].updated_at = datetime.now(timezone.utc) - timedelta(days=2)
+    with pytest.raises(PlanConfirmationError) as error:
+        manager.consume_plan_for_confirmation(
+            session_id=pending.session_id,
+            plan_id=pending.plan_id,
+            user_id="owner",
+            session_exists=True,
+            session_terminal=False,
+        )
+    assert error.value.reason_code == "PLAN_NOT_FOUND"
+
+
+def test_confirmation_preserves_runtime_only_sessions(confirmation_plan):
+    manager, pending = confirmation_plan
+    pending.requires_persisted_session = False
+    assert (
+        manager.consume_plan_for_confirmation(
+            session_id=pending.session_id,
+            plan_id=pending.plan_id,
+            user_id="owner",
+            session_exists=False,
+            session_terminal=False,
+        )
+        is pending
+    )
+
+
+def test_concurrent_confirmations_consume_exactly_once(confirmation_plan):
+    manager, pending = confirmation_plan
+    start = Barrier(2)
+
+    def confirm():
+        start.wait(timeout=5)
+        try:
+            return manager.consume_plan_for_confirmation(
+                session_id=pending.session_id,
+                plan_id=pending.plan_id,
+                user_id="owner",
+                session_exists=True,
+                session_terminal=False,
+            )
+        except PlanConfirmationError as error:
+            return error.reason_code
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(lambda _: confirm(), range(2)))
+    assert sum(item is pending for item in outcomes) == 1
+    assert outcomes.count("PLAN_NOT_FOUND") == 1
+    assert manager.get_plan(session_id=pending.session_id, plan_id=pending.plan_id, user_id="owner") is None

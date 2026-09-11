@@ -4,6 +4,9 @@ on:
   push:
     branches: [ main ]
   pull_request:
+  workflow_run:
+    workflows: [Frontend License Gate Audit]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -11,11 +14,36 @@ permissions:
   packages: read
 
 concurrency:
-  group: sbom-${{ github.event.pull_request.number || github.ref }}
+  group: sbom-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  admission:
+    if: >-
+      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/license-first-admission.yml
+    with:
+      workflow_file: sbom.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
   build-sbom:
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -25,6 +53,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -160,7 +191,7 @@ jobs:
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
 
       - name: Authenticate to GHCR
-        if: ${{ hashFiles('sbom-python.cdx.json') != '' && hashFiles('sbom-node.cdx.json') != '' }}
+        if: ${{ github.event_name != 'workflow_run' && hashFiles('sbom-python.cdx.json') != '' && hashFiles('sbom-node.cdx.json') != '' }}
         run: |
           echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 

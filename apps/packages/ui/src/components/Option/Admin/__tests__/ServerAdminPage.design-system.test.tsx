@@ -11,6 +11,7 @@ const apiMock = vi.hoisted(() => ({
   listAdminRoles: vi.fn(),
   getMediaIngestionBudgetDiagnostics: vi.fn(),
   updateAdminUser: vi.fn(),
+  resetAdminUserPassword: vi.fn(),
   createAdminRole: vi.fn(),
   deleteAdminRole: vi.fn()
 }))
@@ -208,13 +209,20 @@ describe("ServerAdminPage design-system states", () => {
     ).toBeInTheDocument()
   })
 
-  it("renders user-load errors through the design-system Alert primitive", async () => {
+  it("renders user-load errors as an error state with retry, without a false empty panel", async () => {
     apiMock.listAdminUsers.mockRejectedValueOnce(new Error("Users exploded"))
 
     render(<ServerAdminPage />)
 
-    const alert = await expectDesignSystemAlertForTitle("Unable to load users")
-    expect(alert).toHaveTextContent("Users exploded")
+    expect(await screen.findByText("Unable to load users")).toBeInTheDocument()
+    expect(screen.getByText("Users exploded")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+    // Regression (2026-09 audit S4): a failed fetch must not additionally
+    // render the filters-blaming empty state.
+    expect(screen.queryByText("No users found")).not.toBeInTheDocument()
+    expect(
+      screen.queryByText("No user diagnostics match the current filters.")
+    ).not.toBeInTheDocument()
   })
 
   it("renders role-load errors through the design-system Alert primitive", async () => {
@@ -237,5 +245,37 @@ describe("ServerAdminPage design-system states", () => {
       "Unable to load media ingestion budget diagnostics"
     )
     expect(alert).toHaveTextContent("Budget exploded")
+  })
+
+  it("resets a user's password with a generated secret and reveals it once (#2918)", async () => {
+    apiMock.resetAdminUserPassword.mockResolvedValue({
+      user_id: 7,
+      force_password_change: true,
+      message: "ok"
+    })
+
+    render(<ServerAdminPage />)
+
+    const rowButton = (
+      await screen.findAllByRole("button", { name: "Reset password" })
+    )[0]
+    fireEvent.click(rowButton)
+    // Popconfirm opens with a verb-labeled confirm of the same name.
+    const confirmButtons = await screen.findAllByRole("button", {
+      name: "Reset password"
+    })
+    fireEvent.click(confirmButtons[confirmButtons.length - 1])
+
+    await waitFor(() => {
+      expect(apiMock.resetAdminUserPassword).toHaveBeenCalledTimes(1)
+    })
+    const [, payload] = apiMock.resetAdminUserPassword.mock.calls[0]
+    expect(payload.temporary_password.length).toBeGreaterThanOrEqual(10)
+    expect(payload.reason.length).toBeGreaterThanOrEqual(8)
+    expect(payload.force_password_change).toBe(true)
+
+    // The generated secret is revealed exactly once for the admin to share.
+    const reveal = await screen.findByTestId("admin-reset-password-result")
+    expect(reveal).toHaveTextContent(payload.temporary_password)
   })
 })

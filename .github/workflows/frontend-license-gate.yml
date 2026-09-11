@@ -76,8 +76,10 @@ jobs:
           git fetch --no-tags --depth=1 "${public_remote}" \
             "+refs/pull/${PR_NUMBER}/head:refs/remotes/license-gate/pr-head"
 
-          readonly fetched_base="$(git rev-parse refs/remotes/license-gate/base)"
-          readonly fetched_head="$(git rev-parse refs/remotes/license-gate/pr-head)"
+          fetched_base="$(git rev-parse refs/remotes/license-gate/base)"
+          readonly fetched_base
+          fetched_head="$(git rev-parse refs/remotes/license-gate/pr-head)"
+          readonly fetched_head
           [[ "${fetched_base}" == "${BASE_SHA}" ]]
           [[ "${fetched_head}" == "${HEAD_SHA}" ]]
 

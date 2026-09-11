@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
   const characterLocal = new Map<string, unknown>()
   const characterSync = new Map<string, unknown>()
   const operations: string[] = []
+  const assistantSetBarriers: Promise<void>[] = []
 
   const createStorageMock = (name: string, map: Map<string, unknown>) => ({
     get: vi.fn(async (key: string) => (map.has(key) ? map.get(key) : null)),
@@ -31,6 +32,7 @@ const mocks = vi.hoisted(() => {
     characterLocal,
     characterSync,
     operations,
+    assistantSetBarriers,
     parseStoredValue: (value: unknown): Record<string, unknown> | null => {
       if (!value) return null
       if (typeof value === "string") {
@@ -93,6 +95,10 @@ vi.mock("@plasmohq/storage/hook", async () => {
         mocks.operations.push(
           `useStorage.${key}.set:${resolved == null ? "null" : "value"}`
         )
+        if (key === "selectedAssistant") {
+          const barrier = mocks.assistantSetBarriers.shift()
+          if (barrier) await barrier
+        }
         if (resolved == null) {
           store.delete(key)
           setRenderValue(null)
@@ -148,6 +154,7 @@ describe("useSelectedAssistant", () => {
     mocks.characterLocal.clear()
     mocks.characterSync.clear()
     mocks.operations.length = 0
+    mocks.assistantSetBarriers.length = 0
     mocks.assistantStorage.get.mockClear()
     mocks.assistantStorage.set.mockClear()
     mocks.assistantStorage.remove.mockClear()
@@ -221,6 +228,94 @@ describe("useSelectedAssistant", () => {
     })
 
     expect(mocks.characterLocal.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
+  })
+
+  it("keeps the latest assistant selection when an older persistence write finishes last", async () => {
+    let releaseFirstWrite = () => undefined
+    mocks.assistantSetBarriers.push(
+      new Promise<void>((resolve) => {
+        releaseFirstWrite = resolve
+      })
+    )
+    const { result } = renderHook(() => useSelectedAssistant())
+
+    let firstWrite: Promise<void> | undefined
+    let secondWrite: Promise<void> | undefined
+    act(() => {
+      firstWrite = result.current[1]({
+        kind: "persona",
+        id: "persisted-restore",
+        name: "Persisted Restore"
+      })
+      secondWrite = result.current[1]({
+        kind: "character",
+        id: "explicit-selection",
+        name: "Explicit Selection"
+      })
+    })
+
+    await act(async () => {
+      releaseFirstWrite()
+      await Promise.all([firstWrite, secondWrite])
+    })
+
+    expect(mocks.assistantLocal.get(SELECTED_ASSISTANT_STORAGE_KEY)).toMatchObject({
+      kind: "character",
+      id: "explicit-selection",
+      name: "Explicit Selection"
+    })
+    await waitFor(() => {
+      expect(result.current[0]).toMatchObject({
+        kind: "character",
+        id: "explicit-selection"
+      })
+    })
+  })
+
+  it("rolls back a guarded assistant write cancelled during persistence", async () => {
+    const { result } = renderHook(() => useSelectedAssistant())
+    await act(async () => {
+      await result.current[1]({
+        kind: "character",
+        id: "current-selection",
+        name: "Current Selection"
+      })
+    })
+    let releaseRestoreWrite = () => undefined
+    mocks.assistantSetBarriers.push(
+      new Promise<void>((resolve) => {
+        releaseRestoreWrite = resolve
+      })
+    )
+    let restoreIsCurrent = true
+    let restoreWrite: Promise<void> | undefined
+
+    act(() => {
+      restoreWrite = result.current[1](
+        {
+          kind: "persona",
+          id: "stale-restore",
+          name: "Stale Restore"
+        },
+        { isCurrent: () => restoreIsCurrent }
+      )
+    })
+    restoreIsCurrent = false
+    await act(async () => {
+      releaseRestoreWrite()
+      await restoreWrite
+    })
+
+    expect(mocks.assistantLocal.get(SELECTED_ASSISTANT_STORAGE_KEY)).toMatchObject({
+      kind: "character",
+      id: "current-selection"
+    })
+    await waitFor(() => {
+      expect(result.current[0]).toMatchObject({
+        kind: "character",
+        id: "current-selection"
+      })
+    })
   })
 
   it("updates the legacy character mirror before broadcasting character selections", async () => {

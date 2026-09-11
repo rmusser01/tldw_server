@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { render, screen } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -78,14 +79,22 @@ describe("integration routes", () => {
   })
 
   it("renders the personal integrations page in the shared option layout", () => {
-    render(<OptionIntegrations />)
+    render(
+      <MemoryRouter>
+        <OptionIntegrations />
+      </MemoryRouter>
+    )
 
     expect(screen.getByTestId("option-layout")).toBeInTheDocument()
     expect(screen.getByTestId("integration-management-page")).toHaveAttribute("data-scope", "personal")
   })
 
   it("renders the admin integrations page in the route error boundary", () => {
-    render(<OptionAdminIntegrations />)
+    render(
+      <MemoryRouter>
+        <OptionAdminIntegrations />
+      </MemoryRouter>
+    )
 
     expect(screen.getByTestId("route-error-boundary")).toBeInTheDocument()
     expect(screen.getByTestId("option-layout")).toBeInTheDocument()

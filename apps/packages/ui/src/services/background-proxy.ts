@@ -1,5 +1,4 @@
 import { browser } from "wxt/browser"
-import { Storage } from "@plasmohq/storage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { formatErrorMessage } from "@/utils/format-error-message"
 import {
@@ -9,6 +8,7 @@ import {
   resolveBrowserRequestTransport,
   tldwRequest
 } from "@/services/tldw/request-core"
+import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import {
   isCookieSessionBrowserTransport,
   resolveAdvancedRequestTransportGuard
@@ -19,9 +19,19 @@ import {
   type DirectRuntimeStorage
 } from "@/services/tldw/direct-browser-config"
 import {
+  hasNewerCurrentAccessToken,
+  storeRefreshRotationIfCurrent,
+  waitForNewerCurrentAccessToken
+} from "@/services/tldw/single-user-credential"
+import {
   BACKEND_UNREACHABLE_EVENT,
+  isExplicitRequestCancellation,
   type BackendUnreachableDetail
 } from "@/services/request-events"
+import {
+  asValidatedHttpStatus,
+  sanitizeRagProviderFailure
+} from "@/services/rag/provider-error-contract"
 import type {
   AllowedMethodFor,
   AllowedPath,
@@ -34,6 +44,20 @@ import {
   isAbsoluteUrlAllowlisted,
   isSameOriginAbsoluteUrlForConfiguredServer
 } from "@/utils/absolute-url-guard"
+import type {
+  ServicePromptTargetConfig,
+  TldwConfig
+} from "@/services/tldw/TldwApiClient"
+import {
+  createServicePromptScopeChangedError,
+  isRequestConfigScopeChangedError,
+  isServicePromptRequestPath,
+  servicePromptPrincipalMatches,
+  servicePromptRefreshLineageMatches,
+  servicePromptSingleUserApiKeyScopeMatches,
+  servicePromptTargetsMatch
+} from "@/services/tldw/service-prompt-scope-error"
+import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 
 const ERROR_LOG_THROTTLE_MS = 15_000
 const RATE_LIMIT_LOG_THROTTLE_MS = 60_000
@@ -45,6 +69,7 @@ const STREAM_QUEUE_DRAIN_BATCH_LIMIT = 32
 const STREAM_QUEUE_DRAIN_SLICE_MS = 12
 const SAFE_RUNTIME_MESSAGE_TIMEOUT_MS = 3_000
 const UNSAFE_RUNTIME_MESSAGE_TIMEOUT_FLOOR_MS = 5_000
+const RAG_STREAM_ABORT_MESSAGE = "RAG stream request was aborted."
 // The MV3 worker only replies to an unsafe (write) request once the whole
 // server operation finishes, so this messaging-ack timeout must cover the
 // longest normal generation/ingest (non-stream chat, media kickoff, export)
@@ -74,6 +99,32 @@ const errorLogHistory = new Map<string, number>()
 let lastBackendUnreachableEventAt = 0
 let lastStreamRuntimeHealthCheckAt = 0
 let streamRuntimePortUsable: boolean | null = null
+let runtimeRequestSequence = 0
+
+const createRuntimeRequestId = (): string => {
+  try {
+    const randomId = globalThis.crypto?.randomUUID?.()
+    if (randomId) return randomId
+  } catch {
+    // Fall back to a locally unique id when randomUUID is unavailable.
+  }
+  runtimeRequestSequence += 1
+  return `tldw-${Date.now()}-${runtimeRequestSequence}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+const cancelRuntimeWorkerRequest = (requestId?: string): void => {
+  if (!requestId) return
+  try {
+    void Promise.resolve(
+      browser.runtime.sendMessage({
+        type: "tldw:cancel-request",
+        payload: { requestId }
+      })
+    ).catch(() => undefined)
+  } catch {
+    // Cancellation is best effort when the extension context is closing.
+  }
+}
 
 const normalizeKnownPathQuirks = <P extends PathOrUrl>(rawPath: P): P => {
   if (typeof rawPath !== "string") return rawPath
@@ -180,7 +231,7 @@ const isSensitiveKey = (key: string): boolean => {
 }
 
 // Redact known sensitive fields (stack/trace/sql/query/secret/headers/etc.) recursively.
-const sanitizeResponseData = (
+export const sanitizeResponseData = (
   value: unknown,
   seen: WeakSet<object> = new WeakSet()
 ): unknown => {
@@ -280,14 +331,18 @@ const isExtensionTransportFailure = (error: unknown): boolean => {
   )
 }
 
+const isProvenNoReceiverError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error || "")
+  const normalized = message.toLowerCase()
+  return normalized.includes("receiving end does not exist") ||
+    normalized.includes("could not establish connection")
+}
+
 type RequestAbortError = Error & {
   status?: number
   code?: string
   details?: unknown
 }
-
-const isAbortErrorMessage = (value?: string) =>
-  typeof value === "string" && value.toLowerCase().includes("abort")
 
 const readErrorMessage = (error: unknown, fallback = "Aborted") =>
   error instanceof Error && error.message ? error.message : fallback
@@ -347,17 +402,21 @@ const shouldNotifyBackendUnavailable = (entry: {
   return BACKEND_UNREACHABLE_PATTERN.test(String(entry.error || ""))
 }
 
-const notifyBackendUnavailable = (entry: {
-  method: string
-  path: string
-  status?: number
-  error?: string
-  source: "background" | "direct"
-}) => {
+const notifyBackendUnavailable = (
+  entry: {
+    method: string
+    path: string
+    status?: number
+    code?: string
+    error?: string
+    source: "background" | "direct"
+  },
+  eligible?: boolean
+) => {
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
     return
   }
-  if (!shouldNotifyBackendUnavailable(entry)) return
+  if (!(eligible ?? shouldNotifyBackendUnavailable(entry))) return
   const now = Date.now()
   if (now - lastBackendUnreachableEventAt < BACKEND_UNREACHABLE_EVENT_THROTTLE_MS) {
     return
@@ -368,6 +427,7 @@ const notifyBackendUnavailable = (entry: {
     method: entry.method,
     path: entry.path,
     status: entry.status,
+    code: entry.code,
     message: String(entry.error || "Network error"),
     source: entry.source,
     timestamp: now
@@ -399,6 +459,62 @@ export interface BgRequestInit<
   preferDirect?: boolean
   suppressBackendUnavailableEvent?: boolean
   expectedStatuses?: number[]
+  sanitizeRagProviderError?: boolean
+  servicePromptConfig?: ServicePromptTargetConfig
+  configSnapshot?: TldwConfig | null
+}
+
+const resolveCurrentServicePromptConfig = async (
+  storage: DirectRuntimeStorage,
+  checked: ServicePromptTargetConfig
+): Promise<TldwConfig> => {
+  const stored = await resolveDirectConfig(storage)
+  const runtimeApiKey = !isHostedTldwDeployment() &&
+    checked.authMode === "single-user"
+    ? String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+    : ""
+  const current = runtimeApiKey
+    ? { ...(stored ?? checked), apiKey: runtimeApiKey }
+    : stored
+  const singleUserApiKeyScopeMatches = current
+    ? servicePromptSingleUserApiKeyScopeMatches(
+        current,
+        checked.expectedSingleUserApiKeyScope
+      )
+    : true
+  if ((!current && !isHostedTldwDeployment()) ||
+    (current && !servicePromptTargetsMatch(current, checked)) ||
+    (current &&
+      checked.expectedUserId !== null &&
+      checked.expectedUserId !== undefined &&
+      current.authMode === "multi-user" &&
+      !isHostedTldwDeployment() &&
+      current.authSource !== "cookie-session" &&
+      !servicePromptPrincipalMatches(current, checked.expectedUserId)) ||
+    (current &&
+      !servicePromptRefreshLineageMatches(
+        current,
+        checked.expectedRefreshToken
+      )) ||
+    !singleUserApiKeyScopeMatches ||
+    (current?.authMode === "multi-user" &&
+      !isHostedTldwDeployment() &&
+      current.authSource !== "cookie-session" &&
+      !String(current.accessToken || "").trim())
+  ) {
+    throw createServicePromptScopeChangedError()
+  }
+  const effective = current ?? checked
+  return {
+    ...effective,
+    serverUrl: checked.serverUrl,
+    authMode: checked.authMode,
+    authSource: checked.authSource,
+    orgId: checked.orgId,
+    apiKey: current?.apiKey,
+    accessToken: current?.accessToken,
+    refreshToken: current?.refreshToken
+  }
 }
 
 // In-flight coalescing for idempotent GET requests: when several callers issue
@@ -413,6 +529,60 @@ const rateLimitedGetResults = new Map<
 >()
 const DEFAULT_RATE_LIMIT_GET_COOLDOWN_MS = 2_000
 const MAX_RATE_LIMIT_GET_COOLDOWN_MS = 60_000
+
+const normalizeGetScopeServer = (value: string): string | null => {
+  try {
+    const parsed = new URL(String(value || "").trim())
+    if (!/^https?:$/.test(parsed.protocol)) return null
+    return `${parsed.protocol.toLowerCase()}//${parsed.host.toLowerCase()}${parsed.pathname.replace(/\/+$/, "")}`
+  } catch {
+    return null
+  }
+}
+
+type DirectConfigSnapshot = Awaited<ReturnType<typeof resolveDirectConfig>>
+
+interface DirectRequestContext {
+  config: DirectConfigSnapshot
+  scope: string
+  storage: DirectRuntimeStorage
+}
+
+const snapshotDirectConfig = (
+  config: DirectConfigSnapshot
+): DirectConfigSnapshot => (config ? Object.freeze({ ...config }) : null)
+
+const resolveDirectGetRequestContext = async (
+  noAuthExplicit: boolean
+): Promise<DirectRequestContext | null> => {
+  const storage = createSafeStorage({ area: "local" })
+  const config = snapshotDirectConfig(await resolveDirectConfig(storage))
+  if (!config) return null
+  const server = normalizeGetScopeServer(config.serverUrl)
+  if (!server) return null
+  if (noAuthExplicit) {
+    return {
+      config,
+      scope: `${server}:auth:no-auth`,
+      storage
+    }
+  }
+  if (config.authSource === "cookie-session") return null
+  const authMode = String(config?.authMode || "unknown")
+    .trim()
+    .toLowerCase()
+  const org = config?.orgId == null ? "none" : String(config.orgId)
+  const principal = deriveScopedUserId({
+    accessToken: config.accessToken,
+    authMode: config.authMode
+  })
+  if (principal === "user:anonymous") return null
+  return {
+    config,
+    scope: `${server}:auth:${authMode}:org:${org}:${principal}`,
+    storage
+  }
+}
 
 const isRateLimitedResult = (value: unknown): boolean => {
   const status = extractHttpStatus(value)
@@ -466,15 +636,148 @@ const pruneRateLimitedGetResults = () => {
 // instead of a stampede that would each spend and rotate the refresh token,
 // persisting a dead one.
 let webRefreshInFlight: Promise<void> | null = null
+const scopedWebRefreshes = new Map<string, Promise<void>>()
+
+const scopedRefreshKey = (
+  checked: ServicePromptTargetConfig,
+  refreshToken: string
+): string => JSON.stringify([
+  checked.serverUrl ?? null,
+  checked.authMode ?? null,
+  checked.authSource ?? null,
+  checked.orgId ?? null,
+  refreshToken
+])
+
+const commitDirectRefresh = async (
+  storage: DirectRuntimeStorage,
+  checked: TldwConfig,
+  capturedAccessToken: string,
+  expectedRefreshToken: string,
+  tokens: Readonly<{ accessToken: string; refreshToken: string }>
+): Promise<TldwConfig> => {
+  const stored = await storeRefreshRotationIfCurrent(
+    storage,
+    checked,
+    expectedRefreshToken,
+    tokens
+  )
+  const observedNewerToken = await hasNewerCurrentAccessToken(
+    storage,
+    checked,
+    capturedAccessToken
+  )
+  const latest = await resolveDirectConfig(storage)
+  const responseApplied = Boolean(
+    latest &&
+    String(latest.accessToken || "").trim() === tokens.accessToken &&
+    String(latest.refreshToken || "").trim() === tokens.refreshToken
+  )
+  if (
+    !latest ||
+    latest.authMode !== "multi-user" ||
+    !servicePromptTargetsMatch(latest, checked) ||
+    (!stored && !observedNewerToken) ||
+    (!responseApplied && !observedNewerToken)
+  ) {
+    throw createServicePromptScopeChangedError()
+  }
+  return latest
+}
 
 const refreshAuthDirect = async (
-  storage: DirectRuntimeStorage
+  storage: DirectRuntimeStorage,
+  checked?: ServicePromptTargetConfig,
+  originalConfig?: TldwConfig
 ): Promise<void> => {
+  if (checked) {
+    const cfg = originalConfig ??
+      await resolveCurrentServicePromptConfig(storage, checked)
+    const refreshToken = String(cfg.refreshToken || "").trim()
+    const capturedAccessToken = String(cfg.accessToken || "").trim()
+    if (!refreshToken) {
+      throw new Error("Token refresh failed: no refresh token available")
+    }
+    if (
+      originalConfig &&
+      await hasNewerCurrentAccessToken(
+        storage,
+        checked,
+        capturedAccessToken
+      )
+    ) {
+      return
+    }
+    const current = originalConfig
+      ? await resolveCurrentServicePromptConfig(storage, checked)
+      : cfg
+    if (String(current.refreshToken || "").trim() !== refreshToken) {
+      throw createServicePromptScopeChangedError()
+    }
+    const key = scopedRefreshKey(checked, refreshToken)
+    let refresh = scopedWebRefreshes.get(key)
+    if (!refresh) {
+      refresh = (async () => {
+        try {
+          const resp = await tldwRequest(
+            {
+              path: "/api/v1/auth/refresh",
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: { refresh_token: refreshToken },
+              noAuth: true
+            },
+            { getConfig: async () => cfg }
+          )
+          const tokens = (resp?.ok ? resp.data : null) as
+            | { access_token?: string; refresh_token?: string }
+            | null
+          if (!tokens?.access_token) {
+            throw new Error(
+              `Token refresh failed: ${resp?.error || `no access token in refresh response (status ${resp?.status ?? "unknown"})`}`
+            )
+          }
+          const stored = await storeRefreshRotationIfCurrent(
+            storage,
+            { ...checked, accessToken: capturedAccessToken },
+            refreshToken,
+            {
+              accessToken: tokens.access_token,
+              refreshToken: tokens.refresh_token || refreshToken
+            }
+          )
+          if (!stored) {
+            throw createServicePromptScopeChangedError()
+          }
+        } catch (error) {
+          if (isRequestConfigScopeChangedError(error)) throw error
+          if (
+            originalConfig &&
+            await waitForNewerCurrentAccessToken(
+              storage,
+              checked,
+              capturedAccessToken
+            )
+          ) {
+            return
+          }
+          throw error
+        } finally {
+          scopedWebRefreshes.delete(key)
+        }
+      })()
+      scopedWebRefreshes.set(key, refresh)
+    }
+    await refresh
+    return
+  }
+
   if (!webRefreshInFlight) {
     webRefreshInFlight = (async () => {
       const cfg =
         (await resolveDirectConfig(storage)) || null
       const refreshToken = String((cfg?.refreshToken as string) || "").trim()
+      const capturedAccessToken = String(cfg?.accessToken || "").trim()
       // Signal failure (throw) rather than resolving silently: request-core
       // treats a resolved refreshAuth as success and would retry with the stale
       // token. Throwing makes it mark the refresh as failed so a still-401 retry
@@ -500,17 +803,19 @@ const refreshAuthDirect = async (
           `Token refresh failed: ${resp?.error || `no access token in refresh response (status ${resp?.status ?? "unknown"})`}`
         )
       }
-      const latest =
-        (await resolveDirectConfig(storage)) ||
-        cfg
-      await storage.set("tldwConfig", {
-        ...(latest || {}),
-        accessToken: tokens.access_token,
-        refreshToken:
-          tokens.refresh_token ||
-          (latest?.refreshToken as string) ||
-          refreshToken
-      })
+      if (!cfg || cfg.authMode !== "multi-user") {
+        throw new Error("Token refresh failed: account configuration changed")
+      }
+      await commitDirectRefresh(
+        storage,
+        cfg,
+        capturedAccessToken,
+        refreshToken,
+        {
+          accessToken: tokens.access_token,
+          refreshToken: tokens.refresh_token || refreshToken
+        }
+      )
     })().finally(() => {
       webRefreshInFlight = null
     })
@@ -521,10 +826,40 @@ const refreshAuthDirect = async (
 // Runtime for the web/direct fallback. Supplies a working `refreshAuth` so
 // request-core's 401 refresh-and-retry runs in the browser (not just inside the
 // extension worker), and single-flights it across concurrent callers.
-const createDirectRuntime = (storage: DirectRuntimeStorage) => ({
-  getConfig: () => resolveDirectConfig(storage),
-  refreshAuth: () => refreshAuthDirect(storage)
-})
+const createDirectRuntime = (
+  storage: DirectRuntimeStorage,
+  servicePromptConfig?: ServicePromptTargetConfig,
+  initialConfig?: DirectConfigSnapshot
+) => {
+  let originalConfig: TldwConfig | undefined
+  let hasInitialConfig = typeof initialConfig !== "undefined"
+  return {
+    ...(servicePromptConfig ? { useRuntimeAuthOverride: false } : {}),
+    getConfig: servicePromptConfig
+      ? async () => {
+          const current = await resolveCurrentServicePromptConfig(
+            storage,
+            servicePromptConfig
+          )
+          originalConfig ??= current
+          return current
+        }
+      : () => {
+          if (hasInitialConfig) {
+            hasInitialConfig = false
+            return Promise.resolve(initialConfig || null)
+          }
+          return resolveDirectConfig(storage)
+        },
+    refreshAuth: async () => {
+      await refreshAuthDirect(
+        storage,
+        servicePromptConfig,
+        originalConfig
+      )
+    }
+  }
+}
 
 export async function bgRequest<
   T = any,
@@ -532,38 +867,45 @@ export async function bgRequest<
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(init: BgRequestInit<P, M>): Promise<T> {
   const method = String(init.method || "GET").toUpperCase()
+  const hasRuntimeMessage =
+    !init.preferDirect &&
+    Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
   const coalescable =
     method === "GET" &&
     !init.body &&
+    (!init.headers || Object.keys(init.headers).length === 0) &&
     !init.abortSignal &&
     !init.responseType &&
-    !init.preferDirect &&
     !init.suppressBackendUnavailableEvent &&
-    !init.expectedStatuses?.length
+    !init.sanitizeRagProviderError &&
+    !init.servicePromptConfig &&
+    init.configSnapshot === undefined &&
+    !hasRuntimeMessage
   if (!coalescable) {
     return bgRequestImpl<T, P, M>(init)
   }
-  // Header keys are case-insensitive and object key order is not meaningful, so
-  // normalize (lowercase + sort) for a stable key. Keep timeoutMs in the key so
-  // GETs with different timeouts are not merged, and preserve the distinction
-  // between "noAuth omitted" and "noAuth: false" (bgRequestImpl uses
-  // hasOwnProperty(noAuth) to decide cross-origin auth suppression).
-  const initHeaders = init.headers as Record<string, string> | undefined
-  const normalizedHeaders = initHeaders
-    ? Object.keys(initHeaders)
-        .sort()
-        .reduce<Record<string, string>>((acc, headerKey) => {
-          acc[headerKey.toLowerCase()] = initHeaders[headerKey]
-          return acc
-        }, {})
-    : null
+  const directContext = await resolveDirectGetRequestContext(
+    Object.prototype.hasOwnProperty.call(init, "noAuth") && init.noAuth === true
+  )
+  if (!directContext) {
+    return bgRequestImpl<T, P, M>(init)
+  }
+  // Keep timeoutMs in the key so GETs with different timeouts are not merged,
+  // and preserve the distinction between "noAuth omitted" and "noAuth: false"
+  // (bgRequestImpl uses hasOwnProperty(noAuth) to decide cross-origin auth
+  // suppression). Requests with caller headers are excluded above so secret
+  // header values can never enter this module-level key.
+  const expectedStatuses = Array.from(
+    normalizeExpectedStatuses(init.expectedStatuses)
+  ).sort((left, right) => left - right)
   const key = JSON.stringify({
+    scope: directContext.scope,
     p: String(init.path),
-    h: normalizedHeaders,
     noAuth: Object.prototype.hasOwnProperty.call(init, "noAuth")
       ? Boolean(init.noAuth)
       : "__unset__",
     returnResponse: Boolean(init.returnResponse),
+    expectedStatuses,
     suppressBackendUnavailableEvent: Boolean(
       init.suppressBackendUnavailableEvent
     ),
@@ -591,7 +933,7 @@ export async function bgRequest<
       value
     })
   }
-  const promise = bgRequestImpl<T, P, M>(init)
+  const promise = bgRequestImpl<T, P, M>(init, directContext)
     .then(
       (value) => {
         rememberRateLimit(value, false)
@@ -617,7 +959,10 @@ async function bgRequestImpl<
   T = any,
   P extends PathOrUrl = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
->(init: BgRequestInit<P, M>): Promise<T> {
+>(
+  init: BgRequestInit<P, M>,
+  directContext?: DirectRequestContext
+): Promise<T> {
   const {
     path: rawPath,
     method = 'GET' as UpperLower<M>,
@@ -630,8 +975,18 @@ async function bgRequestImpl<
     returnResponse,
     preferDirect = false,
     suppressBackendUnavailableEvent = false,
-    expectedStatuses
+    expectedStatuses,
+    sanitizeRagProviderError = false,
+    servicePromptConfig,
+    configSnapshot
   } = init
+  if (servicePromptConfig) {
+    if (!isServicePromptRequestPath(rawPath, method)) {
+      throw new Error(
+        "A Service Prompt config can only be used with Service Prompt requests."
+      )
+    }
+  }
   const path = normalizeKnownPathQuirks(rawPath)
   const expectedStatusSet = normalizeExpectedStatuses(expectedStatuses)
   const isExpectedStatus = (status: unknown): boolean =>
@@ -640,8 +995,11 @@ async function bgRequestImpl<
   const noAuthExplicit = Object.prototype.hasOwnProperty.call(init, "noAuth")
   let resolvedNoAuth = noAuthExplicit ? noAuth : (noAuth || isAbsoluteUrl)
   if (!noAuthExplicit && isAbsoluteUrl) {
-    const storage = createSafeStorage({ area: "local" })
-    const cfg = await resolveDirectConfig(storage)
+    const storage =
+      directContext?.storage || createSafeStorage({ area: "local" })
+    const cfg = directContext
+      ? directContext.config
+      : servicePromptConfig ?? await resolveDirectConfig(storage)
     const sameOriginAbsolute = isSameOriginAbsoluteUrlForConfiguredServer(
       String(path),
       cfg as unknown as Record<string, unknown>
@@ -653,6 +1011,7 @@ async function bgRequestImpl<
     method: string
     path: string
     status?: number
+    code?: string
     error?: string
     source: "background" | "direct"
   }) => {
@@ -674,9 +1033,10 @@ async function bgRequestImpl<
   const buildRequestError = (
     msg: string,
     status?: number,
-    details?: unknown
+    details?: unknown,
+    code?: string
   ): (Error & { status?: number; code?: string; details?: unknown }) => {
-    if (isAbortErrorMessage(msg)) {
+    if (isExplicitRequestCancellation({ message: msg, code })) {
       return createAbortError(msg, status, details)
     }
     const error = new Error(`${msg} (${method} ${path})`) as Error & {
@@ -685,6 +1045,9 @@ async function bgRequestImpl<
       details?: unknown
     }
     error.status = status
+    if (code) {
+      error.code = code
+    }
     if (typeof details !== "undefined") {
       error.details = sanitizeResponseData(details)
     }
@@ -708,9 +1071,128 @@ async function bgRequestImpl<
   type RuntimeResponsePayload = {
     ok: boolean
     error?: string
+    code?: string
     status?: number
     data?: unknown
     headers?: Record<string, string>
+  }
+  type NormalizedRequestFailure = {
+    message: string
+    status?: number
+    code?: string
+    details?: unknown
+  }
+  const handleFailedResponse = async (
+    resp: RuntimeResponsePayload,
+    source: "background" | "direct"
+  ): Promise<{
+    error: Error & { status?: number; code?: string; details?: unknown }
+    response: RuntimeResponsePayload
+  }> => {
+    const rawMessage = formatErrorMessage(
+      resp?.error,
+      `Request failed: ${resp?.status}`
+    )
+    const explicitCancellation = isExplicitRequestCancellation(rawMessage) ||
+      isExplicitRequestCancellation(resp)
+    const eligibleForBackendUnavailableEvent = !explicitCancellation &&
+      shouldNotifyBackendUnavailable({
+        method: String(method),
+        path: String(path),
+        status: resp?.status,
+        error: rawMessage
+      })
+    const scopedError =
+      servicePromptConfig &&
+      isRequestConfigScopeChangedError({
+        status: resp?.status,
+        details: resp?.data
+      })
+        ? createServicePromptScopeChangedError()
+        : null
+    const sanitized: NormalizedRequestFailure = scopedError
+      ? {
+          message: scopedError.message,
+          status: scopedError.status,
+          details: scopedError.details
+        }
+      : sanitizeRagProviderError
+      ? explicitCancellation
+        ? {
+            message: "Aborted",
+            status: asValidatedHttpStatus(resp?.status),
+            code: "REQUEST_ABORTED"
+          }
+        : sanitizeRagProviderFailure({
+            status: resp?.status,
+            error: rawMessage,
+            data: resp?.data
+          })
+      : {
+          message: rawMessage,
+          status: resp?.status,
+          code: resp?.code,
+          details: resp?.data
+        }
+    const diagnosticEntry = {
+      method: String(method),
+      path: String(path),
+      status: sanitized.status,
+      code: sanitized.code,
+      error: sanitized.message,
+      source
+    }
+
+    if (
+      !isExplicitRequestCancellation({
+        message: sanitized.message,
+        code: sanitized.code
+      }) &&
+      !isExpectedStatus(resp?.status)
+    ) {
+      if (sanitized.code) {
+        console.warn(
+          "[tldw:request]",
+          method,
+          path,
+          sanitized.status,
+          sanitized.message,
+          sanitized.code
+        )
+      } else {
+        console.warn(
+          "[tldw:request]",
+          method,
+          path,
+          sanitized.status,
+          sanitized.message
+        )
+      }
+      await recordRequestError(diagnosticEntry)
+      if (!suppressBackendUnavailableEvent) {
+        notifyBackendUnavailable(
+          diagnosticEntry,
+          eligibleForBackendUnavailableEvent
+        )
+      }
+    }
+
+    return {
+      error: buildRequestError(
+        sanitized.message,
+        sanitized.status,
+        sanitized.details,
+        sanitized.code
+      ),
+      response: sanitizeRagProviderError || scopedError
+        ? {
+            ...resp,
+            error: sanitized.message,
+            status: sanitized.status,
+            data: sanitized.details
+          }
+        : resp
+    }
   }
   const requestDirectArrayBufferFallback = async () => {
     const storage = createSafeStorage({ area: "local" })
@@ -725,7 +1207,7 @@ async function bgRequestImpl<
         abortSignal,
         responseType
       },
-      createDirectRuntime(storage)
+      createDirectRuntime(storage, servicePromptConfig, configSnapshot)
     )
   }
   const resolveArrayBufferResponse = async (
@@ -751,6 +1233,7 @@ async function bgRequestImpl<
     return (returnResponse ? fallback : fallback.data) as T
   }
   const hasRuntimeMessage =
+    !directContext &&
     !preferDirect &&
     Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
   const methodIsSafeFallback = isSafeFallbackMethod(method)
@@ -778,36 +1261,14 @@ async function bgRequestImpl<
         abortSignal,
         responseType
       },
-      createDirectRuntime(storage)
+      createDirectRuntime(storage, servicePromptConfig, configSnapshot)
     )
     if (!resp?.ok) {
-      const msg = formatErrorMessage(
-        resp?.error,
-        `Request failed: ${resp?.status}`
-      )
-      if (!isAbortErrorMessage(msg) && !isExpectedStatus(resp?.status)) {
-        console.warn("[tldw:request]", method, path, resp?.status, msg)
-        await recordRequestError({
-          method: String(method),
-          path: String(path),
-          status: resp?.status,
-          error: msg,
-          source: "direct"
-        })
-        if (!suppressBackendUnavailableEvent) {
-          notifyBackendUnavailable({
-            method: String(method),
-            path: String(path),
-            status: resp?.status,
-            error: msg,
-            source: "direct"
-          })
-        }
-      }
-      const error = buildRequestError(msg, resp?.status, resp?.data)
+      const failure = await handleFailedResponse(resp, "direct")
       if (!returnResponse) {
-        throw error
+        throw failure.error
       }
+      return failure.response as T
     }
     return (returnResponse ? resp : resp.data) as T
   }
@@ -815,6 +1276,10 @@ async function bgRequestImpl<
   // If extension messaging is available, use it (extension context)
   try {
     if (hasRuntimeMessage) {
+      const requestId =
+        servicePromptConfig && abortSignal
+          ? createRuntimeRequestId()
+          : undefined
       const payload = {
         type: 'tldw:request',
         payload: {
@@ -824,7 +1289,9 @@ async function bgRequestImpl<
           body,
           noAuth: resolvedNoAuth,
           timeoutMs,
-          responseType
+          responseType,
+          servicePromptConfig,
+          ...(requestId ? { requestId } : {})
         }
       }
 
@@ -845,39 +1312,17 @@ async function bgRequestImpl<
           throw new Error(`Background request failed (${method} ${path})`)
         }
         if (!resp.ok) {
-          const msg = formatErrorMessage(
-            resp?.error,
-            `Request failed: ${resp?.status}`
-          )
-          if (!isAbortErrorMessage(msg) && !isExpectedStatus(resp?.status)) {
-            console.warn("[tldw:request]", method, path, resp?.status, msg)
-            await recordRequestError({
-              method: String(method),
-              path: String(path),
-              status: resp?.status,
-              error: msg,
-              source: "background"
-            })
-            if (!suppressBackendUnavailableEvent) {
-              notifyBackendUnavailable({
-                method: String(method),
-                path: String(path),
-                status: resp?.status,
-                error: msg,
-                source: "background"
-              })
-            }
-          }
-          const error = buildRequestError(msg, resp?.status, resp?.data)
+          const failure = await handleFailedResponse(resp, "background")
           if (!returnResponse) {
-            throw markNoFallbackError(error)
+            throw markNoFallbackError(failure.error)
           }
+          return await resolveArrayBufferResponse(failure.response)
         }
         return await resolveArrayBufferResponse(resp as RuntimeResponsePayload)
       }
 
       if (abortSignal.aborted) {
-        throw markNoFallbackError(new Error("Aborted"))
+        throw markNoFallbackError(createAbortError())
       }
 
       const messagePromise = browser.runtime.sendMessage(payload) as Promise<
@@ -888,23 +1333,30 @@ async function bgRequestImpl<
       const resp = await new Promise<
         { ok: boolean; error?: string; status?: number; data: T } | undefined | null
       >((resolve, reject) => {
-        const onAbort = () => {
-          reject(new Error('Aborted'))
-        }
-        const timeoutId = setTimeout(() => {
+        let timeoutId: ReturnType<typeof setTimeout>
+        const cleanup = () => {
+          clearTimeout(timeoutId)
           abortSignal.removeEventListener('abort', onAbort)
-          resolve(null) // timeout - fall through to direct request
+        }
+        const onAbort = () => {
+          cleanup()
+          cancelRuntimeWorkerRequest(requestId)
+          reject(markNoFallbackError(createAbortError()))
+        }
+        timeoutId = setTimeout(() => {
+          abortSignal.removeEventListener('abort', onAbort)
+          cancelRuntimeWorkerRequest(requestId)
+          resolve(null)
         }, runtimeMessageTimeoutMs)
         abortSignal.addEventListener('abort', onAbort, { once: true })
+        if (abortSignal.aborted) onAbort()
         messagePromise
           .then((r) => {
-            clearTimeout(timeoutId)
-            abortSignal.removeEventListener('abort', onAbort)
+            cleanup()
             resolve(r)
           })
           .catch((e) => {
-            clearTimeout(timeoutId)
-            abortSignal.removeEventListener('abort', onAbort)
+            cleanup()
             reject(e)
           })
       })
@@ -919,33 +1371,11 @@ async function bgRequestImpl<
         throw new Error(`Background request failed (${method} ${path})`)
       }
       if (!resp.ok) {
-        const msg = formatErrorMessage(
-          resp?.error,
-          `Request failed: ${resp?.status}`
-        )
-        if (!isAbortErrorMessage(msg) && !isExpectedStatus(resp?.status)) {
-          console.warn("[tldw:request]", method, path, resp?.status, msg)
-          await recordRequestError({
-            method: String(method),
-            path: String(path),
-            status: resp?.status,
-            error: msg,
-            source: "background"
-          })
-          if (!suppressBackendUnavailableEvent) {
-            notifyBackendUnavailable({
-              method: String(method),
-              path: String(path),
-              status: resp?.status,
-              error: msg,
-              source: "background"
-            })
-          }
-        }
-        const error = buildRequestError(msg, resp?.status, resp?.data)
+        const failure = await handleFailedResponse(resp, "background")
         if (!returnResponse) {
-          throw markNoFallbackError(error)
+          throw markNoFallbackError(failure.error)
         }
+        return await resolveArrayBufferResponse(failure.response)
       }
       return await resolveArrayBufferResponse(resp as RuntimeResponsePayload)
     }
@@ -960,13 +1390,21 @@ async function bgRequestImpl<
       } else {
         throw e
       }
-    } else if (!methodIsSafeFallback && !isExtensionTransportFailure(e)) {
-      throw e
+    } else if (!methodIsSafeFallback) {
+      const canReplayIdempotentWrite =
+        allowIdempotentWriteFallback && isExtensionTransportFailure(e)
+      if (!isProvenNoReceiverError(e) && !canReplayIdempotentWrite) {
+        throw e
+      }
     }
   }
 
   // Fallback: direct fetch (web/dev context)
-  const storage = createSafeStorage({ area: "local" })
+  const storage =
+    directContext?.storage || createSafeStorage({ area: "local" })
+  if (servicePromptConfig) {
+    await resolveCurrentServicePromptConfig(storage, servicePromptConfig)
+  }
   const resp = await tldwRequest(
     {
       path,
@@ -978,36 +1416,18 @@ async function bgRequestImpl<
       abortSignal,
       responseType
     },
-    createDirectRuntime(storage)
+    createDirectRuntime(
+      storage,
+      servicePromptConfig,
+      directContext ? directContext.config : configSnapshot
+    )
   )
   if (!resp?.ok) {
-    const msg = formatErrorMessage(
-      resp?.error,
-      `Request failed: ${resp?.status}`
-    )
-    if (!isAbortErrorMessage(msg) && !isExpectedStatus(resp?.status)) {
-      console.warn("[tldw:request]", method, path, resp?.status, msg)
-      await recordRequestError({
-        method: String(method),
-        path: String(path),
-        status: resp?.status,
-        error: msg,
-        source: "direct"
-      })
-      if (!suppressBackendUnavailableEvent) {
-        notifyBackendUnavailable({
-          method: String(method),
-          path: String(path),
-          status: resp?.status,
-          error: msg,
-          source: "direct"
-        })
-      }
-    }
-    const error = buildRequestError(msg, resp?.status, resp?.data)
+    const failure = await handleFailedResponse(resp, "direct")
     if (!returnResponse) {
-      throw error
+      throw failure.error
     }
+    return failure.response as T
   }
   return (returnResponse ? resp : resp.data) as T
 }
@@ -1023,6 +1443,8 @@ export interface BgStreamInit<
   streamIdleTimeoutMs?: number
   abortSignal?: AbortSignal
   onOpen?: () => void
+  sanitizeRagProviderStreamError?: boolean
+  servicePromptConfig?: ServicePromptTargetConfig
 }
 
 const deriveStreamIdleTimeout = (cfg: any, path: string, override?: number) => {
@@ -1060,6 +1482,36 @@ const parseStreamError = async (resp: Response): Promise<StreamErrorInfo> => {
   return { message: resp.statusText }
 }
 
+type SanitizedRagStreamError = Error & {
+  status?: number
+  code?: string
+  details?: unknown
+}
+
+const buildSanitizedRagStreamError = (
+  error: unknown
+): SanitizedRagStreamError => {
+  const sanitized = sanitizeRagProviderFailure(error)
+  const streamError = new Error(sanitized.message) as SanitizedRagStreamError
+  if (typeof sanitized.status === "number") {
+    streamError.status = sanitized.status
+  }
+  if (sanitized.code) {
+    streamError.code = sanitized.code
+  }
+  if (sanitized.details) {
+    streamError.details = sanitized.details
+  }
+  return streamError
+}
+
+const createSanitizedRagStreamAbortError = (): RequestAbortError =>
+  createAbortError(RAG_STREAM_ABORT_MESSAGE)
+
+const isRequestAbort = (error: unknown, signal?: AbortSignal): boolean =>
+  Boolean(signal?.aborted) ||
+  isExplicitRequestCancellation(error)
+
 const yieldToBrowser = async (): Promise<void> => {
   if (typeof requestAnimationFrame === "function") {
     await new Promise<void>((resolve) => {
@@ -1071,16 +1523,23 @@ const yieldToBrowser = async (): Promise<void> => {
 }
 
 /**
- * Direct fetch streaming implementation - used as fallback when extension messaging is unavailable or times out
+ * Direct streaming fallback used before handoff, or for safe/idempotent replay.
  */
-async function* bgStreamDirect<
+async function* bgStreamDirectUnsafe<
   P extends AllowedPath = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(
-  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen }: BgStreamInit<P, M>
+  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen, servicePromptConfig }: BgStreamInit<P, M>
 ): AsyncGenerator<string> {
+  if (servicePromptConfig && !isServicePromptRequestPath(path, method)) {
+    throw new Error(
+      "A Service Prompt config can only be used with Service Prompt requests."
+    )
+  }
   const storage = createSafeStorage({ area: "local" })
-  const cfg = (await resolveDirectConfig(storage)) || null
+  const cfg = servicePromptConfig
+    ? await resolveCurrentServicePromptConfig(storage, servicePromptConfig)
+    : (await resolveDirectConfig(storage)) || null
   const normalizedPath = normalizeKnownPathQuirks(path)
   const isAbsolute = typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath)
   const absolutePath = isAbsolute ? String(normalizedPath) : ""
@@ -1164,7 +1623,9 @@ async function* bgStreamDirect<
       if (csrfToken) resolvedHeaders["X-CSRF-Token"] = csrfToken
     }
   } else if (!shouldSkipAuth && !hostedMode && cfg?.authMode === "single-user") {
-    const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+    const runtimeApiKey = servicePromptConfig
+      ? ""
+      : String(getRuntimeSingleUserApiKeyOverride() || "").trim()
     const key = runtimeApiKey || String(cfg?.apiKey || "").trim()
     if (!key) {
       throw new Error(
@@ -1241,30 +1702,46 @@ async function* bgStreamDirect<
     cfg?.refreshToken
   ) {
     try {
-      const refreshResp = await fetch(`${baseUrl}/api/v1/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: cfg.refreshToken })
-      })
-      if (refreshResp.ok) {
-        const tokens = await refreshResp.json().catch(() => null)
-        if (tokens?.access_token) {
-          const latestCfg =
-            (await resolveDirectConfig(storage)) || null
-          const updated = {
-            ...(latestCfg || cfg || {}),
-            accessToken: tokens.access_token,
-            refreshToken:
-              tokens?.refresh_token ||
-              latestCfg?.refreshToken ||
-              cfg?.refreshToken
-          }
-          await storage.set("tldwConfig", updated)
-          resolvedHeaders["Authorization"] = `Bearer ${tokens.access_token}`
+      if (servicePromptConfig) {
+        await refreshAuthDirect(storage, servicePromptConfig, cfg)
+        const latestCfg = await resolveCurrentServicePromptConfig(
+          storage,
+          servicePromptConfig
+        )
+        if (latestCfg.accessToken) {
+          resolvedHeaders["Authorization"] = `Bearer ${latestCfg.accessToken}`
           resp = await fetchStream()
         }
+      } else {
+        const refreshResp = await fetch(`${baseUrl}/api/v1/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: cfg.refreshToken }),
+          signal: controller.signal
+        })
+        if (refreshResp.ok) {
+          const tokens = await refreshResp.json().catch(() => null)
+          if (tokens?.access_token && !controller.signal.aborted) {
+            const latestCfg = await commitDirectRefresh(
+              storage,
+              cfg,
+              String(cfg.accessToken || "").trim(),
+              String(cfg.refreshToken || "").trim(),
+              {
+                accessToken: tokens.access_token,
+                refreshToken: tokens.refresh_token || cfg.refreshToken
+              }
+            )
+            resolvedHeaders["Authorization"] =
+              `Bearer ${latestCfg.accessToken}`
+            resp = await fetchStream()
+          }
+        }
       }
-    } catch {
+    } catch (error) {
+      if (isRequestConfigScopeChangedError(error)) {
+        throw error
+      }
       // ignore refresh failures and continue with original response
     }
   }
@@ -1347,11 +1824,38 @@ async function* bgStreamDirect<
   }
 }
 
+async function* bgStreamDirect<
+  P extends AllowedPath = AllowedPath,
+  M extends AllowedMethodFor<P> = AllowedMethodFor<P>
+>(init: BgStreamInit<P, M>): AsyncGenerator<string> {
+  try {
+    yield* bgStreamDirectUnsafe(init)
+  } catch (error) {
+    if (!init.sanitizeRagProviderStreamError) {
+      throw error
+    }
+    if (isRequestAbort(error, init.abortSignal)) {
+      throw createSanitizedRagStreamAbortError()
+    }
+    throw buildSanitizedRagStreamError(error)
+  }
+}
+
 export async function* bgStream<
   P extends AllowedPath = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(
-  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen }: BgStreamInit<P, M>
+  {
+    path,
+    method = 'POST' as UpperLower<M>,
+    headers = {},
+    body,
+    streamIdleTimeoutMs,
+    abortSignal,
+    onOpen,
+    sanitizeRagProviderStreamError = false,
+    servicePromptConfig
+  }: BgStreamInit<P, M>
 ): AsyncGenerator<string> {
   const hasHttpStatus = (value: unknown): boolean =>
     extractHttpStatus(value) !== null
@@ -1398,9 +1902,22 @@ export async function* bgStream<
 
   const hasRuntimePort = await canUseRuntimePortTransport()
   if (!hasRuntimePort) {
-    yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
+    yield* bgStreamDirect({
+      path,
+      method,
+      headers,
+      body,
+      streamIdleTimeoutMs,
+      abortSignal,
+      onOpen: notifyOpen,
+      sanitizeRagProviderStreamError,
+      servicePromptConfig
+    })
     return
   }
+  const mayReplayAfterHandoff =
+    isSafeFallbackMethod(method) ||
+    isIdempotentWriteFallbackAllowed(method, path, body)
 
   // Derive the response-acquisition timeout from config instead of a hard-coded
   // 5s. Time-to-response over 5s is normal for large prompts, RAG,
@@ -1416,18 +1933,27 @@ export async function* bgStream<
     String(path),
     Number(streamIdleTimeoutMs)
   )
-  // Only idempotent (GET/HEAD/OPTIONS) streams may be replayed via direct fetch
-  // after a transport loss. Non-idempotent generation POSTs must not be re-sent.
-  const methodAllowsStreamReplay = isSafeFallbackMethod(method)
-
-  // Extension port-based streaming with connection-time and connection-establish fallback.
+  // Extension streaming permits direct fallback before postMessage handoff.
   let port: ReturnType<typeof browser.runtime.connect>
   try {
     port = browser.runtime.connect({ name: 'tldw:stream' })
   } catch (connectError) {
     if (!abortSignal?.aborted) {
-      yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
+      yield* bgStreamDirect({
+        path,
+        method,
+        headers,
+        body,
+        streamIdleTimeoutMs,
+        abortSignal,
+        onOpen: notifyOpen,
+        sanitizeRagProviderStreamError,
+        servicePromptConfig
+      })
       return
+    }
+    if (sanitizeRagProviderStreamError) {
+      throw createSanitizedRagStreamAbortError()
     }
     throw connectError
   }
@@ -1437,9 +1963,10 @@ export async function* bgStream<
   let firstDataReceived = false
   let streamOpened = false
   let connectionTimedOut = false
+  let handoffAttempted = false
 
   // Connection timeout - if no response body is acquired within the derived window,
-  // give up on the port. Whether we may then replay depends on idempotency.
+  // give up on the port. After handoff, replay requires explicit idempotency.
   const connectionTimer = setTimeout(() => {
     if (!streamOpened && !done) {
       connectionTimedOut = true
@@ -1467,22 +1994,42 @@ export async function* bgStream<
     } else if (msg?.event === 'done') {
       done = true
     } else if (msg?.event === 'error') {
-      const streamError = new Error(msg.message || 'Stream error') as Error & {
-        status?: number
-        details?: unknown
-        retryAfter?: number
-      }
-      if (typeof msg.status === "number" && Number.isFinite(msg.status)) {
-        streamError.status = Math.trunc(msg.status)
-      }
-      if (typeof msg.details !== "undefined" && msg.details !== null) {
-        streamError.details = sanitizeResponseData(msg.details)
-      }
-      const retryAfterMs = parseRetryAfter(
-        typeof msg.retryAfter === "string" ? msg.retryAfter : null
-      )
-      if (typeof retryAfterMs === "number" && retryAfterMs > 0) {
-        streamError.retryAfter = retryAfterMs / 1_000
+      const streamError = sanitizeRagProviderStreamError
+        ? buildSanitizedRagStreamError({
+            status: msg.status,
+            error: msg.message,
+            data:
+              msg.details ??
+              (msg.code
+                ? {
+                    detail: {
+                      error_code: msg.code,
+                      message: msg.message
+                    }
+                  }
+                : undefined)
+          })
+        : (new Error(msg.message || 'Stream error') as Error & {
+            status?: number
+            details?: unknown
+            retryAfter?: number
+          })
+      if (!sanitizeRagProviderStreamError) {
+        if (typeof msg.status === "number" && Number.isFinite(msg.status)) {
+          streamError.status = Math.trunc(msg.status)
+        }
+        if (typeof msg.details !== "undefined" && msg.details !== null) {
+          streamError.details = sanitizeResponseData(msg.details)
+        }
+        const retryAfterMs = parseRetryAfter(
+          typeof msg.retryAfter === "string" ? msg.retryAfter : null
+        )
+        if (typeof retryAfterMs === "number" && retryAfterMs > 0) {
+          const retryableError = streamError as Error & {
+            retryAfter?: number
+          }
+          retryableError.retryAfter = retryAfterMs / 1_000
+        }
       }
       error = streamError
       done = true
@@ -1509,7 +2056,23 @@ export async function* bgStream<
   }
   if (!done) {
     try {
-      port.postMessage({ path, method, headers, body, streamIdleTimeoutMs })
+      // postMessage may throw after delivery. Once attempted, dispatch is
+      // unknown and therefore conservatively treated as having occurred.
+      handoffAttempted = true
+      const portPayload: Record<string, unknown> = {
+        path,
+        method,
+        headers,
+        body,
+        streamIdleTimeoutMs
+      }
+      if (sanitizeRagProviderStreamError) {
+        portPayload.sanitizeRagProviderStreamError = true
+      }
+      if (servicePromptConfig) {
+        portPayload.servicePromptConfig = servicePromptConfig
+      }
+      port.postMessage(portPayload)
     } catch (e) {
       clearTimeout(connectionTimer)
       if (!error) error = e
@@ -1539,17 +2102,30 @@ export async function* bgStream<
         sliceStartedAt = Date.now()
       }
     }
-    // If connection timed out before acquiring a response body, only idempotent
-    // requests may be replayed via direct fetch. The worker may already be
-    // generating server-side for a non-idempotent POST, so replaying it would
-    // double-generate and persist a duplicate message — surface a timeout error.
+    if (sanitizeRagProviderStreamError && abortSignal?.aborted) {
+      throw createSanitizedRagStreamAbortError()
+    }
+    // Resolve a response-acquisition timeout without replaying ambiguous dispatch.
     if (connectionTimedOut) {
-      if (methodAllowsStreamReplay) {
-        yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
+      if (!handoffAttempted || mayReplayAfterHandoff) {
+        yield* bgStreamDirect({
+          path,
+          method,
+          headers,
+          body,
+          streamIdleTimeoutMs,
+          abortSignal,
+          onOpen: notifyOpen,
+          sanitizeRagProviderStreamError,
+          servicePromptConfig
+        })
         return
       }
+      const timeoutMessage = `Stream connection timed out after ${connectionTimeoutMs}ms before response acquisition`
       throw createStreamInterruptedError(
-        `Stream connection timed out after ${connectionTimeoutMs}ms before response acquisition`
+        sanitizeRagProviderStreamError
+          ? sanitizeRagProviderFailure(new Error(timeoutMessage)).message
+          : timeoutMessage
       )
     }
     const shouldFallbackAfterEarlyError =
@@ -1558,16 +2134,28 @@ export async function* bgStream<
       Boolean(error) &&
       (isExtensionTransportFailure(error) || !hasHttpStatus(error))
     if (shouldFallbackAfterEarlyError) {
-      // Same rule for an early transport failure: replay idempotent requests
-      // only; never re-send a non-idempotent generation POST.
-      if (methodAllowsStreamReplay) {
-        yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
+      if (!handoffAttempted || mayReplayAfterHandoff) {
+        yield* bgStreamDirect({
+          path,
+          method,
+          headers,
+          body,
+          streamIdleTimeoutMs,
+          abortSignal,
+          onOpen: notifyOpen,
+          sanitizeRagProviderStreamError,
+          servicePromptConfig
+        })
         return
       }
-      throw createStreamInterruptedError(
+      const interruptionMessage =
         error instanceof Error
           ? error.message
           : String(error || "Stream transport interrupted")
+      throw createStreamInterruptedError(
+        sanitizeRagProviderStreamError
+          ? sanitizeRagProviderFailure(error).message
+          : interruptionMessage
       )
     }
     const shouldGracefullyEndAfterPartialStreamError =
@@ -1578,13 +2166,28 @@ export async function* bgStream<
     if (shouldGracefullyEndAfterPartialStreamError) {
       // We already delivered data to the caller; avoid replaying non-idempotent
       // streamed requests after transport loss and let caller finalize partial output.
-      const interruptionDetail =
-        error instanceof Error ? error.message : String(error || "Stream transport interrupted")
-      yield JSON.stringify({
+      const rawInterruptionDetail =
+        error instanceof Error
+          ? error.message
+          : String(error || "Stream transport interrupted")
+      const sanitizedInterruption = sanitizeRagProviderStreamError
+        ? sanitizeRagProviderFailure(error)
+        : null
+      const interruption: Record<string, unknown> = {
         event: "stream_transport_interrupted",
-        detail: interruptionDetail,
+        detail: sanitizedInterruption?.message ?? rawInterruptionDetail,
         partial_response_saved: true
-      })
+      }
+      if (sanitizedInterruption?.status) {
+        interruption.status = sanitizedInterruption.status
+      }
+      if (sanitizedInterruption?.code) {
+        interruption.code = sanitizedInterruption.code
+      }
+      if (sanitizedInterruption?.details) {
+        interruption.details = sanitizedInterruption.details
+      }
+      yield JSON.stringify(interruption)
       return
     }
     if (error) throw error
@@ -1609,6 +2212,7 @@ export type BgUploadFile = {
 export interface BgUploadInit<P extends AllowedPath = AllowedPath, M extends AllowedMethodFor<P> = AllowedMethodFor<P>> {
   path: P
   method?: UpperLower<M>
+  headers?: Record<string, string>
   // key/value fields to include alongside file in FormData
   fields?: Record<string, any>
   // File payload as raw bytes with metadata (structured-cloneable)
@@ -1618,23 +2222,33 @@ export interface BgUploadInit<P extends AllowedPath = AllowedPath, M extends All
   fileFieldName?: string
   // Optional timeout override for upload requests
   timeoutMs?: number
+  abortSignal?: AbortSignal
   responseType?: "json" | "text" | "arrayBuffer"
   preferDirect?: boolean
+  servicePromptConfig?: ServicePromptTargetConfig
 }
 
 export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M extends AllowedMethodFor<P> = AllowedMethodFor<P>>(
   {
     path,
     method = 'POST' as UpperLower<M>,
+    headers = {},
     fields = {},
     file,
     files,
     fileFieldName,
     timeoutMs,
+    abortSignal,
     responseType,
-    preferDirect = false
+    preferDirect = false,
+    servicePromptConfig
   }: BgUploadInit<P, M>
 ): Promise<T> {
+  if (servicePromptConfig && !isServicePromptRequestPath(path, method)) {
+    throw new Error(
+      "A Service Prompt config can only be used with Service Prompt requests."
+    )
+  }
   const hasRuntimeMessage =
     !preferDirect &&
     Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
@@ -1650,14 +2264,67 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
           ? timeoutMs
           : DEFAULT_UPLOAD_RUNTIME_MESSAGE_TIMEOUT_MS
       const uploadTimeout = Math.max(5000, resolvedTimeout)
+      if (abortSignal?.aborted) {
+        throw markNoFallbackError(createAbortError())
+      }
+      const requestId =
+        servicePromptConfig && abortSignal
+          ? createRuntimeRequestId()
+          : undefined
       const uploadPromise = browser.runtime.sendMessage({
         type: 'tldw:upload',
-        payload: { path, method, fields, file, files, fileFieldName, timeoutMs: resolvedTimeout, responseType }
+        payload: {
+          path,
+          method,
+          headers,
+          fields,
+          file,
+          files,
+          fileFieldName,
+          timeoutMs: resolvedTimeout,
+          responseType,
+          servicePromptConfig,
+          ...(requestId ? { requestId } : {})
+        }
       })
-      const uploadTimeoutPromise = new Promise<null>((resolve) =>
-        setTimeout(() => resolve(null), uploadTimeout)
-      )
-      const resp = await Promise.race([uploadPromise, uploadTimeoutPromise]) as { ok: boolean; error?: string; status?: number; data: T } | undefined | null
+      const resp = await new Promise<{
+        ok: boolean
+        error?: string
+        status?: number
+        data: T
+      } | undefined | null>((resolve, reject) => {
+        let timeoutId: ReturnType<typeof setTimeout>
+        const onAbort = () => {
+          clearTimeout(timeoutId)
+          abortSignal?.removeEventListener('abort', onAbort)
+          cancelRuntimeWorkerRequest(requestId)
+          reject(markNoFallbackError(createAbortError()))
+        }
+        timeoutId = setTimeout(() => {
+          abortSignal?.removeEventListener('abort', onAbort)
+          cancelRuntimeWorkerRequest(requestId)
+          resolve(null)
+        }, uploadTimeout)
+        abortSignal?.addEventListener('abort', onAbort, { once: true })
+        if (abortSignal?.aborted) onAbort()
+        uploadPromise.then(
+          (response) => {
+            clearTimeout(timeoutId)
+            abortSignal?.removeEventListener('abort', onAbort)
+            resolve(response as {
+              ok: boolean
+              error?: string
+              status?: number
+              data: T
+            } | undefined)
+          },
+          (error) => {
+            clearTimeout(timeoutId)
+            abortSignal?.removeEventListener('abort', onAbort)
+            reject(error)
+          }
+        )
+      })
       if (resp === null) {
         throw markNoFallbackError(
           new Error("Extension messaging timeout"),
@@ -1684,7 +2351,7 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
         } else {
           throw e
         }
-      } else if (!methodIsSafeFallback && !isExtensionTransportFailure(e)) {
+      } else if (!methodIsSafeFallback && !isProvenNoReceiverError(e)) {
         throw e
       }
     }
@@ -1747,8 +2414,16 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
 
   const storage = createSafeStorage({ area: "local" })
   const resp = await tldwRequest(
-    { path, method, body: formData, timeoutMs, responseType },
-    createDirectRuntime(storage)
+    {
+      path,
+      method,
+      headers,
+      body: formData,
+      timeoutMs,
+      abortSignal,
+      responseType
+    },
+    createDirectRuntime(storage, servicePromptConfig)
   )
   if (!resp?.ok) {
     const msg = formatErrorMessage(

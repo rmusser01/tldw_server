@@ -3,12 +3,13 @@
 #
 import asyncio
 import inspect
+import math
 import os
 import re
 import threading
 import time
-from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Annotated, Any, Callable, Optional
 from weakref import WeakKeyDictionary
@@ -27,8 +28,14 @@ from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import (
 
 #
 # Local imports
-from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import (
+    DatabasePool,
+    await_cancellation_safe_cleanup,
+    get_db_pool,
+    select_transaction_cleanup_failure,
+)
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
     DatabaseError,
     DatabaseLockError,
     InvalidTokenError,
@@ -44,27 +51,47 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService, get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, get_password_service
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal, is_single_user_principal
+from tldw_Server_API.app.core.AuthNZ.privilege_catalog import load_catalog
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+    ProfileUserWriteRejected,
+    _profile_user_backend,
+    _profile_user_connection_identity,
+)
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import RateLimiter, get_rate_limiter
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager, get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import (
     get_settings,
 )
+from tldw_Server_API.app.core.AuthNZ.transaction_hooks import (
+    begin_after_commit_scope,
+    finish_after_commit_scope,
+)
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
+    User as User,
+)
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
     authenticate_api_key_user,
-    get_single_user_instance,
     get_request_user,
-    resolve_user_id_for_request as resolve_user_id_for_request,
-    User as User,
+    get_single_user_instance,
     verify_jwt_and_fetch_user,
+)
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
+    resolve_user_id_for_request as resolve_user_id_for_request,
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import set_scope
 from tldw_Server_API.app.core.exceptions import InactiveUserError
 from tldw_Server_API.app.core.External_Sources.connectors_service import get_policy
 from tldw_Server_API.app.core.External_Sources.policy import get_default_policy_from_env
-from tldw_Server_API.app.core.MCP_unified.monitoring import metrics
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled as _env_flag_enabled,
+)
+from tldw_Server_API.app.core.testing import (
     is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
+)
+from tldw_Server_API.app.core.testing import (
     is_production_like_env as _is_production_like_env,
 )
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
@@ -104,7 +131,22 @@ _SENSITIVE_USER_KEY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _AUTH_DEPS_RG_DIAGNOSTICS_ONLY_LOGGED: set[str] = set()
-_AUTH_DEPS_FALLBACK_RATE_WINDOWS: dict[tuple[str, str], deque[float]] = {}
+
+
+@dataclass(slots=True)
+class _FallbackRateBucket:
+    tokens: float
+    last_refill: float
+    limit: int
+    burst: int
+    window_seconds: float
+
+
+_AUTH_DEPS_FALLBACK_RATE_WINDOWS: dict[
+    tuple[str, str], _FallbackRateBucket
+] = {}
+# Bound process-local fallback state without evicting active quota buckets.
+_AUTH_DEPS_FALLBACK_RATE_BUCKET_CAPACITY = 10_000
 _AUTH_DEPS_FALLBACK_RATE_WINDOWS_LOCK = threading.Lock()
 
 
@@ -142,34 +184,6 @@ def _read_non_negative_float_env(name: str, default: float) -> float:
         )
         return default
     return max(parsed, 0.0)
-
-
-def _authnz_sqlite_lock_retry_config() -> tuple[int, float, float, int]:
-    """Return retry/backoff config for transient AuthNZ SQLite lock contention."""
-    max_retries = _read_non_negative_int_env(
-        "AUTHNZ_SQLITE_LOCK_MAX_RETRIES",
-        2,
-    )
-    retry_after_seconds = _read_non_negative_int_env(
-        "AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS",
-        1,
-    )
-    base_backoff_seconds = _read_non_negative_float_env(
-        "AUTHNZ_SQLITE_LOCK_RETRY_BASE_SECONDS",
-        0.05,
-    )
-    max_backoff_seconds = _read_non_negative_float_env(
-        "AUTHNZ_SQLITE_LOCK_RETRY_MAX_SECONDS",
-        0.25,
-    )
-    if max_backoff_seconds < base_backoff_seconds:
-        max_backoff_seconds = base_backoff_seconds
-    return (
-        max_retries,
-        base_backoff_seconds,
-        max_backoff_seconds,
-        retry_after_seconds,
-    )
 
 
 def _authnz_busy_http_exception(retry_after_seconds: int) -> HTTPException:
@@ -374,13 +388,28 @@ def _activate_scope_context(
             exc,
         )
 
+
+async def get_login_db_connection() -> AsyncGenerator[Any, None]:
+    """Yield a statement-autocommit connection for the login lifecycle.
+
+    Login's lockout and session services use separate database connections. A
+    SQLite ``BEGIN IMMEDIATE`` around the whole request would block those
+    security checks against the same database, while a normal deferred
+    connection could retain a rehash write lock. SQLite therefore uses a true
+    autocommit connection; asyncpg statements are already autocommit outside an
+    explicit transaction.
+    """
+    db_pool = await get_db_pool()
+    async with db_pool.acquire_statement_autocommit() as conn:
+        yield conn
+
+
 async def get_db_transaction() -> AsyncGenerator[Any, None]:
     """Get database connection in transaction mode.
 
     Always behaves as an async generator for FastAPI compatibility. In explicit test mode,
-    yields a lightweight pool adapter that runs queries without holding a long-lived
-    transaction to avoid event-loop and teardown issues. Otherwise, yields a
-    request-scoped transaction connection.
+    yields a lightweight pool adapter backed by one request-scoped transaction.
+    Otherwise, yields a request-scoped transaction connection.
     """
     db_pool = await get_db_pool()
 
@@ -398,6 +427,8 @@ async def get_db_transaction() -> AsyncGenerator[Any, None]:
         is_postgres_backend = bool(getattr(db_pool, "pool", None) is not None)
         conn_cm = db_pool.acquire()
         conn = await conn_cm.__aenter__()
+        transaction_cm = None
+        transaction_entered = False
 
         # NOTE: This adapter normalizes asyncpg-style ($1, fetch*) and SQLite-style
         # query/return semantics for tests. If other modules need similar behavior,
@@ -407,14 +438,29 @@ async def get_db_transaction() -> AsyncGenerator[Any, None]:
                 self._conn = _conn
                 self._is_sqlite = not is_postgres
                 self._dollar_param = re.compile(r"\$\d+")
+                expected_backend = "postgres" if is_postgres else "sqlite"
+                managed_backend = _profile_user_backend(_conn)
+                if (
+                    managed_backend is not None
+                    and managed_backend != expected_backend
+                ):
+                    raise ProfileUserWriteRejected()
+                self._authnz_profile_user_backend = expected_backend
+                self._authnz_profile_user_guard_identity = (
+                    _profile_user_connection_identity(_conn)
+                )
 
-            def _normalize_sqlite_sql(self, query: str) -> str:
-                if not self._is_sqlite or "$" not in query:
+            def _normalize_sqlite_sql(self, query: Any) -> Any:
+                if (
+                    not self._is_sqlite
+                    or type(query) is not str
+                    or "$" not in query
+                ):
                     return query
                 # Replace $1, $2 ... with '?'
                 return self._dollar_param.sub("?", query)
 
-            async def execute(self, query: str, *args: object) -> Any:
+            async def execute(self, query: Any, *args: object) -> Any:
                 # Postgres (asyncpg) supports variadic args; SQLite expects a sequence
                 if not self._is_sqlite:
                     # asyncpg connection
@@ -422,16 +468,7 @@ async def get_db_transaction() -> AsyncGenerator[Any, None]:
                 else:
                     params = args[0] if (len(args) == 1 and isinstance(args[0], (list, tuple))) else args
                     q = self._normalize_sqlite_sql(query)
-                    cur = await self._conn.execute(q, params)
-                    try:
-                        await self._conn.commit()
-                    except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
-                        logger.debug(
-                            "Test DB adapter: sqlite commit failed: {}",
-                            exc,
-                        )
-                        raise
-                    return cur
+                    return await self._conn.execute(q, params)
 
             async def fetchval(self, query: str, *args: object) -> Any | None:
                 if not self._is_sqlite:
@@ -483,41 +520,151 @@ async def get_db_transaction() -> AsyncGenerator[Any, None]:
                         return row
 
             async def commit(self) -> None:
-                if self._is_sqlite:
-                    try:
-                        await self._conn.commit()
-                    except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
-                        logger.debug(
-                            "Test DB adapter: sqlite commit failed: {}",
-                            exc,
-                        )
-                        raise
+                # Callers historically commit after individual operations. The explicit
+                # SQLite test adapter owns the transaction and finalizes it on dependency
+                # exit so multi-statement gateways remain atomic.
+                return None
 
-        adapter = _ConnAdapter(conn, is_postgres=is_postgres_backend)
+        adapter: _ConnAdapter | None = None
+        after_commit_token = begin_after_commit_scope()
+        primary_failure: BaseException | None = None
+        transaction_committed = False
+
+        def _merge_cleanup_failure(
+            primary: BaseException | None,
+            cleanup: BaseException,
+            *,
+            operation: str,
+        ) -> BaseException:
+            selected, should_log = select_transaction_cleanup_failure(
+                primary,
+                cleanup,
+            )
+            if primary is None and isinstance(cleanup, Exception):
+                should_log = True
+            if should_log:
+                logger.bind(
+                    operation=operation,
+                    exception_type=type(cleanup).__name__,
+                ).warning("Test DB adapter cleanup failed")
+            return selected
+
         try:
+            if is_postgres_backend:
+                transaction_cm = conn.transaction()
+                await transaction_cm.__aenter__()
+                transaction_entered = True
+            adapter = _ConnAdapter(conn, is_postgres=is_postgres_backend)
             yield adapter
-        finally:
-            await conn_cm.__aexit__(None, None, None)
+        except BaseException as exc:  # noqa: BLE001 - cleanup must preserve control flow
+            primary_failure = exc
+            if transaction_entered and transaction_cm is not None:
+                try:
+                    await await_cancellation_safe_cleanup(
+                        transaction_cm.__aexit__(
+                            type(primary_failure),
+                            primary_failure,
+                            primary_failure.__traceback__,
+                        )
+                    )
+                except BaseException as cleanup_exc:  # noqa: BLE001 - preserve cleanup precedence
+                    primary_failure = _merge_cleanup_failure(
+                        primary_failure,
+                        cleanup_exc,
+                        operation="postgres_rollback",
+                    )
+            elif adapter is not None and not is_postgres_backend:
+                try:
+                    await await_cancellation_safe_cleanup(conn.rollback())
+                except BaseException as cleanup_exc:  # noqa: BLE001 - preserve cleanup precedence
+                    primary_failure = _merge_cleanup_failure(
+                        primary_failure,
+                        cleanup_exc,
+                        operation="sqlite_rollback",
+                    )
+        else:
+            if is_postgres_backend and transaction_cm is not None:
+                try:
+                    await await_cancellation_safe_cleanup(
+                        transaction_cm.__aexit__(None, None, None)
+                    )
+                except BaseException as exc:  # noqa: BLE001 - preserve commit cancellation
+                    primary_failure = exc
+                else:
+                    transaction_committed = True
+            else:
+                try:
+                    await conn.commit()
+                except BaseException as exc:  # noqa: BLE001 - rollback after any commit failure
+                    primary_failure = exc
+                    try:
+                        await await_cancellation_safe_cleanup(conn.rollback())
+                    except BaseException as cleanup_exc:  # noqa: BLE001 - preserve cleanup precedence
+                        primary_failure = _merge_cleanup_failure(
+                            primary_failure,
+                            cleanup_exc,
+                            operation="sqlite_rollback",
+                        )
+                else:
+                    transaction_committed = True
+
+        try:
+            await await_cancellation_safe_cleanup(
+                conn_cm.__aexit__(
+                    type(primary_failure) if primary_failure is not None else None,
+                    primary_failure,
+                    primary_failure.__traceback__
+                    if primary_failure is not None
+                    else None,
+                )
+            )
+        except BaseException as cleanup_exc:  # noqa: BLE001 - preserve cleanup precedence
+            primary_failure = _merge_cleanup_failure(
+                primary_failure,
+                cleanup_exc,
+                operation="connection_release",
+            )
+
+        try:
+            await finish_after_commit_scope(
+                after_commit_token,
+                committed=transaction_committed,
+            )
+        except BaseException as cleanup_exc:  # noqa: BLE001 - preserve primary control failure
+            primary_failure = _merge_cleanup_failure(
+                primary_failure,
+                cleanup_exc,
+                operation="after_commit_hooks",
+            )
+
+        if primary_failure is not None:
+            raise primary_failure
     else:
         # Default: yield a request-scoped transaction so writes commit reliably.
         # For SQLite lock contention, retry only transaction-entry failures.
-        max_retries, backoff_base, backoff_max, retry_after = _authnz_sqlite_lock_retry_config()
+        policy = get_authnz_transaction_policy()
+        max_retries = policy.sqlite_lock_max_retries
+        backoff_base = policy.sqlite_lock_retry_base_seconds
+        backoff_max = policy.sqlite_lock_retry_max_seconds
+        retry_after = policy.busy_retry_after_seconds
         entry_attempt = 0
         txn_cm = None
         conn = None
 
         while True:
-            txn_cm = db_pool.transaction()
+            txn_cm = db_pool.transaction(
+                acquire_timeout_seconds=policy.db_pool_acquire_timeout_seconds,
+            )
             try:
                 conn = await txn_cm.__aenter__()
                 break
-            except DatabaseLockError as lock_exc:
+            except DatabaseLockError:
                 if entry_attempt >= max_retries:
                     logger.warning(
                         "AuthNZ DB lock contention exhausted entry retries (attempts={})",
                         entry_attempt + 1,
                     )
-                    raise _authnz_busy_http_exception(retry_after) from lock_exc
+                    raise _authnz_busy_http_exception(retry_after) from None
                 sleep_seconds = min(backoff_base * (2 ** entry_attempt), backoff_max)
                 logger.debug(
                     "AuthNZ DB lock contention on transaction entry; retrying (attempt={} sleep={}s)",
@@ -526,23 +673,35 @@ async def get_db_transaction() -> AsyncGenerator[Any, None]:
                 )
                 entry_attempt += 1
                 await asyncio.sleep(sleep_seconds)
+            except ConnectionPoolExhaustedError:
+                raise _authnz_busy_http_exception(retry_after) from None
 
         if txn_cm is None:
             raise RuntimeError("AuthNZ transaction context manager was not initialized")
 
+        after_commit_token = begin_after_commit_scope()
+        committed = False
         try:
             yield conn
         except BaseException as exc:
             try:
                 await txn_cm.__aexit__(type(exc), exc, exc.__traceback__)
-            except DatabaseLockError as lock_exc:
-                raise _authnz_busy_http_exception(retry_after) from lock_exc
+            except DatabaseLockError:
+                if isinstance(exc, asyncio.CancelledError):
+                    raise exc from None
+                raise _authnz_busy_http_exception(retry_after) from None
             raise
         else:
             try:
                 await txn_cm.__aexit__(None, None, None)
-            except DatabaseLockError as lock_exc:
-                raise _authnz_busy_http_exception(retry_after) from lock_exc
+            except DatabaseLockError:
+                raise _authnz_busy_http_exception(retry_after) from None
+            committed = True
+        finally:
+            await finish_after_commit_scope(
+                after_commit_token,
+                committed=committed,
+            )
 
 
 async def get_password_service_dep() -> PasswordService:
@@ -634,28 +793,58 @@ async def get_session_manager_dep() -> SessionManager:
                         "expires_at": datetime.now(timezone.utc).isoformat(),
                     }
 
-                async def get_user_sessions(self, user_id: int) -> list[dict[str, Any]]:
+                async def get_user_sessions(
+                    self,
+                    user_id: int,
+                    *,
+                    strict: bool = False,
+                ) -> list[dict[str, Any]]:
+                    del strict
                     async with _get_test_session_lock():
                         with _TEST_SESSION_STATE_GUARD:
                             sessions = list(_TEST_SESSION_STATE["sessions"].values())
-                        return [s for s in sessions if s.get("user_id") == user_id]
+                        return [
+                            s
+                            for s in sessions
+                            if s.get("user_id") == user_id and s.get("is_active") is True
+                        ]
 
-                async def revoke_session(self, session_id: int, *_args: object, **_kwargs: object) -> bool:
+                async def revoke_session(
+                    self,
+                    session_id: int,
+                    revoked_by: Optional[int] = None,
+                    reason: Optional[str] = None,
+                    expected_user_id: Optional[int] = None,
+                ) -> bool:
+                    del revoked_by, reason
                     async with _get_test_session_lock():
                         with _TEST_SESSION_STATE_GUARD:
                             sess = _TEST_SESSION_STATE["sessions"].get(session_id)
-                            if sess is None:
+                            if sess is None or (
+                                expected_user_id is not None
+                                and sess.get("user_id") != expected_user_id
+                            ):
                                 return False
                             sess["is_revoked"] = True
                             sess["is_active"] = False
                             return True
 
-                async def revoke_all_user_sessions(self, user_id: int) -> int:
+                async def revoke_all_user_sessions(
+                    self,
+                    user_id: int,
+                    except_session_id: Optional[int] = None,
+                    reason: str = "User requested logout from all devices",
+                    revoked_by: Optional[int] = None,
+                ) -> int:
+                    del reason, revoked_by
                     async with _get_test_session_lock():
                         with _TEST_SESSION_STATE_GUARD:
                             changed = 0
                             for s in _TEST_SESSION_STATE["sessions"].values():
-                                if s.get("user_id") == user_id:
+                                if (
+                                    s.get("user_id") == user_id
+                                    and s.get("session_id") != except_session_id
+                                ):
                                     s["is_revoked"] = True
                                     s["is_active"] = False
                                     changed += 1
@@ -1046,6 +1235,8 @@ def _mapping_from_user_like(user_obj: Any) -> dict[str, Any]:
         "subject": getattr(user_obj, "subject", None),
         "token_type": getattr(user_obj, "token_type", None),
         "jti": getattr(user_obj, "jti", None),
+        "impersonation": getattr(user_obj, "impersonation", False),
+        "impersonated_by": getattr(user_obj, "impersonated_by", None),
     }
 
 
@@ -1094,6 +1285,10 @@ def _principal_from_legacy_active_user_override(
     subject = data.get("subject")
     token_type = data.get("token_type")
     jti = data.get("jti")
+    impersonation = data.get("impersonation") is True
+    impersonated_by = (
+        _coerce_optional_int(data.get("impersonated_by")) if impersonation else None
+    )
 
     return AuthPrincipal(
         kind="user",
@@ -1104,6 +1299,8 @@ def _principal_from_legacy_active_user_override(
         subject=str(subject) if subject else None,
         token_type=str(token_type) if token_type else "access",
         jti=str(jti) if jti else None,
+        impersonation=impersonation,
+        impersonated_by=impersonated_by,
         roles=roles,
         permissions=permissions,
         is_admin=is_admin,
@@ -1384,7 +1581,37 @@ async def get_auth_principal(
     return principal
 
 
-def require_permissions(*permissions: str) -> Callable[[AuthPrincipal], Awaitable[AuthPrincipal]]:
+async def require_expected_user(
+    expected_user_id: str | None = Header(
+        default=None,
+        alias="X-TLDW-Expected-User-ID",
+        description="Authenticated user ID observed when the request scope was loaded.",
+    ),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> None:
+    """Reject a request when its optional user-scope assertion is stale."""
+
+    if expected_user_id is None:
+        return
+    actual_user_id = principal.user_id
+    if actual_user_id is not None and expected_user_id.strip() == str(actual_user_id):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_412_PRECONDITION_FAILED,
+        headers={"Cache-Control": "no-store"},
+        detail={
+            "code": "request_config_scope_changed",
+            "message": (
+                "The server or authenticated account changed before the request was sent."
+            ),
+        },
+    )
+
+
+def require_permissions(
+    *permissions: str,
+    detail: Any | None = None,
+) -> Callable[[AuthPrincipal], Awaitable[AuthPrincipal]]:
     """
     Dependency factory that enforces required permission claims on the principal.
 
@@ -1407,7 +1634,11 @@ def require_permissions(*permissions: str) -> Callable[[AuthPrincipal], Awaitabl
                 logger.debug("require_permissions denied principal; missing={}", missing)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied: missing {', '.join(missing)}",
+                detail=(
+                    detail
+                    if detail is not None
+                    else f"Permission denied: missing {', '.join(missing)}"
+                ),
             )
         return principal
 
@@ -1695,6 +1926,12 @@ def _principal_has_admin_bypass_claims(principal: AuthPrincipal | None) -> bool:
     return bool(permissions & _ADMIN_BYPASS_PERMISSIONS)
 
 
+def principal_has_admin_bypass_claims(principal: AuthPrincipal | None) -> bool:
+    """Return whether verified role/permission claims authorize an admin bypass."""
+
+    return _principal_has_admin_bypass_claims(principal)
+
+
 def _principal_has_admin_claims(principal: AuthPrincipal | None) -> bool:
     if principal is None:
         return False
@@ -1769,29 +2006,68 @@ def _consume_auth_deps_fallback_rate_token(
     dependency: str,
     identifier: str,
     limit: int,
+    burst: int | None = None,
     window_seconds: float,
 ) -> tuple[bool, int]:
-    """Consume one token from an in-process fallback fixed-window limiter."""
-    safe_limit = max(1, int(limit))
+    """Consume one token from an in-process fallback token bucket."""
+    safe_limit = int(limit)
+    safe_burst = safe_limit if burst is None else int(burst)
     safe_window = max(1.0, float(window_seconds))
     now = time.monotonic()
-    cutoff = now - safe_window
     key = (dependency, identifier)
 
     with _AUTH_DEPS_FALLBACK_RATE_WINDOWS_LOCK:
+        stale_keys = []
+        for candidate_key, candidate in _AUTH_DEPS_FALLBACK_RATE_WINDOWS.items():
+            refill_rate = candidate.limit / candidate.window_seconds
+            seconds_to_full = (
+                max(0.0, candidate.burst - candidate.tokens) / refill_rate
+            )
+            stale_after = max(candidate.window_seconds, seconds_to_full)
+            if now - candidate.last_refill >= stale_after:
+                stale_keys.append(candidate_key)
+        for stale_key in stale_keys:
+            _AUTH_DEPS_FALLBACK_RATE_WINDOWS.pop(stale_key, None)
+
+        if safe_limit <= 0 or safe_burst <= 0:
+            return False, int(math.ceil(safe_window))
+
         bucket = _AUTH_DEPS_FALLBACK_RATE_WINDOWS.get(key)
-        if bucket is None:
-            bucket = deque()
+        if (
+            bucket is None
+            and len(_AUTH_DEPS_FALLBACK_RATE_WINDOWS)
+            >= _AUTH_DEPS_FALLBACK_RATE_BUCKET_CAPACITY
+        ):
+            return False, int(math.ceil(safe_window))
+        if (
+            bucket is None
+            or bucket.limit != safe_limit
+            or bucket.burst != safe_burst
+            or bucket.window_seconds != safe_window
+        ):
+            bucket = _FallbackRateBucket(
+                tokens=float(safe_burst),
+                last_refill=now,
+                limit=safe_limit,
+                burst=safe_burst,
+                window_seconds=safe_window,
+            )
             _AUTH_DEPS_FALLBACK_RATE_WINDOWS[key] = bucket
+        else:
+            elapsed = max(0.0, now - bucket.last_refill)
+            bucket.tokens = min(
+                float(safe_burst),
+                bucket.tokens + elapsed * safe_limit / safe_window,
+            )
+            bucket.last_refill = now
 
-        while bucket and bucket[0] <= cutoff:
-            bucket.popleft()
-
-        if len(bucket) >= safe_limit:
-            retry_after = int(max(1.0, (bucket[0] + safe_window) - now))
+        if bucket.tokens < 1.0:
+            retry_after = math.ceil(
+                (1.0 - bucket.tokens) * safe_window / safe_limit
+            )
             return False, retry_after
 
-        bucket.append(now)
+        bucket.tokens -= 1.0
         return True, 0
 
 
@@ -1895,26 +2171,40 @@ async def check_auth_rate_limit(request: Request, rate_limiter=None) -> None:
 
 
 # ---------------------------------------------------------------------------------
-# RBAC resource-aware rate limit (stub - logs selected limits, no enforcement yet)
+# RBAC resource-aware rate limit
+
+
+def _catalog_rate_limit_for_resource(resource: str) -> tuple[int, int] | None:
+    """Resolve the resource's configured catalog rate class."""
+
+    catalog = load_catalog()
+    scope_entry = next((entry for entry in catalog.scopes if entry.id == resource), None)
+    if scope_entry is None:
+        return None
+    rate_class = next(
+        (
+            entry
+            for entry in catalog.rate_limit_classes
+            if entry.id == scope_entry.rate_limit_class
+        ),
+        None,
+    )
+    if rate_class is None:
+        return None
+    return int(rate_class.requests_per_min), int(rate_class.burst)
 
 async def enforce_rbac_rate_limit(
     request: Request,
     resource: str,
     db_pool: DatabasePool = Depends(get_db_pool)
 ):
-    """
-    Resource-aware rate limit selector (stub).
+    """Enforce the strictest catalog, user, or role per-minute limit."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        return
 
-    Reads the strictest configured limit for the current user from rbac_user_rate_limits
-    and rbac_role_rate_limits. Currently logs selected limits without enforcing.
-    """
+    candidates: list[tuple[int | None, int | None]] = []
     try:
-        user_id = getattr(request.state, 'user_id', None)
-        if not user_id:
-            # Unknown user context; skip
-            return
-
-        # User-level limit
         user_limit = None
         role_limit = None
 
@@ -1961,8 +2251,6 @@ async def enforce_rbac_rate_limit(
                 )
                 role_limit = await c2.fetchone()
 
-        # Choose strictest (lowest) effective limits
-        candidates = []
         if user_limit:
             lp = user_limit[0] if not isinstance(user_limit, dict) else user_limit.get('limit_per_min')
             bp = user_limit[1] if not isinstance(user_limit, dict) else user_limit.get('burst')
@@ -1972,26 +2260,79 @@ async def enforce_rbac_rate_limit(
             bp = role_limit[1] if not isinstance(role_limit, dict) else role_limit.get('burst')
             candidates.append((lp, bp))
 
-        if candidates:
-            limit_per_min = min([c[0] for c in candidates if c[0] is not None]) if any(c[0] for c in candidates) else None
-            burst = min([c[1] for c in candidates if c[1] is not None]) if any(c[1] for c in candidates) else None
-            logger.debug(
-                "RBAC rate-limit selected for user {}, resource {}: rpm={}, burst={}",
-                user_id,
-                resource,
-                limit_per_min,
-                burst,
-            )
-        else:
-            logger.debug("RBAC rate-limit: no configured limits for user {}, resource {}", user_id, resource)
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as e:
         logger.debug("RBAC rate-limit selection failed: error_type={}", type(e).__name__)
 
+    try:
+        catalog_limit = _catalog_rate_limit_for_resource(resource)
+    except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error(
+            "RBAC rate-limit catalog lookup failed: error_type={}",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Rate limiting temporarily unavailable",
+        ) from exc
+    if catalog_limit is not None:
+        candidates.append(catalog_limit)
 
-def rbac_rate_limit(resource: str):
-    """Factory returning a dependency that logs selected RBAC limits for the given resource."""
+    per_minute_values = [
+        int(limit)
+        for limit, _burst in candidates
+        if limit is not None
+    ]
+    if not per_minute_values:
+        logger.debug("RBAC rate-limit: no configured limit")
+        return
+
+    burst_values = [
+        int(burst)
+        for _limit, burst in candidates
+        if burst is not None
+    ]
+    limit_per_min = min(per_minute_values)
+    burst = min(burst_values) if burst_values else limit_per_min
+    identifier = _auth_deps_rate_limit_identifier(request, resource)
+    try:
+        allowed, retry_after = _consume_auth_deps_fallback_rate_token(
+            dependency=f"rbac_rate_limit:{resource}",
+            identifier=identifier,
+            limit=limit_per_min,
+            burst=burst,
+            window_seconds=60.0,
+        )
+    except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error(
+            "RBAC rate-limit enforcement failed: error_type={}",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Rate limiting temporarily unavailable",
+        ) from exc
+
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded for resource: {resource}",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+def rbac_rate_limit(resource: str, *, detail: Any | None = None):
+    """Factory returning an enforcing RBAC resource-rate dependency."""
     async def _dep(request: Request, db_pool: DatabasePool = Depends(get_db_pool)):
-        await enforce_rbac_rate_limit(request, resource, db_pool)
+        try:
+            await enforce_rbac_rate_limit(request, resource, db_pool)
+        except HTTPException as exc:
+            if detail is None or exc.status_code != status.HTTP_429_TOO_MANY_REQUESTS:
+                raise
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=detail,
+                headers=exc.headers,
+            ) from exc
     try:
         _dep._tldw_rate_limit_resource = resource
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
@@ -2041,6 +2382,109 @@ def _vk_usage_check_and_increment(key: object, limit: int) -> bool:
         return True
 
 
+async def _consume_token_quota_plan(
+    plan: Mapping[str, Any],
+    *,
+    db_pool: DatabasePool,
+) -> None:
+    """Consume one previously validated JWT or API-key quota unit."""
+
+    quota_kind = str(plan.get("kind") or "")
+    identifier = str(plan.get("identifier") or "")
+    counter_type = str(plan.get("counter_type") or "")
+    limit = plan.get("limit")
+    if not quota_kind or not identifier or not counter_type or not isinstance(limit, int):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Token quota validation is unavailable",
+        )
+
+    try:
+        if quota_kind == "jwt":
+            from tldw_Server_API.app.core.AuthNZ.quotas import (
+                increment_and_check_jwt_quota,
+            )
+
+            allowed, _count = await increment_and_check_jwt_quota(
+                db_pool=db_pool,
+                jti=identifier,
+                counter_type=counter_type,
+                limit=limit,
+            )
+            fallback_key = (f"jwt:{identifier}", counter_type)
+        elif quota_kind == "api_key":
+            from tldw_Server_API.app.core.AuthNZ.quotas import (
+                increment_and_check_api_key_quota,
+            )
+
+            allowed, _count = await increment_and_check_api_key_quota(
+                db_pool=db_pool,
+                api_key_id=int(identifier),
+                counter_type=counter_type,
+                limit=limit,
+            )
+            fallback_key = (f"apikey:{identifier}", counter_type)
+        else:
+            raise ValueError("unsupported deferred quota kind")
+    except HTTPException:
+        raise
+    except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
+        fallback_key = (
+            f"{quota_kind}:{identifier}",
+            counter_type,
+        )
+        if not _vk_usage_check_and_increment(fallback_key, limit):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: token quota exceeded",
+            ) from exc
+        return
+
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: token quota exceeded",
+        )
+
+
+async def consume_deferred_token_quota(
+    request: Request,
+    db_pool: DatabasePool = Depends(get_db_pool),
+) -> None:
+    """Debit a quota plan recorded by ``require_token_scope`` exactly once."""
+
+    if getattr(request.state, "_auth_deferred_token_quota_consumed", False):
+        return
+    plan = getattr(request.state, "_auth_deferred_token_quota", None)
+    if plan is None:
+        return
+    await _consume_token_quota_plan(plan, db_pool=db_pool)
+    request.state._auth_deferred_token_quota_consumed = True
+
+
+async def _consume_or_defer_token_quota(
+    request: Request,
+    *,
+    db_pool: DatabasePool,
+    kind: str,
+    identifier: str,
+    counter_type: str,
+    limit: int,
+    defer_count: bool,
+) -> None:
+    plan = {
+        "kind": kind,
+        "identifier": identifier,
+        "counter_type": counter_type,
+        "limit": limit,
+    }
+    if defer_count:
+        request.state._auth_deferred_token_quota = plan
+        request.state._auth_deferred_token_quota_consumed = False
+        return
+    await _consume_token_quota_plan(plan, db_pool=db_pool)
+
+
 def require_token_scope(
     scope: str,
     *,
@@ -2051,6 +2495,7 @@ def require_token_scope(
     allow_admin_bypass: bool = True,
     endpoint_id: Optional[str] = None,
     count_as: Optional[str] = None,
+    defer_count: bool = False,
 ):
     """
     Create a dependency that enforces a scoped JWT ("virtual key").
@@ -2064,6 +2509,8 @@ def require_token_scope(
       API keys are accepted via `X-API-KEY` or Authorization bearer (non-JWT).
     - If `allow_admin_bypass=True`, admin users skip this enforcement.
     - If the bearer token is not a JWT, enforce API key constraints using that token.
+    - If ``defer_count`` is true, validate quota metadata now and let the caller
+      debit it later with ``consume_deferred_token_quota``.
     """
     async def _checker(
         request: Request,
@@ -2249,19 +2696,24 @@ def require_token_scope(
                             max_calls = payload.get("max_calls")
                         if isinstance(max_calls, int) and max_calls >= 0:
                             try:
-                                from tldw_Server_API.app.core.AuthNZ.quotas import increment_and_check_jwt_quota
-                                allowed, _cnt = await increment_and_check_jwt_quota(
+                                await _consume_or_defer_token_quota(
+                                    request,
                                     db_pool=db_pool,
-                                    jti=str(jti),
+                                    kind="jwt",
+                                    identifier=str(jti),
                                     counter_type=str(count_as),
                                     limit=int(max_calls),
+                                    defer_count=defer_count,
                                 )
-                                if not allowed:
-                                    raise HTTPException(status_code=403, detail="Forbidden: token quota exceeded")
                             except HTTPException:
                                 raise
                             except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as err:
                                 # Defensive: fall back to process-local counters if quota backend fails.
+                                if defer_count:
+                                    raise HTTPException(
+                                        status_code=503,
+                                        detail="Token quota validation is unavailable",
+                                    ) from err
                                 if not _vk_usage_check_and_increment(key, int(max_calls)):
                                     raise HTTPException(
                                         status_code=403,
@@ -2464,19 +2916,24 @@ def require_token_scope(
                                 quota = meta.get("max_calls")
                             if isinstance(quota, int) and quota >= 0:
                                 try:
-                                    from tldw_Server_API.app.core.AuthNZ.quotas import increment_and_check_api_key_quota
-                                    allowed, _cnt = await increment_and_check_api_key_quota(
+                                    await _consume_or_defer_token_quota(
+                                        request,
                                         db_pool=db_pool,
-                                        api_key_id=int(key_id),
+                                        kind="api_key",
+                                        identifier=str(key_id),
                                         counter_type=str(count_as),
                                         limit=int(quota),
+                                        defer_count=defer_count,
                                     )
-                                    if not allowed:
-                                        raise HTTPException(status_code=403, detail="Forbidden: API key quota exceeded")
                                 except HTTPException:
                                     raise
                                 except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as err:
                                     # Defensive: fall back to process-local counters if quota backend fails.
+                                    if defer_count:
+                                        raise HTTPException(
+                                            status_code=503,
+                                            detail="Token quota validation is unavailable",
+                                        ) from err
                                     key = (f"apikey:{key_id}", str(count_as))
                                     if not _vk_usage_check_and_increment(key, int(quota)):
                                         raise HTTPException(
@@ -2499,6 +2956,7 @@ def require_token_scope(
     try:
         _checker._tldw_endpoint_id = endpoint_id
         _checker._tldw_count_as = count_as
+        _checker._tldw_defer_count = defer_count
         _checker._tldw_scope_name = scope
         _checker._tldw_token_scope = True
         _checker._tldw_token_scope_required = str(scope)

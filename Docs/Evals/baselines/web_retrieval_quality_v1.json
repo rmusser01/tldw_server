@@ -1,0 +1,101 @@
+{
+  "algorithm_versions": {
+    "budget": "char-utf8-budget-v1",
+    "crawl": "ordered-visit-stop-v1",
+    "extraction": "token-shingle-f1-v1",
+    "provenance": "required-field-recall-v1",
+    "search_order": "position-match-v1",
+    "token_estimate": "characters-ceil-div4-v1"
+  },
+  "baseline_revision": "f676e23549ea8ed82ef53493260621a05b281863",
+  "cases": [
+    {
+      "budget": {
+        "characters": 33,
+        "estimated_tokens": {
+          "algorithm": "characters-ceil-div4-v1",
+          "authoritative": false,
+          "value": 9
+        },
+        "utf8_bytes": 33
+      },
+      "id": "crawl-cycle-page-limit",
+      "kind": "crawl_graph",
+      "metrics": {
+        "position_match_ratio": 1.0,
+        "stop_reason_match": true,
+        "visited_url_recall": 1.0
+      },
+      "score": 1.0
+    },
+    {
+      "budget": {
+        "characters": 79,
+        "estimated_tokens": {
+          "algorithm": "characters-ceil-div4-v1",
+          "authoritative": false,
+          "value": 20
+        },
+        "utf8_bytes": 79
+      },
+      "id": "extraction-navigation-omission",
+      "kind": "extraction",
+      "metrics": {
+        "accuracy": 1.0,
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0
+      },
+      "score": 1.0
+    },
+    {
+      "budget": {
+        "characters": 62,
+        "estimated_tokens": {
+          "algorithm": "characters-ceil-div4-v1",
+          "authoritative": false,
+          "value": 16
+        },
+        "utf8_bytes": 62
+      },
+      "id": "provenance-safe-fields",
+      "kind": "provenance",
+      "metrics": {
+        "required_field_recall": 1.0
+      },
+      "score": 1.0
+    },
+    {
+      "budget": {
+        "characters": 41,
+        "estimated_tokens": {
+          "algorithm": "characters-ceil-div4-v1",
+          "authoritative": false,
+          "value": 11
+        },
+        "utf8_bytes": 41
+      },
+      "id": "search-provider-order-tie",
+      "kind": "search_order",
+      "metrics": {
+        "exact_order_match": true,
+        "position_match_ratio": 1.0
+      },
+      "score": 1.0
+    }
+  ],
+  "fixture_schema_version": "web-retrieval-quality-fixture-v1",
+  "report_schema_version": "web-retrieval-quality-report-v1",
+  "suite_id": "current-dev-minimal-v1",
+  "summary": {
+    "case_count": 4,
+    "estimated_tokens": {
+      "algorithm": "characters-ceil-div4-v1",
+      "authoritative": false,
+      "value": 54
+    },
+    "mean_case_score": 1.0,
+    "total_characters": 215,
+    "total_utf8_bytes": 215
+  }
+}

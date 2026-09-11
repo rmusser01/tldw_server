@@ -42,6 +42,19 @@ def _make_wav_bytes(duration_sec: float = 0.1, sr: int = 16000, freq: float = 44
     return buf.getvalue()
 
 
+@pytest.fixture
+def identity_audio_canonicalization(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep positive endpoint tests independent from a host FFmpeg install."""
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Lib as atlib
+
+    monkeypatch.setattr(
+        atlib,
+        "convert_to_wav",
+        lambda path, *_args, **_kwargs: path,
+        raising=True,
+    )
+
+
 def test_transcriptions_requires_auth_401(bypass_api_limits):
 
 
@@ -54,7 +67,11 @@ def test_transcriptions_requires_auth_401(bypass_api_limits):
         assert resp.status_code == 401
 
 
-def test_transcriptions_ok_with_override(monkeypatch, bypass_api_limits):
+def test_transcriptions_ok_with_override(
+    monkeypatch,
+    bypass_api_limits,
+    identity_audio_canonicalization,
+):
 
 
     ctx = bypass_api_limits(app)
@@ -142,7 +159,11 @@ def test_translations_requires_auth_401(bypass_api_limits):
         assert resp.status_code == 401
 
 
-def test_translations_ok_with_override(monkeypatch, bypass_api_limits):
+def test_translations_ok_with_override(
+    monkeypatch,
+    bypass_api_limits,
+    identity_audio_canonicalization,
+):
 
 
     ctx = bypass_api_limits(app)
@@ -218,7 +239,11 @@ def test_translations_ok_with_override(monkeypatch, bypass_api_limits):
             app.dependency_overrides.pop(get_request_user, None)
 
 
-def test_transcriptions_parakeet_variant_routes_to_parakeet(monkeypatch, bypass_api_limits):
+def test_transcriptions_parakeet_variant_routes_to_parakeet(
+    monkeypatch,
+    bypass_api_limits,
+    identity_audio_canonicalization,
+):
 
 
     """Model strings like 'parakeet-mlx' should route to the Parakeet provider, not Whisper."""
@@ -304,7 +329,11 @@ def test_transcriptions_parakeet_variant_routes_to_parakeet(monkeypatch, bypass_
             app.dependency_overrides.pop(get_request_user, None)
 
 
-def test_transcriptions_default_model_uses_config(monkeypatch, bypass_api_limits):
+def test_transcriptions_default_model_uses_config(
+    monkeypatch,
+    bypass_api_limits,
+    identity_audio_canonicalization,
+):
 
 
     """Omitting model should use config.txt defaults for the STT provider."""
@@ -373,7 +402,11 @@ def test_transcriptions_default_model_uses_config(monkeypatch, bypass_api_limits
             app.dependency_overrides.pop(get_request_user, None)
 
 
-def test_transcriptions_qwen2audio_variant_routes_to_qwen2audio(monkeypatch, bypass_api_limits):
+def test_transcriptions_qwen2audio_variant_routes_to_qwen2audio(
+    monkeypatch,
+    bypass_api_limits,
+    identity_audio_canonicalization,
+):
 
 
     """Model strings like 'qwen2audio-test' should route to Qwen2Audio provider, not Whisper."""

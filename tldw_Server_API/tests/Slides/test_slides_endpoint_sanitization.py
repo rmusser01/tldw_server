@@ -2,12 +2,17 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.testclient import TestClient
 from starlette.responses import Response
 
 from tldw_Server_API.app.api.v1.endpoints import slides as slides_ep
+from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
+    is_standalone_sensitive_route,
+    standalone_response_invalid_response,
+)
+from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabaseError
 from tldw_Server_API.app.core.Slides.slides_generator import SlidesGenerationError
-
 
 pytestmark = pytest.mark.unit
 
@@ -132,6 +137,7 @@ def test_generate_presentation_latency_metric_log_is_sanitized(monkeypatch):
                 deleted=0,
                 client_id="1",
                 version=1,
+                content_kind="structured_slides",
             )
 
     logger_stub = _LoggerStub()
@@ -152,7 +158,7 @@ def test_generate_presentation_latency_metric_log_is_sanitized(monkeypatch):
         )
     )
 
-    assert response.id == "presentation-1"
+    assert response["id"] == "presentation-1"
     assert logger_stub.debugs == [("Failed to record slides generation latency metric", (), {})]
     rendered = " ".join([logger_stub.debugs[0][0], *(str(arg) for arg in logger_stub.debugs[0][1])])
     assert "/private/slides-latency.db" not in rendered
@@ -185,8 +191,8 @@ def test_resolve_media_source_text_document_fallback_log_is_sanitized(monkeypatc
 
 async def test_slides_health_backend_failure_log_is_sanitized(monkeypatch):
     class _RaisingSlidesDB:
-        def list_presentations(self, **_kwargs):
-            raise RuntimeError("slides db exploded at /private/slides-health.db")
+        def probe_health(self):
+            raise SlidesDatabaseError("slides db exploded at /private/slides-health.db")
 
     logger_stub = _LoggerStub()
     monkeypatch.setattr(slides_ep, "logger", logger_stub)
@@ -200,3 +206,55 @@ async def test_slides_health_backend_failure_log_is_sanitized(monkeypatch):
     rendered = " ".join([logger_stub.warnings[0][0], *(str(arg) for arg in logger_stub.warnings[0][1])])
     assert "/private/slides-health.db" not in rendered
     assert "exploded" not in rendered
+
+
+async def test_slides_health_uses_source_free_database_probe():
+    class _SlidesDB:
+        def __init__(self) -> None:
+            self.probe_calls = 0
+
+        def probe_health(self) -> None:
+            self.probe_calls += 1
+
+        def list_presentations(self, **_kwargs):
+            raise AssertionError("health must not load presentation detail rows")
+
+    db = _SlidesDB()
+
+    response = await slides_ep.slides_health(db=db)
+
+    assert response.service == "slides"
+    assert response.status == "ok"
+    assert db.probe_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/api/v1/slides/presentations/deck-1"),
+        ("PUT", "/api/v1/slides/presentations/deck-1/html-source"),
+        ("POST", "/api/v1/slides/presentations/deck-1/restore"),
+        ("GET", "/api/v1/slides/presentations/deck-1/versions/1"),
+        ("GET", "/api/v1/slides/presentations/deck-1/export"),
+    ],
+)
+def test_broken_source_response_routes_return_one_fixed_redacted_error(method, path):
+    sentinel = "SECRET-HTML-DOCUMENT-RESPONSE"
+    app = FastAPI()
+
+    async def _broken_response():
+        raise RuntimeError(sentinel)
+
+    @app.exception_handler(Exception)
+    async def _handler(request: Request, exc: Exception):
+        assert is_standalone_sensitive_route(request.method, request.url.path)
+        return standalone_response_invalid_response(exc)
+
+    app.add_api_route(path, _broken_response, methods=[method])
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.request(method, path)
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "standalone_html_response_invalid"}
+    assert sentinel not in response.text

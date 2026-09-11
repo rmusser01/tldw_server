@@ -579,6 +579,7 @@ async def test_upload_files_returns_404_if_session_is_deleted_while_waiting_for_
     session_root = tmp_path / "session-deleted"
     workspace_root = session_root / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(svc._orch, "_workspace_root", lambda: tmp_path.resolve())
 
     state = {"exists": True}
 

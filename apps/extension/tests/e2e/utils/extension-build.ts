@@ -16,6 +16,7 @@ type LaunchOptions = {
   launchTimeoutMs?: number
   optionsTarget?: string
   prepareOptionsPage?: ({ context, page }: { context: BrowserContext; page: Page }) => void | Promise<void>
+  profileRoot?: string
 }
 
 const BASE_EXTENSION_STORAGE_SEED = {
@@ -121,12 +122,122 @@ async function waitForStorageSeed(page: any) {
   )
 }
 
-function makeTempProfileDirs() {
-  const root = path.resolve('tmp-playwright-profile')
+async function waitForBackgroundReady(page: any) {
+  const response = await page.evaluate(
+    (timeoutMs: number) =>
+      new Promise<unknown>((resolve) => {
+        const deadline = Date.now() + timeoutMs
+        let settled = false
+        let retryTimer: ReturnType<typeof setTimeout> | undefined
+        const finish = (value: unknown) => {
+          if (settled) return
+          settled = true
+          clearTimeout(timeout)
+          if (retryTimer) clearTimeout(retryTimer)
+          resolve(value)
+        }
+        const retry = () => {
+          const remaining = deadline - Date.now()
+          if (remaining <= 0) finish(null)
+          else retryTimer = setTimeout(attempt, Math.min(100, remaining))
+        }
+        const attempt = () => {
+          try {
+            chrome.runtime.sendMessage(
+              { type: "tldw:diagnostics" },
+              (value) => {
+                const ready =
+                  !chrome.runtime.lastError &&
+                  value !== null &&
+                  typeof value === "object" &&
+                  (value as { ok?: unknown }).ok === true
+                if (ready) finish(value)
+                else retry()
+              },
+            )
+          } catch {
+            retry()
+          }
+        }
+        const timeout = setTimeout(() => finish(null), timeoutMs)
+        attempt()
+      }),
+    30_000,
+  )
+
+  if (
+    !response ||
+    typeof response !== "object" ||
+    (response as { ok?: unknown }).ok !== true
+  ) {
+    throw new Error("Extension background worker did not become ready within 30000ms")
+  }
+}
+
+function makeTempProfileDirs(profileRoot?: string) {
+  const root = profileRoot === undefined
+    ? path.resolve('tmp-playwright-profile')
+    : path.resolve(profileRoot)
   fs.mkdirSync(root, { recursive: true })
+  if (profileRoot !== undefined) {
+    fs.mkdirSync(path.join(root, 'tmp'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'crash-dumps'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'appdata'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'localappdata'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'xdg-cache'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'xdg-config'), { recursive: true })
+  }
   const homeDir = fs.mkdtempSync(path.join(root, 'home-'))
   const userDataDir = fs.mkdtempSync(path.join(root, 'user-data-'))
   return { homeDir, userDataDir }
+}
+
+const STRICT_CHROMIUM_ENV_KEYS = [
+  'PATH',
+  'DISPLAY',
+  'WAYLAND_DISPLAY',
+  'XAUTHORITY',
+  'XDG_RUNTIME_DIR',
+  'DBUS_SESSION_BUS_ADDRESS',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'SYSTEMROOT',
+  'WINDIR',
+  'COMSPEC',
+  'PATHEXT',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'LD_LIBRARY_PATH',
+  'DYLD_LIBRARY_PATH',
+  'DYLD_FALLBACK_LIBRARY_PATH'
+] as const
+
+function makeChromiumEnv(
+  homeDir: string,
+  profileRoot?: string
+): NodeJS.ProcessEnv {
+  if (profileRoot === undefined) {
+    return { ...process.env, HOME: homeDir }
+  }
+
+  const env: NodeJS.ProcessEnv = {}
+  for (const key of STRICT_CHROMIUM_ENV_KEYS) {
+    if (process.env[key] !== undefined) env[key] = process.env[key]
+  }
+  const tempDir = path.join(profileRoot, 'tmp')
+  return {
+    ...env,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
+    TMPDIR: tempDir,
+    TMP: tempDir,
+    TEMP: tempDir,
+    APPDATA: path.join(profileRoot, 'appdata'),
+    LOCALAPPDATA: path.join(profileRoot, 'localappdata'),
+    XDG_CACHE_HOME: path.join(profileRoot, 'xdg-cache'),
+    XDG_CONFIG_HOME: path.join(profileRoot, 'xdg-config')
+  }
 }
 
 function isExtensionBuildDir(dir: string): boolean {
@@ -226,7 +337,8 @@ export async function launchWithBuiltExtension(
     seedLocalStorage,
     launchTimeoutMs,
     optionsTarget,
-    prepareOptionsPage
+    prepareOptionsPage,
+    profileRoot
   }: LaunchOptions = {}
 ) {
   const normalizedSeed = normalizeBuiltExtensionSeedConfig(seedConfig)
@@ -258,13 +370,15 @@ export async function launchWithBuiltExtension(
       ? configuredLaunchTimeout
       : 30000)
 
-  const { homeDir, userDataDir } = makeTempProfileDirs()
+  const resolvedProfileRoot = profileRoot === undefined ? undefined : path.resolve(profileRoot)
+  const { homeDir, userDataDir } = makeTempProfileDirs(resolvedProfileRoot)
   const executablePath = resolveChromiumExecutablePath(
     process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
   )
   const channel = resolvePlaywrightChannel()
   const headless = resolveExtensionHeadlessMode()
   const launchExtensionPath = prepareExtensionLaunchPath(extensionPath, {
+    deterministicManifestKey: resolvedProfileRoot !== undefined,
     preserveDefaultLocaleCatalog: false,
     rootDir: path.join(userDataDir, "extension-launch")
   })
@@ -274,20 +388,18 @@ export async function launchWithBuiltExtension(
     channel,
     acceptDownloads: true,
     ignoreDefaultArgs: ['--disable-extensions'],
-    env: {
-      ...process.env,
-      HOME: homeDir
-    },
+    env: makeChromiumEnv(homeDir, resolvedProfileRoot),
     executablePath: executablePath || undefined,
     args: [
       `--disable-extensions-except=${launchExtensionPath}`,
       `--load-extension=${launchExtensionPath}`,
       '--no-crashpad',
       '--disable-crash-reporter',
-      '--crash-dumps-dir=/tmp'
+      `--crash-dumps-dir=${resolvedProfileRoot ? path.join(resolvedProfileRoot, 'crash-dumps') : '/tmp'}`
     ]
   })
 
+  try {
   const configuredTargetWait = Number.parseInt(
     String(process.env.TLDW_E2E_EXTENSION_TARGET_WAIT_MS || ""),
     10
@@ -503,20 +615,10 @@ export async function launchWithBuiltExtension(
   const sidepanelUrl = `chrome-extension://${extensionId}/sidepanel.html`
 
   const page = await context.newPage()
-  try {
-    await prepareOptionsPage?.({ context, page })
-    await page.goto(resolveExtensionPageUrl(optionsUrl, optionsTarget))
-    await waitForStorageSeed(page)
-  } catch (error) {
-    try {
-      await context.close()
-    } catch (cleanupError) {
-      if (error instanceof Error && error.cause === undefined) {
-        error.cause = cleanupError
-      }
-    }
-    throw error
-  }
+  await prepareOptionsPage?.({ context, page })
+  await page.goto(resolveExtensionPageUrl(optionsUrl, optionsTarget))
+  await waitForStorageSeed(page)
+  await waitForBackgroundReady(page)
 
   // When seeding config, proactively hydrate the connection store so tests do
   // not race first-run onboarding checks on initial mount.
@@ -571,4 +673,15 @@ export async function launchWithBuiltExtension(
   }
 
   return { context, page, openSidepanel, extensionId, optionsUrl, sidepanelUrl }
+  } catch (error) {
+    try {
+      await context.close()
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Extension launch failed and persistent context cleanup failed"
+      )
+    }
+    throw error
+  }
 }

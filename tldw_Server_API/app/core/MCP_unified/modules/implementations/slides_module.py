@@ -14,15 +14,46 @@ from typing import Any, Optional
 from loguru import logger
 
 from ....DB_Management.media_db.api import managed_media_database
+from ....Slides.presentation_service import (
+    KNOWN_CONTENT_KINDS,
+    STANDALONE_HTML,
+    STRUCTURED_SLIDES,
+    PresentationService,
+    presentation_summary,
+)
 from ....Slides.slides_db import ConflictError
+from ....Slides.standalone_html_validation_pool import (
+    STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY,
+)
 from ..base import BaseModule, create_tool_definition
 from ..disk_space import get_free_disk_space_gb
 
 # Available Reveal.js themes
 REVEAL_THEMES = [
-    "black", "white", "league", "beige", "sky", "night",
-    "serif", "simple", "solarized", "blood", "moon", "dracula"
+    "black",
+    "white",
+    "league",
+    "beige",
+    "sky",
+    "night",
+    "serif",
+    "simple",
+    "solarized",
+    "blood",
+    "moon",
+    "dracula",
 ]
+
+_HTML_TARGET_REJECTED_TOOLS = frozenset(
+    {
+        "slides.presentations.update",
+        "slides.presentations.patch",
+        "slides.presentations.reorder",
+        "slides.versions.get",
+        "slides.versions.restore",
+        "slides.export",
+    }
+)
 
 
 class SlidesModule(BaseModule):
@@ -38,14 +69,17 @@ class SlidesModule(BaseModule):
         checks = {"initialized": True, "driver_available": False, "disk_space": False}
         try:
             from ....Slides.slides_db import SlidesDatabase
+
             _ = SlidesDatabase
             checks["driver_available"] = True
         except (ImportError, AttributeError):
             checks["driver_available"] = False
         try:
             from pathlib import Path
+
             try:
                 from tldw_Server_API.app.core.Utils.Utils import get_project_root
+
                 base = Path(get_project_root())
             except (ImportError, AttributeError, RuntimeError):
                 base = Path(__file__).resolve().parents[5]
@@ -484,10 +518,24 @@ class SlidesModule(BaseModule):
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any = None) -> Any:
         args = self.sanitize_input(arguments)
+        if self._has_unknown_discriminator(args):
+            return self._unsupported_content_kind(tool_name, content_kind="unknown")
+        if self._requests_standalone_html(args):
+            return self._unsupported_content_kind(tool_name)
         try:
             self.validate_tool_arguments(tool_name, args)
         except (ValueError, TypeError, KeyError) as ve:
             raise ValueError(f"Invalid arguments for {tool_name}: {ve}") from ve
+
+        if tool_name in _HTML_TARGET_REJECTED_TOOLS:
+            rejected = await asyncio.to_thread(
+                self._reject_html_target_sync,
+                context,
+                tool_name,
+                args,
+            )
+            if rejected is not None:
+                return rejected
 
         # Presentations CRUD
         if tool_name == "slides.presentations.list":
@@ -537,8 +585,87 @@ class SlidesModule(BaseModule):
 
         raise ValueError(f"Unknown tool: {tool_name}")
 
+    @staticmethod
+    def _unsupported_content_kind(
+        tool_name: str,
+        *,
+        content_kind: str = STANDALONE_HTML,
+    ) -> dict[str, Any]:
+        """Return the exact bounded MCP content-kind rejection."""
+
+        return {
+            "success": False,
+            "error": {
+                "code": "operation_not_supported_for_content_kind",
+                "operation": tool_name,
+                "content_kind": content_kind,
+            },
+        }
+
+    @staticmethod
+    def _shallow_discriminator_containers(args: dict[str, Any]) -> list[dict[str, Any]]:
+        containers = [args]
+        for key in ("updates", "patch"):
+            value = args.get(key)
+            if isinstance(value, dict):
+                containers.append(value)
+        return containers
+
+    @classmethod
+    def _has_unknown_discriminator(cls, args: dict[str, Any]) -> bool:
+        """Reject supplied shallow discriminators outside the closed kind set."""
+
+        return any(
+            field in container and container[field] not in KNOWN_CONTENT_KINDS
+            for container in cls._shallow_discriminator_containers(args)
+            for field in ("content_kind", "generation_mode")
+        )
+
+    @staticmethod
+    def _requests_standalone_html(args: dict[str, Any]) -> bool:
+        """Recognize the shallow standalone discriminators guarded by transport."""
+
+        return any(
+            "html_document" in container
+            or container.get("content_kind") == STANDALONE_HTML
+            or container.get("generation_mode") == STANDALONE_HTML
+            for container in SlidesModule._shallow_discriminator_containers(args)
+        )
+
+    @staticmethod
+    def _validation_pool_from_context(context: Any) -> Any:
+        metadata = getattr(context, "metadata", None)
+        if not isinstance(metadata, dict):
+            return None
+        return metadata.get(STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY)
+
+    def _reject_html_target_sync(
+        self,
+        context: Any,
+        tool_name: str,
+        args: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Guard an MCP target from its immutable kind projection."""
+
+        db = self._open_db(context)
+        try:
+            service = PresentationService(db)
+            target = service.guard_target(
+                str(args.get("presentation_id")),
+                KNOWN_CONTENT_KINDS,
+                include_deleted=tool_name.startswith("slides.versions."),
+            )
+            if target.content_kind != STANDALONE_HTML:
+                return None
+            return self._unsupported_content_kind(tool_name)
+        except KeyError:
+            return None
+        finally:
+            db.close_connection()
+
     def _open_db(self, context: Any):
         from ....Slides.slides_db import SlidesDatabase
+
         if context is None or not getattr(context, "db_paths", None):
             raise ValueError("Missing user context for Slides access")
         slides_path = context.db_paths.get("slides")
@@ -568,6 +695,7 @@ class SlidesModule(BaseModule):
             "deleted": bool(row.deleted),
             "client_id": row.client_id,
             "version": row.version,
+            "content_kind": getattr(row, "content_kind", STRUCTURED_SLIDES),
         }
 
     def _version_to_dict(self, row) -> dict[str, Any]:
@@ -588,15 +716,30 @@ class SlidesModule(BaseModule):
     def _list_presentations_sync(self, context: Any, args: dict[str, Any]) -> dict[str, Any]:
         db = self._open_db(context)
         try:
-            rows, total = db.list_presentations(
+            service = PresentationService(db)
+            rows, total = service.list_summaries(
+                accepted_content_kinds=KNOWN_CONTENT_KINDS,
                 limit=int(args.get("limit", 50)),
                 offset=int(args.get("offset", 0)),
                 include_deleted=bool(args.get("include_deleted", False)),
                 sort_column=args.get("sort_column", "last_modified"),
                 sort_direction=args.get("sort_direction", "DESC"),
             )
-            presentations = [self._presentation_to_dict(r) for r in rows]
-            int(args.get("limit", 50))
+            include_deleted = bool(args.get("include_deleted", False))
+            presentations = [
+                (
+                    presentation_summary(row)
+                    if row.content_kind == STANDALONE_HTML
+                    else self._presentation_to_dict(
+                        service.get_detail(
+                            row.id,
+                            KNOWN_CONTENT_KINDS,
+                            include_deleted=include_deleted,
+                        )
+                    )
+                )
+                for row in rows
+            ]
             offset = int(args.get("offset", 0))
             has_more = offset + len(presentations) < total
             return {
@@ -614,14 +757,29 @@ class SlidesModule(BaseModule):
     def _search_presentations_sync(self, context: Any, args: dict[str, Any]) -> dict[str, Any]:
         db = self._open_db(context)
         try:
-            rows, total = db.search_presentations(
+            service = PresentationService(db)
+            rows, total = service.search_summaries(
+                accepted_content_kinds=KNOWN_CONTENT_KINDS,
                 query=args.get("query"),
                 limit=int(args.get("limit", 50)),
                 offset=int(args.get("offset", 0)),
                 include_deleted=bool(args.get("include_deleted", False)),
             )
-            presentations = [self._presentation_to_dict(r) for r in rows]
-            int(args.get("limit", 50))
+            include_deleted = bool(args.get("include_deleted", False))
+            presentations = [
+                (
+                    presentation_summary(row)
+                    if row.content_kind == STANDALONE_HTML
+                    else self._presentation_to_dict(
+                        service.get_detail(
+                            row.id,
+                            KNOWN_CONTENT_KINDS,
+                            include_deleted=include_deleted,
+                        )
+                    )
+                )
+                for row in rows
+            ]
             offset = int(args.get("offset", 0))
             has_more = offset + len(presentations) < total
             return {
@@ -639,8 +797,25 @@ class SlidesModule(BaseModule):
     def _get_presentation_sync(self, context: Any, args: dict[str, Any]) -> dict[str, Any]:
         db = self._open_db(context)
         try:
-            row = db.get_presentation_by_id(
-                args.get("presentation_id"),
+            service = PresentationService(db)
+            presentation_id = args.get("presentation_id")
+            kind = service.guard_target(
+                presentation_id,
+                KNOWN_CONTENT_KINDS,
+                include_deleted=bool(args.get("include_deleted", False)),
+            )
+            if kind.content_kind == STANDALONE_HTML:
+                return {
+                    "presentation": presentation_summary(
+                        service.get_metadata(
+                            presentation_id,
+                            include_deleted=bool(args.get("include_deleted", False)),
+                        )
+                    )
+                }
+            row = service.get_detail(
+                presentation_id,
+                KNOWN_CONTENT_KINDS,
                 include_deleted=bool(args.get("include_deleted", False)),
             )
             return {"presentation": self._presentation_to_dict(row)}
@@ -694,9 +869,10 @@ class SlidesModule(BaseModule):
         # If JSON, extract text fields
         try:
             data = json.loads(slides)
-            if isinstance(data, dict) and "slides" in data:
+            items = data.get("slides", []) if isinstance(data, dict) else data
+            if isinstance(items, list):
                 texts = []
-                for slide in data.get("slides", []):
+                for slide in items:
                     if isinstance(slide, dict):
                         texts.append(slide.get("title", ""))
                         texts.append(slide.get("content", ""))
@@ -720,7 +896,9 @@ class SlidesModule(BaseModule):
 
     @staticmethod
     def _validate_slide_order(slide_order: list[int], slide_count: int) -> None:
-        if any(isinstance(index, bool) or not isinstance(index, int) for index in slide_order) or sorted(slide_order) != list(range(slide_count)):
+        if any(isinstance(index, bool) or not isinstance(index, int) for index in slide_order) or sorted(
+            slide_order
+        ) != list(range(slide_count)):
             raise ValueError(f"slide_order must be a permutation of 0..{slide_count - 1}")
 
     async def _update_presentation(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -833,12 +1011,20 @@ class SlidesModule(BaseModule):
         try:
             pid = args.get("presentation_id")
             expected_version = args.get("expected_version")
-            db.soft_delete_presentation(pid, expected_version)
-            return {
+            service = PresentationService(db)
+            kind = service.guard_target(pid, KNOWN_CONTENT_KINDS)
+            service.delete_presentation(
+                presentation_id=pid,
+                expected_version=expected_version,
+            )
+            response = {
                 "presentation_id": pid,
                 "action": "soft_deleted",
                 "success": True,
             }
+            if kind.content_kind == STANDALONE_HTML:
+                response["presentation"] = presentation_summary(service.get_metadata(pid, include_deleted=True))
+            return response
         except KeyError:
             raise ValueError(f"Presentation not found: {args.get('presentation_id')}") from None
         except ConflictError as exc:
@@ -847,19 +1033,34 @@ class SlidesModule(BaseModule):
             db.close_connection()
 
     async def _restore_presentation(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
-        return await asyncio.to_thread(self._restore_presentation_sync, context, args)
-
-    def _restore_presentation_sync(self, context: Any, args: dict[str, Any]) -> dict[str, Any]:
         db = self._open_db(context)
         try:
             pid = args.get("presentation_id")
             expected_version = args.get("expected_version")
-            row = db.restore_presentation(pid, expected_version)
+            service = PresentationService(
+                db,
+                validation_pool=self._validation_pool_from_context(context),
+            )
+            kind = service.guard_target(
+                pid,
+                KNOWN_CONTENT_KINDS,
+                include_deleted=True,
+            )
+            PresentationService.require_operation(kind.content_kind, "restore")
+            row = await service.restore_presentation(
+                presentation_id=pid,
+                expected_version=expected_version,
+            )
+            presentation = (
+                presentation_summary(service.get_metadata(pid, include_deleted=True))
+                if kind.content_kind == STANDALONE_HTML
+                else self._presentation_to_dict(row)
+            )
             return {
                 "presentation_id": pid,
                 "action": "restored",
                 "success": True,
-                "presentation": self._presentation_to_dict(row),
+                "presentation": presentation,
             }
         except KeyError:
             raise ValueError(f"Presentation not found: {args.get('presentation_id')}") from None
@@ -926,7 +1127,12 @@ class SlidesModule(BaseModule):
                 "structure": {
                     "slides": [
                         {"order": 0, "layout": "title", "title": "Presentation Title", "content": "Subtitle"},
-                        {"order": 1, "layout": "content", "title": "Overview", "content": "- Point 1\n- Point 2\n- Point 3"},
+                        {
+                            "order": 1,
+                            "layout": "content",
+                            "title": "Overview",
+                            "content": "- Point 1\n- Point 2\n- Point 3",
+                        },
                         {"order": 2, "layout": "content", "title": "Details", "content": "Main content here"},
                         {"order": 3, "layout": "content", "title": "Conclusion", "content": "Summary and next steps"},
                     ]
@@ -940,7 +1146,12 @@ class SlidesModule(BaseModule):
                     "slides": [
                         {"order": 0, "layout": "title", "title": "Business Proposal", "content": "Company Name"},
                         {"order": 1, "layout": "content", "title": "Executive Summary", "content": "Key points"},
-                        {"order": 2, "layout": "content", "title": "Problem Statement", "content": "Challenge we address"},
+                        {
+                            "order": 2,
+                            "layout": "content",
+                            "title": "Problem Statement",
+                            "content": "Challenge we address",
+                        },
                         {"order": 3, "layout": "content", "title": "Solution", "content": "Our approach"},
                         {"order": 4, "layout": "content", "title": "Next Steps", "content": "Action items"},
                     ]
@@ -1000,13 +1211,36 @@ class SlidesModule(BaseModule):
     def _list_versions_sync(self, context: Any, args: dict[str, Any]) -> dict[str, Any]:
         db = self._open_db(context)
         try:
-            rows, total = db.list_presentation_versions(
-                presentation_id=args.get("presentation_id"),
-                limit=int(args.get("limit", 20)),
-                offset=int(args.get("offset", 0)),
+            presentation_id = args.get("presentation_id")
+            service = PresentationService(db)
+            kind = service.guard_target(
+                presentation_id,
+                KNOWN_CONTENT_KINDS,
+                include_deleted=True,
             )
-            versions = [self._version_to_dict(r) for r in rows]
-            int(args.get("limit", 20))
+            PresentationService.require_operation(kind.content_kind, "versions")
+            if kind.content_kind == STANDALONE_HTML:
+                rows, total = db.list_presentation_version_metadata(
+                    presentation_id=presentation_id,
+                    limit=int(args.get("limit", 20)),
+                    offset=int(args.get("offset", 0)),
+                )
+                versions = [
+                    {
+                        "presentation_id": row.presentation_id,
+                        "version": row.version,
+                        "content_kind": kind.content_kind,
+                        "created_at": row.created_at,
+                    }
+                    for row in rows
+                ]
+            else:
+                rows, total = db.list_presentation_versions(
+                    presentation_id=presentation_id,
+                    limit=int(args.get("limit", 20)),
+                    offset=int(args.get("offset", 0)),
+                )
+                versions = [self._version_to_dict(row) for row in rows]
             offset = int(args.get("offset", 0))
             has_more = offset + len(versions) < total
             return {
@@ -1050,7 +1284,16 @@ class SlidesModule(BaseModule):
 
             # Extract fields to restore
             restore_fields = {}
-            for key in ["title", "description", "theme", "marp_theme", "settings", "studio_data", "slides", "custom_css"]:
+            for key in [
+                "title",
+                "description",
+                "theme",
+                "marp_theme",
+                "settings",
+                "studio_data",
+                "slides",
+                "custom_css",
+            ]:
                 if key in payload:
                     restore_fields[key] = payload[key]
 
@@ -1078,6 +1321,7 @@ class SlidesModule(BaseModule):
 
     def _get_generator(self):
         from ....Slides.slides_generator import SlidesGenerator
+
         return SlidesGenerator()
 
     async def _generate_from_prompt(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -1123,9 +1367,7 @@ class SlidesModule(BaseModule):
         model = args.get("model")
 
         # Get media content
-        media_content = await asyncio.to_thread(
-            self._get_media_content, context, media_id
-        )
+        media_content = await asyncio.to_thread(self._get_media_content, context, media_id)
         if not media_content:
             raise ValueError(f"Media not found or no content: {media_id}")
 
@@ -1163,9 +1405,7 @@ class SlidesModule(BaseModule):
         model = args.get("model")
 
         # Get notes content
-        notes_content = await asyncio.to_thread(
-            self._get_notes_content, context, note_ids
-        )
+        notes_content = await asyncio.to_thread(self._get_notes_content, context, note_ids)
         if not notes_content:
             raise ValueError("No notes content found")
 
@@ -1203,9 +1443,7 @@ class SlidesModule(BaseModule):
         model = args.get("model")
 
         # Get conversation content
-        chat_content = await asyncio.to_thread(
-            self._get_chat_content, context, conversation_id
-        )
+        chat_content = await asyncio.to_thread(self._get_chat_content, context, conversation_id)
         if not chat_content:
             raise ValueError(f"Conversation not found: {conversation_id}")
 
@@ -1284,8 +1522,7 @@ class SlidesModule(BaseModule):
     ) -> dict[str, Any]:
         """Save generated slides as a presentation."""
         return await asyncio.to_thread(
-            self._save_generated_presentation_sync,
-            context, result, theme, source_type, source_ref, source_query
+            self._save_generated_presentation_sync, context, result, theme, source_type, source_ref, source_query
         )
 
     def _save_generated_presentation_sync(
@@ -1301,7 +1538,7 @@ class SlidesModule(BaseModule):
         try:
             title = result.get("title", "Generated Presentation")
             slides = result.get("slides", [])
-            slides_json = json.dumps({"title": title, "slides": slides})
+            slides_json = json.dumps(slides)
             slides_text = self._extract_slides_text(slides_json)
 
             row = db.create_presentation(
@@ -1355,6 +1592,7 @@ class SlidesModule(BaseModule):
             if not chacha_path:
                 return None
             from ....DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
             db = CharactersRAGDB(db_path=chacha_path, client_id="mcp_slides_gen")
             try:
                 contents = []
@@ -1376,6 +1614,7 @@ class SlidesModule(BaseModule):
             if not chacha_path:
                 return None
             from ....DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
             db = CharactersRAGDB(db_path=chacha_path, client_id="mcp_slides_gen")
             try:
                 messages = db.get_messages_for_conversation(conversation_id)
@@ -1401,6 +1640,7 @@ class SlidesModule(BaseModule):
             if not media_path and not chacha_path:
                 return None
             from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+
             sources = []
             if media_path:
                 sources.append("media_db")
@@ -1464,9 +1704,7 @@ class SlidesModule(BaseModule):
             pres_dict = self._presentation_to_dict(pres)
             slides = self._parse_slides_for_export(pres)
             settings = self._parse_settings(pres.settings)
-            visual_style_snapshot = self._parse_visual_style_snapshot(
-                getattr(pres, "visual_style_snapshot", None)
-            )
+            visual_style_snapshot = self._parse_visual_style_snapshot(getattr(pres, "visual_style_snapshot", None))
 
             if fmt == "json":
                 content = export_presentation_json(pres_dict)
@@ -1516,6 +1754,7 @@ class SlidesModule(BaseModule):
                 raise ValueError(f"Unknown format: {fmt}")
 
             import base64
+
             content_b64 = base64.b64encode(payload).decode("utf-8")
 
             return {
@@ -1615,12 +1854,14 @@ class SlidesModule(BaseModule):
                 for slide in data["slides"]:
                     slide_title = slide.get("title", "")
                     content = slide.get("content", "").replace("\n", "<br>")
-                    slides_html.append(f"""
+                    slides_html.append(
+                        f"""
                     <section>
                         <h2>{slide_title}</h2>
                         <p>{content}</p>
                     </section>
-                    """)
+                    """
+                    )
             else:
                 slides_html.append(f"<section><pre>{pres.slides}</pre></section>")
         except json.JSONDecodeError:

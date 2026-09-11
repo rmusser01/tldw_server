@@ -30,8 +30,17 @@ vi.mock("antd", () => {
     open?: boolean
     children?: React.ReactNode
   }) => (open ? <div>{children}</div> : null)
+  const messageApi = {
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn()
+  }
 
   return {
+    App: {
+      useApp: () => ({ message: messageApi })
+    },
     Tag: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
     Image: ({ src, alt }: { src?: string; alt?: string }) => (
       <img src={src || ""} alt={alt || ""} />
@@ -59,12 +68,7 @@ vi.mock("antd", () => {
     Modal: Object.assign(ModalMock, {
       confirm: vi.fn()
     }),
-    message: {
-      success: vi.fn(),
-      error: vi.fn(),
-      warning: vi.fn(),
-      info: vi.fn()
-    }
+    message: messageApi
   }
 })
 

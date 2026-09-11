@@ -446,8 +446,8 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       isDirty: false
     }
     testState.loadNote = vi.fn()
-    mockGetMediaDetails.mockResolvedValue({})
-    mockUpsertWorkspace.mockResolvedValue({
+    mockGetMediaDetails.mockReset().mockResolvedValue({})
+    mockUpsertWorkspace.mockReset().mockResolvedValue({
       id: "workspace-1",
       name: "New Research",
       archived: false,
@@ -464,17 +464,19 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       last_modified: "2026-05-23T12:00:00Z",
       version: 1
     })
-    mockGetWorkspaceSources.mockResolvedValue([])
-    mockAddWorkspaceSource.mockImplementation(
-      async (_workspaceId: string, source: Record<string, unknown>) => ({
-        ...source,
-        workspace_id: "workspace-1",
-        added_at: "2026-05-23T12:00:00Z",
-        version: 1
-      })
-    )
-    mockUpdateWorkspaceSourceSelection.mockResolvedValue(undefined)
-    mockGetWorkspaceSourcesStatus.mockResolvedValue({
+    mockGetWorkspaceSources.mockReset().mockResolvedValue([])
+    mockAddWorkspaceSource
+      .mockReset()
+      .mockImplementation(
+        async (_workspaceId: string, source: Record<string, unknown>) => ({
+          ...source,
+          workspace_id: "workspace-1",
+          added_at: "2026-05-23T12:00:00Z",
+          version: 1
+        })
+      )
+    mockUpdateWorkspaceSourceSelection.mockReset().mockResolvedValue(undefined)
+    mockGetWorkspaceSourcesStatus.mockReset().mockResolvedValue({
       workspace_id: "workspace-1",
       sources: [],
       summary: {
@@ -487,7 +489,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
         missing: 0
       }
     })
-    mockGetWorkspaceCapabilities.mockResolvedValue({
+    mockGetWorkspaceCapabilities.mockReset().mockResolvedValue({
       workspace_id: "workspace-1",
       workspace_kind: "research_workspace",
       access_level: "owner",
@@ -1270,9 +1272,16 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       )
     })
 
-    expect(testState.setSourceStatusByMediaId).not.toHaveBeenCalledWith(
+    expect(testState.setSourceStatusByMediaId).toHaveBeenLastCalledWith(
       808,
-      "ready"
+      "processing",
+      "Text search is available while vector indexing continues.",
+      partialReadiness,
+      expect.objectContaining({
+        lifecycleState: "partially_queryable",
+        statusReason: "vector_index_pending",
+        sourceOfTruth: "workspace-status-projection"
+      })
     )
   })
 
@@ -1607,7 +1616,9 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     )
   })
 
-  it("bootstraps the server workspace and source rows before status projection calls", async () => {
+  it("starts status projection after workspace creation while source rows reconcile", async () => {
+    const serverSourcesDeferred = createDeferred<unknown[]>()
+    mockGetWorkspaceSources.mockReturnValueOnce(serverSourcesDeferred.promise)
     testState.sources = [
       {
         id: "source-ready",
@@ -1632,6 +1643,20 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       study_materials_policy: "workspace"
     })
     expect(mockGetWorkspaceSources).toHaveBeenCalledWith("workspace-1")
+    expect(mockAddWorkspaceSource).not.toHaveBeenCalled()
+    expect(mockUpdateWorkspaceSourceSelection).not.toHaveBeenCalled()
+    expect(mockUpsertWorkspace.mock.invocationCallOrder[0]).toBeLessThan(
+      mockGetWorkspaceSourcesStatus.mock.invocationCallOrder[0]
+    )
+    expect(mockUpsertWorkspace.mock.invocationCallOrder[0]).toBeLessThan(
+      mockGetWorkspaceCapabilities.mock.invocationCallOrder[0]
+    )
+
+    serverSourcesDeferred.resolve([])
+    await waitFor(() => {
+      expect(mockAddWorkspaceSource).toHaveBeenCalled()
+      expect(mockUpdateWorkspaceSourceSelection).toHaveBeenCalled()
+    })
     expect(mockAddWorkspaceSource).toHaveBeenCalledWith("workspace-1", {
       id: "source-ready",
       media_id: 101,
@@ -1652,12 +1677,6 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     expect(
       mockGetWorkspaceSources.mock.invocationCallOrder[0]
     ).toBeLessThan(mockAddWorkspaceSource.mock.invocationCallOrder[0])
-    expect(
-      mockAddWorkspaceSource.mock.invocationCallOrder[0]
-    ).toBeLessThan(mockGetWorkspaceSourcesStatus.mock.invocationCallOrder[0])
-    expect(
-      mockAddWorkspaceSource.mock.invocationCallOrder[0]
-    ).toBeLessThan(mockGetWorkspaceCapabilities.mock.invocationCallOrder[0])
   })
 
   it("persists the canonical local source selection during server bootstrap", async () => {
@@ -1684,7 +1703,10 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     render(<ResearchWorkspace />)
 
     await waitFor(() => {
-      expect(mockGetWorkspaceSourcesStatus).toHaveBeenCalledWith("workspace-1")
+      expect(mockUpdateWorkspaceSourceSelection).toHaveBeenCalledWith(
+        "workspace-1",
+        ["source-selected"]
+      )
     })
 
     expect(mockAddWorkspaceSource).toHaveBeenNthCalledWith(1, "workspace-1", {
@@ -1709,26 +1731,36 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       "workspace-1",
       ["source-selected"]
     )
-    expect(
+    expect(mockUpsertWorkspace.mock.invocationCallOrder[0]).toBeLessThan(
       mockUpdateWorkspaceSourceSelection.mock.invocationCallOrder[0]
-    ).toBeLessThan(mockGetWorkspaceSourcesStatus.mock.invocationCallOrder[0])
+    )
   })
 
-  it("continues source status projection when server bootstrap fails", async () => {
+  it("keeps source status projection closed when server bootstrap fails", async () => {
     mockUpsertWorkspace.mockRejectedValueOnce(new Error("database locked"))
-    mockGetWorkspaceSourcesStatus.mockResolvedValueOnce(makeStatusPayload())
-    mockGetWorkspaceCapabilities.mockResolvedValueOnce(makeCapabilitiesPayload())
 
     render(<ResearchWorkspace />)
 
     await waitFor(() => {
-      expect(mockGetWorkspaceSourcesStatus).toHaveBeenCalledWith("workspace-1")
-      expect(mockGetWorkspaceCapabilities).toHaveBeenCalledWith("workspace-1")
+      expect(
+        mockStatusBarProps.some((props) => {
+          const status = props.workspaceContextStatus as
+            | { label?: string; detail?: string; severity?: string }
+            | null
+            | undefined
+          return (
+            status?.label === "Workspace degraded" &&
+            status.detail === "Workspace server sync unavailable" &&
+            status.severity === "warning"
+          )
+        })
+      ).toBe(true)
     })
 
     expect(mockGetWorkspaceSources).not.toHaveBeenCalled()
+    expect(mockGetWorkspaceSourcesStatus).not.toHaveBeenCalled()
+    expect(mockGetWorkspaceCapabilities).not.toHaveBeenCalled()
     expect(screen.queryByTestId("workspace-trust-panel")).not.toBeInTheDocument()
-    expect(screen.queryByText("Workspace server sync unavailable")).not.toBeInTheDocument()
     expect(screen.queryByText("database locked")).not.toBeInTheDocument()
   })
 
@@ -1950,7 +1982,14 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
   })
 
   it("marks processing sources as error after repeated non-transient polling failures", async () => {
-    vi.useFakeTimers()
+    const statusDeferred =
+      createDeferred<ReturnType<typeof makeStatusPayload>>()
+    const capabilitiesDeferred =
+      createDeferred<ReturnType<typeof makeCapabilitiesPayload>>()
+    mockGetWorkspaceSourcesStatus.mockReturnValueOnce(statusDeferred.promise)
+    mockGetWorkspaceCapabilities.mockReturnValueOnce(
+      capabilitiesDeferred.promise
+    )
     testState.sources = [
       {
         id: "source-processing-error",
@@ -1968,24 +2007,25 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
 
     render(<ResearchWorkspace />)
 
-    await act(async () => {
-      await Promise.resolve()
+    await waitFor(() => {
+      expect(mockGetMediaDetails).toHaveBeenCalledTimes(1)
     })
-    expect(mockGetMediaDetails).toHaveBeenCalledTimes(1)
     expect(testState.setSourceStatusByMediaId).not.toHaveBeenCalled()
 
+    statusDeferred.resolve(makeStatusPayload())
+    capabilitiesDeferred.resolve(makeCapabilitiesPayload())
     await act(async () => {
-      vi.advanceTimersByTime(5000)
       await Promise.resolve()
       await Promise.resolve()
     })
 
-    expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
-      909,
-      "error",
-      "Malformed metadata"
-    )
-
-    vi.useRealTimers()
+    await waitFor(() => {
+      expect(mockGetMediaDetails).toHaveBeenCalledTimes(2)
+      expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
+        909,
+        "error",
+        "Malformed metadata"
+      )
+    })
   })
 })

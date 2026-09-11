@@ -1,0 +1,20 @@
+{
+  "base_revision": "0f5ac351f213c78ab922c724f4d6b501e82af885",
+  "source_sha256": {
+    "apps/packages/ui/src/routes/sidepanel-persona.tsx": "bd2f5dbe1646826f39ddaa156be24087ff0151b9453e3c61178f518c70319113",
+    "apps/packages/ui/src/routes/hooks/usePersonaLiveSession.tsx": "29c56e899bacecd0e79d18ea3682635a74c9511168b28ab37bb90dad1bc33cec",
+    "apps/packages/ui/src/hooks/usePersonaLiveVoiceController.tsx": "940cb4f9b12670b08f547e2787afe8c3004e2532960365b82cdb17729d436cb4"
+  },
+  "session_id": "0af2b1de-1689-43c8-83e7-2b1fe2e7edc7",
+  "persona_id": "e19c631e-e2ac-452d-9935-293af03cee4e",
+  "selected_persona_matches_session": true,
+  "ui_connected": true,
+  "ui_voice_state": "idle",
+  "ui_send_now_disabled": true,
+  "saved_stt": "en/tiny.en",
+  "saved_tts": "tldw/af_heart",
+  "capture_started": false,
+  "provider_message_sent": false,
+  "audio_played": false,
+  "limitations": "Connected idle UI only; no new physical microphone or playback acceptance."
+}

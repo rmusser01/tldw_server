@@ -96,7 +96,7 @@ class ChatWorkflowDialogueConfig(BaseModel):
         return [item.strip() for item in value if item.strip()]
 
     @model_validator(mode="after")
-    def _validate_opening_prompt(self) -> "ChatWorkflowDialogueConfig":
+    def _validate_opening_prompt(self) -> ChatWorkflowDialogueConfig:
         """Require a custom opening prompt when the mode asks for one."""
         if self.opening_prompt_mode == "custom_prompt" and not self.opening_prompt_text:
             raise ValueError("custom_prompt mode requires opening_prompt_text")
@@ -106,7 +106,7 @@ class ChatWorkflowDialogueConfig(BaseModel):
 class ChatWorkflowTemplateStep(BaseModel):
     """A single authored step in a workflow template or run snapshot."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", json_schema_mode_override="validation")
 
     id: str = Field(..., min_length=1)
     step_index: int = Field(..., ge=0)
@@ -139,7 +139,7 @@ class ChatWorkflowTemplateStep(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_step_shape(self) -> "ChatWorkflowTemplateStep":
+    def _validate_step_shape(self) -> ChatWorkflowTemplateStep:
         """Ensure the dialogue fields match the selected step type."""
         if self.step_type == "dialogue_round_step" and self.dialogue_config is None:
             raise ValueError("dialogue_round_step requires dialogue_config")
@@ -151,7 +151,7 @@ class ChatWorkflowTemplateStep(BaseModel):
 class ChatWorkflowTemplateDraft(BaseModel):
     """A reusable or generated linear workflow definition."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", json_schema_mode_override="validation")
 
     title: str = Field(..., min_length=1)
     description: str | None = None
@@ -198,7 +198,7 @@ class ChatWorkflowTemplateUpdate(BaseModel):
         return _strip_optional(value)
 
     @model_validator(mode="after")
-    def _require_at_least_one_field(self) -> "ChatWorkflowTemplateUpdate":
+    def _require_at_least_one_field(self) -> ChatWorkflowTemplateUpdate:
         """Reject empty update payloads that would be a no-op."""
         if (
             self.title is None
@@ -258,7 +258,7 @@ class StartRunRequest(BaseModel):
         return _strip_optional(value)
 
     @model_validator(mode="after")
-    def _validate_template_source(self) -> "StartRunRequest":
+    def _validate_template_source(self) -> StartRunRequest:
         """Require exactly one workflow source when starting a run."""
         has_template_id = self.template_id is not None
         has_template_draft = self.template_draft is not None

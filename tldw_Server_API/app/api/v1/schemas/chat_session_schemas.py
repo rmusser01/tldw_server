@@ -164,6 +164,19 @@ class ChatSessionCreate(BaseModel):
         description="Scope type: 'global' for /chat, 'workspace' for per-workspace chats. Defaults to 'global'.",
     )
     workspace_id: Optional[str] = Field(None, description="Workspace ID (required when scope_type='workspace')")
+    participant_character_ids: list[int] = Field(
+        default_factory=list,
+        max_length=32,
+        description="Additional character participants captured at creation time",
+    )
+    prompt_preset_id: str | None = Field(None, min_length=1, max_length=128)
+    memory_by_character_id: dict[str, str] = Field(default_factory=dict)
+    provider: str | None = Field(None, min_length=1, max_length=128)
+    model: str | None = Field(None, min_length=1, max_length=512)
+    temperature: float = Field(0.7, ge=0.0, le=2.0)
+    top_p: float = Field(1.0, ge=0.0, le=1.0)
+    repetition_penalty: float = Field(1.0, ge=0.0, le=3.0)
+    stop: list[str] = Field(default_factory=list, max_length=64)
 
     model_config = {"json_schema_extra": {
         "example": {
@@ -252,8 +265,8 @@ class ChatSessionUpdate(BaseModel):
         return _validate_conversation_state(value)
 
 
-class ChatSessionResponse(BaseModel):
-    """Schema for chat session responses."""
+class ChatSessionListItem(BaseModel):
+    """Chat list item without authoritative resume-detail fields."""
     id: str = Field(..., description="UUID of the chat session")
     scope_type: Literal["global", "workspace"] = Field(
         "global",
@@ -297,9 +310,41 @@ class ChatSessionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ChatSessionResponse(ChatSessionListItem):
+    """Detailed chat session response with authoritative resume metadata."""
+
+    behavior_snapshot: "BehaviorSnapshotStatus" = Field(
+        default_factory=lambda: BehaviorSnapshotStatus(status="missing")
+    )
+    resume_eligible: bool = False
+    resume_ineligible_reason: str | None = "behavior_snapshot_missing"
+    settings_version: int | None = None
+    history_version: int | None = None
+    tail: "ConversationTailFence" = Field(
+        default_factory=lambda: ConversationTailFence(message_id=None, message_version=None)
+    )
+
+    model_config = {"from_attributes": True}
+
+
+class BehaviorSnapshotStatus(BaseModel):
+    """Bounded snapshot metadata safe for ordinary conversation reads."""
+
+    status: Literal["valid", "missing", "invalid"]
+    schema_version: int | None = None
+    digest: str | None = None
+
+
+class ConversationTailFence(BaseModel):
+    """The current immutable message-tail identity/version fence."""
+
+    message_id: str | None
+    message_version: int | None
+
+
 class ChatSessionListResponse(BaseModel):
     """Schema for listing chat sessions."""
-    chats: list[ChatSessionResponse] = Field(..., description="List of chat sessions")
+    chats: list[ChatSessionListItem] = Field(..., description="List of chat sessions")
     total: int = Field(..., description="Total number of chats")
     limit: int = Field(..., description="Number of items per page")
     offset: int = Field(..., description="Offset for pagination")

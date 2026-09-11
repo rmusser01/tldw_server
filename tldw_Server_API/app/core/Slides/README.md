@@ -19,6 +19,7 @@ Slides provides the core persistence, generation, rendering, export, asset, and 
 - Manage slide assets, image references, template catalogs, and style-pack CSS.
 - Persist and resolve visual styles, style profiles, generated styles, and style packs.
 - Enforce optimistic versioning and conflict checks through API/database flows.
+- Store and version validated standalone HTML documents as untrusted opaque text without executing or rendering them.
 
 ## Module Map
 
@@ -30,6 +31,24 @@ Slides provides the core persistence, generation, rendering, export, asset, and 
 - `slides_templates.py` - template catalog handling.
 - `visual_styles.py`, `visual_style_catalog.py`, `visual_style_generation.py`, `visual_style_packs.py`, `visual_style_profiles.py`, and `visual_style_resolver.py` - visual style creation and resolution.
 - `revealjs/` and `style_packs/` - vendored/runtime presentation assets used by rendering.
+
+Standalone HTML is intentionally split across small, closed boundaries:
+
+- `standalone_html_config.py` resolves the default-off feature flag, exact
+  provider/model/adapter tuple, environment-only digest keyring, and fixed
+  budgets.
+- `standalone_html_sources.py`, `standalone_html_provider.py`, and
+  `standalone_html_service.py` resolve bounded owner-scoped input, call one
+  built-in adapter, and coordinate Jobs receipts without placing source in job
+  payloads.
+- `standalone_html_validator.py` and
+  `standalone_html_validation_pool.py` validate documents in a bounded,
+  killable subprocess boundary.
+- `tldw_Server_API/app/services/standalone_html_generation_jobs_worker.py` and
+  `standalone_html_reconciler.py` commit or
+  reconcile generation through the in-process startup service.
+- `presentation_service.py` owns kind negotiation and source-free projections
+  shared by REST and MCP.
 
 ## How It Connects
 
@@ -55,3 +74,13 @@ Slides provides the core persistence, generation, rendering, export, asset, and 
 - Presentation updates use version/ETag-style conflict behavior; bypassing `slides_db.py` can skip conflict detection.
 - The module contains vendored Reveal.js assets. Treat those as runtime assets, not primary application logic.
 - Generation paths enforce source size and structured JSON constraints; prompt changes should preserve parseable output.
+- Existing structured routes keep weak `W/"vN"` ETags and synchronous
+  generation compatibility. Standalone source saves use one verified strong
+  ETag, explicit save only, and asynchronous Jobs generation.
+- Standalone validation is an admission rule, not a safety claim. No backend,
+  MCP, WebUI, extension, renderer, or worker path may preview or execute the
+  stored document.
+- Read standalone readiness through the authenticated, source-free
+  `GET /api/v1/slides/capabilities` endpoint. There is no separate standalone
+  worker CLI or health endpoint; the supported lifecycle is the in-process
+  startup service.

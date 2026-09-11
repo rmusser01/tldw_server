@@ -2,13 +2,22 @@
 
 import ast
 import inspect
+import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
-
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendType,
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+    InputError,
+)
+from tldw_Server_API.app.core.DB_Management.Sync_DB import _envelope_from_row
 
 pytestmark = pytest.mark.unit
 
@@ -38,17 +47,28 @@ _DELEGATED_NOTE_METHODS = {
 }
 
 
+def _postgres_datetime_envelope(server_timestamp: datetime):
+    return _envelope_from_row(
+        {
+            "server_sequence": 1,
+            "dataset_id": "dataset-1",
+            "client_envelope_id": "env-postgres-timestamp",
+            "domain": "notes.note",
+            "entity_id": "sync-note-postgres-time",
+            "operation": "upsert",
+            "server_timestamp": server_timestamp,
+            "status": "accepted",
+        }
+    )
+
+
 def _class_method_names(class_obj: type[object]) -> set[str]:
     source_path = Path(inspect.getsourcefile(class_obj) or "")
     assert source_path.exists()
     tree = ast.parse(source_path.read_text())
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == class_obj.__name__:
-            return {
-                item.name
-                for item in node.body
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
-            }
+            return {item.name for item in node.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))}
     raise AssertionError(f"Class {class_obj.__name__} not found in {source_path}")
 
 
@@ -81,6 +101,199 @@ def test_note_store_owns_delegated_methods_without_monolith_duplicates(db, monke
     assert db.add_note(title="Delegated Note", content="delegated body") == "note-from-store"
     assert captured["args"] == ()
     assert captured["kwargs"] == {"title": "Delegated Note", "content": "delegated body"}
+
+
+def test_source_note_projection_is_active_bounded_and_explicit(store, db, monkeypatch):
+    note_id = store.add_note(
+        title="abcdef",
+        content="123456789",
+        note_id="source-note",
+    )
+    assert note_id == "source-note"
+
+    queries: list[str] = []
+    original_execute = db.execute_query
+
+    def recording_execute(query, params=None, **kwargs):
+        queries.append(str(query))
+        return original_execute(query, params, **kwargs)
+
+    monkeypatch.setattr(db, "execute_query", recording_execute)
+
+    assert store.get_source_note_projection("source-note", max_chars=5) == {
+        "id": "source-note",
+        "source_text": "# abcd",
+        "source_invalid": False,
+    }
+    normalized_sql = " ".join(queries).lower()
+    assert "select *" not in normalized_sql
+    assert "substr" in normalized_sql
+    assert "deleted =" in normalized_sql
+    assert "payload_json" not in normalized_sql
+
+
+def test_source_note_projection_hides_deleted_note_but_not_deleted_backlink_conversation(
+    store,
+    db,
+):
+    character_id = db.add_character_card({"name": "Source note character"})
+    conversation_id = db.add_conversation(
+        {
+            "character_id": character_id,
+            "title": "Source note conversation",
+        }
+    )
+    note_id = store.add_note(
+        title="Visible note",
+        content="Visible body",
+        note_id="source-note-linked",
+        conversation_id=conversation_id,
+    )
+    assert note_id
+
+    db.execute_query(
+        "UPDATE conversations SET deleted = 1 WHERE id = ?",
+        (conversation_id,),
+        commit=True,
+    )
+    assert store.get_source_note_projection(note_id, max_chars=50) == {
+        "id": note_id,
+        "source_text": "# Visible note\n\nVisible body",
+        "source_invalid": False,
+    }
+
+    db.execute_query(
+        "UPDATE notes SET deleted = 1 WHERE id = ?",
+        (note_id,),
+        commit=True,
+    )
+    assert store.get_source_note_projection(note_id, max_chars=50) is None
+
+
+def test_source_note_projection_accepts_zero_as_sentinel_budget(store, db):
+    populated_id = store.add_note(
+        title="Populated",
+        content="body",
+        note_id="source-note-populated",
+    )
+    empty_id = store.add_note(
+        title="Empty",
+        content="placeholder",
+        note_id="source-note-empty",
+    )
+    db.execute_query(
+        "UPDATE notes SET title = '', content = '' WHERE id = ?",
+        (empty_id,),
+        commit=True,
+    )
+
+    assert store.get_source_note_projection(populated_id, max_chars=0) == {
+        "id": populated_id,
+        "source_text": "#",
+        "source_invalid": False,
+    }
+    assert store.get_source_note_projection(empty_id, max_chars=0) == {
+        "id": empty_id,
+        "source_text": "",
+        "source_invalid": False,
+    }
+
+
+@pytest.mark.parametrize("max_chars", [True, -1, "10"])
+def test_source_note_projection_rejects_invalid_character_budget(store, max_chars):
+    with pytest.raises(InputError):
+        store.get_source_note_projection("note", max_chars=max_chars)
+
+
+def test_postgres_source_note_projection_requires_owner_scope():
+    class _PostgresDb:
+        backend_type = BackendType.POSTGRESQL
+
+        @staticmethod
+        def execute_query(*_args, **_kwargs):
+            raise AssertionError("unscoped PostgreSQL projection must not query")
+
+    with pytest.raises(InputError, match="owner_user_id"):
+        NoteStore(_PostgresDb()).get_source_note_projection("note-1", max_chars=20)
+
+
+def test_source_note_projection_marks_nul_text_invalid(store, db):
+    note_id = store.add_note(
+        title="NUL note",
+        content="valid",
+        note_id="source-note-nul",
+    )
+    db.execute_query(
+        "UPDATE notes SET content = ? WHERE id = ?",
+        ("prefix\0" + ("secret" * 1000), note_id),
+        commit=True,
+    )
+
+    projection = store.get_source_note_projection(note_id, max_chars=20)
+
+    assert projection is not None
+    assert projection["source_invalid"] is True
+
+
+def test_source_note_projection_failure_is_fixed_and_redacted():
+    secret = "PRIVATE_NOTE_FRAGMENT"
+    messages: list[str] = []
+
+    class _FailingDb:
+        backend_type = BackendType.SQLITE
+
+        @staticmethod
+        def execute_query(*_args, **_kwargs):
+            raise CharactersRAGDBError(secret)
+
+    sink_id = logger.add(messages.append, level="DEBUG", format="{message}")
+    try:
+        with pytest.raises(CharactersRAGDBError) as exc_info:
+            NoteStore(_FailingDb()).get_source_note_projection(
+                "note-1",
+                max_chars=20,
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert str(exc_info.value) == "Source-note projection failed."
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert secret not in repr(exc_info.value)
+    assert secret not in "\n".join(messages)
+
+
+def test_source_note_projection_redacts_delayed_fetch_failure():
+    secret = "PRIVATE_NOTE_FETCH_FRAGMENT"
+    messages: list[str] = []
+
+    class _FailingCursor:
+        @staticmethod
+        def fetchone():
+            raise sqlite3.OperationalError(f"Could not decode {secret}")
+
+    class _FailingDb:
+        backend_type = BackendType.SQLITE
+
+        @staticmethod
+        def execute_query(*_args, **_kwargs):
+            return _FailingCursor()
+
+    sink_id = logger.add(messages.append, level="DEBUG", format="{message}")
+    try:
+        with pytest.raises(CharactersRAGDBError) as exc_info:
+            NoteStore(_FailingDb()).get_source_note_projection(
+                "note-1",
+                max_chars=20,
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert str(exc_info.value) == "Source-note projection failed."
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert secret not in repr(exc_info.value)
+    assert secret not in "\n".join(messages)
 
 
 class TestNoteStoreAdd:
@@ -184,6 +397,141 @@ class TestNoteStoreSyncHelpers:
         assert after["version"] == 2
         assert after["created_at"] == before["created_at"]
 
+    def test_ingestion_guard_accepts_exact_intended_postcondition(self, db):
+        db.add_note(
+            title="Before",
+            content="Original",
+            note_id="sync-note-guard",
+        )
+        kwargs = {
+            "note_id": "sync-note-guard",
+            "title": "After",
+            "content": "Intended",
+            "conversation_id": None,
+            "message_id": None,
+            "sync_client_id": "note-store-user",
+            "object_revision": 2,
+            "object_hash": "sha256:note-v2",
+            "expected_product_version": 1,
+            "projection_timestamp": "2026-08-09T08:00:00+00:00",
+        }
+
+        assert db.upsert_note_from_sync(**kwargs) is True
+        after_product_commit = db.get_note_by_id("sync-note-guard")
+        assert db.upsert_note_from_sync(**kwargs) is False
+        assert db.get_note_by_id("sync-note-guard") == after_product_commit
+
+    def test_ingestion_guard_rejects_divergent_same_version_postcondition(self, db):
+        db.add_note(
+            title="Before",
+            content="Original",
+            note_id="sync-note-diverged",
+        )
+        kwargs = {
+            "note_id": "sync-note-diverged",
+            "title": "After",
+            "content": "Intended",
+            "conversation_id": None,
+            "message_id": None,
+            "sync_client_id": "note-store-user",
+            "object_revision": 2,
+            "object_hash": "sha256:note-v2",
+            "expected_product_version": 1,
+            "projection_timestamp": "2026-08-09T08:00:00+00:00",
+        }
+        db.upsert_note_from_sync(**kwargs)
+        with db.transaction() as conn:
+            conn.execute(
+                "UPDATE notes SET content = ? WHERE id = ?",
+                ("Diverged", "sync-note-diverged"),
+            )
+
+        with pytest.raises(ConflictError, match="changed after ingestion planning"):
+            db.upsert_note_from_sync(**kwargs)
+
+    def test_postgres_datetime_recovery_accepts_equivalent_utc_offset_without_write(
+        self,
+        db,
+    ):
+        envelope = _postgres_datetime_envelope(
+            datetime(
+                2026,
+                8,
+                9,
+                1,
+                tzinfo=timezone(timedelta(hours=-7)),
+            )
+        )
+        db.add_note(
+            title="Before",
+            content="Original",
+            note_id="sync-note-postgres-time",
+        )
+        kwargs = {
+            "note_id": "sync-note-postgres-time",
+            "title": "After",
+            "content": "Intended",
+            "conversation_id": None,
+            "message_id": None,
+            "sync_client_id": "note-store-user",
+            "object_revision": 2,
+            "object_hash": "sha256:note-v2",
+            "expected_product_version": 1,
+            "projection_timestamp": envelope.server_timestamp,
+        }
+        assert db.upsert_note_from_sync(**kwargs) is True
+        with db.transaction() as conn:
+            conn.execute(
+                "UPDATE notes SET last_modified = ? WHERE id = ?",
+                ("2026-08-09T08:00:00+00:00", "sync-note-postgres-time"),
+            )
+        after_product_commit = db.get_note_by_id("sync-note-postgres-time")
+
+        assert db.upsert_note_from_sync(**kwargs) is False
+        assert db.get_note_by_id("sync-note-postgres-time") == after_product_commit
+        assert envelope.server_timestamp == "2026-08-09T08:00:00+00:00"
+
+    @pytest.mark.parametrize(
+        "stored_timestamp",
+        ["2026-08-09T08:00:01+00:00", "invalid-timestamp"],
+    )
+    def test_postgres_datetime_recovery_rejects_different_timestamp(
+        self,
+        db,
+        stored_timestamp,
+    ):
+        envelope = _postgres_datetime_envelope(
+            datetime(2026, 8, 9, 8, tzinfo=timezone.utc)
+        )
+        db.add_note(
+            title="Before",
+            content="Original",
+            note_id="sync-note-postgres-time",
+        )
+        kwargs = {
+            "note_id": "sync-note-postgres-time",
+            "title": "After",
+            "content": "Intended",
+            "conversation_id": None,
+            "message_id": None,
+            "sync_client_id": "note-store-user",
+            "object_revision": 2,
+            "object_hash": "sha256:note-v2",
+            "expected_product_version": 1,
+            "projection_timestamp": envelope.server_timestamp,
+        }
+        db.upsert_note_from_sync(**kwargs)
+        with db.transaction() as conn:
+            conn.execute(
+                "UPDATE notes SET last_modified = ? WHERE id = ?",
+                (stored_timestamp, "sync-note-postgres-time"),
+            )
+        divergent = db.get_note_by_id("sync-note-postgres-time")
+
+        with pytest.raises(ConflictError, match="changed after ingestion planning"):
+            db.upsert_note_from_sync(**kwargs)
+        assert db.get_note_by_id("sync-note-postgres-time") == divergent
+
     def test_tombstone_note_from_sync_soft_deletes_existing_note(self, db):
         db.upsert_note_from_sync(
             note_id="sync-note-1",
@@ -261,6 +609,37 @@ class TestNoteStoreSearch:
 
 
 class TestNoteStoreGraphHelpers:
+    def test_notes_batch_preserves_conversation_and_message_backlinks(self, store, db):
+        conversation_id = db.add_conversation({"title": "Source conversation"})
+        message_id = db.add_message(
+            {
+                "conversation_id": conversation_id,
+                "sender": "user",
+                "content": "Source message",
+            }
+        )
+        note_id = store.add_note(
+            title="Linked note",
+            content="Linked content",
+            conversation_id=conversation_id,
+            message_id=message_id,
+        )
+
+        rows = store.get_notes_batch([note_id])
+
+        assert rows == [
+            {
+                "id": note_id,
+                "title": "Linked note",
+                "content": "Linked content",
+                "created_at": rows[0]["created_at"],
+                "last_modified": rows[0]["last_modified"],
+                "deleted": rows[0]["deleted"],
+                "conversation_id": conversation_id,
+                "message_id": message_id,
+            }
+        ]
+
     def test_graph_helpers_and_keyword_links(self, store, db):
         character_id = db.add_character_card({"name": "Note Source Character"})
         conversation_id = db.add_conversation(

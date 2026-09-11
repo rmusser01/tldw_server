@@ -12,7 +12,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 
-
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 
 
@@ -34,7 +33,11 @@ def search_by_safe_metadata(
     """Search by fields inside safe metadata and identifier projections."""
     try:
         offset = (max(1, page) - 1) * per_page
-        clauses: list[str] = ["dv.deleted = 0", "m.deleted = 0"]
+        clauses: list[str] = [
+            "dv.deleted = 0",
+            "m.deleted = 0",
+            "m.system_operation_id IS NULL",
+        ]
         params: list[Any] = []
         join_ident = False
 

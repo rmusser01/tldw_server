@@ -1,0 +1,1 @@
+{"case":"lowercase_datetime_syntax","model":"ProfileManifest","valid":false,"structurally_valid":true,"data":{"schema_version":1,"profile_id":"profile-1","revision":2,"purge_generation":0,"created_at":"2026-08-28t00:00:00z","updated_at":"2026-08-28t00:01:00z","current_version_id":"manifest-version-2"}}

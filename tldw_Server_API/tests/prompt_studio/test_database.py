@@ -2,6 +2,7 @@
 # Database tests for Prompt Studio
 
 import gc
+import json
 import pytest
 import sqlite3
 import tempfile
@@ -476,6 +477,34 @@ class TestSignatureOperations:
         assert test_db.delete_signature(signature["id"])
         assert test_db.get_signature(signature["id"]) is None
 
+    def test_soft_delete_signature_logs_canonical_delete_operation(
+        self,
+        test_db: PromptStudioDatabase,
+    ) -> None:
+        project = self._create_project(test_db)
+        signature = test_db.create_signature(
+            project_id=project["id"],
+            name="Soft Delete Audit",
+            input_schema=[],
+            output_schema=[],
+        )
+
+        assert test_db.delete_signature(signature["id"])
+
+        row = test_db.get_connection().execute(
+            """
+            SELECT operation, payload
+            FROM sync_log
+            WHERE entity = 'prompt_studio_signature' AND entity_uuid = ?
+            ORDER BY change_id DESC
+            LIMIT 1
+            """,
+            (signature["uuid"],),
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "delete"
+        assert json.loads(row[1]) == {"hard": False}
+
     def test_create_signature_conflict(self, test_db: PromptStudioDatabase):
         project = self._create_project(test_db)
         test_db.create_signature(
@@ -801,6 +830,45 @@ class TestPromptOperations:
         """)
         versions = [row[0] for row in cursor.fetchall()]
         assert versions == [1, 2, 3]
+
+    def test_prompt_version_events_use_canonical_create_operation(
+        self,
+        test_db: PromptStudioDatabase,
+    ) -> None:
+        project = test_db.create_project(name="Version Audit Project")
+        prompt = test_db.create_prompt(
+            project_id=project["id"],
+            name="Version Audit Prompt",
+            system_prompt="System v1",
+            user_prompt="User v1",
+        )
+
+        created_version = test_db.create_prompt_version(
+            prompt["id"],
+            change_description="Create v2",
+            system_prompt="System v2",
+        )
+        reverted_version = test_db.revert_prompt_to_version(
+            created_version["id"],
+            1,
+        )
+
+        rows = test_db.get_connection().execute(
+            """
+            SELECT entity_uuid, operation, payload
+            FROM sync_log
+            WHERE entity = 'prompt_studio_prompt' AND entity_uuid IN (?, ?)
+            """,
+            (created_version["uuid"], reverted_version["uuid"]),
+        ).fetchall()
+        events = {
+            entity_uuid: (operation, json.loads(payload))
+            for entity_uuid, operation, payload in rows
+        }
+        assert events[created_version["uuid"]][0] == "create"
+        assert events[created_version["uuid"]][1]["version_operation"] == "create"
+        assert events[reverted_version["uuid"]][0] == "create"
+        assert events[reverted_version["uuid"]][1]["version_operation"] == "revert"
 
 ########################################################################################################################
 # Test Case CRUD Tests

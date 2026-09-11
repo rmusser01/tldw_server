@@ -38,6 +38,9 @@ vi.mock("antd", () => {
   }) => (open ? <div>{children}</div> : null)
 
   return {
+    App: {
+      useApp: () => ({ message: antdMessageApi })
+    },
     Tag: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
     Image: ({ src, alt }: { src?: string; alt?: string }) => (
       <img src={src || ""} alt={alt || ""} />

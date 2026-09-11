@@ -27,6 +27,14 @@ except ImportError:  # pragma: no cover
 
 from loguru import logger
 
+from ..Prompt_Management.optimization_model_config import (
+    validate_secret_free_optimization_config,
+)
+from ..Prompt_Management.structured_prompts import (
+    PromptDefinition,
+    render_legacy_snapshot,
+    validate_prompt_definition,
+)
 from .backends.base import (
     BackendType,
     DatabaseBackend,
@@ -45,11 +53,6 @@ from .backends.query_utils import (
 
 # Local imports
 from .Prompts_DB import ConflictError, DatabaseError, InputError, PromptsDatabase, SchemaError
-from ..Prompt_Management.structured_prompts import (
-    PromptDefinition,
-    render_legacy_snapshot,
-    validate_prompt_definition,
-)
 
 _PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -76,6 +79,11 @@ _PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS = (
     SchemaError,
 )
 
+_OPTIMIZATION_ACTIVE_STATUSES = ("pending", "running")
+_OPTIMIZATION_GUARDED_STATUS_TARGETS = frozenset(
+    {"running", "completed", "failed", "cancelled"}
+)
+
 
 def _should_enable_prompt_studio_sqlite_wal() -> bool:
     """Default Prompt Studio SQLite to WAL outside CI and explicit test runtimes."""
@@ -92,10 +100,7 @@ def _should_enable_prompt_studio_sqlite_wal() -> bool:
     if env_flag_enabled("CI") or env_flag_enabled("GITHUB_ACTIONS"):
         return False
 
-    if is_explicit_pytest_runtime() or is_test_mode():
-        return False
-
-    return True
+    return not (is_explicit_pytest_runtime() or is_test_mode())
 
 
 def _serialise_tags(tags: Optional[Union[str, Iterable[str]]]) -> Optional[str]:
@@ -474,6 +479,13 @@ class PromptStudioBackendManagedTransaction:
     def __enter__(self):
         self._ctx = self._db.backend.transaction()
         raw_conn = self._ctx.__enter__()
+        try:
+            self._db._apply_tenant_session(raw_conn)
+        except BaseException as exc:
+            with suppress(Exception):
+                self._ctx.__exit__(exc.__class__, exc, exc.__traceback__)
+            self._ctx = None
+            raise
         self._conn = PromptStudioBackendConnectionWrapper(self._db, raw_conn)
         return self._conn
 
@@ -495,6 +507,7 @@ class BackendPromptStudioDatabaseBase:
         db_path: Union[str, Path],
         client_id: str,
         *,
+        tenant_user_id: Optional[str] = None,
         backend: Optional[DatabaseBackend] = None,
         config: Optional[ConfigParser] = None,
     ) -> None:
@@ -509,6 +522,9 @@ class BackendPromptStudioDatabaseBase:
             )
 
         self.client_id = client_id
+        self.tenant_user_id = (
+            client_id if tenant_user_id is None else str(tenant_user_id)
+        )
         self._config = config
         self.db_path = Path(db_path) if not isinstance(db_path, Path) else db_path
         self.db_path_str = str(self.db_path)
@@ -524,12 +540,48 @@ class BackendPromptStudioDatabaseBase:
         except BackendDatabaseError as exc:
             raise DatabaseError(f"Failed to acquire backend connection: {exc}") from exc  # noqa: TRY003
 
-    def _release_connection(self, wrapper: Optional[PromptStudioBackendConnectionWrapper]) -> None:
+    def _apply_tenant_session(self, raw_conn: Any) -> None:
+        """Apply the Prompt Studio tenant to a borrowed PostgreSQL connection."""
+        try:
+            cur = raw_conn.cursor()
+            user_value = self.tenant_user_id
+            if psycopg_sql is not None:  # type: ignore[name-defined]
+                stmt = psycopg_sql.SQL("SET SESSION app.current_user_id = {}").format(
+                    psycopg_sql.Literal(user_value)
+                )
+                cur.execute(stmt)
+            else:
+                cur.execute(
+                    "SELECT set_config('app.current_user_id', %s, false)",
+                    (user_value,),
+                )
+            raw_conn.commit()
+        except Exception:  # noqa: BLE001 - normalize arbitrary driver failures
+            with suppress(Exception):
+                raw_conn.rollback()
+            raise DatabaseError(
+                "Failed to apply Prompt Studio tenant session"
+            ) from None
+
+    def _release_connection(
+        self,
+        wrapper: Optional[PromptStudioBackendConnectionWrapper],
+        *,
+        discard: bool = False,
+    ) -> None:
         if not wrapper:
             return
         try:
             raw_conn = wrapper.raw_connection
-            self.backend.get_pool().return_connection(raw_conn)
+            pool = self.backend.get_pool()
+            if discard:
+                discard_connection = getattr(pool, "discard_connection", None)
+                if callable(discard_connection):
+                    discard_connection(raw_conn)
+                    return
+                with suppress(Exception):
+                    raw_conn.close()
+            pool.return_connection(raw_conn)
         except BackendDatabaseError as exc:
             logger.warning("Error returning backend connection to pool: {}", exc)
 
@@ -541,28 +593,11 @@ class BackendPromptStudioDatabaseBase:
         raw_conn = self._open_new_connection()
         # Apply per-tenant session guard for PostgreSQL (RLS via current_setting('app.current_user_id'))
         try:
-            if self.backend_type == BackendType.POSTGRESQL and self.client_id:
-                cur = raw_conn.cursor()
-                user_value = str(self.client_id)
-                if psycopg_sql is not None:  # type: ignore[name-defined]
-                    stmt = psycopg_sql.SQL("SET SESSION app.current_user_id = {}").format(
-                        psycopg_sql.Literal(user_value)
-                    )
-                    cur.execute(stmt)
-                else:
-                    # Validate input strictly - only allow alphanumeric, dash, underscore, dot
-                    import re
-                    if not re.match(r'^[\w\-\.]+$', user_value):
-                        logger.warning(f"Invalid client_id format for SET SESSION: {user_value[:50]}")
-                    else:
-                        # Use parameterized query via format_map for safety
-                        safe_value = user_value.replace("'", "''").replace("\\", "\\\\")
-                        cur.execute(f"SET SESSION app.current_user_id = '{safe_value}'")
-                with suppress(_PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS):
-                    raw_conn.commit()
-        except _PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS:
-            # Non-fatal if SET fails
-            pass
+            self._apply_tenant_session(raw_conn)
+        except BaseException:
+            with suppress(Exception):
+                self.backend.get_pool().return_connection(raw_conn)
+            raise
         wrapper = PromptStudioBackendConnectionWrapper(self, raw_conn)
         self._local.conn = wrapper
         logger.debug(
@@ -580,13 +615,29 @@ class BackendPromptStudioDatabaseBase:
         if wrapper is None:
             return
 
+        discard = False
         try:
-            if wrapper.raw_connection and getattr(wrapper.raw_connection, 'in_transaction', False):
-                with suppress(_PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS):
+            # Cached backend connections execute reads as external connections,
+            # so psycopg may leave an implicit transaction open. Psycopg exposes
+            # that state through ``info.transaction_status`` rather than the
+            # sqlite-style ``in_transaction`` attribute; rollback is safe when
+            # already idle and guarantees read locks are released before pooling.
+            if wrapper.raw_connection:
+                try:
                     wrapper.rollback()
-            self._release_connection(wrapper)
+                except Exception as exc:  # noqa: BLE001 - driver errors vary
+                    discard = True
+                    logger.warning(
+                        "Prompt Studio connection rollback failed during release: {}",
+                        type(exc).__name__,
+                    )
         finally:
-            self._local.conn = None
+            try:
+                # A rollback failure makes the checkout unsafe to reuse. The
+                # pool still owns disposal/bookkeeping for that connection.
+                self._release_connection(wrapper, discard=discard)
+            finally:
+                self._local.conn = None
 
     def close(self) -> None:
         self.close_connection()
@@ -717,10 +768,17 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
         db_path: Union[str, Path],
         client_id: str,
         *,
+        tenant_user_id: Optional[str] = None,
         backend: Optional[DatabaseBackend] = None,
         config: Optional[ConfigParser] = None,
     ) -> None:
-        super().__init__(db_path, client_id, backend=backend, config=config)
+        super().__init__(
+            db_path,
+            client_id,
+            tenant_user_id=tenant_user_id,
+            backend=backend,
+            config=config,
+        )
         self._fts_columns = {
             table: f"{table}_tsv" for table, _columns in self._FTS_CONFIG
         }
@@ -1478,7 +1536,7 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
                 self._log_sync_event(
                     "prompt_studio_project",
                     row.get('uuid', ''),
-                    "delete" if hard_delete else "soft_delete",
+                    "delete",
                     {"hard": hard_delete},
                 )
             return success  # noqa: TRY300
@@ -1715,7 +1773,7 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
                 self._log_sync_event(
                     "prompt_studio_signature",
                     row.get("uuid", ""),
-                    "delete" if hard_delete else "soft_delete",
+                    "delete",
                     {"hard": hard_delete},
                 )
             return success  # noqa: TRY300
@@ -2113,7 +2171,23 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
         *,
         set_started_at: bool = False,
         set_completed_at: bool = False,
-    ) -> dict[str, Any]:
+        expected_statuses: Optional[Iterable[str]] = None,
+        expected_uuid: Optional[str] = None,
+        _return_transition_applied: bool = False,
+    ) -> dict[str, Any] | tuple[dict[str, Any], bool]:
+        expected_status_values = (
+            tuple(dict.fromkeys(str(value) for value in expected_statuses))
+            if expected_statuses is not None
+            else ()
+        )
+        if expected_statuses is not None and not expected_status_values:
+            raise ValueError("expected_statuses cannot be empty")  # noqa: TRY003
+        expected_uuid_value = (
+            str(expected_uuid).strip() if expected_uuid is not None else None
+        )
+        if expected_uuid is not None and not expected_uuid_value:
+            raise ValueError("expected_uuid cannot be empty")  # noqa: TRY003
+
         json_fields = {
             "optimization_config",
             "initial_metrics",
@@ -2141,47 +2215,76 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
             optimization = self.get_optimization(optimization_id, include_deleted=True)
             if optimization is None:
                 raise InputError(f"Optimization {optimization_id} not found")  # noqa: TRY003
-            return optimization
+            return (
+                (optimization, False)
+                if _return_transition_applied
+                else optimization
+            )
 
         params.append(optimization_id)
+        where_sql = " WHERE id = ?"
+        if expected_status_values:
+            status_placeholders = ", ".join("?" for _ in expected_status_values)
+            where_sql += f" AND status IN ({status_placeholders})"
+            params.extend(expected_status_values)
+        if expected_uuid_value is not None:
+            where_sql += " AND uuid = ?"
+            params.append(expected_uuid_value)
         update_sql = (
             "UPDATE prompt_studio_optimizations SET "  # nosec B608
             + ", ".join(set_clauses)
-            + " WHERE id = ? RETURNING *"
+            + where_sql
+            + " RETURNING *"
         )
 
         try:
             with self._write_lock, self.transaction() as conn:
                 cursor = self._cursor_exec(conn, update_sql, params)
                 row = cursor.fetchone()
-                if not row:
+                transition_applied = row is not None
+                if not row and not (
+                    expected_status_values or expected_uuid_value is not None
+                ):
                     raise InputError(f"Optimization {optimization_id} not found")  # noqa: TRY003
-            optimization = self._row_to_dict(cursor, row) if row else {}
+            if not row:
+                optimization = self.get_optimization(
+                    optimization_id,
+                    include_deleted=True,
+                )
+                if optimization is None:
+                    raise InputError(f"Optimization {optimization_id} not found")  # noqa: TRY003
+            else:
+                optimization = self._row_to_dict(cursor, row)
         except BackendDatabaseError as exc:
             raise DatabaseError(f"Failed to update optimization {optimization_id}: {exc}") from exc  # noqa: TRY003
 
-        log_payload = {}
-        for key, value in updates.items():
-            if isinstance(value, (dict, list)):
-                try:
-                    log_payload[key] = json.loads(json.dumps(value, default=str))
-                except TypeError:
-                    log_payload[key] = str(value)
-            else:
-                log_payload[key] = value
+        if transition_applied:
+            log_payload = {}
+            for key, value in updates.items():
+                if isinstance(value, (dict, list)):
+                    try:
+                        log_payload[key] = json.loads(json.dumps(value, default=str))
+                    except TypeError:
+                        log_payload[key] = str(value)
+                else:
+                    log_payload[key] = value
 
-        if set_started_at:
-            log_payload["started_at"] = "CURRENT_TIMESTAMP"
-        if set_completed_at:
-            log_payload["completed_at"] = "CURRENT_TIMESTAMP"
+            if set_started_at:
+                log_payload["started_at"] = "CURRENT_TIMESTAMP"
+            if set_completed_at:
+                log_payload["completed_at"] = "CURRENT_TIMESTAMP"
 
-        self._log_sync_event(
-            "prompt_studio_optimization",
-            optimization.get("uuid", ""),
-            "update",
-            log_payload,
+            self._log_sync_event(
+                "prompt_studio_optimization",
+                optimization.get("uuid", ""),
+                "update",
+                log_payload,
+            )
+        return (
+            (optimization, transition_applied)
+            if _return_transition_applied
+            else optimization
         )
-        return optimization
 
     def set_optimization_status(
         self,
@@ -2195,11 +2298,17 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
         updates: dict[str, Any] = {"status": status}
         if error_message is not None:
             updates["error_message"] = error_message
+        expected_statuses = (
+            _OPTIMIZATION_ACTIVE_STATUSES
+            if status in _OPTIMIZATION_GUARDED_STATUS_TARGETS
+            else None
+        )
         return self.update_optimization(
             optimization_id,
             updates,
             set_started_at=mark_started,
             set_completed_at=mark_completed,
+            expected_statuses=expected_statuses,
         )
 
     def complete_optimization(
@@ -2213,9 +2322,11 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
         improvement_percentage: Optional[float] = None,
         total_tokens: Optional[int] = None,
         total_cost: Optional[float] = None,
-    ) -> dict[str, Any]:
+        _return_transition_applied: bool = False,
+    ) -> dict[str, Any] | tuple[dict[str, Any], bool]:
         updates: dict[str, Any] = {
             "status": "completed",
+            "error_message": None,
             "optimized_prompt_id": optimized_prompt_id,
             "iterations_completed": iterations_completed,
             "initial_metrics": initial_metrics,
@@ -2224,12 +2335,19 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
             "total_tokens": total_tokens,
             "total_cost": total_cost,
         }
-        # Remove keys with None to avoid overriding with NULL unnecessarily
-        updates = {k: v for k, v in updates.items() if v is not None}
+        # Successful retries must clear any diagnostic left by an earlier
+        # nonterminal attempt; other omitted result fields remain untouched.
+        updates = {
+            k: v
+            for k, v in updates.items()
+            if v is not None or k == "error_message"
+        }
         return self.update_optimization(
             optimization_id,
             updates,
             set_completed_at=True,
+            expected_statuses=_OPTIMIZATION_ACTIVE_STATUSES,
+            _return_transition_applied=_return_transition_applied,
         )
 
     def record_optimization_iteration(
@@ -3126,11 +3244,12 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
         self._log_sync_event(
             "prompt_studio_prompt",
             prompt.get("uuid", ""),
-            "version_create",
+            "create",
             {
                 "prompt_id": prompt_id,
                 "new_version": prompt.get("version_number"),
                 "change_description": change_description,
+                "version_operation": "create",
             },
         )
         return prompt
@@ -3254,11 +3373,12 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
         self._log_sync_event(
             "prompt_studio_prompt",
             prompt.get("uuid", ""),
-            "version_revert",
+            "create",
             {
                 "prompt_id": prompt_id,
                 "target_version": target_version,
                 "new_version": prompt.get("version_number"),
+                "version_operation": "revert",
             },
         )
         return prompt
@@ -4601,7 +4721,7 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
                     self._log_sync_event(
                         "prompt_studio_signature",
                         signature_uuid,
-                        "delete" if hard_delete else "soft_delete",
+                        "delete",
                         {"hard": hard_delete},
                     )
                     return True
@@ -5352,11 +5472,12 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
                     self._log_sync_event(
                         "prompt_studio_prompt",
                         prompt.get("uuid", ""),
-                        "version_create",
+                        "create",
                         {
                             "prompt_id": prompt_id,
                             "new_version": prompt.get("version_number"),
                             "change_description": change_description,
+                            "version_operation": "create",
                         },
                     )
                     return prompt  # noqa: TRY300
@@ -5491,11 +5612,12 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
                     self._log_sync_event(
                         "prompt_studio_prompt",
                         prompt.get("uuid", ""),
-                        "version_revert",
+                        "create",
                         {
                             "prompt_id": prompt_id,
                             "target_version": target_version,
                             "new_version": prompt.get("version_number"),
+                            "version_operation": "revert",
                         },
                     )
                     return prompt  # noqa: TRY300
@@ -5546,12 +5668,32 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
         *,
         set_started_at: bool = False,
         set_completed_at: bool = False,
-    ) -> dict[str, Any]:
+        expected_statuses: Optional[Iterable[str]] = None,
+        expected_uuid: Optional[str] = None,
+        _return_transition_applied: bool = False,
+    ) -> dict[str, Any] | tuple[dict[str, Any], bool]:
+        expected_status_values = (
+            tuple(dict.fromkeys(str(value) for value in expected_statuses))
+            if expected_statuses is not None
+            else ()
+        )
+        if expected_statuses is not None and not expected_status_values:
+            raise ValueError("expected_statuses cannot be empty")  # noqa: TRY003
+        expected_uuid_value = (
+            str(expected_uuid).strip() if expected_uuid is not None else None
+        )
+        if expected_uuid is not None and not expected_uuid_value:
+            raise ValueError("expected_uuid cannot be empty")  # noqa: TRY003
+
         if not updates and not (set_started_at or set_completed_at):
             optimization = self.get_optimization(optimization_id, include_deleted=True)
             if optimization is None:
                 raise InputError(f"Optimization {optimization_id} not found")  # noqa: TRY003
-            return optimization
+            return (
+                (optimization, False)
+                if _return_transition_applied
+                else optimization
+            )
 
         json_fields = {
             "optimization_config",
@@ -5576,10 +5718,18 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
             set_clauses.append("completed_at = CURRENT_TIMESTAMP")
 
         params.append(optimization_id)
+        where_sql = " WHERE id = ?"
+        if expected_status_values:
+            status_placeholders = ", ".join("?" for _ in expected_status_values)
+            where_sql += f" AND status IN ({status_placeholders})"
+            params.extend(expected_status_values)
+        if expected_uuid_value is not None:
+            where_sql += " AND uuid = ?"
+            params.append(expected_uuid_value)
         sql = (
             "UPDATE prompt_studio_optimizations SET "  # nosec B608
             + ", ".join(set_clauses)
-            + " WHERE id = ?"
+            + where_sql
         )
 
         try:
@@ -5587,7 +5737,10 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
                 conn = self.get_connection()
                 cursor = conn.cursor()
                 cursor.execute(sql, params)
-                if cursor.rowcount == 0:
+                transition_applied = cursor.rowcount > 0
+                if not transition_applied and not (
+                    expected_status_values or expected_uuid_value is not None
+                ):
                     raise InputError(f"Optimization {optimization_id} not found")  # noqa: TRY003
                 conn.commit()
 
@@ -5596,31 +5749,38 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
                     (optimization_id,),
                 )
                 row = cursor.fetchone()
-                optimization = self._row_to_dict(cursor, row) if row else {}
+                if not row:
+                    raise InputError(f"Optimization {optimization_id} not found")  # noqa: TRY003
+                optimization = self._row_to_dict(cursor, row)
         except sqlite3.Error as exc:  # noqa: BLE001
             raise DatabaseError(f"Failed to update optimization {optimization_id}: {exc}") from exc  # noqa: TRY003
 
-        log_payload = {}
-        for key, value in updates.items():
-            if isinstance(value, (dict, list)):
-                try:
-                    log_payload[key] = json.loads(json.dumps(value, default=str))
-                except TypeError:
-                    log_payload[key] = str(value)
-            else:
-                log_payload[key] = value
-        if set_started_at:
-            log_payload["started_at"] = "CURRENT_TIMESTAMP"
-        if set_completed_at:
-            log_payload["completed_at"] = "CURRENT_TIMESTAMP"
+        if transition_applied:
+            log_payload = {}
+            for key, value in updates.items():
+                if isinstance(value, (dict, list)):
+                    try:
+                        log_payload[key] = json.loads(json.dumps(value, default=str))
+                    except TypeError:
+                        log_payload[key] = str(value)
+                else:
+                    log_payload[key] = value
+            if set_started_at:
+                log_payload["started_at"] = "CURRENT_TIMESTAMP"
+            if set_completed_at:
+                log_payload["completed_at"] = "CURRENT_TIMESTAMP"
 
-        self._log_sync_event(
-            "prompt_studio_optimization",
-            optimization.get("uuid", ""),
-            "update",
-            log_payload,
+            self._log_sync_event(
+                "prompt_studio_optimization",
+                optimization.get("uuid", ""),
+                "update",
+                log_payload,
+            )
+        return (
+            (optimization, transition_applied)
+            if _return_transition_applied
+            else optimization
         )
-        return optimization
 
     def set_optimization_status(
         self,
@@ -5634,11 +5794,17 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
         updates: dict[str, Any] = {"status": status}
         if error_message is not None:
             updates["error_message"] = error_message
+        expected_statuses = (
+            _OPTIMIZATION_ACTIVE_STATUSES
+            if status in _OPTIMIZATION_GUARDED_STATUS_TARGETS
+            else None
+        )
         return self.update_optimization(
             optimization_id,
             updates,
             set_started_at=mark_started,
             set_completed_at=mark_completed,
+            expected_statuses=expected_statuses,
         )
 
     def complete_optimization(
@@ -5652,9 +5818,11 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
         improvement_percentage: Optional[float] = None,
         total_tokens: Optional[int] = None,
         total_cost: Optional[float] = None,
-    ) -> dict[str, Any]:
+        _return_transition_applied: bool = False,
+    ) -> dict[str, Any] | tuple[dict[str, Any], bool]:
         updates: dict[str, Any] = {
             "status": "completed",
+            "error_message": None,
             "optimized_prompt_id": optimized_prompt_id,
             "iterations_completed": iterations_completed,
             "initial_metrics": initial_metrics,
@@ -5663,11 +5831,17 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
             "total_tokens": total_tokens,
             "total_cost": total_cost,
         }
-        updates = {k: v for k, v in updates.items() if v is not None}
+        updates = {
+            k: v
+            for k, v in updates.items()
+            if v is not None or k == "error_message"
+        }
         return self.update_optimization(
             optimization_id,
             updates,
             set_completed_at=True,
+            expected_statuses=_OPTIMIZATION_ACTIVE_STATUSES,
+            _return_transition_applied=_return_transition_applied,
         )
 
     def record_optimization_iteration(
@@ -6953,6 +7127,7 @@ class PromptStudioDatabase:
         db_path: Union[str, Path],
         client_id: str,
         *,
+        tenant_user_id: Optional[str] = None,
         backend: Optional[DatabaseBackend] = None,
         config: Optional[ConfigParser] = None,
     ) -> None:
@@ -6961,11 +7136,18 @@ class PromptStudioDatabase:
             self._impl = _BackendPromptStudioDatabase(
                 db_path,
                 client_id,
+                tenant_user_id=tenant_user_id,
                 backend=backend,
                 config=config,
             )
         else:
             self._impl = _SQLitePromptStudioDatabase(str(db_path), client_id)
+        if tenant_user_id is not None:
+            # The wrapper is the object passed to optimizers and other service
+            # layers. Preserve the tenant on both surfaces for SQLite as well
+            # as PostgreSQL so durable state can never fall back to audit ID.
+            self.tenant_user_id = str(tenant_user_id)
+            self._impl.tenant_user_id = str(tenant_user_id)
 
     def __getattr__(self, item):
         return getattr(self._impl, item)
@@ -7161,6 +7343,11 @@ class PromptStudioDatabase:
     # Optimization delegation --------------------------------------------
 
     def create_optimization(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if "optimization_config" in kwargs:
+            kwargs = dict(kwargs)
+            kwargs["optimization_config"] = validate_secret_free_optimization_config(
+                kwargs["optimization_config"],
+            )
         return self._impl.create_optimization(*args, **kwargs)
 
     def get_optimization(self, *args: Any, **kwargs: Any) -> Optional[dict[str, Any]]:
@@ -7170,13 +7357,45 @@ class PromptStudioDatabase:
         return self._impl.list_optimizations(*args, **kwargs)
 
     def update_optimization(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return self._impl.update_optimization(*args, **kwargs)
+        positional = list(args)
+        if len(positional) >= 2 and isinstance(positional[1], dict):
+            updates = dict(positional[1])
+            if "optimization_config" in updates:
+                updates["optimization_config"] = validate_secret_free_optimization_config(
+                    updates["optimization_config"],
+                )
+            positional[1] = updates
+        elif isinstance(kwargs.get("updates"), dict):
+            kwargs = dict(kwargs)
+            updates = dict(kwargs["updates"])
+            if "optimization_config" in updates:
+                updates["optimization_config"] = validate_secret_free_optimization_config(
+                    updates["optimization_config"],
+                )
+            kwargs["updates"] = updates
+        return self._impl.update_optimization(*positional, **kwargs)
 
     def set_optimization_status(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return self._impl.set_optimization_status(*args, **kwargs)
 
     def complete_optimization(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return self._impl.complete_optimization(*args, **kwargs)
+
+    def complete_optimization_with_transition(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> tuple[dict[str, Any], bool]:
+        """Complete an active optimization and report whether this caller won."""
+
+        result = self._impl.complete_optimization(
+            *args,
+            **kwargs,
+            _return_transition_applied=True,
+        )
+        if not isinstance(result, tuple):
+            raise DatabaseError("Optimization transition result is invalid")
+        return result
 
     def record_optimization_iteration(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return self._impl.record_optimization_iteration(*args, **kwargs)

@@ -209,6 +209,7 @@ Notes:
 - `JOBS_LEASE_RENEW_SECONDS`: Renewal cadence while a worker processes a job (default `30`).
 - `JOBS_LEASE_RENEW_JITTER_SECONDS`: Jitter (seconds) applied to renewals to avoid herd behavior (default `5`).
 - `JOBS_LEASE_MAX_SECONDS`: Cap for acquire/renew lease seconds (default `3600`).
+- `JOBS_EXPIRED_RECOVERY_BATCH_SIZE`: Maximum expired leases transitioned per recovery transaction and terminal-dependent jobs reconciled per maintenance pass (default `100`, clamped `1..1000`). Each acquire processes one batch; `integrity_sweep(fix=true)` drains expired leases across repeated transactions.
 - `TLDW_WORKERS_SIDECAR_MODE`: When true, skip in-process Jobs workers so you can run them as sidecars (`true|false`, default `false`).
 - `EVALUATIONS_ABTEST_JOBS_WORKER_ENABLED`: Enable the in-process Embeddings A/B Jobs worker (`true|false`, default `false`). Alias: `EVALS_ABTEST_JOBS_WORKER_ENABLED`.
 - `EVALUATIONS_JOBS_QUEUE`: Queue name for evaluations jobs (default `default`). Alias: `EVALS_JOBS_QUEUE`.
@@ -255,7 +256,7 @@ Notes:
 ## Chat Commands & Weather
 - `CHAT_COMMANDS_ENABLED`: Enable slash-command preprocessing (`true|false`, default `false`).
 - `CHAT_COMMAND_INJECTION_MODE`: Slash-command injection mode (`system|preface|replace`, default `system`).
-- `CHAT_COMMANDS_REQUIRE_PERMISSIONS`: Require per-command RBAC permission checks (`true|false`, default `false`).
+- `CHAT_COMMANDS_REQUIRE_PERMISSIONS`: Deprecated compatibility flag; declared per-command permissions are enforced whenever slash commands are enabled.
 - `CHAT_COMMANDS_RATE_LIMIT_USER`: Per-user, per-command RPM limit (accepts `10` or `10/min`; default `10`).
 - `CHAT_COMMANDS_RATE_LIMIT`: Backward-compatible alias for `CHAT_COMMANDS_RATE_LIMIT_USER`.
 - `CHAT_COMMANDS_RATE_LIMIT_GLOBAL`: Global, per-command RPM limit (accepts `100` or `100/min`; default `100`).
@@ -263,6 +264,7 @@ Notes:
 - `DEFAULT_LOCATION`: Optional fallback location for `/weather` when no argument is supplied.
 - `WEATHER_PROVIDER`: Weather backend (`openweather`, `noop`, `none`, `disabled`; default `openweather`).
 - `OPENWEATHER_API_KEY`: API key for the `openweather` provider.
+- `EGRESS_ALLOWLIST`: Must include `api.openweathermap.org` when the `openweather` provider is enabled; policy denial returns weather as unavailable without making the request.
 - `WEATHER_UNITS`: Unit system for weather summaries (`metric|imperial`, default `metric`).
 - `WEATHER_LANG`: OpenWeather language code for descriptions (default `en`).
 - `WEATHER_TIMEOUT_MS`: OpenWeather HTTP timeout in milliseconds (default `1500`).
@@ -326,8 +328,9 @@ The Resource Governor (RG) is the **primary enforcement path** for all rate limi
 - `RG_REDIS_FAIL_MODE`: Behavior when Redis is unavailable (`fail_open` | `fail_closed` | `fallback_memory`). Default `fail_open`.
 
 ### Client Identity
-- `RG_TRUSTED_PROXIES`: Comma-separated list of trusted proxy IPs for `X-Forwarded-For` resolution.
-- `RG_CLIENT_IP_HEADER`: Custom header for client IP extraction (e.g., `CF-Connecting-IP`).
+- `RG_TRUSTED_PROXIES`: Comma-separated trusted-proxy host/CIDR list. This is opt-in: forwarding is used only when the physical peer is a valid IP in this list.
+- `RG_CLIENT_IP_HEADER`: Header used with `RG_TRUSTED_PROXIES`; leave either setting unset to use the physical peer. `X-Forwarded-For` is parsed as a complete chain from the trusted edge inward (right-to-left), and malformed chains fall back to the physical peer. Any other header value must contain one plain IP literal.
+- Invalid physical peers resolve to the safe `unknown` sentinel.
 
 ### Per-Module Policy Overrides
 - `RG_CHAT_POLICY_ID`: Override chat policy ID (default `chat.default`).
@@ -372,6 +375,10 @@ The following env vars are retained as **deprecated compatibility knobs** during
 
 ## AuthNZ (Authentication)
 - `AUTH_MODE`: `single_user` | `multi_user`.
+- `AUTH_TRUST_X_FORWARDED_FOR`: Opt in to trusted forwarded identity for AuthNZ (default `false`). Use with `AUTH_TRUSTED_PROXY_IPS`.
+- `AUTH_TRUSTED_PROXY_IPS`: Comma-separated trusted-proxy host/CIDR list. Forwarded identity is used only when the physical peer is a valid IP in this list.
+- When both AuthNZ and Resource Governor forwarding are enabled, configure equivalent trusted-proxy sets and compatible headers so password-login lockouts and request governance derive the same client identity. AuthNZ uses `AUTH_TRUST_X_FORWARDED_FOR=true` plus `AUTH_TRUSTED_PROXY_IPS=<proxy IP/CIDR list>`; Resource Governor uses `RG_CLIENT_IP_HEADER=X-Forwarded-For` plus `RG_TRUSTED_PROXIES=<equivalent proxy IP/CIDR list>`.
+- Rollout no longer consults legacy raw-IP password-login buckets. Account-wide lockout and Resource Governor protections remain active.
 - `DATABASE_URL`: AuthNZ database URL. For production multi-user, use Postgres (e.g., `postgresql://user:pass@host:5432/db`). SQLite supported for dev.
 - `SINGLE_USER_API_KEY`: API key for single-user mode (>=24 chars recommended in production).
 - `JWT_SECRET_KEY`: JWT signing secret (>=32 chars). Required for `multi_user` in production.
@@ -382,7 +389,9 @@ The following env vars are retained as **deprecated compatibility knobs** during
 - `PUBLIC_EMAIL_VERIFICATION_PATH`: Public hosted path for email verification completion (default `/auth/verify-email`).
 - `PUBLIC_MAGIC_LINK_PATH`: Public hosted path for magic-link sign-in completion (default `/auth/magic-link`).
 - Hosted SaaS profile: expect `AUTH_MODE=multi_user`, PostgreSQL `DATABASE_URL`, `tldw_production=true`, and `PUBLIC_WEB_BASE_URL=https://<public-app-origin>`.
-- `REDIS_URL`: Optional Redis URL for sessions (`redis://` or `rediss://`).
+- `REDIS_URL`: Optional Redis URL for sessions (`redis://` or `rediss://`) and required when `OPENAI_OAUTH_REFRESH_LOCK_BACKEND=redis`.
+- `OPENAI_OAUTH_REFRESH_LOCK_BACKEND`: Cross-worker backend for all whole-row OpenAI credential mutations; the legacy OAuth-oriented name is retained for compatibility. Values are `db` (default), `redis`, or `memory`; missing and invalid values resolve to `db`. On PostgreSQL, `db` uses a separate zero-idle pool capped at four advisory-lock sessions per application process so credential refresh cannot exhaust the main AuthNZ pool. On SQLite, `db` uses a native process-shared file lock. `redis` is the supported high-scale backend for multi-process or high credential-mutation concurrency and is required with PgBouncer transaction pooling. Direct PostgreSQL connections and PgBouncer session pooling remain correctness-capable with `db` at modest concurrency. Explicit Redis selection without `REDIS_URL` fails closed. `memory` is suitable only for one process.
+- `OPENAI_OAUTH_REFRESH_LOCK_DIR`: Optional local directory for native SQLite OpenAI credential lock files (default `~/.tldw/locks`). The path must be visible to every process that shares that SQLite AuthNZ database.
 - `ENABLE_REGISTRATION`: Enable user registration (`true|false`).
 - `REQUIRE_REGISTRATION_CODE`: Require code to register (`true|false`).
 - `SECURITY_ALERTS_ENABLED`: Enable AuthNZ security alert dispatching (`true|false`, default `false`).
@@ -432,6 +441,16 @@ Config file support (optional):
 - `PERSONA_IOO_BUDGET_AUTO_ADJUST_ENABLED`: Auto-adjust persona exemplar budget after sustained IOO alerts (`true|false`, default `true`).
 - `PERSONA_IOO_BUDGET_AUTO_REDUCTION_FACTOR`: Multiplicative downshift applied when auto-adjust triggers (default `0.75`, clamped to `0.10..0.95`).
 - `PERSONA_IOO_BUDGET_AUTO_MIN_TOKENS`: Lower bound for auto-adjusted persona exemplar budget (default `240`, clamped to `1..20000`).
+
+### Provider call and stream capacity
+
+- `CHAT_SYNC_ADAPTER_MAX_WORKERS`: Process-local cap for credential-bearing synchronous provider adapter calls (default `32`). Saturation fails closed before dispatch.
+- `CHAT_STREAM_DAEMON_MAX_WORKERS`: Process-local cap for synchronous Chat, Audio, Character, and provider stream workers (default `32`).
+- `CHAT_STREAM_CLEANUP_DAEMON_MAX_WORKERS`: Process-local capacity reserved for synchronous cleanup after late or non-cooperative stream work (default `4`). This is not additional request throughput.
+- `CHAT_STREAM_ASYNC_MAX_TASKS`: Process-local cap for asynchronous provider stream tasks (default `256`).
+- `CHAT_STREAM_ASYNC_CLEANUP_MAX_TASKS`: Process-local capacity reserved for asynchronous cleanup tasks (default `32`). This is not additional request throughput.
+
+All five values must be integers from `1` through `256`; `0` does not disable a cap, and invalid or out-of-range values fall back to the listed default. They are read at process startup, so changes require a restart. The caps apply independently to each application process and replica.
 
 ### Tokenizer (Chat Dictionaries & World Books)
 - `TOKEN_ESTIMATOR_MODE`: `whitespace` (default) or `char_approx`
@@ -719,6 +738,11 @@ Non‑prod defaults
 - `Dockerfiles/docker-compose.dev.yml` exports `STREAMS_UNIFIED=1` for dev/staging overlays.
 - `Dockerfiles/docker-compose.test.yml` also sets `STREAMS_UNIFIED=1` for test environments.
   In production, keep the flag unset or `0` until you explicitly opt into unified streams or are ready to flip them on by default.
+
+### Streaming defaults
+
+| Variable | Default | Notes |
+|----------|---------|-------|
 | `STREAM_HEARTBEAT_INTERVAL_S`   | `10`                | Default heartbeat interval for streams (seconds) |
 | `STREAM_HEARTBEAT_MODE`         | `comment`           | `comment` or `data` heartbeats (prefer `data` behind reverse proxies) |
 | `STREAM_IDLE_TIMEOUT_S`         | (disabled)          | Idle timeout for SSE streams (seconds) |

@@ -50,6 +50,32 @@ class AdapterRegistry:
 
     def __init__(self) -> None:
         self._adapters: dict[str, AdapterSpec] = {}
+        # Adapter category modules are imported on first registry access rather
+        # than at import time; see set_loader().
+        self._loader: Callable[[], None] | None = None
+        self._loading = False
+        self._loaded = False
+
+    def set_loader(self, loader: Callable[[], None]) -> None:
+        """Install the callback that imports every adapter category module.
+
+        The adapters package registers its categories through this hook instead
+        of importing them at module scope. Importing them eagerly pulled the RAG
+        pipeline -- and through it nltk, scipy, sklearn and pandas -- into every
+        process that touched workflows, including CLI runs and test sessions.
+        """
+        self._loader = loader
+
+    def _ensure_loaded(self) -> None:
+        """Import all adapter categories once, before answering a query."""
+        if self._loaded or self._loading or self._loader is None:
+            return
+        self._loading = True
+        try:
+            self._loader()
+            self._loaded = True
+        finally:
+            self._loading = False
 
     @classmethod
     def get(cls) -> AdapterRegistry:
@@ -110,6 +136,7 @@ class AdapterRegistry:
         Returns:
             The adapter function, or None if not found
         """
+        self._ensure_loaded()
         spec = self._adapters.get(name)
         return spec.func if spec else None
 
@@ -122,6 +149,7 @@ class AdapterRegistry:
         Returns:
             The AdapterSpec, or None if not found
         """
+        self._ensure_loaded()
         return self._adapters.get(name)
 
     def list_adapters(self) -> list[str]:
@@ -130,6 +158,7 @@ class AdapterRegistry:
         Returns:
             List of adapter names
         """
+        self._ensure_loaded()
         return list(self._adapters.keys())
 
     def get_parallelizable(self) -> set[str]:
@@ -140,6 +169,7 @@ class AdapterRegistry:
         Returns:
             Set of adapter names that can run in parallel
         """
+        self._ensure_loaded()
         return {name for name, spec in self._adapters.items() if spec.parallelizable}
 
     def get_by_category(self, category: str) -> list[str]:
@@ -151,6 +181,7 @@ class AdapterRegistry:
         Returns:
             List of adapter names in that category
         """
+        self._ensure_loaded()
         return [name for name, spec in self._adapters.items() if spec.category == category]
 
     def get_categories(self) -> list[str]:
@@ -159,6 +190,7 @@ class AdapterRegistry:
         Returns:
             List of unique category names
         """
+        self._ensure_loaded()
         return list({spec.category for spec in self._adapters.values()})
 
     def get_catalog(self) -> dict[str, list[dict[str, Any]]]:
@@ -167,6 +199,7 @@ class AdapterRegistry:
         Returns:
             Dict mapping category names to adapter metadata entries
         """
+        self._ensure_loaded()
         catalog: dict[str, list[dict[str, Any]]] = {}
         for name, spec in self._adapters.items():
             catalog.setdefault(spec.category, []).append(
@@ -183,9 +216,11 @@ class AdapterRegistry:
         return catalog
 
     def __len__(self) -> int:
+        self._ensure_loaded()
         return len(self._adapters)
 
     def __contains__(self, name: str) -> bool:
+        self._ensure_loaded()
         return name in self._adapters
 
 

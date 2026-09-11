@@ -220,7 +220,7 @@ describe("TldwModelsService caching", () => {
     expect(mocks.getModels).toHaveBeenCalledTimes(1)
   })
 
-  it("retries aborted model metadata requests before returning an empty model list", async () => {
+  it("does not retry or log model metadata requests aborted by page lifecycle", async () => {
     const abortError = Object.assign(
       new Error("signal is aborted without reason"),
       {
@@ -229,23 +229,19 @@ describe("TldwModelsService caching", () => {
         status: 0
       }
     )
-    mocks.getModels
-      .mockRejectedValueOnce(abortError)
-      .mockResolvedValueOnce([
-        { id: "gpt-4o", name: "gpt-4o", provider: "openai", type: "chat" }
-      ])
+    mocks.getModels.mockRejectedValue(abortError)
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-    const { TldwModelsService } = await importService()
-    const service = new TldwModelsService()
+    try {
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
 
-    await expect(service.getModels(true)).resolves.toEqual([
-      expect.objectContaining({
-        id: "gpt-4o",
-        provider: "openai",
-        type: "chat"
-      })
-    ])
-    expect(mocks.getModels).toHaveBeenCalledTimes(2)
+      await expect(service.getModels(true)).resolves.toEqual([])
+      expect(mocks.getModels).toHaveBeenCalledTimes(1)
+      expect(consoleError).not.toHaveBeenCalled()
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
   it("reuses cached models during the forced refresh cooldown", async () => {

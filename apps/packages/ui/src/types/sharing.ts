@@ -62,9 +62,9 @@ export interface ShareListResponse {
 export interface SharedWithMeItem {
   share_id: number
   workspace_id: string
-  workspace_name?: string
+  workspace_name?: string | null
   owner_user_id: number
-  owner_username?: string
+  owner_username?: string | null
   access_level: AccessLevel
   allow_clone: boolean
   shared_at?: string | null

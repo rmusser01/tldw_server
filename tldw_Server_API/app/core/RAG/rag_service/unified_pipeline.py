@@ -18,26 +18,47 @@ import calendar
 import copy
 import hashlib
 import inspect
+import json
+import math
 import os
 import re
 import sqlite3
 import time
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+from functools import partial
+from numbers import Real
 from types import SimpleNamespace
 from typing import Any, Callable, Literal, Optional, cast
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     managed_media_database,
+)
+from tldw_Server_API.app.core.DB_Management.scope_context import (
+    ScopeContext,
+    content_authorization_cache_scope,
+    get_scope,
 )
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
     parse_structured_output,
 )
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+    SummaryProviderError,
+)
+from tldw_Server_API.app.core.RAG.exceptions import RAGConfigurationError
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
 )
@@ -45,11 +66,47 @@ from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 
-from .retrieval_executor import execute_retrieval_phase
 from .generation_executor import execute_generation_phase
+from .hyde import (
+    _embedding_model_from_config,
+    _embedding_provider_from_config,
+    _mark_runtime_used_for_embeddings,
+    _resolve_runtime_embedding_call,
+    _run_sync_embedding_call,
+    _runtime_local_embedding_call_kwargs,
+)
+from .retrieval_executor import execute_retrieval_phase
 from .retrieval_plan import RetrievalPlan
 
 _RERANK_DEBUG_DOCUMENT_CONTENT_MAX_CHARS = 500
+_RAG_PROVIDER_FAILURES = (ByokResolutionError, ChatAPIError)
+
+
+class _ProviderFailureBypass(BaseException):
+    """Carry a typed provider failure across retry/circuit accounting unchanged."""
+
+    __slots__ = ("failure",)
+
+    def __init__(self, failure: BaseException) -> None:
+        self.failure = failure
+        super().__init__()
+
+
+def _bounded_provider_failure_code(exc: BaseException) -> str:
+    """Map a typed provider failure to an allowlisted metadata code."""
+    allowed = {
+        "invalid_provider_credentials",
+        "missing_provider_credentials",
+        "provider_configuration_invalid",
+        "credential_store_unavailable",
+        "credential_scope_revoked",
+    }
+    code = str(getattr(exc, "code", "") or getattr(exc, "error_code", "") or "")
+    if code in allowed:
+        return code
+    if getattr(exc, "status_code", None) in {401, 403}:
+        return "invalid_provider_credentials"
+    return "provider_unavailable"
 
 
 def _serialize_result_document(doc: Any) -> dict[str, Any]:
@@ -57,46 +114,64 @@ def _serialize_result_document(doc: Any) -> dict[str, Any]:
     if isinstance(doc, dict):
         metadata = dict(doc.get("metadata") or {})
         source = doc.get("source")
+        serialized_source = None
         if source is not None:
-            metadata.setdefault(
-                "source",
-                source.value if hasattr(source, "value") else str(source),
-            )
-        for field_name in ("media_id", "note_id", "chunk_id", "record_id", "start", "end"):
+            serialized_source = source.value if hasattr(source, "value") else str(source)
+            metadata["source"] = serialized_source
+        for field_name in (
+            "media_id",
+            "note_id",
+            "chunk_id",
+            "record_id",
+            "chunk_index",
+            "start",
+            "end",
+            "start_char",
+            "end_char",
+        ):
             value = doc.get(field_name)
             if value is not None:
                 metadata.setdefault(field_name, value)
         doc_id = doc.get("id")
         if doc_id is not None:
             metadata.setdefault("chunk_id", str(doc_id))
-        return {
+        serialized = {
             "id": doc_id,
             "content": doc.get("content") or doc.get("text") or doc.get("body"),
             "score": doc.get("score", 0.0),
             "metadata": metadata,
         }
+        if serialized_source is not None:
+            serialized["source"] = serialized_source
+        return serialized
 
     metadata = dict(getattr(doc, "metadata", {}) or {})
+    serialized_source = None
     try:
         source = getattr(doc, "source", None)
         if source is not None:
-            metadata.setdefault(
-                "source",
-                source.value if hasattr(source, "value") else str(source),
-            )
+            serialized_source = source.value if hasattr(source, "value") else str(source)
+            metadata["source"] = serialized_source
     except (AttributeError, TypeError, ValueError):
         pass
 
     doc_id = getattr(doc, "id", None)
     if doc_id is not None:
         metadata.setdefault("chunk_id", str(doc_id))
+    for field_name in ("chunk_index", "start_char", "end_char"):
+        value = getattr(doc, field_name, None)
+        if value is not None:
+            metadata.setdefault(field_name, value)
 
-    return {
+    serialized = {
         "id": doc_id,
         "content": getattr(doc, "content", None),
         "score": getattr(doc, "score", 0.0),
         "metadata": metadata,
     }
+    if serialized_source is not None:
+        serialized["source"] = serialized_source
+    return serialized
 
 
 def _clone_cached_document(doc: Any) -> Any:
@@ -128,6 +203,96 @@ def _clone_cached_documents(documents: list[Any]) -> list[Any]:
     return [_clone_cached_document(doc) for doc in documents]
 
 
+def _restore_cached_document(document: Any) -> Optional["Document"]:
+    """Restore one supported cache wire document to the pipeline document type."""
+    if isinstance(document, Document):
+        return _clone_cached_document(document)
+    if not isinstance(document, dict):
+        return None
+    content = document.get("content")
+    document_id = document.get("id")
+    if not isinstance(content, str) or not isinstance(document_id, (str, int)):
+        return None
+    metadata = copy.deepcopy(document.get("metadata") or {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    source_value = document.get("source", metadata.get("source"))
+    if isinstance(source_value, DataSource):
+        source = source_value
+    else:
+        try:
+            source = DataSource(str(source_value))
+        except (TypeError, ValueError):
+            source = DataSource.MEDIA_DB
+    try:
+        score = float(document.get("score", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+    return Document(
+        id=str(document_id),
+        content=content,
+        metadata=metadata,
+        source=source,
+        score=score,
+    )
+
+
+def _extract_cached_documents(value: Any) -> list["Document"]:
+    """Extract only non-empty retrieval documents from a cache payload."""
+    if callable(_sanitize_cache_payload):
+        value = _sanitize_cache_payload(value)
+        if value is None:
+            return []
+    if isinstance(value, dict):
+        raw_documents = value.get("documents")
+    elif isinstance(value, list):
+        raw_documents = value
+    else:
+        return []
+    if not isinstance(raw_documents, list) or not raw_documents:
+        return []
+    return [
+        restored
+        for document in raw_documents
+        if (restored := _restore_cached_document(document)) is not None
+    ]
+
+
+_MAX_CACHED_QUERY_CHARS = 4096
+
+
+def _validate_semantic_cache_match(value: Any) -> Optional[tuple[str, float]]:
+    """Validate and bound the untrusted result returned by ``find_similar``."""
+    if not isinstance(value, tuple) or len(value) not in {2, 3}:
+        return None
+    cached_query, similarity = value[-2:]
+    if not isinstance(cached_query, str):
+        return None
+    cached_query = cached_query.strip()
+    if not cached_query or len(cached_query) > _MAX_CACHED_QUERY_CHARS:
+        return None
+    if isinstance(similarity, bool) or not isinstance(similarity, Real):
+        return None
+    similarity_value = float(similarity)
+    if not math.isfinite(similarity_value) or not 0.0 <= similarity_value <= 1.0:
+        return None
+    return cached_query, similarity_value
+
+
+async def _invoke_cache_callable(callable_obj: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Invoke a cache callable once and await wrapped awaitable results."""
+    value = callable_obj(*args, **kwargs)
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+def _cache_identity_digest(value: dict[str, Any]) -> str:
+    """Return a deterministic short digest for cache identity components."""
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:20]
+
+
 def _resolve_security_user_id(user_id: Any, feedback_user_id: Any) -> str:
     """Resolve the best available user identifier for security filtering."""
     for candidate in (user_id, feedback_user_id):
@@ -148,7 +313,9 @@ def _resolve_include_rerank_debug_documents(explicit_flag: Any) -> bool:
     return _shared_is_truthy(explicit_flag)
 
 
-def _truncate_rerank_debug_content(content: Any, *, max_chars: int = _RERANK_DEBUG_DOCUMENT_CONTENT_MAX_CHARS) -> str | None:
+def _truncate_rerank_debug_content(
+    content: Any, *, max_chars: int = _RERANK_DEBUG_DOCUMENT_CONTENT_MAX_CHARS
+) -> str | None:
     if content is None:
         return None
     text = str(content)
@@ -230,8 +397,7 @@ def _serialize_rerank_debug_documents(
     if limit <= 0:
         return []
     return [
-        _serialize_rerank_debug_document(doc, include_content=include_content)
-        for doc in list(documents or [])[:limit]
+        _serialize_rerank_debug_document(doc, include_content=include_content) for doc in list(documents or [])[:limit]
     ]
 
 
@@ -245,6 +411,7 @@ _QueryIntent: Any = None
 _QueryRouter: Any = None
 _QueryRewriter: Any = None
 _generate_hypothetical_answer: Any = None
+_generate_hypothetical_answer_async: Any = None
 _hyde_embed_text: Any = None
 _expand_acronyms: Any = None
 _expand_synonyms: Any = None
@@ -254,6 +421,7 @@ _multi_strategy_expansion: Any = None
 _SemanticCache: Any = None
 _AdaptiveCache: Any = None
 _get_shared_cache: Any = None
+_MediaDBRetriever: Any = None
 _MultiDatabaseRetriever: Any = None
 _RetrievalConfig: Any = None
 _SQLRetriever: Any = None
@@ -264,6 +432,7 @@ _enhanced_chunk_documents: Any = None
 _filter_chunks_by_type: Any = None
 _expand_with_parent_context: Any = None
 _prioritize_by_chunk_type: Any = None
+_create_preinstalled_local_reranker: Any = None
 _create_reranker: Any = None
 _RerankingStrategy: Any = None
 _RerankingConfig: Any = None
@@ -344,6 +513,7 @@ except ImportError:  # pragma: no cover - optional dependency
 get_telemetry_manager = _get_telemetry_manager
 OTEL_AVAILABLE = _OTEL_AVAILABLE
 
+
 class _NoopSpan:
     def __enter__(self):
         return None
@@ -362,12 +532,17 @@ def otel_span(name: str, *args, **kwargs):
             pass
     return _NoopSpan()
 
+
 # Core types
 import contextlib
 
-from .metrics_collector import MetricsCollector, QueryMetrics
 from .evidence_models import RetrievedEvidence
+from .metrics_collector import MetricsCollector, QueryMetrics
 from .post_retrieval_coordinator import coordinate_standard_result_evidence
+from .profiles import (
+    SLIDES_SOURCE_PROFILE,
+    SLIDES_SOURCE_RERANKING_STRATEGIES,
+)
 from .request_resolution import (
     ResolvedRAGRequest,
     resolve_legacy_standard_pipeline_request,
@@ -375,6 +550,32 @@ from .request_resolution import (
 from .result_model import RAGResult
 from .retrieval_plan import build_retrieval_plan
 from .types import DataSource, Document
+
+
+def _consume_bound_sgl_response(
+    response: Any,
+    provider: str,
+    on_content: Callable[[], None] | None = None,
+    fail_closed: bool = False,
+) -> Any:
+    """Consume a bound SGL response and reject its legacy error-string form."""
+    if isinstance(response, Iterator):
+        from .generation import _classify_stream_content, _extract_stream_text
+
+        chunks: list[str] = []
+        for chunk in response:
+            chunks.append(str(chunk))
+            has_content, has_error = _classify_stream_content(
+                _extract_stream_text(chunk)
+            )
+            if on_content is not None and has_content:
+                on_content()
+            if fail_closed and has_error:
+                raise SummaryProviderError(code="provider_failure", provider=provider)
+        response = "".join(chunks)
+    if fail_closed and isinstance(response, str) and response.startswith("Error:"):
+        raise SummaryProviderError(code="provider_failure", provider=provider)
+    return response
 
 try:
     from tldw_Server_API.app.core.Text2SQL.source_registry import (
@@ -518,11 +719,16 @@ try:
     from .hyde import (
         generate_hypothetical_answer as _generate_hypothetical_answer,
     )
+    from .hyde import (
+        generate_hypothetical_answer_async as _generate_hypothetical_answer_async,
+    )
 except ImportError:
     _generate_hypothetical_answer = None
+    _generate_hypothetical_answer_async = None
     _hyde_embed_text = None
 
 generate_hypothetical_answer = _generate_hypothetical_answer
+generate_hypothetical_answer_async = _generate_hypothetical_answer_async
 hyde_embed_text = _hyde_embed_text
 
 try:
@@ -562,12 +768,16 @@ try:
         SemanticCache as _SemanticCache,
     )
     from .semantic_cache import (
+        _sanitize_retrieval_payload as _sanitize_cache_payload,
+    )
+    from .semantic_cache import (
         get_shared_cache as _get_shared_cache,
     )
 except ImportError:
     _SemanticCache = None
     _AdaptiveCache = None
     _get_shared_cache = None
+    _sanitize_cache_payload = None
 
 SemanticCache = _SemanticCache
 AdaptiveCache = _AdaptiveCache
@@ -575,7 +785,16 @@ get_shared_cache = _get_shared_cache
 
 try:
     from .database_retrievers import (
+        ChatHistoryRetriever as _ChatHistoryRetriever,
+    )
+    from .database_retrievers import (
+        MediaDBRetriever as _MediaDBRetriever,
+    )
+    from .database_retrievers import (
         MultiDatabaseRetriever as _MultiDatabaseRetriever,
+    )
+    from .database_retrievers import (
+        NotesDBRetriever as _NotesDBRetriever,
     )
     from .database_retrievers import (
         RetrievalConfig as _RetrievalConfig,
@@ -583,14 +802,25 @@ try:
     from .database_retrievers import (
         SQLRetriever as _SQLRetriever,
     )
+    from .database_retrievers import (
+        _allocate_slides_source_projection_caps as _allocate_slides_source_projection_caps_impl,
+    )
 except ImportError:
+    _allocate_slides_source_projection_caps_impl = None
+    _ChatHistoryRetriever = None
+    _MediaDBRetriever = None
     _MultiDatabaseRetriever = None
+    _NotesDBRetriever = None
     _RetrievalConfig = None
     _SQLRetriever = None
 
+ChatHistoryRetriever = _ChatHistoryRetriever
+MediaDBRetriever = _MediaDBRetriever
 MultiDatabaseRetriever = _MultiDatabaseRetriever
+NotesDBRetriever = _NotesDBRetriever
 RetrievalConfig = _RetrievalConfig
 SQLRetriever = _SQLRetriever
+allocate_slides_source_projection_caps = _allocate_slides_source_projection_caps_impl
 
 try:
     from .security_filters import SecurityFilters as _SecurityFilters
@@ -641,13 +871,18 @@ try:
         RerankingStrategy as _RerankingStrategy,
     )
     from .advanced_reranking import (
+        create_preinstalled_local_reranker as _create_preinstalled_local_reranker,
+    )
+    from .advanced_reranking import (
         create_reranker as _create_reranker,
     )
 except ImportError:
+    _create_preinstalled_local_reranker = None
     _create_reranker = None
     _RerankingStrategy = None
     _RerankingConfig = None
 
+create_preinstalled_local_reranker = _create_preinstalled_local_reranker
 create_reranker = _create_reranker
 RerankingStrategy = _RerankingStrategy
 RerankingConfig = _RerankingConfig
@@ -705,10 +940,12 @@ try:
 except ImportError:
     _load_prompt = None
 
+
 def load_prompt(*args, **kwargs):
     if _load_prompt is None:
         return None
     return _load_prompt(*args, **kwargs)
+
 
 # Chunking support
 try:
@@ -1032,6 +1269,7 @@ def _coerce_security_filter_sequence(value: Any, *, description: str) -> list[An
         )
         return []
 
+
 try:
     from .user_personalization_store import UserPersonalizationStore as _UserPersonalizationStore
 except ImportError:
@@ -1086,21 +1324,42 @@ try:
     from tldw_Server_API.app.core.Claims_Extraction.budget_guard import (
         resolve_claims_job_budget as _resolve_claims_job_budget,
     )
+except ImportError:
+    _ClaimsJobContext = None
+    _resolve_claims_job_budget = None
 
+try:
     from .claims import ClaimsEngine as _ClaimsEngine
 except ImportError:
     _ClaimsEngine = None
-    _ClaimsJobContext = None
-    _resolve_claims_job_budget = None
 
 ClaimsEngine = _ClaimsEngine
 ClaimsJobContext = _ClaimsJobContext
 resolve_claims_job_budget = _resolve_claims_job_budget
 
 
+def _resolve_claims_engine() -> Any:
+    """Recover the real claims engine after an import-order cycle completes."""
+    global ClaimsEngine
+    if ClaimsEngine is not None:
+        return ClaimsEngine
+    try:
+        from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+            ClaimsEngine as _RealClaimsEngine,
+        )
+
+        from .claims import ClaimsEngine as _CandidateClaimsEngine
+    except ImportError:
+        return None
+    if _CandidateClaimsEngine is _RealClaimsEngine:
+        ClaimsEngine = _RealClaimsEngine
+    return _CandidateClaimsEngine
+
+
 @dataclass
 class UnifiedSearchResult:
     """Unified result structure for all RAG queries."""
+
     documents: list[Document]
     query: str
     expanded_queries: list[str] = field(default_factory=list)
@@ -1143,6 +1402,336 @@ def build_retrieval_only_result(
         documents=list(retrieval_result.documents),
         metadata=metadata,
     )
+
+
+def _fuse_slides_source_documents(
+    source_results: list[list[Any]],
+    *,
+    source_limits: tuple[int, int, int],
+    top_k: int,
+) -> list[Any]:
+    """Round-robin source-ranked candidates so unlike score scales stay fair."""
+    ranked_sources: list[list[Any]] = []
+    for documents, limit in zip(source_results, source_limits):
+        ranked_sources.append(
+            sorted(
+                documents,
+                key=lambda document: (
+                    -float(getattr(document, "score", 0.0)),
+                    str(getattr(document, "id", "")),
+                ),
+            )[:limit]
+        )
+    fused: list[Any] = []
+    rank = 0
+    while len(fused) < top_k:
+        added = False
+        for documents in ranked_sources:
+            if rank < len(documents):
+                fused.append(documents[rank])
+                added = True
+                if len(fused) >= top_k:
+                    break
+        if not added:
+            break
+        rank += 1
+    return fused
+
+
+def _bound_slides_source_documents(
+    documents: list[Any],
+    *,
+    max_source_chars: int,
+    top_k: int,
+) -> list[Any]:
+    """Copy documents within the exact formatted aggregate max-plus-one budget."""
+    marker = "_standalone_source_projection_truncated"
+    accumulated = 0
+    bounded: list[Any] = []
+    for document in documents[:top_k]:
+        if accumulated > max_source_chars:
+            break
+        original_metadata = (
+            document.get("metadata") if isinstance(document, dict) else getattr(document, "metadata", None)
+        )
+        metadata = dict(original_metadata) if isinstance(original_metadata, dict) else {}
+        title = metadata.get("title") or metadata.get("source_title")
+        if not isinstance(title, str) or not title.strip():
+            raw_id = document.get("id") if isinstance(document, dict) else getattr(document, "id", None)
+            title = str(raw_id).strip() if raw_id is not None else "source"
+        title = title.strip() or "source"
+        if isinstance(document, dict):
+            original_content = str(document.get("content") or "")
+        else:
+            original_content = str(getattr(document, "content", "") or "")
+
+        separator = "\n\n" if bounded else ""
+        available = max_source_chars + 1 - accumulated
+        truncated = bool(metadata.get(marker))
+        preformatted = bool(metadata.get("_standalone_source_preformatted"))
+        if preformatted:
+            fixed_prefix = separator
+            fixed_suffix = ""
+            projected_title = ""
+        else:
+            fixed_prefix = f"{separator}# "
+            fixed_suffix = "\n\n"
+            max_title_chars = max(0, available - len(fixed_prefix) - len(fixed_suffix))
+            projected_title = title[:max_title_chars]
+            if projected_title != title:
+                truncated = True
+        available_content = max(
+            0,
+            available - len(fixed_prefix) - len(projected_title) - len(fixed_suffix),
+        )
+        projected_content = original_content[:available_content]
+        if projected_content != original_content:
+            truncated = True
+
+        formatted_size = len(fixed_prefix) + len(projected_title) + len(fixed_suffix) + len(projected_content)
+        accumulated += formatted_size
+        if accumulated > max_source_chars:
+            truncated = True
+        if not preformatted:
+            metadata["title"] = projected_title
+        if truncated:
+            metadata[marker] = True
+
+        if isinstance(document, dict):
+            bounded.append(
+                {
+                    **document,
+                    "content": projected_content,
+                    "metadata": metadata,
+                }
+            )
+        elif isinstance(document, Document):
+            bounded.append(
+                replace(
+                    document,
+                    content=projected_content,
+                    metadata=metadata,
+                )
+            )
+        else:
+            copied_document = copy.copy(document)
+            copied_document.content = projected_content
+            copied_document.metadata = metadata
+            bounded.append(copied_document)
+        if accumulated >= max_source_chars + 1:
+            break
+    return bounded
+
+
+async def retrieve_slides_source_documents_v1(
+    *,
+    query: str,
+    owner_user_id: str,
+    top_k: int,
+    media_db: Any,
+    max_source_chars: int = 200_000,
+    chacha_db: Any | None = None,
+    reranking_strategy: Literal["none", "flashrank", "cross_encoder"] = "none",
+) -> RAGResult:
+    """Run the closed, owner-local retrieval path for HTML slide sources."""
+    if not isinstance(query, str) or not query.strip() or len(query) > 20_000:
+        raise ValueError("query must contain between 1 and 20,000 characters")
+    if not isinstance(owner_user_id, str) or not owner_user_id.strip():
+        raise ValueError("owner_user_id must be a non-empty string")
+    if len(owner_user_id.encode("utf-8")) > 256:
+        raise ValueError("owner_user_id must not exceed 256 UTF-8 bytes")
+    if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 100:
+        raise ValueError("top_k must be an integer between 1 and 100")
+    if (
+        isinstance(max_source_chars, bool)
+        or not isinstance(max_source_chars, int)
+        or not 1 <= max_source_chars <= 200_000
+    ):
+        raise ValueError("max_source_chars must be an integer between 1 and 200,000")
+    if reranking_strategy not in SLIDES_SOURCE_RERANKING_STRATEGIES:
+        raise ValueError(f"Unsupported local reranking strategy: {reranking_strategy!r}")
+    if media_db is None:
+        raise ValueError("media_db is required")
+    if chacha_db is None:
+        raise ValueError("chacha_db is required")
+    local_reranker = None
+    if reranking_strategy != "none":
+        if create_preinstalled_local_reranker is None:
+            raise RAGConfigurationError("Local reranking support is unavailable.")
+        local_reranker = create_preinstalled_local_reranker(
+            reranking_strategy,
+            top_k=top_k,
+        )
+
+    payload = {
+        "query": query,
+        "strategy": "standard",
+        "sources": ["media_db", "notes", "chats"],
+        "search_mode": "fts",
+        "fts_level": "chunk",
+        "top_k": top_k,
+        "min_score": 0.0,
+        "enable_generation": False,
+        "enable_text_late_chunking": False,
+        "enable_reranking": reranking_strategy != "none",
+        "reranking_strategy": reranking_strategy,
+        "user_id": owner_user_id,
+        "feedback_user_id": owner_user_id,
+        "rag_profile": SLIDES_SOURCE_PROFILE,
+    }
+    resolved_request = ResolvedRAGRequest(
+        query=query,
+        strategy="standard",
+        payload=payload,
+        index_namespace=None,
+        rag_profile=SLIDES_SOURCE_PROFILE,
+        user_id=owner_user_id,
+        feedback_user_id=owner_user_id,
+    )
+    retrieval_plan = RetrievalPlan(
+        query=query,
+        sources=("media_db", "notes", "chats"),
+        search_mode="fts",
+        top_k=top_k,
+        min_score=0.0,
+        index_namespace=None,
+        collection_names={},
+    )
+    if (
+        MediaDBRetriever is None
+        or NotesDBRetriever is None
+        or ChatHistoryRetriever is None
+        or RetrievalConfig is None
+        or allocate_slides_source_projection_caps is None
+    ):
+        raise RAGConfigurationError("Owner-local database retrieval is unavailable.")
+    retrieval_config = RetrievalConfig(
+        max_results=top_k,
+        use_fts=True,
+        use_vector=False,
+        fts_level="chunk",
+        enable_text_late_chunking=False,
+    )
+    media_retriever = MediaDBRetriever(
+        None,
+        config=retrieval_config,
+        user_id=owner_user_id,
+        media_db=media_db,
+    )
+    notes_retriever = NotesDBRetriever(
+        None,
+        config=retrieval_config,
+        chacha_db=chacha_db,
+    )
+    chats_retriever = ChatHistoryRetriever(
+        None,
+        config=retrieval_config,
+        chacha_db=chacha_db,
+    )
+
+    async def retrieve_source_candidates(retriever: Any) -> list[Any]:
+        return await retriever.retrieve_slides_source_candidates_v1(
+            query=query,
+            owner_user_id=owner_user_id,
+            top_k=top_k,
+        )
+
+    try:
+        source_results = await asyncio.gather(
+            retrieve_source_candidates(media_retriever),
+            retrieve_source_candidates(notes_retriever),
+            retrieve_source_candidates(chats_retriever),
+        )
+        candidates = _fuse_slides_source_documents(
+            source_results,
+            source_limits=(top_k, top_k, top_k),
+            top_k=top_k,
+        )
+        selected_candidates, projection_caps = allocate_slides_source_projection_caps(
+            candidates,
+            total_chars=max_source_chars + 1,
+            separator_chars=2,
+        )
+        retrievers_by_source = {
+            DataSource.MEDIA_DB: media_retriever,
+            DataSource.NOTES: notes_retriever,
+            DataSource.CHAT_HISTORY: chats_retriever,
+        }
+        projection_requests: dict[DataSource, list[tuple[Document, int]]] = {
+            source: [] for source in retrievers_by_source
+        }
+        for candidate, char_cap in zip(selected_candidates, projection_caps):
+            if candidate.source not in projection_requests:
+                raise RAGConfigurationError("Unexpected local source candidate.")
+            projection_requests[candidate.source].append((candidate, char_cap))
+
+        async def project_source(source: DataSource) -> list[Document]:
+            return await retrievers_by_source[source].project_slides_source_documents_v1(
+                projections=projection_requests[source],
+                owner_user_id=owner_user_id,
+            )
+
+        projected_source_results = await asyncio.gather(
+            project_source(DataSource.MEDIA_DB),
+            project_source(DataSource.NOTES),
+            project_source(DataSource.CHAT_HISTORY),
+        )
+        projected_by_key = {
+            (document.source, document.id): document
+            for source_documents in projected_source_results
+            for document in source_documents
+        }
+        documents = [
+            projected_by_key[(candidate.source, candidate.id)]
+            for candidate in selected_candidates
+            if (candidate.source, candidate.id) in projected_by_key
+        ]
+        marker = "_standalone_source_projection_truncated"
+        if len(selected_candidates) < len(candidates) and documents:
+            sentinel = documents[-1]
+            sentinel_metadata = dict(sentinel.metadata)
+            sentinel_metadata[marker] = True
+            documents[-1] = replace(sentinel, metadata=sentinel_metadata)
+        documents = _bound_slides_source_documents(
+            documents,
+            max_source_chars=max_source_chars,
+            top_k=top_k,
+        )
+        has_truncated_projection = any(
+            isinstance(getattr(document, "metadata", None), dict) and bool(document.metadata.get(marker))
+            for document in documents
+        )
+        if local_reranker is not None and documents and not has_truncated_projection:
+            scored_documents = await local_reranker.rerank(query, documents)
+            documents = _bound_slides_source_documents(
+                [scored.document for scored in scored_documents],
+                max_source_chars=max_source_chars,
+                top_k=top_k,
+            )
+        retrieval_result = RetrievedEvidence(
+            documents=documents,
+            metadata={
+                "resolved_request": {
+                    "query": resolved_request.query,
+                    "user_id": resolved_request.user_id,
+                },
+                "retrieval_plan": {
+                    "query": retrieval_plan.query,
+                    "sources": list(retrieval_plan.sources),
+                    "search_mode": retrieval_plan.search_mode,
+                    "top_k": retrieval_plan.top_k,
+                },
+            },
+        )
+        return build_retrieval_only_result(
+            resolved_request=resolved_request,
+            retrieval_plan=retrieval_plan,
+            retrieval_result=retrieval_result,
+        )
+    finally:
+        close = getattr(media_retriever, "close", None)
+        if callable(close):
+            close()
 
 
 _CANONICAL_SOURCE_TO_DATASOURCE: dict[str, DataSource] = {
@@ -1328,11 +1917,13 @@ def _filter_workspace_artifacts(
             or visibility == "workspace"
         )
 
-        should_filter = False
-        if is_workspace_artifact and not requested_workspace:
-            should_filter = True
-        elif requested_workspace and doc_workspace and doc_workspace != requested_workspace:
-            should_filter = True
+        should_filter = (
+            is_workspace_artifact and not requested_workspace
+        ) or (
+            bool(requested_workspace)
+            and bool(doc_workspace)
+            and doc_workspace != requested_workspace
+        )
 
         if should_filter:
             source = _document_canonical_source(doc)
@@ -1443,10 +2034,23 @@ def _resolve_sqlite_rag_db_path(
     return normalized
 
 
+def _should_restore_classification_local_retrieval(
+    *,
+    skip_retrieval_stack: bool,
+    skip_local_retrieval: bool,
+    classification_local_retrieval: Any,
+) -> bool:
+    """Return whether research failure may re-enable classification-disabled local retrieval."""
+    return (
+        not skip_retrieval_stack
+        and skip_local_retrieval
+        and classification_local_retrieval == "disabled"
+    )
+
+
 async def unified_rag_pipeline(
     # ========== REQUIRED PARAMETERS ==========
     query: str,
-
     # ========== DATA SOURCES ==========
     sources: Optional[list[str]] = None,  # ["media_db", "notes", "characters", "chats"]
     media_db_path: Optional[str] = None,
@@ -1455,7 +2059,6 @@ async def unified_rag_pipeline(
     kanban_db_path: Optional[str] = None,
     sql_target_id: str = "media_db",
     sql_retriever: Any = None,
-
     # ========== SEARCH CONFIGURATION ==========
     search_mode: Literal["fts", "vector", "hybrid"] = "hybrid",
     fts_level: Literal["media", "chunk"] = "media",
@@ -1475,51 +2078,42 @@ async def unified_rag_pipeline(
     expansion_strategies: Optional[list[str]] = None,  # ["acronym", "synonym", "domain", "entity"]
     spell_check: bool = False,
     max_query_variations: int = 3,
-
     # ========== PSEUDO-RELEVANCE FEEDBACK (PRF) ==========
     enable_prf: bool = False,
     prf_terms: int = 10,
     prf_sources: Optional[list[str]] = None,  # ["keywords", "entities", "numbers"]
     prf_alpha: float = 0.3,
     prf_top_n: int = 8,
-
     # ========== HYDE ==========
     enable_hyde: bool = False,
     hyde_provider: Optional[str] = None,
     hyde_model: Optional[str] = None,
-
     # ========== GAP ANALYSIS / FOLLOW-UPS ==========
     enable_gap_analysis: bool = False,
     max_followup_searches: int = 2,
-
     # ========== CACHING ==========
     enable_cache: bool = True,
     cache_threshold: float = 0.85,
     adaptive_cache: bool = True,
-
     # ========== FILTERING ==========
     keyword_filter: Optional[list[str]] = None,  # Filter by these keywords
     include_media_ids: Optional[list[int]] = None,
     include_note_ids: Optional[list[str]] = None,
-
     # ========== SECURITY & PRIVACY ==========
     enable_security_filter: bool = False,
     detect_pii: bool = False,
     redact_pii: bool = False,
     sensitivity_level: Literal["public", "internal", "confidential", "restricted"] = "public",
     content_filter: bool = False,
-
     # ========== DOCUMENT PROCESSING ==========
     enable_table_processing: bool = False,
     table_method: Literal["markdown", "html", "hybrid"] = "markdown",
-
     # ========== VLM LATE CHUNKING ==========
     enable_vlm_late_chunking: bool = False,
     vlm_backend: Optional[str] = None,
     vlm_detect_tables_only: bool = True,
     vlm_max_pages: Optional[int] = None,
     vlm_late_chunk_top_k_docs: int = 3,
-
     # ========== CHUNKING & CONTEXT ==========
     enable_enhanced_chunking: bool = False,
     chunk_type_filter: Optional[list[str]] = None,  # ["text", "code", "table", "list"]
@@ -1529,7 +2123,6 @@ async def unified_rag_pipeline(
     sibling_window: int = 1,
     include_parent_document: bool = False,
     parent_max_tokens: Optional[int] = 1200,
-
     # ========== ADVANCED RETRIEVAL ==========
     enable_multi_vector_passages: bool = False,
     mv_span_chars: int = 300,
@@ -1538,27 +2131,25 @@ async def unified_rag_pipeline(
     mv_flatten_to_spans: bool = False,
     enable_precomputed_spans: bool = False,
     enable_numeric_table_boost: bool = False,
-
     # ========== RERANKING ==========
     enable_reranking: bool = True,
-    reranking_strategy: Literal["flashrank", "cross_encoder", "hybrid", "llama_cpp", "llm_scoring", "two_tier", "none"] = "flashrank",
+    reranking_strategy: Literal[
+        "flashrank", "cross_encoder", "hybrid", "llama_cpp", "llm_scoring", "two_tier", "none"
+    ] = "flashrank",
     rerank_top_k: Optional[int] = None,  # Defaults to top_k if not specified
     reranking_model: Optional[str] = None,  # Optional model id/path for rerankers (GGUF path or HF model id)
     # Two-tier specific: request-level gating overrides (optional)
     rerank_min_relevance_prob: Optional[float] = None,
     rerank_sentinel_margin: Optional[float] = None,
-
     # ========== LEARNED FUSION & CALIBRATION ==========
     enable_learned_fusion: bool = False,
     calibrator_version: Optional[str] = None,
     abstention_policy: Literal["continue", "ask", "decline"] = "continue",
-
     # ========== CITATIONS ==========
     enable_citations: bool = False,
     citation_style: Literal["apa", "mla", "chicago", "harvard", "ieee"] = "apa",
     include_page_numbers: bool = False,
     enable_chunk_citations: bool = True,
-
     # ========== ANSWER GENERATION ==========
     enable_generation: bool = True,
     strict_extractive: bool = False,
@@ -1575,7 +2166,6 @@ async def unified_rag_pipeline(
     synthesis_time_budget_sec: Optional[float] = None,
     synthesis_draft_tokens: Optional[int] = None,
     synthesis_refine_tokens: Optional[int] = None,
-
     # ========== POST-VERIFICATION (ADAPTIVE) ==========
     enable_post_verification: bool = False,
     adaptive_max_retries: int = 1,
@@ -1603,28 +2193,26 @@ async def unified_rag_pipeline(
     graph_alpha: float = 0.4,
     # Internal guard to prevent nested rerun loops
     _adaptive_rerun: bool = False,
-
     # ========== FEEDBACK ==========
     collect_feedback: bool = False,
     feedback_user_id: Optional[str] = None,
     apply_feedback_boost: bool = False,
-
     # ========== MONITORING & OBSERVABILITY ==========
     enable_monitoring: bool = False,
     enable_observability: bool = False,
     trace_id: Optional[str] = None,
-
     # ========== PERFORMANCE ==========
     enable_performance_analysis: bool = False,
     timeout_seconds: Optional[float] = None,
+    include_retrieval_diagnostics: bool = True,
 
     # ========== STREAMING ==========
     enable_streaming: bool = False,
-
     # ========== INDEXING / NAMESPACE ==========
     index_namespace: Optional[str] = None,
     retrieval_plan: Optional[RetrievalPlan] = None,
     resolved_request: Optional[ResolvedRAGRequest] = None,
+    credential_runtime: Any = None,
 
     # ========== QUICK WINS ==========
     highlight_results: bool = False,
@@ -1632,7 +2220,6 @@ async def unified_rag_pipeline(
     track_cost: bool = False,
     debug_mode: bool = False,
     include_rerank_debug_documents: Optional[bool] = None,
-
     # ========== GENERATION GUARDRAILS ==========
     # Pre-generation: instruction-injection filtering and down-weighting
     enable_injection_filter: bool = True,
@@ -1649,7 +2236,6 @@ async def unified_rag_pipeline(
     require_hard_citations: bool = False,
     enable_numeric_fidelity: bool = False,
     numeric_fidelity_behavior: Literal["continue", "ask", "decline", "retry"] = "continue",
-
     # ========== CLAIMS & FACTUALITY ==========
     enable_claims: bool = False,
     claim_extractor: Literal["aps", "claimify", "auto"] = "auto",
@@ -1662,7 +2248,6 @@ async def unified_rag_pipeline(
     numeric_precision_mode: Literal["standard", "strict", "academic"] = "standard",
     doc_only_verification: bool = False,
     generate_verification_report: bool = False,
-
     # ========== DOC-RESEARCHER FEATURES ==========
     # Dynamic granularity selection
     enable_dynamic_granularity: bool = False,
@@ -1672,7 +2257,6 @@ async def unified_rag_pipeline(
     accumulation_time_budget_sec: Optional[float] = None,
     # Multi-hop evidence chains
     enable_evidence_chains: bool = False,
-
     # ========== SELF-CORRECTING RAG ==========
     # Stage 1: Document Grading - filter documents by LLM-assessed relevance
     enable_document_grading: bool = False,
@@ -1708,43 +2292,33 @@ async def unified_rag_pipeline(
     utility_grading_timeout_sec: float = 5.0,
     utility_grading_provider: Optional[str] = None,
     utility_grading_model: Optional[str] = None,
-
     # ========== BATCH PROCESSING ==========
     enable_batch: bool = False,
     batch_queries: Optional[list[str]] = None,
     batch_concurrent: int = 5,
-
     # ========== RESILIENCE ==========
     enable_resilience: bool = False,
     retry_attempts: int = 3,
     circuit_breaker: bool = False,
-
     # ========== CACHING EXTRAS ==========
     cache_ttl: int = 3600,
-
     # ========== FILTERING EXTRAS ==========
     enable_date_filter: bool = False,
     date_range: Optional[dict[str, str]] = None,
     filter_media_types: Optional[list[str]] = None,
-
     # ========== ALT INPUTS ==========
     media_db: Any = None,
     chacha_db: Any = None,
-
     # ========== ERROR HANDLING ==========
     fallback_on_error: bool = False,
-
     # ========== USER CONTEXT ==========
     user_id: Optional[str] = None,
     session_id: Optional[str] = None,
-
     # ========== RETRIEVAL QUALITY METRICS ==========
     ground_truth_doc_ids: Optional[list[str]] = None,
     metrics_k: int = 10,
-
     # ========== FAITHFULNESS EVALUATION ==========
     enable_faithfulness_eval: bool = False,
-
     # ========== SEARCH AGENT / RESEARCH ==========
     # Multi-mode search depth (speed/balanced/quality) - sets parameter presets
     search_depth_mode: Optional[Literal["speed", "balanced", "quality"]] = None,
@@ -1774,21 +2348,17 @@ async def unified_rag_pipeline(
     # Classifier LLM settings (uses default if empty)
     classifier_provider: Optional[str] = None,
     classifier_model: Optional[str] = None,
-
     # ========== FOLLOW-UP SUGGESTIONS ==========
     enable_suggestions: bool = False,
     num_suggestions: int = 5,
-
     # ========== STRUCTURED RESPONSE WRITER ==========
     enable_structured_response: bool = False,
-
     # ========== MEDIA SEARCH ==========
     enable_image_search: bool = False,
     enable_video_search: bool = False,
     rag_profile: Optional[Literal["fast", "balanced", "accuracy"]] = None,
-
     # ========== ADDITIONAL PARAMETERS ==========
-    **kwargs: Any
+    **kwargs: Any,
 ) -> UnifiedPipelineResult:
     """
     Unified RAG Pipeline - All features accessible via parameters.
@@ -1814,6 +2384,36 @@ async def unified_rag_pipeline(
             reranking_strategy="hybrid"
         )
     """
+
+    ambient_scope = get_scope()
+    authorization_cache_scope: dict[str, object] | None = None
+    authorization_cache_error: str | None = None
+    if ambient_scope is not None:
+        if isinstance(ambient_scope, ScopeContext):
+            try:
+                authorization_cache_scope = content_authorization_cache_scope(
+                    ambient_scope
+                )
+            except (TypeError, ValueError):
+                authorization_cache_error = "malformed"
+        else:
+            authorization_cache_error = "malformed"
+
+    runtime_user_id = (
+        getattr(credential_runtime, "_user_id", None)
+        if credential_runtime is not None
+        else None
+    )
+    if runtime_user_id is not None:
+        if ambient_scope is None:
+            authorization_cache_error = "missing"
+        elif authorization_cache_scope is None:
+            authorization_cache_error = "malformed"
+        elif (
+            type(authorization_cache_scope["user_id"]) is not type(runtime_user_id)
+            or authorization_cache_scope["user_id"] != runtime_user_id
+        ):
+            authorization_cache_error = "user_mismatch"
 
     request_metadata: dict[str, Any] = {}
     inbound_metadata = kwargs.get("metadata")
@@ -1868,10 +2468,7 @@ async def unified_rag_pipeline(
     def _planned_index_namespace(plan: RetrievalPlan) -> Optional[str]:
         if plan.index_namespace is not None:
             return plan.index_namespace
-        normalized_sources = {
-            getattr(source, "value", str(source)).strip()
-            for source in plan.sources
-        }
+        normalized_sources = {getattr(source, "value", str(source)).strip() for source in plan.sources}
         if "media_db" in normalized_sources:
             return plan.collection_names.get("media_db")
         return None
@@ -1999,6 +2596,7 @@ async def unified_rag_pipeline(
         # Consistent contract: return UnifiedRAGResponse for all outcomes
         try:
             from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
+
             return UnifiedRAGResponse(
                 documents=[],
                 query=(query if isinstance(query, str) else ""),
@@ -2104,6 +2702,32 @@ async def unified_rag_pipeline(
         query=query,
         metadata={"original_query": query}
     )
+    optional_provider_failure_code: str | None = None
+
+    def _latch_optional_provider_failure(
+        component: str,
+        exc: BaseException,
+    ) -> str:
+        """Latch the first optional retrieval provider failure for this request."""
+        nonlocal optional_provider_failure_code
+        if optional_provider_failure_code is None:
+            optional_provider_failure_code = _bounded_provider_failure_code(exc)
+        result.metadata.setdefault("retrieval_coverage", {})[component] = {
+            "coverage": "degraded",
+            "failure_code": optional_provider_failure_code,
+        }
+        return optional_provider_failure_code
+
+    def _latched_optional_provider_failure(component: str) -> str | None:
+        """Return and record the request's latched optional provider failure."""
+        if credential_runtime is None or optional_provider_failure_code is None:
+            return None
+        result.metadata.setdefault("retrieval_coverage", {})[component] = {
+            "coverage": "degraded",
+            "failure_code": optional_provider_failure_code,
+        }
+        return optional_provider_failure_code
+
     standard_evidence_coordinated = False
     claims_payload = None
     factuality_payload = None
@@ -2114,6 +2738,39 @@ async def unified_rag_pipeline(
             result.metadata.update(inbound_meta)
     except TypeError:
         pass
+    result.metadata["retrieval_cache_hit"] = False
+    result.metadata["generation_executed"] = False
+    cache_bypass_modes = [
+        mode
+        for enabled, mode in (
+            (expand_query, "query_expansion"),
+            (enable_hyde, "hyde"),
+            (enable_prf, "prf"),
+            (enable_query_decomposition, "query_decomposition"),
+            (enable_gap_analysis, "gap_analysis"),
+        )
+        if enabled
+    ]
+    retrieval_cache_eligible = bool(
+        enable_cache
+        and not cache_bypass_modes
+        and not auto_temporal_filters
+    )
+    if enable_cache and cache_bypass_modes:
+        result.metadata["cache_bypassed"] = {
+            "reason": "secondary_retrieval_mode",
+            "modes": cache_bypass_modes,
+        }
+    elif enable_cache and auto_temporal_filters:
+        result.metadata["cache_bypassed"] = {
+            "reason": "auto_temporal_window",
+        }
+    if enable_cache and authorization_cache_error is not None:
+        retrieval_cache_eligible = False
+        result.metadata["cache_bypassed"] = {
+            "reason": "content_authorization_scope_unavailable",
+            "code": authorization_cache_error,
+        }
 
     def _ensure_profile_resolution_metadata() -> dict[str, Any]:
         profile_resolution = result.metadata.get("profile_resolution")
@@ -2134,6 +2791,8 @@ async def unified_rag_pipeline(
         to_value: str,
         reason: str,
     ) -> None:
+        if not include_retrieval_diagnostics:
+            return
         profile_resolution = _ensure_profile_resolution_metadata()
         degraded_features = profile_resolution.get("degraded_features")
         if not isinstance(degraded_features, list):
@@ -2148,35 +2807,112 @@ async def unified_rag_pipeline(
             }
         )
 
-    _ensure_profile_resolution_metadata()
+    if include_retrieval_diagnostics:
+        _ensure_profile_resolution_metadata()
 
     cache_instance = None
+    cache_setup_attempted = False
+    cache_retrieval_snapshot: Optional[list[Any]] = None
+    base_retrieval_executed = False
     cache_max_size = 1000
     try:
         from tldw_Server_API.app.core.config import RAG_SERVICE_CONFIG
+
         cfg = cast(dict[str, Any], RAG_SERVICE_CONFIG) if isinstance(RAG_SERVICE_CONFIG, dict) else {}
         cache_max_size = int((cfg.get("cache") or {}).get("max_cache_size", cache_max_size))
     except (ImportError, TypeError, ValueError):
         pass
-    cache_namespace = retrieval_index_namespace or (user_id or None)
-    if cache_namespace is None:
-        try:
-            parts = [media_db_path, notes_db_path, character_db_path, kanban_db_path, prompts_db_path]
-            if any(parts):
-                joined = "|".join([str(p or "") for p in parts])
-                cache_namespace = f"db:{hashlib.sha256(joined.encode('utf-8')).hexdigest()[:12]}"
-        except (TypeError, ValueError):
-            cache_namespace = None
-    workspace_cache_component = workspace_id or "global"
-    if cache_namespace is not None:
-        cache_namespace = f"{cache_namespace}|workspace:{workspace_cache_component}"
-    elif workspace_id is not None:
-        cache_namespace = f"workspace:{workspace_cache_component}"
+    def _build_cache_namespace() -> str:
+        def _cache_path_value(value: Any) -> Optional[str]:
+            if isinstance(value, (str, os.PathLike)):
+                return os.fspath(value)
+            return None
+
+        authorization_user_id = (
+            authorization_cache_scope.get("user_id")
+            if authorization_cache_scope is not None
+            else None
+        )
+        if authorization_user_id is not None:
+            owner_scope = {"kind": "user", "id": str(authorization_user_id)}
+        elif runtime_user_id is not None:
+            owner_scope = {
+                "kind": "user",
+                "id": str(runtime_user_id),
+            }
+        elif credential_runtime is None and user_id is not None:
+            owner_scope = {"kind": "user", "id": str(user_id)}
+        else:
+            owner_paths = {
+                "media": _cache_path_value(media_db_path)
+                or _cache_path_value(getattr(media_db, "db_path", None)),
+                "notes": _cache_path_value(notes_db_path),
+                "characters": _cache_path_value(character_db_path),
+                "kanban": _cache_path_value(kanban_db_path),
+                "prompts": _cache_path_value(prompts_db_path),
+                "world_books": _cache_path_value(world_books_db_path),
+                "dictionaries": _cache_path_value(chat_dictionaries_db_path),
+            }
+            owner_scope = {
+                "kind": "database" if any(owner_paths.values()) else "server",
+                "paths": owner_paths,
+            }
+
+        collection_scope = (
+            {
+                str(key): str(value)
+                for key, value in sorted(retrieval_plan.collection_names.items())
+            }
+            if retrieval_plan is not None
+            else {}
+        )
+        normalized_search_mode = str(retrieval_search_mode or "").strip().lower()
+        effective_date_range = None
+        if enable_date_filter and isinstance(date_range, dict):
+            effective_date_range = {
+                "start": str(date_range.get("start") or ""),
+                "end": str(date_range.get("end") or ""),
+            }
+        retrieval_scope = {
+            "sources": sorted(
+                _normalize_pipeline_sources(
+                    list(retrieval_sources) if retrieval_sources is not None else None
+                )
+            ),
+            "search_mode": normalized_search_mode,
+            "use_fts": normalized_search_mode in {"fts", "hybrid"},
+            "use_vector": normalized_search_mode in {"vector", "hybrid"},
+            "top_k": int(retrieval_top_k),
+            "min_score": float(retrieval_min_score),
+            "fts_level": str(fts_level),
+            "date_range": effective_date_range,
+            "late_chunking": {
+                "enabled": bool(enable_text_late_chunking),
+                "method": chunk_method,
+                "size": chunk_size,
+                "overlap": chunk_overlap,
+                "language": chunk_language,
+            },
+            "index_namespace": str(retrieval_index_namespace or ""),
+            "collection_names": collection_scope,
+        }
+        namespace_parts = [
+            f"owner:{_cache_identity_digest(owner_scope)}",
+            f"workspace:{_cache_identity_digest({'id': 'global' if workspace_id is None else str(workspace_id)})}",
+            f"retrieval:{_cache_identity_digest(retrieval_scope)}",
+        ]
+        if authorization_cache_scope is not None:
+            namespace_parts.insert(
+                1,
+                f"authorization:{_cache_identity_digest(authorization_cache_scope)}",
+            )
+        return "|".join(namespace_parts)
 
     def _get_cache_instance():
-        nonlocal cache_instance
-        if cache_instance is not None:
+        nonlocal cache_instance, cache_setup_attempted
+        if cache_setup_attempted:
             return cache_instance
+        cache_setup_attempted = True
         cache_cls = None
         if adaptive_cache and AdaptiveCache:
             cache_cls = AdaptiveCache
@@ -2185,6 +2921,7 @@ async def unified_rag_pipeline(
 
         if cache_cls:
             try:
+                cache_namespace = _build_cache_namespace()
                 if get_shared_cache:
                     cache_instance = get_shared_cache(
                         cache_cls=cache_cls,
@@ -2199,12 +2936,18 @@ async def unified_rag_pipeline(
                         ttl=cache_ttl,
                         namespace=cache_namespace,
                     )
-            except TypeError:
-                cache_instance = cache_cls(similarity_threshold=cache_threshold)
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                cache_instance = None
+                logger.warning(
+                    "Semantic cache disabled after scoped setup failure "
+                    "(error_type={})",
+                    type(exc).__name__,
+                )
         # Register with the RAGCache facade so health endpoints see real stats
         if cache_instance is not None:
             try:
                 from .advanced_cache import register_semantic_cache
+
                 register_semantic_cache(cache_instance)
             except (ImportError, TypeError):
                 pass
@@ -2216,7 +2959,13 @@ async def unified_rag_pipeline(
             return await asyncio.wait_for(coro, timeout=timeout)
         return await coro
 
-    async def _resilient_call(component: str, func, *args, **kwargs):
+    async def _resilient_call(
+        component: str,
+        func,
+        *args,
+        bypass_provider_failures: bool = False,
+        **kwargs,
+    ):
         """Apply circuit breaker, retries, and timeout around async operations when enabled."""
         breaker = None
         if enable_resilience and circuit_breaker and get_coordinator and CircuitBreakerConfig:
@@ -2228,12 +2977,20 @@ async def unified_rag_pipeline(
             except (AttributeError, KeyError, TypeError):
                 breaker = None
 
+        async def _invoke():
+            try:
+                if asyncio.iscoroutinefunction(func):
+                    return await func(*args, **kwargs)
+                return func(*args, **kwargs)
+            except _RAG_PROVIDER_FAILURES as exc:
+                if bypass_provider_failures:
+                    raise _ProviderFailureBypass(exc) from None
+                raise
+
         async def _attempt():
             if breaker is not None:
-                return await breaker.call(func, *args, **kwargs)
-            if asyncio.iscoroutinefunction(func):
-                return await func(*args, **kwargs)
-            return func(*args, **kwargs)
+                return await breaker.call(_invoke)
+            return await _invoke()
 
         if enable_resilience and (retry_attempts or 0) > 1 and RetryPolicy and RetryConfig:
             policy = RetryPolicy(RetryConfig(max_attempts=int(retry_attempts or 1)))
@@ -2241,7 +2998,10 @@ async def unified_rag_pipeline(
         else:
             call_coro = _attempt()
 
-        return await _with_timeout(call_coro, timeout_seconds)
+        try:
+            return await _with_timeout(call_coro, timeout_seconds)
+        except _ProviderFailureBypass as bypass:
+            raise bypass.failure from None
 
     # Initialize monitoring if requested
     metrics = None
@@ -2253,13 +3013,21 @@ async def unified_rag_pipeline(
             total_duration=0.0,
         )
 
-    def _apply_generation_gate(reason: str, *, coverage: Optional[float] = None, unsupported_ratio: Optional[float] = None, threshold: Optional[float] = None) -> None:
+    def _apply_generation_gate(
+        reason: str,
+        *,
+        coverage: Optional[float] = None,
+        unsupported_ratio: Optional[float] = None,
+        threshold: Optional[float] = None,
+    ) -> None:
         """Record a gating event in metadata for downstream observability."""
         gate = result.metadata.setdefault("generation_gate", {})
-        gate.update({
-            "reason": reason,
-            "at": time.time(),
-        })
+        gate.update(
+            {
+                "reason": reason,
+                "at": time.time(),
+            }
+        )
         if coverage is not None:
             gate["coverage"] = coverage
         if unsupported_ratio is not None:
@@ -2283,25 +3051,17 @@ async def unified_rag_pipeline(
             if explicit_include_sources:
                 original_retrieval_sources = list(retrieval_sources)
                 requested_sources = set(resolved_data_sources)
-                scoped_data_sources = [
-                    source
-                    for source in explicit_include_sources
-                    if source in requested_sources
-                ]
+                scoped_data_sources = [source for source in explicit_include_sources if source in requested_sources]
                 scope_intersection_empty = not scoped_data_sources
                 resolved_data_sources = (
-                    list(explicit_include_sources)
-                    if scope_intersection_empty
-                    else scoped_data_sources
+                    list(explicit_include_sources) if scope_intersection_empty else scoped_data_sources
                 )
-                retrieval_sources = [
-                    _DATASOURCE_TO_CANONICAL_SOURCE[source]
-                    for source in resolved_data_sources
-                ]
+                retrieval_sources = [_DATASOURCE_TO_CANONICAL_SOURCE[source] for source in resolved_data_sources]
                 resolved_request.payload["sources"] = list(retrieval_sources)
                 cache_disabled_for_scope = bool(enable_cache)
                 if cache_disabled_for_scope:
                     enable_cache = False
+                    retrieval_cache_eligible = False
                     result.metadata["cache_bypassed"] = {
                         "reason": "explicit_source_selection",
                     }
@@ -2329,7 +3089,7 @@ async def unified_rag_pipeline(
         except ValueError as exc:
             result.errors.append(f"invalid_source: {exc}")
             result.metadata["source_validation_error"] = str(exc)
-            raise _EarlyReturn()
+            raise _EarlyReturn() from exc
 
         if (
             sql_retriever is None
@@ -2355,6 +3115,8 @@ async def unified_rag_pipeline(
 
         def _build_multi_retriever(db_paths: dict[str, str]):
             base_kwargs: dict[str, Any] = {"user_id": user_id or "0", "media_db": media_db}
+            if credential_runtime is not None:
+                base_kwargs["credential_runtime"] = credential_runtime
             if chacha_db is not None:
                 base_kwargs["chacha_db"] = chacha_db
             prompts_db = kwargs.get("prompts_db")
@@ -2368,11 +3130,7 @@ async def unified_rag_pipeline(
             for key in optional_keys:
                 if key in base_kwargs:
                     variants.append({k: v for k, v in base_kwargs.items() if k != key})
-            variants.append({
-                k: v
-                for k, v in base_kwargs.items()
-                if k not in set(optional_keys)
-            })
+            variants.append({k: v for k, v in base_kwargs.items() if k not in set(optional_keys)})
             seen: set[tuple[str, ...]] = set()
             for variant in variants:
                 key = tuple(sorted(variant.keys()))
@@ -2383,6 +3141,8 @@ async def unified_rag_pipeline(
                     return MultiDatabaseRetriever(db_paths, **variant)
                 except TypeError:
                     continue
+            if credential_runtime is not None:
+                raise TypeError("MultiDatabaseRetriever does not accept credential runtime")
             try:
                 return MultiDatabaseRetriever(db_paths, user_id=user_id or "0")
             except TypeError:
@@ -2421,11 +3181,9 @@ async def unified_rag_pipeline(
                 workspace_id=workspace_id,
             )
             for source, count in filtered_artifact_counts.items():
-                cumulative_filtered_artifact_counts[source] = (
-                    cumulative_filtered_artifact_counts.get(source, 0) + count
-                )
+                cumulative_filtered_artifact_counts[source] = cumulative_filtered_artifact_counts.get(source, 0) + count
             result.documents = filtered_documents
-            if source_status_retriever is not None:
+            if include_retrieval_diagnostics and source_status_retriever is not None:
                 result.metadata["source_status"] = _build_source_status(
                     _normalize_pipeline_sources(list(retrieval_sources)),
                     retriever=source_status_retriever,
@@ -2480,17 +3238,20 @@ async def unified_rag_pipeline(
                 result.documents = []
                 result.timings["retrieval"] = 0.0
                 result.metadata.setdefault("clarification", {})
-                result.metadata["clarification"].update({
-                    "required": True,
-                    "stage": "pre_retrieval",
-                    "reason": decision.reason,
-                    "confidence": decision.confidence,
-                    "detector": decision.detector,
-                })
+                result.metadata["clarification"].update(
+                    {
+                        "required": True,
+                        "stage": "pre_retrieval",
+                        "reason": decision.reason,
+                        "confidence": decision.confidence,
+                        "detector": decision.detector,
+                    }
+                )
                 result.metadata.setdefault("retrieval_bypassed", {})
                 result.metadata["retrieval_bypassed"]["reason"] = "pre_retrieval_clarification"
                 try:
                     from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
+
                     increment_counter(
                         "rag_clarification_triggered_total",
                         1,
@@ -2549,18 +3310,20 @@ async def unified_rag_pipeline(
                     )
                     for item in discussion_results or []:
                         doc_id = str(item.get("url") or item.get("id") or f"discussion:{len(prefetched_docs)}")
-                        _append_doc(Document(
-                            id=doc_id,
-                            content=str(item.get("content", "")),
-                            metadata={
-                                "title": item.get("title", ""),
-                                "url": item.get("url", ""),
-                                "source_type": "discussion",
-                                "platform": item.get("platform", ""),
-                            },
-                            source=DataSource.WEB_CONTENT,
-                            score=float(item.get("score", 0.5) or 0.5),
-                        ))
+                        _append_doc(
+                            Document(
+                                id=doc_id,
+                                content=str(item.get("content", "")),
+                                metadata={
+                                    "title": item.get("title", ""),
+                                    "url": item.get("url", ""),
+                                    "source_type": "discussion",
+                                    "platform": item.get("platform", ""),
+                                },
+                                source=DataSource.WEB_CONTENT,
+                                score=float(item.get("score", 0.5) or 0.5),
+                            )
+                        )
                 except Exception as exc:  # noqa: BLE001 - best effort
                     result.errors.append(f"Discussion prefetch failed: {exc}")
 
@@ -2575,8 +3338,7 @@ async def unified_rag_pipeline(
                     web_query = query_text
                     if use_academic:
                         web_query = (
-                            f"{query_text} "
-                            "site:arxiv.org OR site:scholar.google.com OR site:semanticscholar.org"
+                            f"{query_text} " "site:arxiv.org OR site:scholar.google.com OR site:semanticscholar.org"
                         )
 
                     raw_results = await asyncio.to_thread(
@@ -2594,17 +3356,19 @@ async def unified_rag_pipeline(
                         if not url:
                             continue
                         source_type = "academic" if use_academic else "web"
-                        _append_doc(Document(
-                            id=url,
-                            content=str(item.get("content", item.get("snippet", ""))),
-                            metadata={
-                                "title": item.get("title", ""),
-                                "url": url,
-                                "source_type": source_type,
-                            },
-                            source=DataSource.WEB_CONTENT,
-                            score=float(item.get("score", 0.5) or 0.5),
-                        ))
+                        _append_doc(
+                            Document(
+                                id=url,
+                                content=str(item.get("content", item.get("snippet", ""))),
+                                metadata={
+                                    "title": item.get("title", ""),
+                                    "url": url,
+                                    "source_type": source_type,
+                                },
+                                source=DataSource.WEB_CONTENT,
+                                score=float(item.get("score", 0.5) or 0.5),
+                            )
+                        )
                 except Exception as exc:  # noqa: BLE001 - best effort
                     result.errors.append(f"Web/academic prefetch failed: {exc}")
 
@@ -2615,11 +3379,20 @@ async def unified_rag_pipeline(
                 _cls_start = time.time()
                 _cls_provider = classifier_provider or generation_provider or "openai"
                 _cls_model = classifier_model or generation_model
+                _classification_stage_metadata: dict[str, Any] = {}
                 _classification = await classify_and_reformulate(
                     query=query,
                     chat_history=chat_history,
                     llm_provider=_cls_provider,
                     llm_model=_cls_model,
+                    **(
+                        {
+                            "credential_runtime": credential_runtime,
+                            "stage_metadata": _classification_stage_metadata,
+                        }
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
                 result.timings["query_classification"] = time.time() - _cls_start
                 result.metadata["query_classification"] = {
@@ -2631,6 +3404,7 @@ async def unified_rag_pipeline(
                     "detected_intent": _classification.detected_intent,
                     "confidence": _classification.confidence,
                     "reasoning": _classification.reasoning,
+                    **_classification_stage_metadata,
                 }
 
                 # Apply classification decisions
@@ -2660,9 +3434,10 @@ async def unified_rag_pipeline(
 
                     # If local retrieval is disabled but external routes are requested,
                     # prefetch external docs directly in non-research-loop mode.
-                    if (
-                        not enable_research_loop
-                        and (_classification.search_web or _classification.search_academic or _classification.search_discussions)
+                    if not enable_research_loop and (
+                        _classification.search_web
+                        or _classification.search_academic
+                        or _classification.search_discussions
                     ):
                         external_docs = await _prefetch_routed_external_docs(
                             query_text=query,
@@ -2699,18 +3474,32 @@ async def unified_rag_pipeline(
             # Even without full classification, do reformulation if chat history present
             try:
                 from .query_classifier import reformulate_query as _reformulate_q
+
                 _ref_start = time.time()
                 _ref_provider = classifier_provider or generation_provider or "openai"
                 _ref_model = classifier_model or generation_model
+                _reformulation_stage_metadata: dict[str, Any] = {}
                 reformulated = await _reformulate_q(
                     query=query,
                     chat_history=chat_history,
                     llm_provider=_ref_provider,
                     llm_model=_ref_model,
+                    **(
+                        {
+                            "credential_runtime": credential_runtime,
+                            "stage_metadata": _reformulation_stage_metadata,
+                        }
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
                 if reformulated and reformulated != query:
                     result.metadata["reformulated_query"] = reformulated
                     _sync_effective_query(reformulated)
+                if _reformulation_stage_metadata:
+                    result.metadata["query_reformulation"] = dict(
+                        _reformulation_stage_metadata
+                    )
                 result.timings["query_reformulation"] = time.time() - _ref_start
             except Exception as _ref_exc:
                 logger.warning(f"Query reformulation failed: {_ref_exc!r}")
@@ -2728,6 +3517,7 @@ async def unified_rag_pipeline(
                 _research_start = time.time()
                 _research_mode = search_depth_mode or "balanced"
                 _db_ctx = {
+                    "user_id": user_id or "0",
                     "media_db_path": media_db_path,
                     "notes_db_path": notes_db_path,
                     "character_db_path": character_db_path,
@@ -2756,6 +3546,7 @@ async def unified_rag_pipeline(
                 if _effective_max_iterations is None:
                     with contextlib.suppress(TypeError, ValueError):
                         import os as _os
+
                         _env_key = f"SEARCH_MAX_ITERATIONS_{_research_mode.upper()}"
                         _effective_max_iterations = _positive_int_or_none(_os.getenv(_env_key))
 
@@ -2769,6 +3560,11 @@ async def unified_rag_pipeline(
                             enable_image_search=bool(enable_image_search),
                             enable_video_search=bool(enable_video_search),
                             on_progress=_progress_cb,
+                            **(
+                                {"credential_runtime": credential_runtime}
+                                if credential_runtime is not None
+                                else {}
+                            ),
                         )
 
                 _research_output = await research_loop(
@@ -2786,25 +3582,37 @@ async def unified_rag_pipeline(
                     enable_action_dedup=bool(enable_research_action_dedup),
                     enable_image_search=bool(enable_image_search),
                     enable_video_search=bool(enable_video_search),
+                    **(
+                        {"credential_runtime": credential_runtime}
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
 
                 # Convert research results to Document objects
                 from .types import DataSource as _DS
                 from .types import Document as _Doc
+
                 _research_docs = []
                 for r_item in _research_output.all_results:
-                    _research_docs.append(_Doc(
-                        id=str(r_item.get("id", r_item.get("url", ""))),
-                        content=str(r_item.get("content", "")),
-                        metadata={
-                            "title": r_item.get("title", ""),
-                            "url": r_item.get("url", ""),
-                            "source_type": r_item.get("source", "research"),
-                            "platform": r_item.get("platform", ""),
-                        },
-                        source=_DS.WEB_CONTENT if r_item.get("source") in ("web", "discussion", "academic", "scraped_url") else _DS.MEDIA_DB,
-                        score=float(r_item.get("score", 0.5)),
-                    ))
+                    _research_docs.append(
+                        _Doc(
+                            id=str(r_item.get("id", r_item.get("url", ""))),
+                            content=str(r_item.get("content", "")),
+                            metadata={
+                                "title": r_item.get("title", ""),
+                                "url": r_item.get("url", ""),
+                                "source_type": r_item.get("source", "research"),
+                                "platform": r_item.get("platform", ""),
+                            },
+                            source=(
+                                _DS.WEB_CONTENT
+                                if r_item.get("source") in ("web", "discussion", "academic", "scraped_url")
+                                else _DS.MEDIA_DB
+                            ),
+                            score=float(r_item.get("score", 0.5)),
+                        )
+                    )
 
                 result.documents = _research_docs
                 result.timings["research_loop"] = time.time() - _research_start
@@ -2818,6 +3626,14 @@ async def unified_rag_pipeline(
                     "action_dedup": _research_output.metadata.get("action_dedup", {}),
                     "discussion_platforms": discussion_platforms or ["reddit", "stackoverflow", "hackernews"],
                     "url_dedup": _research_output.metadata.get("url_dedup", {}),
+                    **(
+                        dict(_research_output.metadata.get("provider_stage") or {})
+                        if isinstance(
+                            _research_output.metadata.get("provider_stage"),
+                            dict,
+                        )
+                        else {}
+                    ),
                     "steps": [
                         {
                             "iteration": s.iteration,
@@ -2834,17 +3650,52 @@ async def unified_rag_pipeline(
                 if enable_image_search or enable_video_search:
                     _images = []
                     _videos = []
+                    _media_provider_stage: dict[str, Any] = {}
                     for _step in _research_output.steps:
-                        if _step.output and _step.output.success and _step.output.results:
-                            _step_type = (_step.output.metadata or {}).get("type", "")
+                        if not _step.output or not _step.output.success:
+                            continue
+                        _step_metadata = (
+                            _step.output.metadata
+                            if isinstance(_step.output.metadata, dict)
+                            else {}
+                        )
+                        _step_type = _step_metadata.get("type", "")
+                        if _step_type not in {"images", "videos"}:
+                            continue
+                        if _step.output.results:
                             if _step_type == "images":
                                 _images.extend(_step.output.results)
-                            elif _step_type == "videos":
+                            else:
                                 _videos.extend(_step.output.results)
+                        _verification_available = _step_metadata.get(
+                            "verification_available"
+                        )
+                        if isinstance(_verification_available, bool):
+                            _bounded_stage = {
+                                "verification_available": _verification_available
+                            }
+                            if (
+                                _verification_available is False
+                                and _step_metadata.get("failure_code")
+                                == "provider_unavailable"
+                            ):
+                                _bounded_stage["failure_code"] = "provider_unavailable"
+                            if (
+                                _verification_available is False
+                                or _media_provider_stage.get(
+                                    "verification_available"
+                                )
+                                is not False
+                            ):
+                                _media_provider_stage = _bounded_stage
                     if _images:
                         result.metadata["images"] = _images
                     if _videos:
                         result.metadata["videos"] = _videos
+                    if _media_provider_stage:
+                        result.metadata["research"]["media_provider_stage"] = (
+                            _media_provider_stage
+                        )
 
                 logger.info(
                     f"Research loop completed: {_research_output.total_iterations} iterations, "
@@ -2854,9 +3705,26 @@ async def unified_rag_pipeline(
 
                 # Skip cache/retrieval after a successful research loop so the
                 # assembled research evidence remains the source of truth.
-                _skip_retrieval_stack = True
-                _skip_retrieval_reason = "research_loop"
-                result.metadata["research_retrieval_bypassed"] = True
+                _research_provider_stage = _research_output.metadata.get("provider_stage")
+                _research_available = not (
+                    isinstance(_research_provider_stage, dict)
+                    and _research_provider_stage.get("verification_available") is False
+                )
+                if _research_available:
+                    _skip_retrieval_stack = True
+                    _skip_retrieval_reason = "research_loop"
+                    result.metadata["research_retrieval_bypassed"] = True
+                elif _should_restore_classification_local_retrieval(
+                    skip_retrieval_stack=_skip_retrieval_stack,
+                    skip_local_retrieval=_skip_local_retrieval,
+                    classification_local_retrieval=result.metadata.get(
+                        "classification_local_retrieval"
+                    ),
+                ):
+                    _skip_local_retrieval = False
+                    result.metadata["classification_local_retrieval"] = (
+                        "fallback_after_research_unavailable"
+                    )
 
             except Exception as _res_exc:
                 logger.warning(f"Research loop failed, falling back to standard pipeline: {_res_exc!r}")
@@ -2867,6 +3735,7 @@ async def unified_rag_pipeline(
         # If running in production, enable stricter guardrails by default
         try:
             import os as _os
+
             _prod_env = _shared_is_truthy(_os.getenv("tldw_production", "false"))
             _strict_env = _shared_is_truthy(_os.getenv("RAG_GUARDRAILS_STRICT", "false"))
             if _prod_env or _strict_env:
@@ -2875,7 +3744,7 @@ async def unified_rag_pipeline(
                 if not require_hard_citations:
                     require_hard_citations = True
                 # Behavior default can be tuned via env when it's left as "continue"
-                if (numeric_fidelity_behavior == "continue"):
+                if numeric_fidelity_behavior == "continue":
                     _beh = _os.getenv("RAG_NUMERIC_FIDELITY_BEHAVIOR", "ask").strip().lower()
                     if _beh in {"continue", "ask", "decline", "retry"}:
                         numeric_fidelity_behavior = _beh  # type: ignore
@@ -2914,8 +3783,14 @@ async def unified_rag_pipeline(
                 analysis = qa.analyze_query(retrieval_query)
                 analysis_intent = getattr(analysis, "intent", None)
                 analysis_complexity = getattr(analysis, "complexity", None)
-                analysis_intent_val = getattr(analysis_intent, "value", str(analysis_intent)) if analysis_intent is not None else None
-                analysis_complexity_val = getattr(analysis_complexity, "value", str(analysis_complexity)) if analysis_complexity is not None else None
+                analysis_intent_val = (
+                    getattr(analysis_intent, "value", str(analysis_intent)) if analysis_intent is not None else None
+                )
+                analysis_complexity_val = (
+                    getattr(analysis_complexity, "value", str(analysis_complexity))
+                    if analysis_complexity is not None
+                    else None
+                )
                 analysis_domain = getattr(analysis, "domain", None)
             except (AttributeError, TypeError, ValueError, RuntimeError):
                 analysis = None
@@ -2972,10 +3847,7 @@ async def unified_rag_pipeline(
                             query,
                             strategies=["decompose", "generalize", "specify", "clarify"],
                         )
-                        rewriter_variants = [
-                            r.rewritten_query for r in rw
-                            if getattr(r, "rewritten_query", None)
-                        ]
+                        rewriter_variants = [r.rewritten_query for r in rw if getattr(r, "rewritten_query", None)]
                     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
                         rewriter_variants = []
 
@@ -3126,97 +3998,6 @@ async def unified_rag_pipeline(
             prefer_current_scalars=retrieval_scalar_overrides_applied,
         )
 
-        # ========== CACHE CHECK ==========
-        cached_documents = None
-        if enable_cache and not _skip_retrieval_stack and not _skip_local_retrieval:
-            cache_start = time.time()
-            cache = _get_cache_instance()
-
-            if cache:
-                # First try direct get on the main query (support sync or async)
-                try:
-                    get_fn = cache.get
-                    if asyncio.iscoroutinefunction(get_fn):
-                        direct = await get_fn(query)
-                    else:
-                        direct = get_fn(query)
-                except (AttributeError, OSError, RuntimeError, TypeError):
-                    direct = None
-                if direct:
-                    cached_documents = direct
-                    result.cache_hit = True
-                else:
-                    # Check cache for all query variations
-                    for q in expanded_queries:
-                        try:
-                            find_fn = getattr(cache, 'find_similar', None)
-                            if find_fn is None:
-                                break
-                            if asyncio.iscoroutinefunction(find_fn):
-                                cached_result = await find_fn(q)
-                            else:
-                                cached_result = find_fn(q)
-                        except (AttributeError, OSError, RuntimeError, TypeError):
-                            cached_result = None
-                        if cached_result:
-                            # find_similar returns (key, query, sim) or (query, sim)
-                            if len(cached_result) == 3:
-                                _, cached_query, similarity = cached_result
-                            else:
-                                cached_query, similarity = cached_result
-                            try:
-                                if asyncio.iscoroutinefunction(get_fn):
-                                    cached_documents = await get_fn(cached_query)
-                                else:
-                                    cached_documents = get_fn(cached_query)
-                            except (AttributeError, OSError, RuntimeError, TypeError):
-                                cached_documents = None
-                            if cached_documents:
-                                result.cache_hit = True
-                                result.metadata["cache_similarity"] = similarity
-                                result.metadata["cached_query"] = cached_query
-                                break
-
-                if result.cache_hit:
-                    empty_cached_docs = False
-                    if isinstance(cached_documents, dict):
-                        docs = cached_documents.get("documents")
-                        if isinstance(docs, list) and not docs:
-                            empty_cached_docs = True
-                    elif isinstance(cached_documents, list) and not cached_documents:
-                        empty_cached_docs = True
-                    if empty_cached_docs:
-                        # Treat empty cached results as a miss to avoid stale false negatives.
-                        result.cache_hit = False
-                        cached_documents = None
-
-                if result.cache_hit:
-                    if isinstance(cached_documents, dict):
-                        ans = cached_documents.get("answer")
-                        if ans is not None:
-                            result.generated_answer = ans
-                        docs = cached_documents.get("documents")
-                        if isinstance(docs, list):
-                            result.documents = _clone_cached_documents(docs)
-                        if cached_documents.get("cached") is True:
-                            result.metadata["cached_flag"] = True
-                    elif isinstance(cached_documents, list):
-                        # Backward compatibility: older cache entries stored document lists directly
-                        result.documents = _clone_cached_documents(cached_documents)
-                    result.metadata.setdefault("cached_flag", True)
-
-            result.timings["cache_check"] = time.time() - cache_start
-            if metrics:
-                metrics.cache_lookup_time = result.timings["cache_check"]
-        elif _skip_retrieval_stack or _skip_local_retrieval:
-            result.metadata["cache_bypassed"] = {
-                "reason": (
-                    _skip_retrieval_reason
-                    if _skip_retrieval_stack
-                    else "classification_local_disabled"
-                )
-            }
-
         # ========== INTENT-BASED WEIGHTING (optional) ==========
         if adaptive_hybrid_weights and search_mode == "hybrid":
             try:
@@ -3242,7 +4023,9 @@ async def unified_rag_pipeline(
                         getattr(QueryIntent, "TEMPORAL", None),
                     }:
                         hybrid_alpha = 0.4
-                    result.metadata["query_intent"] = getattr(local_analysis.intent, "value", str(local_analysis.intent))
+                    result.metadata["query_intent"] = getattr(
+                        local_analysis.intent, "value", str(local_analysis.intent)
+                    )
                 result.metadata["adaptive_hybrid_alpha"] = hybrid_alpha
             except (AttributeError, TypeError, ValueError):
                 pass
@@ -3255,6 +4038,7 @@ async def unified_rag_pipeline(
                 # Read defaults if present
                 try:
                     from tldw_Server_API.app.core.config import load_and_log_configs
+
                     cfg = load_and_log_configs()
                     if not isinstance(cfg, dict):
                         cfg = {}
@@ -3264,8 +4048,25 @@ async def unified_rag_pipeline(
                     hyde_model = hyde_model or (str(raw_model).strip() if raw_model else None)
                 except (ImportError, AttributeError, OSError, TypeError, ValueError):
                     pass
-                hypo = generate_hypothetical_answer(query, hyde_provider, hyde_model)
-                vec = await hyde_embed_text(hypo)
+                hyde_embedding_metadata: dict[str, Any] = {}
+                if credential_runtime is None:
+                    hypo = generate_hypothetical_answer(query, hyde_provider, hyde_model)
+                    vec = await hyde_embed_text(hypo)
+                else:
+                    hypo = await generate_hypothetical_answer_async(
+                        query,
+                        hyde_provider,
+                        hyde_model,
+                        credential_runtime=credential_runtime,
+                        stage_metadata=hyde_embedding_metadata,
+                    )
+                    vec = await hyde_embed_text(
+                        hypo,
+                        credential_runtime=credential_runtime,
+                        stage_metadata=hyde_embedding_metadata,
+                    )
+                if hyde_embedding_metadata:
+                    result.metadata["hyde_embedding"] = hyde_embedding_metadata
                 if vec:
                     hyde_vector = vec
                     result.metadata["hyde_applied"] = True
@@ -3321,7 +4122,10 @@ async def unified_rag_pipeline(
 
                 # Month name + year, e.g., January 2023
                 month_names = {m.lower(): i for i, m in enumerate(calendar.month_name) if m}
-                m_month_year = re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(20\d{2}|19\d{2})\b", qlower)
+                m_month_year = re.search(
+                    r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(20\d{2}|19\d{2})\b",
+                    qlower,
+                )
                 if m_month_year:
                     mon = month_names.get(m_month_year.group(1))
                     y = int(m_month_year.group(2))
@@ -3353,6 +4157,70 @@ async def unified_rag_pipeline(
             except (AttributeError, TypeError, ValueError, RuntimeError):
                 pass
 
+        # ========== CACHE CHECK ==========
+        # Resolve auto-temporal scope before deriving the retrieval cache identity.
+        if retrieval_cache_eligible and not _skip_retrieval_stack and not _skip_local_retrieval:
+            cache_start = time.time()
+            cache = _get_cache_instance()
+
+            if cache:
+                get_fn = getattr(cache, "get", None)
+                try:
+                    direct = (
+                        await _invoke_cache_callable(get_fn, query)
+                        if callable(get_fn)
+                        else None
+                    )
+                except (AttributeError, OSError, RuntimeError, TypeError):
+                    direct = None
+                cached_documents = _extract_cached_documents(direct)
+                if cached_documents:
+                    result.cache_hit = True
+                else:
+                    for q in expanded_queries:
+                        try:
+                            find_fn = getattr(cache, "find_similar", None)
+                            if not callable(find_fn):
+                                break
+                            cached_result = await _invoke_cache_callable(find_fn, q)
+                        except (AttributeError, OSError, RuntimeError, TypeError):
+                            cached_result = None
+                        validated_match = _validate_semantic_cache_match(cached_result)
+                        if validated_match is None:
+                            continue
+                        cached_query, similarity = validated_match
+                        try:
+                            similar_payload = (
+                                await _invoke_cache_callable(get_fn, cached_query)
+                                if callable(get_fn)
+                                else None
+                            )
+                        except (AttributeError, OSError, RuntimeError, TypeError):
+                            similar_payload = None
+                        cached_documents = _extract_cached_documents(similar_payload)
+                        if cached_documents:
+                            result.cache_hit = True
+                            result.metadata["cache_similarity"] = similarity
+                            break
+
+                if result.cache_hit:
+                    result.documents = cached_documents
+                    result.generated_answer = None
+                    result.metadata["retrieval_cache_hit"] = True
+                    result.metadata["cached_flag"] = True
+
+            result.timings["cache_check"] = time.time() - cache_start
+            if metrics:
+                metrics.cache_lookup_time = result.timings["cache_check"]
+        elif _skip_retrieval_stack or _skip_local_retrieval:
+            result.metadata["cache_bypassed"] = {
+                "reason": (
+                    _skip_retrieval_reason
+                    if _skip_retrieval_stack
+                    else "classification_local_disabled"
+                )
+            }
+
         # ========== DOCUMENT RETRIEVAL ==========
         if not result.cache_hit and not _skip_retrieval_stack and not _skip_local_retrieval:
             retrieval_start = time.time()
@@ -3368,7 +4236,7 @@ async def unified_rag_pipeline(
                             "rag.phase": "retrieval",
                             "rag.search_mode": str(retrieval_search_mode),
                             "rag.top_k": int(retrieval_top_k or 0),
-                            "rag.index_namespace": str(retrieval_index_namespace or "")
+                            "rag.index_namespace": str(retrieval_index_namespace or ""),
                         }
                         _otel_cm = _tr.start_as_current_span("rag.retrieval")
                         _otel_span = _otel_cm.__enter__()
@@ -3379,7 +4247,6 @@ async def unified_rag_pipeline(
                         _otel_cm = None
                         _otel_span = None
                 if MultiDatabaseRetriever and RetrievalConfig:
-
                     # Set up database paths
                     db_paths = _build_pipeline_db_paths()
 
@@ -3404,21 +4271,26 @@ async def unified_rag_pipeline(
                     # Optional date filter
                     if enable_date_filter and date_range and isinstance(date_range, dict):
                         try:
-                            start = datetime.fromisoformat(date_range.get("start", "")) if date_range.get("start") else None
+                            start = (
+                                datetime.fromisoformat(date_range.get("start", "")) if date_range.get("start") else None
+                            )
                             end = datetime.fromisoformat(date_range.get("end", "")) if date_range.get("end") else None
                             if start and end:
                                 config.date_filter = (start, end)
                         except (TypeError, ValueError):
                             pass
                     # Fallback: use metadata-written temporal filter (auto)
-                    if getattr(config, 'date_filter', None) is None:
+                    if getattr(config, "date_filter", None) is None:
                         tf = result.metadata.get("temporal_filter") if isinstance(result.metadata, dict) else None
                         if isinstance(tf, dict):
                             try:
                                 start_val = tf.get("start")
                                 end_val = tf.get("end")
                                 if start_val and end_val:
-                                    config.date_filter = (datetime.fromisoformat(start_val), datetime.fromisoformat(end_val))
+                                    config.date_filter = (
+                                        datetime.fromisoformat(start_val),
+                                        datetime.fromisoformat(end_val),
+                                    )
                             except (TypeError, ValueError):
                                 pass
 
@@ -3469,19 +4341,28 @@ async def unified_rag_pipeline(
                         retrieval_cfg: Optional[Any] = None,
                         top_k_override: Optional[int] = None,
                     ) -> list[Document]:
-                        evidence = await _resilient_call(
-                            component,
-                            execute_retrieval_phase,
-                            resolved_request=resolved_request,
-                            retrieval_plan=_effective_retrieval_plan_for_query(
-                                query_text,
-                                top_k_override=top_k_override,
-                            ),
-                            retriever=retriever,
-                            retrieval_config=retrieval_cfg or config,
-                            allowed_media_ids=include_media_ids,
-                            allowed_note_ids=include_note_ids,
-                        )
+                        if _latched_optional_provider_failure(component) is not None:
+                            return []
+                        try:
+                            evidence = await _resilient_call(
+                                component,
+                                execute_retrieval_phase,
+                                resolved_request=resolved_request,
+                                retrieval_plan=_effective_retrieval_plan_for_query(
+                                    query_text,
+                                    top_k_override=top_k_override,
+                                ),
+                                retriever=retriever,
+                                retrieval_config=retrieval_cfg or config,
+                                allowed_media_ids=include_media_ids,
+                                allowed_note_ids=include_note_ids,
+                                bypass_provider_failures=credential_runtime is not None,
+                            )
+                        except _RAG_PROVIDER_FAILURES as exc:
+                            if credential_runtime is None:
+                                raise
+                            _latch_optional_provider_failure(component, exc)
+                            return []
                         evidence_docs = getattr(evidence, "documents", None)
                         return list(evidence_docs or [])
 
@@ -3496,7 +4377,9 @@ async def unified_rag_pipeline(
                         retrieval_config=config,
                         allowed_media_ids=include_media_ids,
                         allowed_note_ids=include_note_ids,
+                        bypass_provider_failures=credential_runtime is not None,
                     )
+                    base_retrieval_executed = True
                     documents = list(retrieved_evidence.documents)
 
                     # Fallback: if no documents were retrieved via MultiDatabaseRetriever,
@@ -3512,6 +4395,7 @@ async def unified_rag_pipeline(
                         try:
                             from .database_retrievers import MediaDBRetriever as _MDBR
                             from .database_retrievers import RetrievalConfig as _RCfg
+
                             fb_cfg = _RCfg(
                                 max_results=retrieval_top_k,
                                 min_score=retrieval_min_score,
@@ -3567,7 +4451,9 @@ async def unified_rag_pipeline(
                                 by_id: dict[str, Document] = {d.id: d for d in documents}
                                 for d in hyde_docs:
                                     cur = by_id.get(d.id)
-                                    if cur is None or float(getattr(d, "score", 0.0)) > float(getattr(cur, "score", 0.0)):
+                                    if cur is None or float(getattr(d, "score", 0.0)) > float(
+                                        getattr(cur, "score", 0.0)
+                                    ):
                                         by_id[d.id] = d
                                 documents = sorted(by_id.values(), key=lambda x: getattr(x, "score", 0.0), reverse=True)
                                 result.metadata["hyde_merged_count"] = len(hyde_docs)
@@ -3621,7 +4507,9 @@ async def unified_rag_pipeline(
                                 added = 0
                                 for d in exp_docs:
                                     cur = by_id.get(d.id)
-                                    if cur is None or float(getattr(d, "score", 0.0)) > float(getattr(cur, "score", 0.0)):
+                                    if cur is None or float(getattr(d, "score", 0.0)) > float(
+                                        getattr(cur, "score", 0.0)
+                                    ):
                                         if cur is None:
                                             added += 1
                                         by_id[d.id] = d
@@ -3727,6 +4615,7 @@ async def unified_rag_pipeline(
                                 try:
                                     from .agentic_chunker import AgenticConfig as _ACfg
                                     from .agentic_chunker import _decompose_query as _agentic_decompose
+
                                     subgoal_max = max_subqueries if max_subqueries is not None else 3
                                     acfg = _ACfg(enable_query_decomposition=True, subgoal_max=int(subgoal_max))
                                     subqueries = _agentic_decompose(q_norm, acfg) or []
@@ -3764,7 +4653,7 @@ async def unified_rag_pipeline(
                             except (TypeError, ValueError):
                                 max_sub = 0
                             if max_sub and len(subqueries) > max_sub:
-                                subqueries = subqueries[: max_sub]
+                                subqueries = subqueries[:max_sub]
 
                             meta_decomp: dict[str, Any] = {
                                 "enabled": True,
@@ -3806,7 +4695,14 @@ async def unified_rag_pipeline(
                                     return res if isinstance(res, list) else []
 
                                 subquery_results: dict[str, Any] = {}
-                                subqueries_to_run = list(subqueries[1:])
+                                subqueries_to_run = (
+                                    []
+                                    if _latched_optional_provider_failure(
+                                        "retrieval_decomposition"
+                                    )
+                                    is not None
+                                    else list(subqueries[1:])
+                                )
                                 try:
                                     max_workers = max(1, int(subquery_max_concurrency or 1))
                                 except (TypeError, ValueError):
@@ -3839,9 +4735,7 @@ async def unified_rag_pipeline(
                                             ValueError,
                                             asyncio.TimeoutError,
                                         ) as _sq_err:
-                                            result.errors.append(
-                                                f"Decomposition subquery retrieval failed: {_sq_err}"
-                                            )
+                                            result.errors.append(f"Decomposition subquery retrieval failed: {_sq_err}")
 
                                 for sq in subqueries_to_run:
                                     if time_budget is not None and (time.time() - decomp_start) >= time_budget:
@@ -3858,10 +4752,12 @@ async def unified_rag_pipeline(
                                             total_added += 1
                                             if doc_budget is not None and total_added >= doc_budget:
                                                 break
-                                    meta_decomp["subqueries"].append({
-                                        "query": sq,
-                                        "added_doc_ids": added_ids,
-                                    })
+                                    meta_decomp["subqueries"].append(
+                                        {
+                                            "query": sq,
+                                            "added_doc_ids": added_ids,
+                                        }
+                                    )
                                     if doc_budget is not None and total_added >= doc_budget:
                                         break
 
@@ -3871,7 +4767,7 @@ async def unified_rag_pipeline(
                                         result.documents,
                                         key=lambda d: getattr(d, "score", 0.0),
                                         reverse=True,
-                                    )[: retrieval_top_k]
+                                    )[:retrieval_top_k]
                                 except (TypeError, ValueError):
                                     # Fallback: leave documents in current order
                                     pass
@@ -3908,15 +4804,14 @@ async def unified_rag_pipeline(
                     # Record phase duration with difficulty label
                     try:
                         from tldw_Server_API.app.core.Metrics.metrics_manager import observe_histogram
+
                         def _difficulty(docs: list) -> str:
                             try:
                                 if not docs:
                                     difficulty = "hard"
                                 else:
                                     high = sum(
-                                        1
-                                        for d in docs
-                                        if float(getattr(d, "score", 0.0)) >= max(min_score, 0.3)
+                                        1 for d in docs if float(getattr(d, "score", 0.0)) >= max(min_score, 0.3)
                                     )
                                     if high >= max(3, int(0.3 * len(docs))):
                                         difficulty = "easy"
@@ -3927,7 +4822,12 @@ async def unified_rag_pipeline(
                             except (AttributeError, RuntimeError, TypeError, ValueError):
                                 return "unknown"
                             return difficulty
-                        observe_histogram("rag_phase_duration_seconds", result.timings["retrieval"], labels={"phase": "retrieval", "difficulty": _difficulty(result.documents or [])})
+
+                        observe_histogram(
+                            "rag_phase_duration_seconds",
+                            result.timings["retrieval"],
+                            labels={"phase": "retrieval", "difficulty": _difficulty(result.documents or [])},
+                        )
                         # Also attach difficulty as OTEL attribute if span is active
                         if _otel_span is not None:
                             try:
@@ -3951,11 +4851,14 @@ async def unified_rag_pipeline(
                 asyncio.TimeoutError,
                 sqlite3.Error,
             ) as e:
-                result.errors.append(f"Document retrieval failed: {str(e)}")
-                logger.error(f"Retrieval error: {e}")
+                if credential_runtime is not None and isinstance(e, _RAG_PROVIDER_FAILURES):
+                    raise
+                result.errors.append("document_retrieval_failed")
+                logger.error("Document retrieval failed")
                 # Sample payload exemplar on retrieval failure
                 try:
                     from .payload_exemplars import maybe_record_exemplar
+
                     maybe_record_exemplar(
                         query=query,
                         documents=result.documents or [],
@@ -3980,6 +4883,7 @@ async def unified_rag_pipeline(
                     try:
                         from .database_retrievers import MediaDBRetriever as _MDBR
                         from .database_retrievers import RetrievalConfig as _RCfg
+
                         fb_cfg = _RCfg(
                             max_results=top_k,
                             min_score=min_score,
@@ -4013,8 +4917,9 @@ async def unified_rag_pipeline(
                         ValueError,
                         asyncio.TimeoutError,
                         sqlite3.Error,
-                    ) as _fb_err:
-                        result.errors.append(f"Media DB fallback retrieval on error failed: {str(_fb_err)}")
+                    ):
+                        result.errors.append("media_db_fallback_failed")
+                        logger.error("Media DB fallback retrieval failed")
             finally:
                 # Ensure OTEL span is closed
                 if _otel_cm is not None:
@@ -4033,6 +4938,19 @@ async def unified_rag_pipeline(
                 "documents_preserved": int(len(result.documents or [])),
             }
 
+        if (
+            retrieval_cache_eligible
+            and base_retrieval_executed
+            and not result.cache_hit
+            and not _skip_retrieval_stack
+            and not _skip_local_retrieval
+            and result.documents
+        ):
+            _apply_workspace_filtering_to_result()
+            cache_retrieval_snapshot = _clone_cached_documents(
+                list(result.documents)
+            )
+
         # ========== MULTI-VECTOR PASSAGES (optional, pre-rerank) ==========
         if enable_multi_vector_passages and result.documents:
             mv_start = time.time()
@@ -4050,7 +4968,7 @@ async def unified_rag_pipeline(
                         result.metadata.setdefault("multi_vector", {})
                         # When implementation is available, pre_docs can override documents
                         if pre_docs:
-                            result.documents = pre_docs[: top_k]
+                            result.documents = pre_docs[:top_k]
                             result.metadata["multi_vector"]["precomputed_spans"] = True
                             used_precomputed = True
                         else:
@@ -4067,22 +4985,35 @@ async def unified_rag_pipeline(
                         max_spans_per_doc=int(mv_max_spans or 8),
                         flatten_to_spans=bool(mv_flatten_to_spans or False),
                     )
-                    mv_docs = await apply_multi_vector_passages(
-                        query=query,
-                        documents=result.documents,
-                        config=cfg,
-                        user_id=user_id,
-                    )
+                    multi_vector_embedding_metadata: dict[str, Any] = {}
+                    multi_vector_kwargs: dict[str, Any] = {
+                        "query": query,
+                        "documents": result.documents,
+                        "config": cfg,
+                        "user_id": user_id,
+                    }
+                    if credential_runtime is not None:
+                        multi_vector_kwargs.update(
+                            credential_runtime=credential_runtime,
+                            stage_metadata=multi_vector_embedding_metadata,
+                        )
+                    mv_docs = await apply_multi_vector_passages(**multi_vector_kwargs)
+                    if multi_vector_embedding_metadata:
+                        result.metadata.setdefault("multi_vector", {}).update(
+                            multi_vector_embedding_metadata
+                        )
                     if mv_docs:
-                        result.documents = mv_docs[: top_k]
+                        result.documents = mv_docs[:top_k]
                         result.metadata.setdefault("multi_vector", {})
-                        result.metadata["multi_vector"].update({
-                            "enabled": True,
-                            "span_chars": cfg.span_chars,
-                            "stride": cfg.stride,
-                            "max_spans_per_doc": cfg.max_spans_per_doc,
-                            "flattened": cfg.flatten_to_spans,
-                        })
+                        result.metadata["multi_vector"].update(
+                            {
+                                "enabled": True,
+                                "span_chars": cfg.span_chars,
+                                "stride": cfg.stride,
+                                "max_spans_per_doc": cfg.max_spans_per_doc,
+                                "flattened": cfg.flatten_to_spans,
+                            }
+                        )
                 else:
                     result.errors.append("Multi-vector module not available")
             except (
@@ -4099,7 +5030,12 @@ async def unified_rag_pipeline(
                 result.timings["multi_vector"] = time.time() - mv_start
                 try:
                     from tldw_Server_API.app.core.Metrics.metrics_manager import observe_histogram
-                    observe_histogram("rag_phase_duration_seconds", result.timings["multi_vector"], labels={"phase": "multi_vector", "difficulty": str(result.metadata.get("query_intent", "na"))})
+
+                    observe_histogram(
+                        "rag_phase_duration_seconds",
+                        result.timings["multi_vector"],
+                        labels={"phase": "multi_vector", "difficulty": str(result.metadata.get("query_intent", "na"))},
+                    )
                 except (ImportError, RuntimeError, TypeError, ValueError):
                     pass
 
@@ -4109,7 +5045,12 @@ async def unified_rag_pipeline(
         if enable_numeric_table_boost:
             try:
                 import re as _re
-                q_has_num = bool(_re.search(r"\d", query)) or bool(_re.search(r"\b(percent|percentage|million|billion|thousand|\$|usd|eur|kg|g|lb|%|k|m|b)\b", query, _re.I))
+
+                q_has_num = bool(_re.search(r"\d", query)) or bool(
+                    _re.search(
+                        r"\b(percent|percentage|million|billion|thousand|\$|usd|eur|kg|g|lb|%|k|m|b)\b", query, _re.I
+                    )
+                )
             except (TypeError, ValueError):
                 q_has_num = False
             if q_has_num:
@@ -4142,9 +5083,11 @@ async def unified_rag_pipeline(
                 # Try a lightweight LLM to propose follow-ups
                 try:
                     from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze as llm_analyze
+
                     # Determine default provider/model from config if available
                     try:
                         from tldw_Server_API.app.core.config import load_and_log_configs
+
                         _cfg = load_and_log_configs() or {}
                         _prov = (_cfg.get("RAG_DEFAULT_LLM_PROVIDER") or "openai").strip()
                         _model = (_cfg.get("RAG_DEFAULT_LLM_MODEL") or "gpt-4o-mini").strip()
@@ -4160,7 +5103,60 @@ async def unified_rag_pipeline(
                         snippet = (d.content or "")[:300].replace("\n", " ")
                         prompt += f"- {snippet}\n"
                     prompt += "\nJSON:"
-                    llm_out = llm_analyze(api_name=_prov, input_data="", custom_prompt_arg=prompt, model_override=_model)
+                    gap_handle = None
+                    if credential_runtime is not None:
+                        gap_handle = await credential_runtime.resolve(
+                            _prov,
+                            model=_model,
+                        )
+                    gap_stream_state = {"content": False}
+
+                    def _call_gap_analyzer() -> Any:
+                        response = llm_analyze(
+                            api_name=_prov,
+                            input_data=prompt,
+                            custom_prompt_arg=None,
+                            model_override=_model,
+                            api_key=(gap_handle.api_key if gap_handle is not None else None),
+                            app_config=(gap_handle.app_config if gap_handle is not None else None),
+                            credentials_resolved=gap_handle is not None,
+                            provider_credentials=gap_handle,
+                            raise_on_error=gap_handle is not None,
+                        )
+                        return _consume_bound_sgl_response(
+                            response,
+                            _prov,
+                            on_content=lambda: gap_stream_state.__setitem__(
+                                "content",
+                                True,
+                            ),
+                            fail_closed=gap_handle is not None,
+                        )
+
+                    async def _run_gap_analyzer() -> Any:
+                        gap_completed = False
+                        try:
+                            value = await await_bounded_sync_call(
+                                _call_gap_analyzer,
+                                pool=SYNC_ADAPTER_CALL_POOL,
+                                exhaustion_message=(
+                                    "RAG optional adapter capacity is exhausted"
+                                ),
+                            )
+                            gap_completed = True
+                            return value
+                        finally:
+                            if gap_handle is not None and (
+                                gap_completed or gap_stream_state["content"]
+                            ):
+                                await credential_runtime.mark_used(gap_handle)
+
+                    gap_operation = _run_gap_analyzer()
+                    llm_out = (
+                        await await_owned_worker(gap_operation)
+                        if gap_handle is not None
+                        else await gap_operation
+                    )
                     if isinstance(llm_out, str):
                         try:
                             parsed = parse_structured_output(
@@ -4175,6 +5171,16 @@ async def unified_rag_pipeline(
                                     followups = [q for q in wrapped_followups if isinstance(q, str) and q.strip()]
                         except (StructuredOutputParseError, TypeError, ValueError):
                             followups = [s.strip("- ") for s in llm_out.splitlines() if s.strip()]
+                except (ByokResolutionError, SummaryProviderError) as exc:
+                    result.metadata["gap_analysis"] = {
+                        "failure_code": (
+                            exc.code
+                            if isinstance(exc, ByokResolutionError)
+                            else "provider_unavailable"
+                        ),
+                        "verification_available": False,
+                    }
+                    followups = []
                 except (
                     AttributeError,
                     ConnectionError,
@@ -4184,34 +5190,44 @@ async def unified_rag_pipeline(
                     ValueError,
                     asyncio.TimeoutError,
                 ):
-                    # Fallback
+                    if credential_runtime is not None:
+                        result.metadata["gap_analysis"] = {
+                            "failure_code": "provider_unavailable",
+                            "verification_available": False,
+                        }
                     followups = [f"detailed {query}", f"examples {query}"]
                 followups = [q for q in followups if isinstance(q, str) and q.strip()][:max_followup_searches]
                 if followups:
-                    # Run in parallel
-                    tasks = [
-                        _execute_retrieval_variant("retrieval_followup", fq)
-                        for fq in followups
-                    ]
-                    try:
-                        follow_results = await asyncio.gather(*tasks)
-                    except (
-                        ConnectionError,
-                        OSError,
-                        RuntimeError,
-                        TypeError,
-                        ValueError,
-                        asyncio.TimeoutError,
-                    ):
+                    if _latched_optional_provider_failure("retrieval_followup") is not None:
                         follow_results = []
+                    else:
+                        # Calls already running when one fails finish normally; later
+                        # optional callbacks observe the request-scoped latch.
+                        tasks = [
+                            _execute_retrieval_variant("retrieval_followup", fq)
+                            for fq in followups
+                        ]
+                        try:
+                            follow_results = await asyncio.gather(*tasks)
+                        except (
+                            ConnectionError,
+                            OSError,
+                            RuntimeError,
+                            TypeError,
+                            ValueError,
+                            asyncio.TimeoutError,
+                        ):
+                            follow_results = []
                     # Merge by id, keep higher score
                     merged = {d.id: d for d in result.documents}
                     for lst in follow_results:
-                        for d in (lst or []):
+                        for d in lst or []:
                             prev = merged.get(d.id)
                             if prev is None or float(getattr(d, "score", 0.0)) > float(getattr(prev, "score", 0.0)):
                                 merged[d.id] = d
-                    result.documents = sorted(merged.values(), key=lambda x: getattr(x, "score", 0.0), reverse=True)[:top_k]
+                    result.documents = sorted(merged.values(), key=lambda x: getattr(x, "score", 0.0), reverse=True)[
+                        :top_k
+                    ]
                     result.metadata["followups"] = followups
                 result.timings["gap_analysis"] = time.time() - ga_start
             except (
@@ -4244,18 +5260,25 @@ async def unified_rag_pipeline(
             inj_start = time.time()
             try:
                 if downweight_injection_docs:
-                    summary = downweight_injection_docs(result.documents, strength=float(injection_filter_strength or 0.5))
+                    summary = downweight_injection_docs(
+                        result.documents, strength=float(injection_filter_strength or 0.5)
+                    )
                     result.metadata.setdefault("injection_filter", {})
-                    result.metadata["injection_filter"].update({
-                        "affected": int(summary.get("affected", 0)),
-                        "total": int(summary.get("total", len(result.documents))),
-                        "strength": float(injection_filter_strength or 0.5),
-                    })
+                    result.metadata["injection_filter"].update(
+                        {
+                            "affected": int(summary.get("affected", 0)),
+                            "total": int(summary.get("total", len(result.documents))),
+                            "strength": float(injection_filter_strength or 0.5),
+                        }
+                    )
                     # Optional metric
                     try:
                         from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
+
                         if int(summary.get("affected", 0)) > 0:
-                            increment_counter("rag_injection_chunks_downweighted_total", int(summary.get("affected", 0)))
+                            increment_counter(
+                                "rag_injection_chunks_downweighted_total", int(summary.get("affected", 0))
+                            )
                     except (ImportError, RuntimeError, TypeError, ValueError):
                         pass
                 else:
@@ -4300,6 +5323,7 @@ async def unified_rag_pipeline(
                 if ocr_confidence_threshold is not None:
                     try:
                         from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
+
                         dropped = gate_docs_by_ocr_confidence(result.documents, float(ocr_confidence_threshold))
                         if dropped > 0:
                             increment_counter("rag_ocr_dropped_docs_total", dropped)
@@ -4308,7 +5332,7 @@ async def unified_rag_pipeline(
                 # HTML sanitation
                 if enable_html_sanitizer:
                     sanitized = 0
-                    for d in (result.documents or []):
+                    for d in result.documents or []:
                         try:
                             before = d.content or ""
                             after = sanitize_html_allowlist(before, html_allowed_tags, html_allowed_attrs)
@@ -4320,24 +5344,36 @@ async def unified_rag_pipeline(
                     try:
                         if sanitized > 0:
                             from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
+
                             increment_counter("rag_sanitized_docs_total", sanitized)
                     except (ImportError, RuntimeError, TypeError, ValueError):
                         pass
                 # Content policy (PII/PHI)
                 if enable_content_policy_filter:
-                    summary = apply_content_policy(result.documents, policy_types=(content_policy_types or ["pii"]), mode=str(content_policy_mode or "redact"))
+                    summary = apply_content_policy(
+                        result.documents,
+                        policy_types=(content_policy_types or ["pii"]),
+                        mode=str(content_policy_mode or "redact"),
+                    )
                     result.metadata.setdefault("content_policy", {})
-                    result.metadata["content_policy"].update({
-                        "enabled": True,
-                        "types": content_policy_types or ["pii"],
-                        "mode": content_policy_mode,
-                        "affected": int(summary.get("affected", 0)),
-                        "dropped": int(summary.get("dropped", 0)),
-                    })
+                    result.metadata["content_policy"].update(
+                        {
+                            "enabled": True,
+                            "types": content_policy_types or ["pii"],
+                            "mode": content_policy_mode,
+                            "affected": int(summary.get("affected", 0)),
+                            "dropped": int(summary.get("dropped", 0)),
+                        }
+                    )
                     try:
                         from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
+
                         if int(summary.get("affected", 0)) > 0:
-                            increment_counter("rag_policy_filtered_chunks_total", int(summary.get("affected", 0)), labels={"mode": str(content_policy_mode or "redact")})
+                            increment_counter(
+                                "rag_policy_filtered_chunks_total",
+                                int(summary.get("affected", 0)),
+                                labels={"mode": str(content_policy_mode or "redact")},
+                            )
                     except (ImportError, RuntimeError, TypeError, ValueError):
                         pass
             except (AttributeError, RuntimeError, TypeError, ValueError):
@@ -4521,6 +5557,7 @@ async def unified_rag_pipeline(
                         get_backend as _get_vlm_backend,
                     )
                 except ImportError:
+
                     def _get_vlm_backend(name=None):
                         return None
 
@@ -4533,7 +5570,8 @@ async def unified_rag_pipeline(
                     # Allow media_db and notes_db sources when a local PDF path is present
                     allowed_sources = {"media_db", "notes_db"}
                     selected_docs = [
-                        d for d in result.documents
+                        d
+                        for d in result.documents
                         if (d.metadata or {}).get("source") in allowed_sources and (d.metadata or {}).get("url")
                     ]
                     selected_docs = selected_docs[: max(1, int(vlm_late_chunk_top_k_docs or 1))]
@@ -4549,6 +5587,7 @@ async def unified_rag_pipeline(
                         cleanup_tmp = False
                         try:
                             from pathlib import Path
+
                             pdf_path_obj = Path(str(url))
                             if pdf_path_obj.exists() and pdf_path_obj.suffix.lower() == ".pdf":
                                 pdf_path = str(pdf_path_obj)
@@ -4569,20 +5608,23 @@ async def unified_rag_pipeline(
                                 if by_page:
                                     for entry in by_page:
                                         page_no = entry.get("page")
-                                        for d in (entry.get("detections") or []):
+                                        for d in entry.get("detections") or []:
                                             label = str(d.get("label"))
                                             if vlm_detect_tables_only and label.lower() != "table":
                                                 continue
-                                            detections.append({
-                                                "label": label,
-                                                "score": float(d.get("score", 0.0)),
-                                                "bbox": d.get("bbox") or [0.0, 0.0, 0.0, 0.0],
-                                                "page": page_no,
-                                            })
+                                            detections.append(
+                                                {
+                                                    "label": label,
+                                                    "score": float(d.get("score", 0.0)),
+                                                    "bbox": d.get("bbox") or [0.0, 0.0, 0.0, 0.0],
+                                                    "page": page_no,
+                                                }
+                                            )
                             else:
                                 # Per-page image mode
                                 try:
                                     import pymupdf
+
                                     with pymupdf.open(pdf_path) as _doc:
                                         total_pages = len(_doc)
                                         max_pages = min(page_limit or total_pages, total_pages)
@@ -4591,17 +5633,21 @@ async def unified_rag_pipeline(
                                                 break
                                             pix = page.get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0), alpha=False)
                                             img_bytes = pix.tobytes("png")
-                                            res = backend.process_image(img_bytes, context={"page": i, "pdf_path": pdf_path})
-                                            for det in (getattr(res, "detections", []) or []):
+                                            res = backend.process_image(
+                                                img_bytes, context={"page": i, "pdf_path": pdf_path}
+                                            )
+                                            for det in getattr(res, "detections", []) or []:
                                                 label = str(getattr(det, "label", ""))
                                                 if vlm_detect_tables_only and label.lower() != "table":
                                                     continue
-                                                detections.append({
-                                                    "label": label,
-                                                    "score": float(getattr(det, "score", 0.0)),
-                                                    "bbox": list(getattr(det, "bbox", [0.0, 0.0, 0.0, 0.0])),
-                                                    "page": i,
-                                                })
+                                                detections.append(
+                                                    {
+                                                        "label": label,
+                                                        "score": float(getattr(det, "score", 0.0)),
+                                                        "bbox": list(getattr(det, "bbox", [0.0, 0.0, 0.0, 0.0])),
+                                                        "page": i,
+                                                    }
+                                                )
                                 except (ImportError, OSError, RuntimeError, TypeError, ValueError):
                                     continue
 
@@ -4653,10 +5699,17 @@ async def unified_rag_pipeline(
                 accumulator = EvidenceAccumulator(
                     max_rounds=accumulation_max_rounds,
                     enable_gap_assessment=True,
+                    **(
+                        {"credential_runtime": credential_runtime}
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
 
                 # Create retrieval function for additional rounds
                 async def _additional_retrieval(gap_query: str, exclude_ids: set):
+                    if _latched_optional_provider_failure("evidence_accumulation") is not None:
+                        return []
                     if not (MultiDatabaseRetriever and RetrievalConfig):
                         return []
                     try:
@@ -4691,6 +5744,11 @@ async def unified_rag_pipeline(
                         )
                         # Filter out already-seen documents
                         return [d for d in new_docs if d.id not in exclude_ids]
+                    except _RAG_PROVIDER_FAILURES as exc:
+                        if credential_runtime is None:
+                            raise
+                        _latch_optional_provider_failure("evidence_accumulation", exc)
+                        return []
                     except (
                         AttributeError,
                         ConnectionError,
@@ -4719,6 +5777,13 @@ async def unified_rag_pipeline(
                     "initial_docs": accumulation_result.metadata.get("initial_docs", 0),
                     "final_docs": len(accumulation_result.documents),
                     "docs_added": accumulation_result.metadata.get("docs_added", 0),
+                    **(
+                        {
+                            key: accumulation_result.metadata[key]
+                            for key in ("verification_available", "failure_code")
+                            if key in accumulation_result.metadata
+                        }
+                    ),
                 }
                 result.timings["evidence_accumulation"] = time.time() - accumulation_start
 
@@ -4758,7 +5823,10 @@ async def unified_rag_pipeline(
                     fallback_to_score=grading_fallback_to_score,
                     fallback_min_score=grading_fallback_min_score,
                 )
-                grader = DocumentGrader(config=grading_config)
+                grader = DocumentGrader(
+                    config=grading_config,
+                    credential_runtime=credential_runtime,
+                )
 
                 filtered_docs, grading_metadata = await grader.filter_relevant(
                     query=query,
@@ -4779,6 +5847,16 @@ async def unified_rag_pipeline(
                     "avg_relevance": grading_metadata.get("avg_relevance", 0.0),
                     "grading_latency_ms": grading_metadata.get("total_latency_ms", 0),
                 }
+                if grading_metadata.get("verification_available") is False:
+                    result.metadata["document_grading"].update(
+                        {
+                            "failure_code": grading_metadata.get(
+                                "failure_code",
+                                "provider_unavailable",
+                            ),
+                            "verification_available": False,
+                        }
+                    )
 
                 # Check if we should trigger query rewriting loop (Stage 2)
                 avg_relevance = grading_metadata.get("avg_relevance", 0.0)
@@ -4856,19 +5934,28 @@ async def unified_rag_pipeline(
                     best_rewrite = max(rewrites, key=lambda r: r.confidence)
                     rewritten_query = best_rewrite.rewritten_query
 
-                    rewrite_attempts.append({
-                        "attempt": attempt + 1,
-                        "original_query": current_query,
-                        "rewritten_query": rewritten_query,
-                        "rewrite_type": best_rewrite.rewrite_type,
-                        "confidence": best_rewrite.confidence,
-                        "explanation": best_rewrite.explanation,
-                    })
+                    rewrite_attempts.append(
+                        {
+                            "attempt": attempt + 1,
+                            "original_query": current_query,
+                            "rewritten_query": rewritten_query,
+                            "rewrite_type": best_rewrite.rewrite_type,
+                            "confidence": best_rewrite.confidence,
+                            "explanation": best_rewrite.explanation,
+                        }
+                    )
 
                     logger.debug(f"Query rewrite attempt {attempt + 1}: '{rewritten_query}'")
 
                     # Re-run retrieval with rewritten query
                     if MultiDatabaseRetriever and RetrievalConfig:
+                        latched_code = _latched_optional_provider_failure("query_rewrite")
+                        if latched_code is not None:
+                            rewrite_attempts[-1].update(
+                                retrieval_coverage="degraded",
+                                failure_code=latched_code,
+                            )
+                            break
                         try:
                             db_paths = _build_pipeline_db_paths()
 
@@ -4907,7 +5994,10 @@ async def unified_rag_pipeline(
                                         fallback_to_score=grading_fallback_to_score,
                                         fallback_min_score=grading_fallback_min_score,
                                     )
-                                    grader = DocumentGrader(config=grading_config)
+                                    grader = DocumentGrader(
+                                        config=grading_config,
+                                        credential_runtime=credential_runtime,
+                                    )
                                     _, new_grading_metadata = await grader.filter_relevant(
                                         query=rewritten_query,
                                         documents=new_docs,
@@ -4925,7 +6015,9 @@ async def unified_rag_pipeline(
 
                                     # Check if we've exceeded threshold
                                     if new_avg_relevance >= rewrite_relevance_threshold:
-                                        logger.info(f"Query rewrite succeeded after {attempt + 1} attempts, relevance: {new_avg_relevance:.2f}")
+                                        logger.info(
+                                            f"Query rewrite succeeded after {attempt + 1} attempts, relevance: {new_avg_relevance:.2f}"
+                                        )
                                         rewrite_attempts[-1]["success"] = True
                                         break
                                 else:
@@ -4934,6 +6026,18 @@ async def unified_rag_pipeline(
                                     current_query = rewritten_query
                                     break
 
+                        except _RAG_PROVIDER_FAILURES as ret_err:
+                            if credential_runtime is None:
+                                raise
+                            failure_code = _latch_optional_provider_failure(
+                                "query_rewrite",
+                                ret_err,
+                            )
+                            rewrite_attempts[-1].update(
+                                retrieval_coverage="degraded",
+                                failure_code=failure_code,
+                            )
+                            break
                         except (
                             AttributeError,
                             ConnectionError,
@@ -4980,10 +6084,7 @@ async def unified_rag_pipeline(
         # ========== RERANKING ==========
         if enable_reranking and result.documents and reranking_strategy != "none":
             rerank_start = time.time()
-            if (
-                reranking_strategy == "two_tier"
-                and not (create_reranker and RerankingStrategy and RerankingConfig)
-            ):
+            if reranking_strategy == "two_tier" and not (create_reranker and RerankingStrategy and RerankingConfig):
                 _record_profile_degradation(
                     component="reranking_strategy",
                     from_value="two_tier",
@@ -5026,43 +6127,98 @@ async def unified_rag_pipeline(
                     # Determine LLM reranker provider/model from config when requested
                     selected_strategy = strategy_map[reranking_strategy]
                     llm_client = None
-                    if selected_strategy == RerankingStrategy.LLM_SCORING:
+                    reranker_credential_handle = None
+                    if selected_strategy in {
+                        RerankingStrategy.LLM_SCORING,
+                        RerankingStrategy.TWO_TIER,
+                    }:
                         try:
                             import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
                             from tldw_Server_API.app.core.config import load_and_log_configs
+
                             cfg = load_and_log_configs()
                             if not isinstance(cfg, dict):
                                 cfg = {}
-                            prov = (cfg.get('RAG_LLM_RERANKER_PROVIDER') or '').strip()
-                            model = (cfg.get('RAG_LLM_RERANKER_MODEL') or '').strip()
+                            prov = (cfg.get("RAG_LLM_RERANKER_PROVIDER") or "").strip()
+                            model = (cfg.get("RAG_LLM_RERANKER_MODEL") or "").strip()
                             if not model:
                                 # No model set -> fallback to FlashRank
-                                selected_strategy = RerankingStrategy.FLASHRANK
+                                if selected_strategy == RerankingStrategy.LLM_SCORING:
+                                    selected_strategy = RerankingStrategy.FLASHRANK
                             else:
+                                if credential_runtime is not None:
+                                    try:
+                                        reranker_credential_handle = await credential_runtime.resolve(
+                                            prov or "openai",
+                                            model=model,
+                                        )
+                                    except ByokResolutionError as exc:
+                                        result.metadata["reranking"] = {
+                                            "degraded": True,
+                                            "failure_code": exc.code,
+                                            "verification_available": False,
+                                        }
+                                        result.metadata.pop(
+                                            "reranking_calibration",
+                                            None,
+                                        )
+
                                 class _LLMClient:
-                                    def __init__(self, provider: str, model_name: str):
+                                    def __init__(self, provider: str, model_name: str, handle: Any):
                                         self.provider = provider or 'openai'
                                         self.model_name = model_name
+                                        self.handle = handle
+                                        self.credentials_resolved = handle is not None
+                                        self.used = False
+
                                     def analyze(self, prompt_text: str):
                                         # Use analyze with prompt as custom_prompt_arg
-                                        return sgl.analyze(
+                                        response = sgl.analyze(
                                             api_name=self.provider,
-                                            input_data="",
-                                            custom_prompt_arg=prompt_text,
-                                            api_key=None,
+                                            input_data=prompt_text,
+                                            custom_prompt_arg=None,
+                                            api_key=(
+                                                self.handle.api_key
+                                                if self.handle is not None
+                                                else None
+                                            ),
                                             system_message=None,
                                             temp=None,
                                             model_override=self.model_name,
+                                            app_config=(
+                                                self.handle.app_config
+                                                if self.handle is not None
+                                                else None
+                                            ),
+                                            credentials_resolved=self.handle is not None,
+                                            provider_credentials=self.handle,
+                                            raise_on_error=self.handle is not None,
                                         )
-                                llm_client = _LLMClient(prov, model)
+                                        response = _consume_bound_sgl_response(
+                                            response,
+                                            self.provider,
+                                            on_content=lambda: setattr(self, "used", True),
+                                            fail_closed=self.handle is not None,
+                                        )
+                                        self.used = True
+                                        return response
+
+                                if credential_runtime is None or reranker_credential_handle is not None:
+                                    llm_client = _LLMClient(
+                                        prov,
+                                        model,
+                                        reranker_credential_handle,
+                                    )
                         except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
-                            selected_strategy = RerankingStrategy.FLASHRANK
+                            if selected_strategy == RerankingStrategy.LLM_SCORING:
+                                selected_strategy = RerankingStrategy.FLASHRANK
 
                     # Determine model for reranker when applicable
                     model_name_for_reranker = None
                     if selected_strategy == RerankingStrategy.LLAMA_CPP:
                         try:
                             from tldw_Server_API.app.core.config import load_and_log_configs
+
                             cfg = load_and_log_configs()
                             if not isinstance(cfg, dict):
                                 cfg = {}
@@ -5073,6 +6229,7 @@ async def unified_rag_pipeline(
                     elif selected_strategy == RerankingStrategy.CROSS_ENCODER:
                         try:
                             from tldw_Server_API.app.core.config import load_and_log_configs
+
                             cfg = load_and_log_configs()
                             if not isinstance(cfg, dict):
                                 cfg = {}
@@ -5100,7 +6257,23 @@ async def unified_rag_pipeline(
                                 limit=rerank_debug_limit,
                             )
                         reranker = create_reranker(selected_strategy, rerank_config, llm_client=llm_client)
-                        reranked = await _resilient_call("reranking", reranker.rerank, query, result.documents)
+                        try:
+                            reranked = await _resilient_call(
+                                "reranking",
+                                reranker.rerank,
+                                query,
+                                result.documents,
+                            )
+                        finally:
+                            if (
+                                credential_runtime is not None
+                                and reranker_credential_handle is not None
+                                and llm_client is not None
+                                and llm_client.used
+                            ):
+                                await credential_runtime.mark_used(
+                                    reranker_credential_handle
+                                )
                     except Exception as rerank_exc:
                         if reranking_strategy != "two_tier":
                             raise
@@ -5125,10 +6298,10 @@ async def unified_rag_pipeline(
                         )
                         reranker = create_reranker(selected_strategy, rerank_config, llm_client=llm_client)
                         reranked = await _resilient_call("reranking", reranker.rerank, query, result.documents)
-                    if reranked and hasattr(reranked[0], 'document'):
-                        result.documents = [sd.document for sd in reranked[:(rerank_top_k or top_k)]]
+                    if reranked and hasattr(reranked[0], "document"):
+                        result.documents = [sd.document for sd in reranked[: (rerank_top_k or top_k)]]
                     else:
-                        result.documents = reranked[:(rerank_top_k or top_k)]
+                        result.documents = reranked[: (rerank_top_k or top_k)]
                     if include_rerank_snapshots and isinstance(result.metadata, dict):
                         result.metadata["reranked_documents"] = _serialize_rerank_debug_documents(
                             result.documents,
@@ -5139,9 +6312,18 @@ async def unified_rag_pipeline(
                     result.timings["reranking"] = time.time() - rerank_start
                     try:
                         from tldw_Server_API.app.core.Metrics.metrics_manager import observe_histogram
-                        observe_histogram("rag_reranking_duration_seconds", result.timings["reranking"], labels={"strategy": reranking_strategy})
+
+                        observe_histogram(
+                            "rag_reranking_duration_seconds",
+                            result.timings["reranking"],
+                            labels={"strategy": reranking_strategy},
+                        )
                         # Also record as a generic phase without difficulty
-                        observe_histogram("rag_phase_duration_seconds", result.timings["reranking"], labels={"phase": "reranking", "difficulty": "na"})
+                        observe_histogram(
+                            "rag_phase_duration_seconds",
+                            result.timings["reranking"],
+                            labels={"phase": "reranking", "difficulty": "na"},
+                        )
                         if _otel_span_rk is not None:
                             with contextlib.suppress(AttributeError, RuntimeError, TypeError, ValueError):
                                 _otel_span_rk.set_attribute("rag.doc_count", int(len(result.documents or [])))
@@ -5153,24 +6335,54 @@ async def unified_rag_pipeline(
                     # If reranker exposes calibration metadata (e.g., TwoTier), record it
                     try:
                         if hasattr(reranker, 'last_metadata') and isinstance(reranker.last_metadata, dict):
-                            result.metadata.setdefault("reranking_calibration", {})
-                            result.metadata["reranking_calibration"].update(reranker.last_metadata)
-                            # Attach learned-fusion specific decoration when applicable
-                            _decorate_calibration_metadata()
+                            if reranker.last_metadata.get("degraded"):
+                                result.metadata.pop("reranking_calibration", None)
+                                reranking_metadata = result.metadata.setdefault(
+                                    "reranking",
+                                    {},
+                                )
+                                reranking_metadata.update(
+                                    {
+                                        "degraded": True,
+                                        "failure_code": reranking_metadata.get(
+                                            "failure_code"
+                                        )
+                                        or reranker.last_metadata.get(
+                                            "failure_code",
+                                            "provider_unavailable",
+                                        ),
+                                        "verification_available": False,
+                                    }
+                                )
+                            else:
+                                result.metadata.setdefault("reranking_calibration", {})
+                                result.metadata["reranking_calibration"].update(reranker.last_metadata)
+                                # Attach learned-fusion specific decoration when applicable
+                                _decorate_calibration_metadata()
                     except (AttributeError, RuntimeError, TypeError, ValueError):
                         pass
 
-                    # For non Two-Tier strategies, if learned fusion is requested but no
-                    # calibrator metadata exists, compute a simple fused probability from
-                    # the top document score so that downstream gating can still use a
-                    # calibrated signal.
+                    # If learned fusion is requested but no calibrator metadata exists,
+                    # compute a simple fused probability from the top document score.
+                    # A credential-degraded reranker has no trustworthy verification
+                    # signal, so it must not synthesize calibration or gate generation.
                     if enable_learned_fusion:
                         try:
-                            if isinstance(result.metadata, dict) and "reranking_calibration" not in result.metadata:
+                            reranking_status = result.metadata.get("reranking", {})
+                            verification_unavailable = (
+                                isinstance(reranking_status, dict)
+                                and reranking_status.get("verification_available") is False
+                            )
+                            if (
+                                isinstance(result.metadata, dict)
+                                and "reranking_calibration" not in result.metadata
+                                and not verification_unavailable
+                            ):
                                 top_doc = result.documents[0] if result.documents else None
                                 if top_doc is not None:
                                     import math as _math_lf
                                     import os as _os_lf
+
                                     # Use shared env weights to stay consistent with Two-Tier,
                                     # but only CE-style weight is applied since we only have
                                     # a single rerank score available here.
@@ -5226,6 +6438,7 @@ async def unified_rag_pipeline(
                 # Sample payload exemplar on reranking failure
                 try:
                     from .payload_exemplars import maybe_record_exemplar
+
                     maybe_record_exemplar(
                         query=query,
                         documents=result.documents or [],
@@ -5255,10 +6468,7 @@ async def unified_rag_pipeline(
                         relevance_signal = float(cal.get("fused_score", 0.5))
                     elif result.documents:
                         # Fall back to average document score
-                        scores = [
-                            float(getattr(d, "score", 0.0) or 0.0)
-                            for d in result.documents
-                        ]
+                        scores = [float(getattr(d, "score", 0.0) or 0.0) for d in result.documents]
                         relevance_signal = sum(scores) / len(scores) if scores else 0.0
 
                 # Only trigger if below threshold
@@ -5329,9 +6539,10 @@ async def unified_rag_pipeline(
 
         # ========== WHY THESE SOURCES (metadata) ==========
         try:
-            docs = result.documents or []
+            docs = (result.documents or []) if include_retrieval_diagnostics else []
             if docs:
                 import urllib.parse
+
                 def _host(u: Optional[str]) -> Optional[str]:
                     try:
                         if not u:
@@ -5339,33 +6550,34 @@ async def unified_rag_pipeline(
                         return urllib.parse.urlparse(str(u)).hostname
                     except (AttributeError, TypeError, ValueError):
                         return None
+
                 hosts = []
                 sources_ = []
                 ages = []
                 scores = []
                 now_ts = time.time()
                 for d in docs:
-                    md = getattr(d, 'metadata', None) or (d.get('metadata') if isinstance(d, dict) else {}) or {}
-                    url = md.get('url')
+                    md = getattr(d, "metadata", None) or (d.get("metadata") if isinstance(d, dict) else {}) or {}
+                    url = md.get("url")
                     h = _host(url)
                     if h:
                         hosts.append(h)
-                    src = md.get('source') or str(getattr(d, 'source', '') or '')
+                    src = md.get("source") or str(getattr(d, "source", "") or "")
                     if src:
                         sources_.append(str(src))
-                    created = md.get('last_modified') or md.get('created_at')
+                    created = md.get("last_modified") or md.get("created_at")
                     ts = None
                     try:
                         if isinstance(created, (int, float)):
                             ts = float(created)
                         elif isinstance(created, str) and created:
-                            ts = datetime.fromisoformat(created.replace('Z','+00:00')).timestamp()
+                            ts = datetime.fromisoformat(created.replace("Z", "+00:00")).timestamp()
                     except (TypeError, ValueError):
                         ts = None
                     if ts is not None:
                         ages.append(max(0.0, (now_ts - ts) / 86400.0))
                     try:
-                        scores.append(float(getattr(d, 'score', d.get('score', 0.0) if isinstance(d, dict) else 0.0)))
+                        scores.append(float(getattr(d, "score", d.get("score", 0.0) if isinstance(d, dict) else 0.0)))
                     except (TypeError, ValueError):
                         scores.append(0.0)
                 n = max(1, len(docs))
@@ -5384,21 +6596,27 @@ async def unified_rag_pipeline(
                         topicality = 1.0
                 else:
                     topicality = 0.0
+
                 def _title(md):
                     try:
-                        return (md.get('title') or '') if isinstance(md, dict) else ''
+                        return (md.get("title") or "") if isinstance(md, dict) else ""
                     except (AttributeError, TypeError, ValueError):
-                        return ''
+                        return ""
+
                 top_contexts = []
                 for d in docs[: min(10, n)]:
-                    md = getattr(d, 'metadata', None) or (d.get('metadata') if isinstance(d, dict) else {}) or {}
-                    top_contexts.append({
-                        "id": getattr(d, 'id', d.get('id') if isinstance(d, dict) else None),
-                        "title": _title(md),
-                        "score": float(getattr(d, 'score', md.get('score', 0.0) if isinstance(md, dict) else 0.0) or 0.0),
-                        "url": md.get('url'),
-                        "source": md.get('source') or str(getattr(d, 'source', '') or ''),
-                    })
+                    md = getattr(d, "metadata", None) or (d.get("metadata") if isinstance(d, dict) else {}) or {}
+                    top_contexts.append(
+                        {
+                            "id": getattr(d, "id", d.get("id") if isinstance(d, dict) else None),
+                            "title": _title(md),
+                            "score": float(
+                                getattr(d, "score", md.get("score", 0.0) if isinstance(md, dict) else 0.0) or 0.0
+                            ),
+                            "url": md.get("url"),
+                            "source": md.get("source") or str(getattr(d, "source", "") or ""),
+                        }
+                    )
                 result.metadata["why_these_sources"] = {
                     "diversity": round(float(diversity), 4),
                     "freshness": round(float(fresh_portion), 4),
@@ -5417,17 +6635,25 @@ async def unified_rag_pipeline(
                 for d in result.documents:
                     pid = str(d.metadata.get("parent_id", ""))
                     cidx_md = d.metadata.get("chunk_index", -1)
-                    cidx = int(cidx_md) if isinstance(cidx_md, int) or (isinstance(cidx_md, str) and cidx_md.isdigit()) else -1
+                    cidx = (
+                        int(cidx_md)
+                        if isinstance(cidx_md, int) or (isinstance(cidx_md, str) and cidx_md.isdigit())
+                        else -1
+                    )
                     if pid and cidx >= 0:
                         parents.setdefault(pid, {})[cidx] = d
 
                 sibling_added: list[Document] = []
-                seen_ids = {getattr(d, 'id', None) for d in result.documents}
+                seen_ids = {getattr(d, "id", None) for d in result.documents}
 
                 for d in list(result.documents):
                     pid = str(d.metadata.get("parent_id", ""))
                     cidx_md = d.metadata.get("chunk_index", -1)
-                    cidx = int(cidx_md) if isinstance(cidx_md, int) or (isinstance(cidx_md, str) and cidx_md.isdigit()) else -1
+                    cidx = (
+                        int(cidx_md)
+                        if isinstance(cidx_md, int) or (isinstance(cidx_md, str) and cidx_md.isdigit())
+                        else -1
+                    )
                     if not pid or cidx < 0:
                         continue
                     siblings = parents.get(pid, {})
@@ -5435,9 +6661,9 @@ async def unified_rag_pipeline(
                     for w in range(1, int(sibling_window) + 1):
                         for adj in (cidx - w, cidx + w):
                             sdoc = siblings.get(adj)
-                            if sdoc is not None and getattr(sdoc, 'id', None) not in seen_ids:
+                            if sdoc is not None and getattr(sdoc, "id", None) not in seen_ids:
                                 sibling_added.append(sdoc)
-                                seen_ids.add(getattr(sdoc, 'id', None))
+                                seen_ids.add(getattr(sdoc, "id", None))
 
                 if sibling_added:
                     result.documents.extend(sibling_added)
@@ -5478,16 +6704,29 @@ async def unified_rag_pipeline(
                         "harvard": getattr(CitationStyle, "HARVARD", None),
                         "ieee": getattr(CitationStyle, "IEEE", None),
                     }
-                    style_enum = style_map.get(citation_style) or next(iter([v for v in style_map.values() if v is not None]), None)
+                    style_enum = style_map.get(citation_style) or next(
+                        iter([v for v in style_map.values() if v is not None]), None
+                    )
 
                     if enable_evidence_chains and hasattr(generator, "generate_citations_with_chains"):
                         dual, chain_result = await generator.generate_citations_with_chains(
                             documents=result.documents,
                             query=query,
                             generated_answer=result.generated_answer,
-                            style=style_enum if style_enum is not None else CitationStyle.MLA if CitationStyle else None,
+                            style=(
+                                style_enum if style_enum is not None else CitationStyle.MLA if CitationStyle else None
+                            ),
                             include_chunks=bool(enable_chunk_citations),
                             max_citations=min(len(result.documents), (rerank_top_k or top_k or 10)),
+                            **(
+                                {
+                                    "credential_runtime": credential_runtime,
+                                    "llm_provider": generation_provider,
+                                    "llm_model": generation_model,
+                                }
+                                if credential_runtime is not None
+                                else {}
+                            ),
                         )
                         if chain_result:
                             evidence_chain_result = chain_result
@@ -5495,16 +6734,17 @@ async def unified_rag_pipeline(
                         dual = await generator.generate_citations(
                             documents=result.documents,
                             query=query,
-                            style=style_enum if style_enum is not None else CitationStyle.MLA if CitationStyle else None,
+                            style=(
+                                style_enum if style_enum is not None else CitationStyle.MLA if CitationStyle else None
+                            ),
                             include_chunks=bool(enable_chunk_citations),
-                            max_citations=min(len(result.documents), (rerank_top_k or top_k or 10))
+                            max_citations=min(len(result.documents), (rerank_top_k or top_k or 10)),
                         )
 
                     # Combined citations list for backward compatibility
-                    result.citations = (
-                        [{"type": "academic", "formatted": s} for s in (dual.academic_citations or [])] +
-                        ([{"type": "chunk", **c.to_dict()} for c in (dual.chunk_citations or [])])
-                    )
+                    result.citations = [
+                        {"type": "academic", "formatted": s} for s in (dual.academic_citations or [])
+                    ] + ([{"type": "chunk", **c.to_dict()} for c in (dual.chunk_citations or [])])
                     # Expose detailed structures via metadata
                     result.metadata["academic_citations"] = dual.academic_citations or []
                     result.metadata["chunk_citations"] = [c.to_dict() for c in (dual.chunk_citations or [])]
@@ -5539,6 +6779,17 @@ async def unified_rag_pipeline(
                     min_relevance=strip_min_relevance,
                     max_strips=max_strips,
                     use_llm_grading=False,  # Use heuristic for speed by default
+                    **(
+                        {
+                            "llm_provider": classifier_provider
+                            or generation_provider
+                            or "openai",
+                            "llm_model": classifier_model or generation_model,
+                            "credential_runtime": credential_runtime,
+                        }
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
 
                 if filtered_docs:
@@ -5553,6 +6804,13 @@ async def unified_rag_pipeline(
                     "strip_size_tokens": strip_size_tokens,
                     "min_relevance": strip_min_relevance,
                     "resulting_docs": len(filtered_docs) if filtered_docs else 0,
+                    **(
+                        {
+                            key: strips_metadata[key]
+                            for key in ("verification_available", "failure_code")
+                            if key in strips_metadata
+                        }
+                    ),
                 }
 
                 result.timings["knowledge_strips"] = time.time() - strips_start
@@ -5589,6 +6847,13 @@ async def unified_rag_pipeline(
                 if evidence_chain_result is None:
                     chain_builder = EvidenceChainBuilder(
                         enable_llm_extraction=True,
+                        llm_provider=generation_provider,
+                        llm_model=generation_model,
+                        **(
+                            {"credential_runtime": credential_runtime}
+                            if credential_runtime is not None
+                            else {}
+                        ),
                     )
 
                     # Build chains - note: we don't have the answer yet, so chains are built from docs
@@ -5605,6 +6870,13 @@ async def unified_rag_pipeline(
                         "overall_confidence": evidence_chain_result.overall_confidence,
                         "multi_hop_detected": evidence_chain_result.multi_hop_detected,
                         "total_nodes": evidence_chain_result.metadata.get("total_nodes", 0),
+                        **(
+                            {
+                                key: evidence_chain_result.metadata[key]
+                                for key in ("verification_available", "failure_code")
+                                if key in evidence_chain_result.metadata
+                            }
+                        ),
                     }
 
                 result.timings["evidence_chains"] = time.time() - chain_start
@@ -5624,7 +6896,15 @@ async def unified_rag_pipeline(
         # ========== ANSWER GENERATION ==========
         # Honor reranking calibration gating if present (e.g., TwoTier strategy)
         try:
-            _cal = result.metadata.get("reranking_calibration") if isinstance(result.metadata, dict) else None
+            _reranking_status = result.metadata.get("reranking", {})
+            if (
+                isinstance(_reranking_status, dict)
+                and _reranking_status.get("verification_available") is False
+            ):
+                result.metadata.pop("reranking_calibration", None)
+                _cal = None
+            else:
+                _cal = result.metadata.get("reranking_calibration")
             gated_generation = bool(_cal.get("gated")) if isinstance(_cal, dict) else False
             # When calibration metadata is present, ensure fused_score/version/decision
             # are wired for observability.
@@ -5670,7 +6950,8 @@ async def unified_rag_pipeline(
             result.documents = list(retrieval_only_result.documents)
             result.metadata.update(dict(retrieval_only_result.metadata or {}))
 
-        if effective_enable_generation and not gated_generation and not result.cache_hit:
+        if effective_enable_generation and not gated_generation:
+            result.metadata["generation_executed"] = True
             generation_start = time.time()
             try:
                 # --- OTEL: generation span ---
@@ -5701,9 +6982,10 @@ async def unified_rag_pipeline(
                         max_sents = 6
                         chosen: list[str] = []
                         import re as _re
+
                         q_terms = [t.lower() for t in _re.findall(r"[A-Za-z0-9_-]{3,}", query or "")][:10]
                         for doc in (result.documents or [])[: min(5, len(result.documents or []))]:
-                            text = (getattr(doc, 'content', '') or '').strip()
+                            text = (getattr(doc, "content", "") or "").strip()
                             if not text:
                                 continue
                             sents = [s.strip() for s in _re.split(r"(?<=[\.!?])\s+", text) if s.strip()]
@@ -5720,7 +7002,7 @@ async def unified_rag_pipeline(
                                 chosen.append(hit)
                                 if len(chosen) >= max_sents:
                                     break
-                        result.generated_answer = " " .join(chosen).strip()
+                        result.generated_answer = " ".join(chosen).strip()
                     except (AttributeError, TypeError, ValueError) as _se:
                         result.errors.append(f"Strict extractive assembly failed: {_se}")
                         result.generated_answer = None
@@ -5728,22 +7010,29 @@ async def unified_rag_pipeline(
                     generator = AnswerGenerator(
                         model=generation_model,
                         provider=generation_provider,
+                        credential_runtime=credential_runtime,
                     )
 
                     # Prepare base context from top documents
-                    context_docs = (result.documents[:5] if result.documents else [])
+                    context_docs = result.documents[:5] if result.documents else []
 
                     # Structured response writer: XML-tagged context with citation rules
-                    if enable_structured_response and format_context_xml is not None and build_writer_system_prompt is not None:
+                    if (
+                        enable_structured_response
+                        and format_context_xml is not None
+                        and build_writer_system_prompt is not None
+                    ):
                         _writer_chunks = []
                         for _wd in context_docs:
-                            _wd_meta = getattr(_wd, 'metadata', {}) or {}
-                            _writer_chunks.append({
-                                "content": getattr(_wd, 'content', str(_wd)),
-                                "title": _wd_meta.get("title", ""),
-                                "url": _wd_meta.get("url", "") or _wd_meta.get("source", ""),
-                                "metadata": _wd_meta,
-                            })
+                            _wd_meta = getattr(_wd, "metadata", {}) or {}
+                            _writer_chunks.append(
+                                {
+                                    "content": getattr(_wd, "content", str(_wd)),
+                                    "title": _wd_meta.get("title", ""),
+                                    "url": _wd_meta.get("url", "") or _wd_meta.get("source", ""),
+                                    "metadata": _wd_meta,
+                                }
+                            )
                         context = format_context_xml(_writer_chunks)
                         _writer_mode = search_depth_mode or "balanced"
                         _writer_policy = None
@@ -5765,16 +7054,18 @@ async def unified_rag_pipeline(
                         if build_writer_user_prompt is not None:
                             context = build_writer_user_prompt(query=query, context_xml=context)
                         result.metadata.setdefault("structured_writer", {})
-                        result.metadata["structured_writer"].update({
-                            "enabled": True,
-                            "mode": _writer_mode,
-                            "context_results": len(_writer_chunks),
-                            "max_generation_tokens": int(max_generation_tokens),
-                        })
+                        result.metadata["structured_writer"].update(
+                            {
+                                "enabled": True,
+                                "mode": _writer_mode,
+                                "context_results": len(_writer_chunks),
+                                "max_generation_tokens": int(max_generation_tokens),
+                            }
+                        )
                         if isinstance(_writer_policy, dict):
                             result.metadata["structured_writer"]["depth_policy"] = _writer_policy
                     else:
-                        context = "\n\n".join([getattr(doc, 'content', str(doc)) for doc in context_docs])
+                        context = "\n\n".join([getattr(doc, "content", str(doc)) for doc in context_docs])
 
                     if enable_multi_turn_synthesis:
                         # Strict budget control
@@ -5808,21 +7099,106 @@ async def unified_rag_pipeline(
                         c_dt = 0.0
                         try:
                             import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
                             # Construct a compact critique prompt using small snippets
                             snippets = []
                             for d in context_docs[:3]:
-                                s = (getattr(d, 'content', '') or '')[:250].replace('\n', ' ')
+                                s = (getattr(d, "content", "") or "")[:250].replace("\n", " ")
                                 if s:
                                     snippets.append(f"- {s}")
                             crit_prompt = (
                                 "You are a careful reviewer.\n"
                                 "Given the user query, retrieved snippets, and the draft answer, list the top 3 issues (missing facts or unsupported claims).\n"
-                                f"Query: {query}\nSnippets:\n" + "\n".join(snippets) + f"\n\nDraft:\n{d_ans_text}\n\nIssues:"
+                                f"Query: {query}\nSnippets:\n"
+                                + "\n".join(snippets)
+                                + f"\n\nDraft:\n{d_ans_text}\n\nIssues:"
                             )
                             c_start = time.time()
-                            c_text = sgl.analyze(api_name="openai", input_data="", custom_prompt_arg=crit_prompt, model_override=None)
+                            critique_handle = None
+                            if credential_runtime is not None:
+                                critique_handle = await credential_runtime.resolve("openai")
+                            critique_stream_state = {"content": False}
+
+                            def _call_critique() -> Any:
+                                response = sgl.analyze(
+                                    api_name="openai",
+                                    input_data=crit_prompt,
+                                    custom_prompt_arg=None,
+                                    model_override=None,
+                                    api_key=(
+                                        critique_handle.api_key
+                                        if critique_handle is not None
+                                        else None
+                                    ),
+                                    app_config=(
+                                        critique_handle.app_config
+                                        if critique_handle is not None
+                                        else None
+                                    ),
+                                    credentials_resolved=critique_handle is not None,
+                                    provider_credentials=critique_handle,
+                                    raise_on_error=critique_handle is not None,
+                                )
+                                return _consume_bound_sgl_response(
+                                    response,
+                                    "openai",
+                                    on_content=lambda: critique_stream_state.__setitem__(
+                                        "content",
+                                        True,
+                                    ),
+                                    fail_closed=critique_handle is not None,
+                                )
+
+                            async def _run_critique() -> Any:
+                                critique_completed = False
+                                try:
+                                    value = await await_bounded_sync_call(
+                                        _call_critique,
+                                        pool=SYNC_ADAPTER_CALL_POOL,
+                                        exhaustion_message=(
+                                            "RAG optional adapter capacity is exhausted"
+                                        ),
+                                    )
+                                    critique_completed = True
+                                    return value
+                                finally:
+                                    if critique_handle is not None and (
+                                        critique_completed
+                                        or critique_stream_state["content"]
+                                    ):
+                                        await credential_runtime.mark_used(
+                                            critique_handle
+                                        )
+
+                            critique_operation = _run_critique()
+                            c_text = (
+                                await await_owned_worker(critique_operation)
+                                if critique_handle is not None
+                                else await critique_operation
+                            )
                             c_dt = time.time() - c_start
+                        except (ByokResolutionError, SummaryProviderError) as exc:
+                            result.metadata.setdefault("synthesis", {})
+                            result.metadata["synthesis"].update(
+                                {
+                                    "failure_code": (
+                                        exc.code
+                                        if isinstance(exc, ByokResolutionError)
+                                        else "provider_unavailable"
+                                    ),
+                                    "verification_available": False,
+                                }
+                            )
+                            c_text = "- Ensure claims are supported by provided snippets."
                         except (ImportError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, asyncio.TimeoutError):
+                            if credential_runtime is not None:
+                                result.metadata.setdefault("synthesis", {})
+                                result.metadata["synthesis"].update(
+                                    {
+                                        "failure_code": "provider_unavailable",
+                                        "verification_available": False,
+                                    }
+                                )
                             c_text = "- Ensure claims are supported by provided snippets.\n- Add missing specifics.\n- Clarify ambiguous statements."
                         if isinstance(c_text, str):
                             c_text_val = c_text
@@ -5839,7 +7215,13 @@ async def unified_rag_pipeline(
                             aborted = True
                             result.generated_answer = d_ans_text
                             result.metadata.setdefault("synthesis", {})
-                            result.metadata["synthesis"].update({"enabled": True, "aborted": True, "durations": {"draft": d_dt, "critique": c_dt, "refine": 0.0}})
+                            result.metadata["synthesis"].update(
+                                {
+                                    "enabled": True,
+                                    "aborted": True,
+                                    "durations": {"draft": d_dt, "critique": c_dt, "refine": 0.0},
+                                }
+                            )
                         else:
                             # Refine
                             refine_tokens = int(synthesis_refine_tokens or max_generation_tokens)
@@ -5855,8 +7237,15 @@ async def unified_rag_pipeline(
                             r_dt = time.time() - r_start
                             result.generated_answer = r_ans
                             result.metadata.setdefault("synthesis", {})
-                            result.metadata["synthesis"].update({"enabled": True, "aborted": False, "durations": {"draft": d_dt, "critique": c_dt, "refine": r_dt}})
+                            result.metadata["synthesis"].update(
+                                {
+                                    "enabled": True,
+                                    "aborted": False,
+                                    "durations": {"draft": d_dt, "critique": c_dt, "refine": r_dt},
+                                }
+                            )
                     else:
+
                         async def _generate_standard_answer(
                             *,
                             query: str,
@@ -5906,9 +7295,8 @@ async def unified_rag_pipeline(
                                 "generated_answer",
                                 generation_result.get("answer"),
                             )
-                            generation_documents = (
-                                generation_result.get("documents")
-                                or generation_result.get("sources")
+                            generation_documents = generation_result.get("documents") or generation_result.get(
+                                "sources"
                             )
                             if generation_documents is not None:
                                 result.documents = list(generation_documents)
@@ -5928,9 +7316,24 @@ async def unified_rag_pipeline(
                     result.timings["answer_generation"] = time.time() - generation_start
                     try:
                         from tldw_Server_API.app.core.Metrics.metrics_manager import observe_histogram
-                        observe_histogram("rag_phase_duration_seconds", result.timings["answer_generation"], labels={"phase": "generation", "difficulty": str(result.metadata.get("query_intent", "na"))})
+
+                        observe_histogram(
+                            "rag_phase_duration_seconds",
+                            result.timings["answer_generation"],
+                            labels={
+                                "phase": "generation",
+                                "difficulty": str(result.metadata.get("query_intent", "na")),
+                            },
+                        )
                         if enable_multi_turn_synthesis:
-                            observe_histogram("rag_phase_duration_seconds", result.timings["answer_generation"], labels={"phase": "synthesis", "difficulty": str(result.metadata.get("query_intent", "na"))})
+                            observe_histogram(
+                                "rag_phase_duration_seconds",
+                                result.timings["answer_generation"],
+                                labels={
+                                    "phase": "synthesis",
+                                    "difficulty": str(result.metadata.get("query_intent", "na")),
+                                },
+                            )
                         if _otel_span_gen is not None:
                             try:
                                 _ans_len = len(result.generated_answer or "")
@@ -5946,6 +7349,7 @@ async def unified_rag_pipeline(
                     if enable_suggestions and generate_suggestions is not None and result.generated_answer:
                         try:
                             _suggestions_start = time.time()
+                            _suggestion_stage_metadata: dict[str, Any] = {}
                             _suggestions = await generate_suggestions(
                                 query=query,
                                 response_text=str(result.generated_answer),
@@ -5954,8 +7358,20 @@ async def unified_rag_pipeline(
                                 llm_model=classifier_model or generation_model,
                                 num_suggestions=num_suggestions,
                                 llm_timeout_sec=3.0,
+                                **(
+                                    {
+                                        "credential_runtime": credential_runtime,
+                                        "stage_metadata": _suggestion_stage_metadata,
+                                    }
+                                    if credential_runtime is not None
+                                    else {}
+                                ),
                             )
                             result.metadata["suggestions"] = _suggestions
+                            if _suggestion_stage_metadata:
+                                result.metadata["suggestion_generation"] = dict(
+                                    _suggestion_stage_metadata
+                                )
                             result.timings["suggestions"] = time.time() - _suggestions_start
                         except Exception as _sug_exc:
                             logger.debug(f"Suggestion generation failed: {_sug_exc!r}")
@@ -5971,11 +7387,12 @@ async def unified_rag_pipeline(
                 TypeError,
                 ValueError,
                 asyncio.TimeoutError,
-            ) as e:
-                result.errors.append(f"Answer generation failed: {str(e)}")
-                logger.error(f"Generation error: {e}")
+            ):
+                result.errors.append("answer_generation_failed")
+                logger.error("Answer generation failed")
                 try:
                     from .payload_exemplars import maybe_record_exemplar
+
                     maybe_record_exemplar(
                         query=query,
                         documents=result.documents or [],
@@ -5993,18 +7410,22 @@ async def unified_rag_pipeline(
         elif effective_enable_generation and gated_generation:
             # Record a metadata entry and bump a metric for observability
             result.metadata.setdefault("generation_gate", {})
-            result.metadata["generation_gate"].update({
-                "reason": "low_relevance_probability",
-                "at": time.time(),
-            })
+            result.metadata["generation_gate"].update(
+                {
+                    "reason": "low_relevance_probability",
+                    "at": time.time(),
+                }
+            )
             try:
                 from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
+
                 increment_counter("rag_generation_gated_total", 1, labels={"strategy": "two_tier"})
             except (ImportError, RuntimeError, TypeError, ValueError):
                 pass
             # Sample payload exemplar when generation is gated
             try:
                 from .payload_exemplars import maybe_record_exemplar
+
                 maybe_record_exemplar(
                     query=query,
                     documents=result.documents or [],
@@ -6065,7 +7486,9 @@ async def unified_rag_pipeline(
                 # Prefer claims payload if present
                 claims_payload = result.metadata.get("claims") if isinstance(result.metadata, dict) else None
                 if build_hard_citations:
-                    hc = build_hard_citations(result.generated_answer, result.documents or [], claims_payload=claims_payload)
+                    hc = build_hard_citations(
+                        result.generated_answer, result.documents or [], claims_payload=claims_payload
+                    )
                 if isinstance(hc, dict):
                     result.metadata["hard_citations"] = hc
                     # If hard-citation coverage is incomplete and strict mode is requested, apply behavior
@@ -6075,6 +7498,7 @@ async def unified_rag_pipeline(
                             _apply_generation_gate("missing_hard_citations", coverage=cov)
                             try:
                                 from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
+
                                 increment_counter("rag_missing_hard_citations_total", 1)
                             except (ImportError, RuntimeError, TypeError, ValueError):
                                 pass
@@ -6083,10 +7507,13 @@ async def unified_rag_pipeline(
                                 note = "\n\n[Note] Some statements lack supporting citations. Please clarify or provide sources."
                                 result.generated_answer = (result.generated_answer or "") + note
                             elif low_confidence_behavior == "decline":
-                                result.generated_answer = "Insufficient evidence: missing citations for some statements."
+                                result.generated_answer = (
+                                    "Insufficient evidence: missing citations for some statements."
+                                )
                         # Gauge for coverage (report once per answer)
                         try:
                             from tldw_Server_API.app.core.Metrics.metrics_manager import set_gauge
+
                             set_gauge("rag_hard_citation_coverage", cov, labels={"strategy": "standard"})
                         except (ImportError, RuntimeError, TypeError, ValueError):
                             pass
@@ -6116,6 +7543,7 @@ async def unified_rag_pipeline(
                         provider=fast_hallucination_provider,
                         model=fast_hallucination_model,
                         timeout_sec=fast_hallucination_timeout_sec,
+                        credential_runtime=credential_runtime,
                     )
                     fast_grounded = fg_result.is_grounded
                     fast_groundedness_confidence = fg_result.confidence
@@ -6148,17 +7576,111 @@ async def unified_rag_pipeline(
                 # Import shared analyze function for LLM calls
                 import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
 
+                claims_handle = None
+                claims_provider = None
+                claims_state = {"used": False, "marked": False}
+                if credential_runtime is not None:
+                    from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+                        _resolve_claims_llm_config,
+                    )
+
+                    claims_provider, claims_model, _ = _resolve_claims_llm_config()
+                    claims_handle = await credential_runtime.resolve(
+                        claims_provider,
+                        model=claims_model,
+                    )
+
                 def _analyze(api_name: str, input_data: Any, custom_prompt_arg: Optional[str] = None,
                              api_key: Optional[str] = None, system_message: Optional[str] = None,
                              temp: Optional[float] = None, **kwargs):
-                    return sgl.analyze(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, **kwargs)
+                    if claims_handle is None:
+                        return sgl.analyze(
+                            api_name,
+                            input_data,
+                            custom_prompt_arg,
+                            api_key,
+                            system_message,
+                            temp,
+                            **kwargs,
+                        )
+                    for key in (
+                        "app_config",
+                        "credentials_resolved",
+                        "provider_credentials",
+                        "_provider_call_credentials",
+                        "raise_on_error",
+                    ):
+                        kwargs.pop(key, None)
+                    response = sgl.analyze(
+                        claims_provider or claims_handle.provider,
+                        input_data,
+                        custom_prompt_arg,
+                        claims_handle.api_key,
+                        system_message,
+                        temp,
+                        app_config=claims_handle.app_config,
+                        credentials_resolved=True,
+                        provider_credentials=claims_handle,
+                        raise_on_error=True,
+                        **kwargs,
+                    )
+                    if isinstance(response, Iterator):
+                        from .generation import (
+                            _classify_stream_content,
+                            _extract_stream_text,
+                        )
 
-                if ClaimsEngine:
-                    engine = ClaimsEngine(_analyze)
+                        chunks = []
+                        for chunk in response:
+                            chunks.append(str(chunk))
+                            has_content, has_error = _classify_stream_content(
+                                _extract_stream_text(chunk)
+                            )
+                            if has_content:
+                                claims_state["used"] = True
+                            if has_error:
+                                raise SummaryProviderError(
+                                    code="provider_failure",
+                                    provider=claims_provider or claims_handle.provider,
+                                )
+                        response = "".join(chunks)
+                    if isinstance(response, str) and response.startswith("Error:"):
+                        raise SummaryProviderError(
+                            code="provider_failure",
+                            provider=claims_provider or claims_handle.provider,
+                        )
+                    claims_state["used"] = True
+                    return response
+
+                claims_engine_type = _resolve_claims_engine()
+                if claims_engine_type is not None:
+                    engine = claims_engine_type(_analyze)
+
+                    async def _mark_claims_used() -> None:
+                        if (
+                            claims_handle is not None
+                            and claims_state["used"]
+                            and not claims_state["marked"]
+                        ):
+                            await credential_runtime.mark_used(claims_handle)
+                            claims_state["marked"] = True
+
+                    async def _run_claims_engine(**run_kwargs: Any) -> dict[str, Any]:
+                        async def _run_and_mark() -> dict[str, Any]:
+                            try:
+                                return await engine.run(**run_kwargs)
+                            finally:
+                                await _mark_claims_used()
+
+                        operation = _run_and_mark()
+                        if claims_handle is not None:
+                            return await await_owned_worker(operation)
+                        return await operation
+
                     # Default NLI model from environment if not provided
                     if not nli_model:
-                        import os
-                        nli_model = os.environ.get("RAG_NLI_MODEL") or os.environ.get("RAG_NLI_MODEL_PATH")
+                        import os as _os
+                        nli_model = _os.environ.get("RAG_NLI_MODEL") or _os.environ.get("RAG_NLI_MODEL_PATH")
                     job_context = None
                     if ClaimsJobContext is not None:
                         user_id_val = None
@@ -6176,6 +7698,7 @@ async def unified_rag_pipeline(
                         settings_obj = None
                         try:
                             from tldw_Server_API.app.core.config import settings as _settings
+
                             if isinstance(_settings, dict):
                                 settings_obj = _settings
                             elif hasattr(_settings, "dict"):
@@ -6201,8 +7724,11 @@ async def unified_rag_pipeline(
                             max_tokens=budget_tokens,
                             strict=budget_strict if isinstance(budget_strict, bool) else None,
                         )
+
                     # Build a per-claim retrieval that uses MultiDatabaseRetriever and hybrid search when available
                     async def _retrieve_for_claim(c_text: str, top_k: int = 5):
+                        if _latched_optional_provider_failure("per_claim") is not None:
+                            return result.documents[:top_k] if result.documents else []
                         try:
                             if MultiDatabaseRetriever and RetrievalConfig:
                                 db_paths = _build_pipeline_db_paths()
@@ -6214,11 +7740,10 @@ async def unified_rag_pipeline(
                                 docs: list[Any] = []
                                 # Media hybrid
                                 med = mdr.retrievers.get(DataSource.MEDIA_DB)
-                                if (
-                                    med is not None
-                                    and _scope_includes_data_source(resolved_data_sources, DataSource.MEDIA_DB)
+                                if med is not None and _scope_includes_data_source(
+                                    resolved_data_sources, DataSource.MEDIA_DB
                                 ):
-                                    rh = getattr(med, 'retrieve_hybrid', None)
+                                    rh = getattr(med, "retrieve_hybrid", None)
                                     if rh is not None and asyncio.iscoroutinefunction(rh) and search_mode == "hybrid":
                                         media_docs = await rh(query=c_text, alpha=hybrid_alpha)
                                     else:
@@ -6233,6 +7758,8 @@ async def unified_rag_pipeline(
                                         try:
                                             more = await retr.retrieve(query=c_text)
                                             docs.extend(more)
+                                        except _RAG_PROVIDER_FAILURES:
+                                            raise
                                         except (
                                             AttributeError,
                                             ConnectionError,
@@ -6244,8 +7771,13 @@ async def unified_rag_pipeline(
                                         ):
                                             pass
                                 # Sort and cap
-                                docs = sorted(docs, key=lambda d: getattr(d, 'score', 0.0), reverse=True)
+                                docs = sorted(docs, key=lambda d: getattr(d, "score", 0.0), reverse=True)
                                 return docs[:top_k]
+                        except _RAG_PROVIDER_FAILURES as exc:
+                            if credential_runtime is None:
+                                raise
+                            _latch_optional_provider_failure("per_claim", exc)
+                            return result.documents[:top_k] if result.documents else []
                         except (
                             AttributeError,
                             ConnectionError,
@@ -6264,6 +7796,7 @@ async def unified_rag_pipeline(
                         pre_claims: list[str] = []
                         if media_db_path and (result.documents or []):
                             from tldw_Server_API.app.core.config import settings as _settings
+
                             with managed_media_database(
                                 client_id=str(_settings.get("SERVER_CLIENT_ID", "SERVER_API_V1")),
                                 db_path=media_db_path,
@@ -6297,22 +7830,26 @@ async def unified_rag_pipeline(
                         if pre_claims:
                             # Verify these claims directly, skipping extraction
                             from tldw_Server_API.app.core.Claims_Extraction.claims_engine import Claim as _Claim
+
                             verifications = []
-                            for i, ctext in enumerate(pre_claims[:claims_max]):
-                                cv = await engine.verifier.verify(
-                                    claim=_Claim(id=f"pc{i+1}", text=ctext),
-                                    query=query,
-                                    base_documents=result.documents or [],
-                                    retrieve_fn=_retrieve_for_claim,
-                                    top_k=claims_top_k,
-                                    conf_threshold=claims_conf_threshold,
-                                    mode=(claim_verifier or "hybrid").strip().lower(),
-                                    budget=job_budget,
-                                    job_context=job_context,
-                                    doc_only_mode=doc_only_verification,
-                                    numeric_precision_mode=numeric_precision_mode,
-                                )
-                                verifications.append(cv)
+                            try:
+                                for i, ctext in enumerate(pre_claims[:claims_max]):
+                                    cv = await engine.verifier.verify(
+                                        claim=_Claim(id=f"pc{i+1}", text=ctext),
+                                        query=query,
+                                        base_documents=result.documents or [],
+                                        retrieve_fn=_retrieve_for_claim,
+                                        top_k=claims_top_k,
+                                        conf_threshold=claims_conf_threshold,
+                                        mode=(claim_verifier or "hybrid").strip().lower(),
+                                        budget=job_budget,
+                                        job_context=job_context,
+                                        doc_only_mode=doc_only_verification,
+                                        numeric_precision_mode=numeric_precision_mode,
+                                    )
+                                    verifications.append(cv)
+                            finally:
+                                await _mark_claims_used()
                             supported = sum(1 for v in verifications if v.label == "supported")
                             refuted = sum(1 for v in verifications if v.label == "refuted")
                             nei = sum(1 for v in verifications if v.label == "nei")
@@ -6325,12 +7862,18 @@ async def unified_rag_pipeline(
                                     "id": v.claim.id,
                                     "text": v.claim.text,
                                     "span": list(v.claim.span) if v.claim.span else None,
-                                    "claim_type": v.claim.claim_type.value if hasattr(v.claim, "claim_type") else "general",
+                                    "claim_type": (
+                                        v.claim.claim_type.value if hasattr(v.claim, "claim_type") else "general"
+                                    ),
                                     "status": v.status.value if hasattr(v, "status") else v.label,
                                     "label": v.label,
                                     "confidence": v.confidence,
-                                    "match_level": v.match_level.value if hasattr(v, "match_level") else "interpretation",
-                                    "source_authority": v.source_authority.value if hasattr(v, "source_authority") else 1,
+                                    "match_level": (
+                                        v.match_level.value if hasattr(v, "match_level") else "interpretation"
+                                    ),
+                                    "source_authority": (
+                                        v.source_authority.value if hasattr(v, "source_authority") else 1
+                                    ),
                                     "requires_external_knowledge": getattr(v, "requires_external_knowledge", False),
                                     "evidence": [
                                         {
@@ -6355,7 +7898,7 @@ async def unified_rag_pipeline(
                             }
                         else:
                             # Fall back to on-the-fly extraction from the generated answer
-                            claims_run = await engine.run(
+                            claims_run = await _run_claims_engine(
                                 answer=result.generated_answer,
                                 query=query,
                                 documents=result.documents or [],
@@ -6382,8 +7925,13 @@ async def unified_rag_pipeline(
                         ValueError,
                         asyncio.TimeoutError,
                     ) as _eclaims:
-                        logger.debug(f"Pre-extracted claims path failed: {_eclaims}")
-                        claims_run = await engine.run(
+                        if credential_runtime is not None:
+                            logger.debug(
+                                "Pre-extracted claims path failed; using on-the-fly fallback"
+                            )
+                        else:
+                            logger.debug(f"Pre-extracted claims path failed: {_eclaims}")
+                        claims_run = await _run_claims_engine(
                             answer=result.generated_answer,
                             query=query,
                             documents=result.documents or [],
@@ -6402,6 +7950,7 @@ async def unified_rag_pipeline(
                         factuality_payload = claims_run.get("summary")
                         verifications = claims_run.get("verifications", [])
                     # Also store in metadata for debugging/analytics
+                    await _mark_claims_used()
                     result.metadata["claims"] = claims_payload
                     result.metadata["factuality"] = factuality_payload
 
@@ -6411,6 +7960,7 @@ async def unified_rag_pipeline(
                             from tldw_Server_API.app.core.Claims_Extraction.verification_report import (
                                 generate_verification_report as gen_report,
                             )
+
                             # Use the full VerificationReport class with raw verification objects
                             report = gen_report(
                                 verifications=verifications,
@@ -6421,6 +7971,16 @@ async def unified_rag_pipeline(
                             result.metadata["verification_report"] = report.to_dict()
                         except (ImportError, RuntimeError, TypeError, ValueError) as _ereport:
                             logger.debug(f"Verification report generation failed: {_ereport}")
+            except (ByokResolutionError, SummaryProviderError) as exc:
+                result.metadata["claims"] = {
+                    "failure_code": (
+                        exc.code
+                        if isinstance(exc, ByokResolutionError)
+                        else "provider_unavailable"
+                    ),
+                    "verification_available": False,
+                }
+                logger.warning("Claims analysis provider unavailable")
             except (
                 AttributeError,
                 ConnectionError,
@@ -6430,8 +7990,15 @@ async def unified_rag_pipeline(
                 ValueError,
                 asyncio.TimeoutError,
             ) as e:
-                result.errors.append(f"Claims analysis failed: {str(e)}")
-                logger.error(f"Claims analysis error: {e}")
+                if credential_runtime is not None:
+                    result.metadata["claims"] = {
+                        "failure_code": "provider_unavailable",
+                        "verification_available": False,
+                    }
+                    logger.warning("Claims analysis provider unavailable")
+                else:
+                    result.errors.append(f"Claims analysis failed: {str(e)}")
+                    logger.error(f"Claims analysis error: {e}")
 
         # ========== NUMERIC FIDELITY (verify numeric tokens) ==========
         try:
@@ -6439,14 +8006,17 @@ async def unified_rag_pipeline(
                 nf = check_numeric_fidelity(result.generated_answer, result.documents or [])
                 if nf:
                     result.metadata.setdefault("numeric_fidelity", {})
-                    result.metadata["numeric_fidelity"].update({
-                        "present": sorted(nf.present),
-                        "missing": sorted(nf.missing),
-                        "source_numbers": sorted(nf.union_source_numbers)[:100],
-                    })
+                    result.metadata["numeric_fidelity"].update(
+                        {
+                            "present": sorted(nf.present),
+                            "missing": sorted(nf.missing),
+                            "source_numbers": sorted(nf.union_source_numbers)[:100],
+                        }
+                    )
                     if nf.missing:
                         try:
                             from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
+
                             increment_counter("rag_numeric_mismatches_total", len(nf.missing))
                         except (ImportError, RuntimeError, TypeError, ValueError):
                             pass
@@ -6462,11 +8032,44 @@ async def unified_rag_pipeline(
                                         and _scope_includes_data_source(resolved_data_sources, DataSource.MEDIA_DB)
                                     ):
                                         mdr = _build_multi_retriever({"media_db": media_db_path})
-                                        conf = RetrievalConfig(max_results=min(10, top_k), min_score=min_score, use_fts=True, use_vector=True, include_metadata=True, fts_level=fts_level, enable_text_late_chunking=enable_text_late_chunking, chunk_method=chunk_method, chunk_size=chunk_size, chunk_overlap=chunk_overlap, chunk_language=chunk_language)
+                                        conf = RetrievalConfig(
+                                            max_results=min(10, top_k),
+                                            min_score=min_score,
+                                            use_fts=True,
+                                            use_vector=True,
+                                            include_metadata=True,
+                                            fts_level=fts_level,
+                                            enable_text_late_chunking=enable_text_late_chunking,
+                                            chunk_method=chunk_method,
+                                            chunk_size=chunk_size,
+                                            chunk_overlap=chunk_overlap,
+                                            chunk_language=chunk_language,
+                                        )
                                         numeric_added: list[Document] = []
                                         for tok in list(nf.missing)[:3]:
+                                            latched_code = _latched_optional_provider_failure(
+                                                "numeric_fidelity"
+                                            )
+                                            if latched_code is not None:
+                                                result.metadata.setdefault("numeric_fidelity", {}).update(
+                                                    embedding_coverage="degraded",
+                                                    failure_code=latched_code,
+                                                )
+                                                break
                                             try:
                                                 numeric_added.extend(await mdr.retrieve(query=f"{query} {tok}", sources=[DataSource.MEDIA_DB], config=conf, index_namespace=index_namespace))
+                                            except _RAG_PROVIDER_FAILURES as exc:
+                                                if credential_runtime is None:
+                                                    raise
+                                                failure_code = _latch_optional_provider_failure(
+                                                    "numeric_fidelity",
+                                                    exc,
+                                                )
+                                                result.metadata.setdefault("numeric_fidelity", {}).update(
+                                                    embedding_coverage="degraded",
+                                                    failure_code=failure_code,
+                                                )
+                                                break
                                             except (
                                                 AttributeError,
                                                 ConnectionError,
@@ -6479,12 +8082,20 @@ async def unified_rag_pipeline(
                                                 continue
                                         if numeric_added:
                                             # Merge with existing docs and optionally re-rerank in place
-                                            by_id_numeric: dict[str, Document] = {getattr(d, 'id', ''): d for d in (result.documents or [])}
+                                            by_id_numeric: dict[str, Document] = {
+                                                getattr(d, "id", ""): d for d in (result.documents or [])
+                                            }
                                             for d in numeric_added:
-                                                cur = by_id_numeric.get(getattr(d, 'id', ''))
-                                                if cur is None or float(getattr(d, 'score', 0.0)) > float(getattr(cur, 'score', 0.0)):
-                                                    by_id_numeric[getattr(d, 'id', '')] = d
-                                            result.documents = sorted(by_id_numeric.values(), key=lambda x: getattr(x, 'score', 0.0), reverse=True)[: max(top_k, 10)]
+                                                cur = by_id_numeric.get(getattr(d, "id", ""))
+                                                if cur is None or float(getattr(d, "score", 0.0)) > float(
+                                                    getattr(cur, "score", 0.0)
+                                                ):
+                                                    by_id_numeric[getattr(d, "id", "")] = d
+                                            result.documents = sorted(
+                                                by_id_numeric.values(),
+                                                key=lambda x: getattr(x, "score", 0.0),
+                                                reverse=True,
+                                            )[: max(top_k, 10)]
                                             result.metadata.setdefault("numeric_fidelity", {})
                                             result.metadata["numeric_fidelity"]["retry_docs_added"] = len(numeric_added)
                                             # Attempt quick regeneration if generator is available
@@ -6493,9 +8104,20 @@ async def unified_rag_pipeline(
                                                     generator = AnswerGenerator(
                                                         model=generation_model,
                                                         provider=generation_provider,
+                                                        credential_runtime=credential_runtime,
                                                     )
-                                                    context = "\n\n".join([getattr(d, 'content', str(d)) for d in (result.documents[:5] if result.documents else [])])
-                                                    regen = await generator.generate(query=query, context=context, prompt_template=generation_prompt, max_tokens=max_generation_tokens)
+                                                    context = "\n\n".join(
+                                                        [
+                                                            getattr(d, "content", str(d))
+                                                            for d in (result.documents[:5] if result.documents else [])
+                                                        ]
+                                                    )
+                                                    regen = await generator.generate(
+                                                        query=query,
+                                                        context=context,
+                                                        prompt_template=generation_prompt,
+                                                        max_tokens=max_generation_tokens,
+                                                    )
                                                     if isinstance(regen, dict) and regen.get("answer"):
                                                         result.generated_answer = regen.get("answer")
                                                     elif isinstance(regen, str):
@@ -6524,7 +8146,9 @@ async def unified_rag_pipeline(
                                 note = "\n\n[Note] Some numeric values could not be verified against sources. Please clarify or provide references."
                                 result.generated_answer = (result.generated_answer or "") + note
                             elif numeric_fidelity_behavior == "decline":
-                                result.generated_answer = "Insufficient evidence to verify numeric claims in the current context."
+                                result.generated_answer = (
+                                    "Insufficient evidence to verify numeric claims in the current context."
+                                )
         except (AttributeError, RuntimeError, TypeError, ValueError) as e:
             result.errors.append(f"Numeric fidelity check failed: {str(e)}")
 
@@ -6534,8 +8158,8 @@ async def unified_rag_pipeline(
             # Allow env defaults if parameters not explicitly set
             if adaptive_time_budget_sec is None:
                 try:
-                    import os
-                    adaptive_time_budget_sec = float(os.getenv("RAG_ADAPTIVE_TIME_BUDGET_SEC", "0")) or None
+                    import os as _os
+                    adaptive_time_budget_sec = float(_os.getenv("RAG_ADAPTIVE_TIME_BUDGET_SEC", "0")) or None
                 except (TypeError, ValueError):
                     adaptive_time_budget_sec = None
             if enable_post_verification and result.generated_answer and PostGenerationVerifier:
@@ -6545,6 +8169,7 @@ async def unified_rag_pipeline(
                     max_claims=adaptive_max_claims,
                     time_budget_sec=adaptive_time_budget_sec,
                     use_advanced_rewrites=adaptive_advanced_rewrites,
+                    credential_runtime=credential_runtime,
                 )
                 vres = await verifier.verify_and_maybe_fix(
                     query=query,
@@ -6570,11 +8195,38 @@ async def unified_rag_pipeline(
                     "unsupported_count": vres.unsupported_count,
                     "fixed": vres.fixed,
                     "reason": vres.reason,
+                    "verification_available": getattr(
+                        vres,
+                        "verification_available",
+                        True,
+                    ),
                 })
+                failure_code = getattr(vres, "failure_code", None)
+                if failure_code:
+                    result.metadata["post_verification"]["failure_code"] = failure_code
+                if getattr(vres, "embedding_coverage", None) == "degraded":
+                    result.metadata["post_verification"]["embedding_coverage"] = "degraded"
+                embedding_failure_code = getattr(vres, "embedding_failure_code", None)
+                if embedding_failure_code in {
+                    "invalid_provider_credentials",
+                    "missing_provider_credentials",
+                    "provider_configuration_invalid",
+                    "credential_store_unavailable",
+                    "credential_scope_revoked",
+                    "provider_unavailable",
+                }:
+                    result.metadata["post_verification"]["embedding_failure_code"] = (
+                        embedding_failure_code
+                    )
                 # Gauge for NLI unsupported ratio
                 try:
                     from tldw_Server_API.app.core.Metrics.metrics_manager import set_gauge
-                    set_gauge("rag_nli_unsupported_ratio", float(vres.unsupported_ratio or 0.0), labels={"strategy": "standard"})
+
+                    set_gauge(
+                        "rag_nli_unsupported_ratio",
+                        float(vres.unsupported_ratio or 0.0),
+                        labels={"strategy": "standard"},
+                    )
                 except (ImportError, RuntimeError, TypeError, ValueError):
                     pass
                 # Optionally override final answer on successful repair
@@ -6590,6 +8242,7 @@ async def unified_rag_pipeline(
                     )
                     try:
                         from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
+
                         increment_counter("rag_nli_low_confidence_total", 1)
                     except (ImportError, RuntimeError, TypeError, ValueError):
                         pass
@@ -6602,6 +8255,7 @@ async def unified_rag_pipeline(
                 try:
                     if low_confidence:
                         from .payload_exemplars import maybe_record_exemplar
+
                         maybe_record_exemplar(
                             query=query,
                             documents=result.documents or [],
@@ -6697,6 +8351,7 @@ async def unified_rag_pipeline(
                             enable_monitoring=enable_monitoring,
                             enable_observability=enable_observability,
                             trace_id=trace_id,
+                            credential_runtime=credential_runtime,
                             enable_performance_analysis=enable_performance_analysis,
                             timeout_seconds=timeout_seconds,
                             highlight_results=highlight_results,
@@ -6708,10 +8363,18 @@ async def unified_rag_pipeline(
                         # Quick verify the new answer without repairs to compare factuality
                         new_ratio = None
                         if PostGenerationVerifier and (new_result.generated_answer or "").strip():
-                            v2 = await PostGenerationVerifier(max_retries=0, max_claims=min(10, adaptive_max_claims)).verify_and_maybe_fix(
+                            v2 = await PostGenerationVerifier(
+                                max_retries=0,
+                                max_claims=min(10, adaptive_max_claims),
+                                credential_runtime=credential_runtime,
+                            ).verify_and_maybe_fix(
                                 query=query,
                                 answer=new_result.generated_answer,
-                                base_documents=(new_result.documents[:int(adaptive_rerun_doc_budget)] if (adaptive_rerun_doc_budget and isinstance(adaptive_rerun_doc_budget, int)) else (new_result.documents or [])),
+                                base_documents=(
+                                    new_result.documents[: int(adaptive_rerun_doc_budget)]
+                                    if (adaptive_rerun_doc_budget and isinstance(adaptive_rerun_doc_budget, int))
+                                    else (new_result.documents or [])
+                                ),
                                 media_db_path=media_db_path,
                                 notes_db_path=notes_db_path,
                                 character_db_path=character_db_path,
@@ -6724,7 +8387,7 @@ async def unified_rag_pipeline(
                             )
                             new_ratio = v2.unsupported_ratio
                         # Adoption decision with guardrails regression checks
-                        adopt = (new_ratio is not None and new_ratio < vres.unsupported_ratio)
+                        adopt = new_ratio is not None and new_ratio < vres.unsupported_ratio
                         try:
                             # Numeric fidelity regression check
                             old_nf_missing = None
@@ -6736,7 +8399,11 @@ async def unified_rag_pipeline(
                             else:
                                 # fallback to existing metadata if available
                                 try:
-                                    old_nf_missing = len((result.metadata.get("numeric_fidelity") or {}).get("missing", [])) if isinstance(result.metadata, dict) else None
+                                    old_nf_missing = (
+                                        len((result.metadata.get("numeric_fidelity") or {}).get("missing", []))
+                                        if isinstance(result.metadata, dict)
+                                        else None
+                                    )
                                 except (AttributeError, TypeError, ValueError):
                                     old_nf_missing = None
                             if check_numeric_fidelity and (new_result.generated_answer or "").strip():
@@ -6747,12 +8414,18 @@ async def unified_rag_pipeline(
                             old_cov = None
                             new_cov = None
                             try:
-                                cov_raw = (result.metadata.get("hard_citations") or {}).get("coverage") if isinstance(result.metadata, dict) else None
+                                cov_raw = (
+                                    (result.metadata.get("hard_citations") or {}).get("coverage")
+                                    if isinstance(result.metadata, dict)
+                                    else None
+                                )
                                 old_cov = float(cov_raw) if cov_raw is not None else None
                             except (TypeError, ValueError):
                                 old_cov = None
                             if build_hard_citations and (new_result.generated_answer or "").strip():
-                                hc2 = build_hard_citations(new_result.generated_answer, new_result.documents or [], claims_payload=None)
+                                hc2 = build_hard_citations(
+                                    new_result.generated_answer, new_result.documents or [], claims_payload=None
+                                )
                                 if isinstance(hc2, dict):
                                     new_cov = float(hc2.get("coverage") or 0.0)
 
@@ -6769,35 +8442,47 @@ async def unified_rag_pipeline(
                             pass
                         dur = time.time() - rerun_start
                         result.metadata.setdefault("adaptive_rerun", {})
-                        result.metadata["adaptive_rerun"].update({
-                            "performed": True,
-                            "duration": round(dur, 6),
-                            "old_ratio": vres.unsupported_ratio,
-                            "new_ratio": new_ratio,
-                            "adopted": bool(adopt),
-                            "bypass_cache": bool(adaptive_rerun_bypass_cache),
-                            "old_nf_missing": old_nf_missing if 'old_nf_missing' in locals() else None,
-                            "new_nf_missing": new_nf_missing if 'new_nf_missing' in locals() else None,
-                            "old_hard_citation_coverage": old_cov if 'old_cov' in locals() else None,
-                            "new_hard_citation_coverage": new_cov if 'new_cov' in locals() else None,
-                        })
+                        result.metadata["adaptive_rerun"].update(
+                            {
+                                "performed": True,
+                                "duration": round(dur, 6),
+                                "old_ratio": vres.unsupported_ratio,
+                                "new_ratio": new_ratio,
+                                "adopted": bool(adopt),
+                                "bypass_cache": bool(adaptive_rerun_bypass_cache),
+                                "old_nf_missing": old_nf_missing if "old_nf_missing" in locals() else None,
+                                "new_nf_missing": new_nf_missing if "new_nf_missing" in locals() else None,
+                                "old_hard_citation_coverage": old_cov if "old_cov" in locals() else None,
+                                "new_hard_citation_coverage": new_cov if "new_cov" in locals() else None,
+                            }
+                        )
                         # Metrics for rerun
                         try:
                             from tldw_Server_API.app.core.Metrics.metrics_manager import (
                                 increment_counter,
                                 observe_histogram,
                             )
+
                             increment_counter("rag_adaptive_rerun_performed_total", 1)
                             if adopt:
                                 increment_counter("rag_adaptive_rerun_adopted_total", 1)
-                            observe_histogram("rag_adaptive_rerun_duration_seconds", dur, labels={"adopted": "true" if adopt else "false"})
+                            observe_histogram(
+                                "rag_adaptive_rerun_duration_seconds",
+                                dur,
+                                labels={"adopted": "true" if adopt else "false"},
+                            )
                         except (AttributeError, RuntimeError, TypeError, ValueError):
                             pass
                         # Budget check and metric
                         try:
-                            if adaptive_rerun_time_budget_sec is not None and dur > float(adaptive_rerun_time_budget_sec):
+                            if adaptive_rerun_time_budget_sec is not None and dur > float(
+                                adaptive_rerun_time_budget_sec
+                            ):
                                 from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
-                                increment_counter("rag_phase_budget_exhausted_total", 1, labels={"phase": "adaptive_rerun"})
+
+                                increment_counter(
+                                    "rag_phase_budget_exhausted_total", 1, labels={"phase": "adaptive_rerun"}
+                                )
                                 result.metadata["adaptive_rerun"]["budget_exhausted"] = True
                         except (ImportError, RuntimeError, TypeError, ValueError):
                             pass
@@ -6816,6 +8501,8 @@ async def unified_rag_pipeline(
                     ValueError,
                     asyncio.TimeoutError,
                 ) as _er:
+                    if isinstance(_er, _RAG_PROVIDER_FAILURES):
+                        raise
                     result.errors.append(f"Adaptive rerun failed: {str(_er)}")
                     logger.debug(f"Adaptive rerun error: {_er}")
         except (
@@ -6835,7 +8522,16 @@ async def unified_rag_pipeline(
         # Now that we have the generated answer, rebuild evidence chains with claim extraction
         if enable_evidence_chains and result.generated_answer and result.documents and EvidenceChainBuilder:
             try:
-                chain_builder = EvidenceChainBuilder(enable_llm_extraction=True)
+                chain_builder = EvidenceChainBuilder(
+                    enable_llm_extraction=True,
+                    llm_provider=generation_provider,
+                    llm_model=generation_model,
+                    **(
+                        {"credential_runtime": credential_runtime}
+                        if credential_runtime is not None
+                        else {}
+                    ),
+                )
 
                 # Rebuild chains with the generated answer for claim extraction
                 evidence_chain_result = await chain_builder.build_chains(
@@ -6848,13 +8544,15 @@ async def unified_rag_pipeline(
                     # Update metadata with full chain information
                     chains_data = []
                     for chain in evidence_chain_result.chains:
-                        chains_data.append({
-                            "hop_count": chain.hop_count,
-                            "chain_confidence": chain.chain_confidence,
-                            "source_documents": chain.get_source_documents(),
-                            "root_claims": chain.root_claims,
-                            "nodes_count": len(chain.nodes),
-                        })
+                        chains_data.append(
+                            {
+                                "hop_count": chain.hop_count,
+                                "chain_confidence": chain.chain_confidence,
+                                "source_documents": chain.get_source_documents(),
+                                "root_claims": chain.root_claims,
+                                "nodes_count": len(chain.nodes),
+                            }
+                        )
 
                     result.metadata["evidence_chains"] = {
                         "total_chains": len(evidence_chain_result.chains),
@@ -6863,6 +8561,13 @@ async def unified_rag_pipeline(
                         "total_claims": evidence_chain_result.metadata.get("total_claims", 0),
                         "supported_claims": evidence_chain_result.metadata.get("supported_claims", 0),
                         "chains": chains_data[:5],  # Include top 5 chains
+                        **(
+                            {
+                                key: evidence_chain_result.metadata[key]
+                                for key in ("verification_available", "failure_code")
+                                if key in evidence_chain_result.metadata
+                            }
+                        ),
                     }
 
                     # Optionally include full chain data for debugging
@@ -6892,6 +8597,7 @@ async def unified_rag_pipeline(
                         provider=utility_grading_provider,
                         model=utility_grading_model,
                         timeout_sec=utility_grading_timeout_sec,
+                        credential_runtime=credential_runtime,
                     )
                     result.metadata["utility_grade"] = ug_meta
         except (
@@ -6921,11 +8627,21 @@ async def unified_rag_pipeline(
                                 store = UserPersonalizationStore(feedback_user_id or user_id)
                                 result.documents = store.boost_documents(result.documents, corpus=index_namespace)
                         except ValueError as exc:
-                            logger.debug(f"Personalization boost disabled for user_id={feedback_user_id or user_id}: {exc}")
+                            logger.debug(
+                                f"Personalization boost disabled for user_id={feedback_user_id or user_id}: {exc}"
+                            )
                         except (AttributeError, RuntimeError, TypeError):
                             pass
                     # Record anonymized search analytics
-                    with contextlib.suppress(AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, asyncio.TimeoutError):
+                    with contextlib.suppress(
+                        AttributeError,
+                        ConnectionError,
+                        OSError,
+                        RuntimeError,
+                        TypeError,
+                        ValueError,
+                        asyncio.TimeoutError,
+                    ):
                         await collector.record_search(
                             query=query,
                             results_count=len(result.documents or []),
@@ -6980,7 +8696,7 @@ async def unified_rag_pipeline(
                     cost = await track_llm_cost(
                         model=generation_model or "gpt-3.5-turbo",
                         input_tokens=total_tokens,
-                        output_tokens=len(result.generated_answer.split()) if result.generated_answer else 0
+                        output_tokens=len(result.generated_answer.split()) if result.generated_answer else 0,
                     )
 
                     result.metadata["estimated_cost"] = cost
@@ -6991,24 +8707,25 @@ async def unified_rag_pipeline(
         _apply_workspace_filtering_to_result()
 
         # ========== CACHE STORAGE ==========
-        if enable_cache and not result.cache_hit and result.documents:
+        if (
+            retrieval_cache_eligible
+            and not result.cache_hit
+            and cache_retrieval_snapshot
+        ):
             try:
                 # Store in cache for future use
                 cache = _get_cache_instance()
 
                 if cache:
                     # Support both async/sync and set/add method names
-                    set_fn = getattr(cache, 'set', None) or getattr(cache, 'add', None)
+                    set_fn = getattr(cache, "set", None) or getattr(cache, "add", None)
                     if set_fn:
-                        cache_payload = {
-                            "documents": _clone_cached_documents(list(result.documents)),
-                            "answer": result.generated_answer,
-                            "cached": True,
-                        }
+                        wire_documents = [
+                            _serialize_result_document(document)
+                            for document in cache_retrieval_snapshot
+                        ]
                         cache_queries = [query]
-                        cache_queries.extend(
-                            [q for q in (result.expanded_queries or []) if isinstance(q, str)]
-                        )
+                        cache_queries.extend([q for q in (result.expanded_queries or []) if isinstance(q, str)])
                         seen = set()
                         for cq in cache_queries:
                             if not isinstance(cq, str):
@@ -7017,12 +8734,28 @@ async def unified_rag_pipeline(
                             if not cq or cq in seen:
                                 continue
                             seen.add(cq)
-                            if asyncio.iscoroutinefunction(set_fn):
-                                await set_fn(cq, cache_payload, ttl=cache_ttl)
-                            else:
-                                set_fn(cq, cache_payload, ttl=cache_ttl)
-            except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-                logger.error(f"Cache storage error: {e}")
+                            cache_payload = {
+                                "documents": _clone_cached_documents(wire_documents),
+                                "metadata": {
+                                    "kind": "retrieval_documents",
+                                    "schema_version": 1,
+                                },
+                            }
+                            if callable(_sanitize_cache_payload):
+                                cache_payload = _sanitize_cache_payload(cache_payload)
+                            if cache_payload is None:
+                                continue
+                            await _invoke_cache_callable(
+                                set_fn,
+                                cq,
+                                cache_payload,
+                                ttl=cache_ttl,
+                            )
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                logger.error(
+                    "Cache storage failed (error_type={})",
+                    type(exc).__name__,
+                )
 
         # ========== OBSERVABILITY ==========
         if enable_observability:
@@ -7034,7 +8767,7 @@ async def unified_rag_pipeline(
                         operation="unified_rag_pipeline",
                         query=query,
                         timings=result.timings,
-                        metadata=result.metadata
+                        metadata=result.metadata,
                     )
 
             except ImportError:
@@ -7046,9 +8779,7 @@ async def unified_rag_pipeline(
                 if PerformanceMonitor:
                     monitor = PerformanceMonitor()
                     analysis = await monitor.analyze(
-                        timings=result.timings,
-                        document_count=len(result.documents),
-                        cache_hit=result.cache_hit
+                        timings=result.timings, document_count=len(result.documents), cache_hit=result.cache_hit
                     )
 
                     result.metadata["performance_analysis"] = analysis
@@ -7058,6 +8789,8 @@ async def unified_rag_pipeline(
 
     except _EarlyReturn:
         pass
+    except _RAG_PROVIDER_FAILURES:
+        raise
     except (
         AttributeError,
         ConnectionError,
@@ -7066,16 +8799,16 @@ async def unified_rag_pipeline(
         TypeError,
         ValueError,
         asyncio.TimeoutError,
-    ) as e:
-        result.errors.append(f"Pipeline error: {str(e)}")
-        logger.exception("Unified pipeline error: {}", e)
+    ):
+        result.errors.append("pipeline_failed")
+        logger.error("Unified pipeline failed")
         if fallback_on_error:
             return {
                 "query": query,
                 "documents": [],
                 "answer": "",
                 "cached": False,
-                "error": str(e),
+                "error": "pipeline_failed",
                 "metadata": result.metadata,
                 "timings": result.timings,
             }
@@ -7102,10 +8835,8 @@ async def unified_rag_pipeline(
         if ground_truth_doc_ids and result.documents:
             try:
                 from .retrieval_metrics import evaluate_retrieval as _eval_retrieval
-                _retrieved_ids = [
-                    str(getattr(d, "id", ""))
-                    for d in result.documents
-                ]
+
+                _retrieved_ids = [str(getattr(d, "id", "")) for d in result.documents]
                 _ret_metrics = _eval_retrieval(
                     _retrieved_ids,
                     [str(gid) for gid in ground_truth_doc_ids],
@@ -7115,6 +8846,7 @@ async def unified_rag_pipeline(
                 # Emit to Prometheus
                 try:
                     from tldw_Server_API.app.core.Metrics.metrics_manager import observe_histogram
+
                     observe_histogram("rag_retrieval_precision", _ret_metrics.precision)
                     observe_histogram("rag_retrieval_recall", _ret_metrics.recall)
                     observe_histogram("rag_retrieval_mrr", _ret_metrics.mrr)
@@ -7131,10 +8863,9 @@ async def unified_rag_pipeline(
         if enable_faithfulness_eval and result.generated_answer:
             try:
                 from .faithfulness import FaithfulnessEvaluator as _FaithEval
+
                 # Build context from retrieved documents
-                _ctx_parts = [
-                    getattr(d, "content", "") for d in (result.documents or [])
-                ]
+                _ctx_parts = [getattr(d, "content", "") for d in (result.documents or [])]
                 _ctx_text = "\n\n".join(p for p in _ctx_parts if p)
                 if _ctx_text:
                     # Attempt to find an LLM callable from kwargs or auto-construct one
@@ -7155,31 +8886,93 @@ async def unified_rag_pipeline(
                                 or "openai"
                             ).strip()
                             _f_model = generation_model or _f_cfg.get("RAG_DEFAULT_LLM_MODEL")
+                            _f_handle = None
+                            if credential_runtime is not None:
+                                _f_handle = await credential_runtime.resolve(
+                                    _f_prov,
+                                    model=_f_model,
+                                )
+                            _f_state = {"marked": False, "content": False}
 
                             class _FaithfulnessLLMAdapter:
                                 """Wraps analyze() to satisfy the LLMCallable protocol."""
 
                                 async def generate(self, prompt: str) -> str:
-                                    import asyncio as _aio
-                                    result_text = await _aio.get_running_loop().run_in_executor(
-                                        None,
-                                        lambda: _sgl_analyze(
+                                    def _call_faithfulness() -> Any:
+                                        response = _sgl_analyze(
                                             api_name=_f_prov,
-                                            input_data="",
-                                            custom_prompt_arg=prompt,
+                                            input_data=prompt,
+                                            custom_prompt_arg=None,
                                             model_override=_f_model,
-                                        ),
+                                            api_key=(
+                                                _f_handle.api_key
+                                                if _f_handle is not None
+                                                else None
+                                            ),
+                                            app_config=(
+                                                _f_handle.app_config
+                                                if _f_handle is not None
+                                                else None
+                                            ),
+                                            credentials_resolved=_f_handle is not None,
+                                            provider_credentials=_f_handle,
+                                            raise_on_error=_f_handle is not None,
+                                        )
+                                        return _consume_bound_sgl_response(
+                                            response,
+                                            _f_prov,
+                                            on_content=lambda: _f_state.__setitem__(
+                                                "content",
+                                                True,
+                                            ),
+                                            fail_closed=_f_handle is not None,
+                                        )
+
+                                    async def _run_faithfulness() -> Any:
+                                        faithfulness_completed = False
+                                        try:
+                                            value = await await_bounded_sync_call(
+                                                _call_faithfulness,
+                                                pool=SYNC_ADAPTER_CALL_POOL,
+                                                exhaustion_message=(
+                                                    "RAG optional adapter capacity is exhausted"
+                                                ),
+                                            )
+                                            faithfulness_completed = True
+                                            return value
+                                        finally:
+                                            if (
+                                                _f_handle is not None
+                                                and not _f_state["marked"]
+                                                and (
+                                                    faithfulness_completed
+                                                    or _f_state["content"]
+                                                )
+                                            ):
+                                                await credential_runtime.mark_used(
+                                                    _f_handle
+                                                )
+                                                _f_state["marked"] = True
+
+                                    faithfulness_operation = _run_faithfulness()
+                                    result_text = (
+                                        await await_owned_worker(
+                                            faithfulness_operation
+                                        )
+                                        if _f_handle is not None
+                                        else await faithfulness_operation
                                     )
                                     return str(result_text) if result_text else ""
 
                             _llm_obj = _FaithfulnessLLMAdapter()
                         except (ImportError, AttributeError, TypeError) as _auto_err:
-                            logger.debug(
-                                f"Could not auto-construct faithfulness LLM: {_auto_err}"
-                            )
+                            logger.debug(f"Could not auto-construct faithfulness LLM: {_auto_err}")
 
                     if _llm_obj is not None:
-                        _faith_eval = _FaithEval(_llm_obj)
+                        _faith_eval = _FaithEval(
+                            _llm_obj,
+                            propagate_errors=credential_runtime is not None,
+                        )
                         _faith_result = await _faith_eval.evaluate_detailed(
                             result.generated_answer, _ctx_text
                         )
@@ -7187,6 +8980,7 @@ async def unified_rag_pipeline(
                         # Emit faithfulness score to Prometheus
                         try:
                             from tldw_Server_API.app.core.Metrics.metrics_manager import set_gauge
+
                             _f_score = _faith_result.to_dict().get("faithfulness_score")
                             if _f_score is not None:
                                 set_gauge("rag_eval_faithfulness_score", float(_f_score), labels={"dataset": "online"})
@@ -7196,9 +8990,26 @@ async def unified_rag_pipeline(
                         logger.debug(
                             "Faithfulness eval requested but no LLM available"
                         )
+            except (ByokResolutionError, SummaryProviderError) as exc:
+                result.metadata["faithfulness"] = {
+                    "failure_code": (
+                        exc.code
+                        if isinstance(exc, ByokResolutionError)
+                        else "provider_unavailable"
+                    ),
+                    "verification_available": False,
+                }
+                logger.warning("Faithfulness evaluation provider unavailable")
             except Exception as _fe_err:
-                logger.warning(f"Faithfulness evaluation failed: {_fe_err}")
-                result.errors.append(f"Faithfulness eval failed: {_fe_err}")
+                if credential_runtime is not None:
+                    result.metadata["faithfulness"] = {
+                        "failure_code": "provider_unavailable",
+                        "verification_available": False,
+                    }
+                    logger.warning("Faithfulness evaluation provider unavailable")
+                else:
+                    logger.warning(f"Faithfulness evaluation failed: {_fe_err}")
+                    result.errors.append(f"Faithfulness eval failed: {_fe_err}")
 
         # Debug output if requested
         if debug_mode:
@@ -7222,6 +9033,7 @@ async def unified_rag_pipeline(
     # Convert to Pydantic response
     try:
         from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
+
         doc_dicts = [_serialize_result_document(d) for d in (result.documents or [])]
         return UnifiedRAGResponse(
             documents=doc_dicts,
@@ -7259,8 +9071,6 @@ async def unified_rag_pipeline(
         }
 
 
-
-
 # ========== BATCH PROCESSING WRAPPER ==========
 async def unified_batch_pipeline(
     queries: list[str],
@@ -7268,6 +9078,7 @@ async def unified_batch_pipeline(
     on_progress: Optional[Callable[[int, int], Any]] = None,
     on_query_done: Optional[Callable[[int, str, Optional[UnifiedPipelineResult], Optional[BaseException]], Any]] = None,
     query_indices: Optional[list[int]] = None,
+    credential_runtime: Any = None,
     **kwargs
 ) -> list[UnifiedPipelineResult]:
     """
@@ -7287,6 +9098,8 @@ async def unified_batch_pipeline(
     Returns:
         List of results in the same order as queries
     """
+    if credential_runtime is not None:
+        kwargs["credential_runtime"] = credential_runtime
     semaphore = asyncio.Semaphore(max_concurrent)
 
     # Lightweight normalizer to dedupe/cluster identical queries
@@ -7319,6 +9132,7 @@ async def unified_batch_pipeline(
     # Near-duplicate clustering via cosine similarity of embeddings (best-effort)
     clusters: dict[int, list[int]] = {}
     import os as _os
+
     _disable_cluster = _shared_is_truthy(_os.getenv("RAG_BATCH_DISABLE_CLUSTERING", ""))
     _test_mode = _shared_is_test_mode()
     if _disable_cluster or _test_mode:
@@ -7329,20 +9143,47 @@ async def unified_batch_pipeline(
                 create_embeddings_batch,
                 get_embedding_config,
             )
+
             # Get embeddings for representative texts
             cfg = get_embedding_config()
-            vectors = await asyncio.get_running_loop().run_in_executor(
-                None,
-                create_embeddings_batch,
-                rep_texts,
-                cfg,
-                None,
+            provider = _embedding_provider_from_config(cfg)
+            effective_model = _embedding_model_from_config(cfg)
+            handle = None
+            call_kwargs: dict[str, Any] = {}
+            if credential_runtime is not None:
+                if provider == "openai":
+                    handle, call_kwargs = await _resolve_runtime_embedding_call(
+                        credential_runtime,
+                        provider,
+                        effective_model,
+                    )
+                else:
+                    call_kwargs = _runtime_local_embedding_call_kwargs(cfg, provider)
+            vectors = await _run_sync_embedding_call(
+                partial(
+                    create_embeddings_batch,
+                    rep_texts,
+                    cfg,
+                    None,
+                    **call_kwargs,
+                ),
+                on_success=(
+                    partial(
+                        _mark_runtime_used_for_embeddings,
+                        credential_runtime=credential_runtime,
+                        handle=handle,
+                    )
+                    if handle is not None
+                    else None
+                ),
             )
+
             # Normalize vectors to unit length for cosine
             def _norm(v):
                 try:
                     import math
-                    if hasattr(v, 'tolist'):
+
+                    if hasattr(v, "tolist"):
                         v = v.tolist()
                     s = math.sqrt(sum((float(x) or 0.0) ** 2 for x in v))
                     if s > 0:
@@ -7350,16 +9191,19 @@ async def unified_batch_pipeline(
                 except (TypeError, ValueError):
                     pass
                 return v
+
             vecs = [_norm(v) for v in (vectors or [])]
+
             # Cosine similarity
             def _cos(a, b):
                 try:
                     return float(sum((ai * bi) for ai, bi in zip(a, b)))
                 except (TypeError, ValueError):
                     return 0.0
+
             # Threshold from env or default 0.9
             try:
-                thr = float(_os.getenv('RAG_BATCH_NEAR_DUP_THRESHOLD', '0.9'))
+                thr = float(_os.getenv("RAG_BATCH_NEAR_DUP_THRESHOLD", "0.9"))
             except (TypeError, ValueError):
                 thr = 0.9
             used = set()
@@ -7377,8 +9221,10 @@ async def unified_batch_pipeline(
                     if _cos(vi, vj) >= thr:
                         clusters[i].append(j)
                         used.add(j)
-        except Exception as exc:  # noqa: BLE001 - best-effort clustering; never fail batch
-            logger.warning(f"Batch query clustering disabled due to error: {exc}")
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - best-effort clustering; never fail batch
+            logger.warning("Batch query clustering disabled due to embedding failure")
             # Fallback: each unique becomes its own cluster
             clusters = {i: [i] for i in range(len(unique_keys))}
 
@@ -7454,36 +9300,45 @@ async def unified_batch_pipeline(
             tasks[task] = idx
 
         pending = set(tasks.keys())
-        while pending:
-            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                head_idx = tasks.get(task)
-                if head_idx is None:
-                    continue
-                result: Optional[UnifiedPipelineResult] = None
-                err: Optional[BaseException] = None
-                try:
-                    result = await task
-                    head_results[head_idx] = result
-                except BaseException as exc:  # noqa: BLE001 - surface as error
-                    err = exc
-                    head_results[head_idx] = exc
+        try:
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    head_idx = tasks.get(task)
+                    if head_idx is None:
+                        continue
+                    result: Optional[UnifiedPipelineResult] = None
+                    err: Optional[BaseException] = None
+                    try:
+                        result = await task
+                        head_results[head_idx] = result
+                    except BaseException as exc:  # noqa: BLE001 - surface as error
+                        if isinstance(exc, _RAG_PROVIDER_FAILURES):
+                            raise
+                        err = exc
+                        head_results[head_idx] = exc
 
-                head_key = heads[head_idx]
-                members = clusters.get(head_key, [])
-                for i_uq in members:
-                    orig_indices = normalized_map.get(unique_keys[i_uq], [])
-                    for local_idx in orig_indices:
-                        global_idx = _resolve_index(local_idx)
-                        query_text = queries[local_idx] if local_idx < len(queries) else ""
-                        if on_query_done:
-                            try:
-                                callback_result = on_query_done(global_idx, query_text, result, err)
-                                if asyncio.iscoroutine(callback_result):
-                                    await callback_result
-                            except Exception as cb_err:  # noqa: BLE001 - callbacks must not fail pipeline
-                                logger.warning(f"Batch on_query_done callback failed: {cb_err}")
-                        await _notify_progress(1)
+                    head_key = heads[head_idx]
+                    members = clusters.get(head_key, [])
+                    for i_uq in members:
+                        orig_indices = normalized_map.get(unique_keys[i_uq], [])
+                        for local_idx in orig_indices:
+                            global_idx = _resolve_index(local_idx)
+                            query_text = queries[local_idx] if local_idx < len(queries) else ""
+                            if on_query_done:
+                                try:
+                                    callback_result = on_query_done(global_idx, query_text, result, err)
+                                    if asyncio.iscoroutine(callback_result):
+                                        await callback_result
+                                except Exception as cb_err:  # noqa: BLE001 - callbacks must not fail pipeline
+                                    logger.warning(f"Batch on_query_done callback failed: {cb_err}")
+                            await _notify_progress(1)
+        except BaseException:
+            for child_task in tasks:
+                if not child_task.done():
+                    child_task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
     else:
         try:
             from .batch_utils import run_batch as _run_batch
@@ -7516,6 +9371,10 @@ async def unified_batch_pipeline(
             tasks = [process_with_semaphore(q) for q in head_queries]
             head_results = await asyncio.gather(*tasks, return_exceptions=True)
 
+    for head_result in head_results:
+        if isinstance(head_result, _RAG_PROVIDER_FAILURES):
+            raise head_result
+
     # Build final results in original order, reusing unique results
     final_results: list[Optional[UnifiedPipelineResult]] = [None] * len(queries)
     reuse_count = 0
@@ -7540,7 +9399,8 @@ async def unified_batch_pipeline(
                 ures_any = cast(Any, ures)
                 # Copy minimal fields for non-heads to preserve original query text
                 final_results[i] = (
-                    ures_any if pos == 0 and queries[i] == rep_texts[i_uq]
+                    ures_any
+                    if pos == 0 and queries[i] == rep_texts[i_uq]
                     else UnifiedSearchResult(
                         documents=ures_any.documents,
                         query=queries[i],
@@ -7561,6 +9421,7 @@ async def unified_batch_pipeline(
     try:
         if reuse_count > 0:
             from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
+
             increment_counter("rag_batch_query_reuse_total", reuse_count)
     except (ImportError, RuntimeError, TypeError, ValueError):
         pass
@@ -7577,6 +9438,7 @@ async def unified_batch_pipeline(
 
 # ========== SIMPLE CONVENIENCE WRAPPERS ==========
 
+
 async def simple_search(
     query: str,
     top_k: int = 10,
@@ -7589,6 +9451,7 @@ async def simple_search(
     character_db_path: Optional[str] = None,
     kanban_db_path: Optional[str] = None,
     user_id: Optional[str] = None,
+    credential_runtime: Any = None,
 ) -> list[Document]:
     """
     Simple search wrapper for basic use cases.
@@ -7600,20 +9463,25 @@ async def simple_search(
     Returns:
         List of documents
     """
+    pipeline_kwargs = {
+        "query": query,
+        "top_k": top_k,
+        "expand_query": False,
+        "enable_cache": True,
+        "enable_reranking": True,
+        "sources": sources,
+        "media_db": media_db,
+        "chacha_db": chacha_db,
+        "media_db_path": media_db_path,
+        "notes_db_path": notes_db_path,
+        "character_db_path": character_db_path,
+        "kanban_db_path": kanban_db_path,
+        "user_id": user_id,
+    }
+    if credential_runtime is not None:
+        pipeline_kwargs["credential_runtime"] = credential_runtime
     result = await unified_rag_pipeline(
-        query=query,
-        top_k=top_k,
-        expand_query=False,
-        enable_cache=True,
-        enable_reranking=True,
-        sources=sources,
-        media_db=media_db,
-        chacha_db=chacha_db,
-        media_db_path=media_db_path,
-        notes_db_path=notes_db_path,
-        character_db_path=character_db_path,
-        kanban_db_path=kanban_db_path,
-        user_id=user_id,
+        **pipeline_kwargs,
     )
     if isinstance(result, UnifiedSearchResult):
         return result.documents
@@ -7624,10 +9492,7 @@ async def simple_search(
 
 
 async def advanced_search(
-    query: str,
-    with_citations: bool = True,
-    with_answer: bool = True,
-    **kwargs
+    query: str, with_citations: bool = True, with_answer: bool = True, **kwargs
 ) -> UnifiedPipelineResult:
     """
     Advanced search with commonly used features enabled.
@@ -7652,8 +9517,10 @@ async def advanced_search(
         enable_generation=with_answer,
         enable_table_processing=True,
         enable_performance_analysis=True,
-        **kwargs
+        **kwargs,
     )
+
+
 def compute_temporal_range_from_query(query: str) -> Optional[dict[str, str]]:
     """Compute an approximate temporal range from a natural language query.
 
@@ -7685,13 +9552,16 @@ def compute_temporal_range_from_query(query: str) -> Optional[dict[str, str]]:
         if m_quarter:
             qn = int(m_quarter.group(1))
             y = int(m_quarter.group(2))
-            qm = {1:1,2:4,3:7,4:10}[qn]
+            qm = {1: 1, 2: 4, 3: 7, 4: 10}[qn]
             start_dt = datetime(y, qm, 1)
             end_month = qm + 2
             _, last_day = calendar.monthrange(y, end_month)
             end_dt = datetime(y, end_month, last_day, 23, 59, 59)
         month_names = {m.lower(): i for i, m in enumerate(calendar.month_name) if m}
-        m_month_year = re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(20\d{2}|19\d{2})\b", qlower)
+        m_month_year = re.search(
+            r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(20\d{2}|19\d{2})\b",
+            qlower,
+        )
         if m_month_year:
             mon = month_names.get(m_month_year.group(1))
             y = int(m_month_year.group(2))
@@ -7702,8 +9572,8 @@ def compute_temporal_range_from_query(query: str) -> Optional[dict[str, str]]:
         m_year = re.search(r"\b(20\d{2}|19\d{2})\b", qlower)
         if m_year and start_dt is None and end_dt is None:
             y = int(m_year.group(1))
-            start_dt = datetime(y,1,1)
-            end_dt = datetime(y,12,31,23,59,59)
+            start_dt = datetime(y, 1, 1)
+            end_dt = datetime(y, 12, 31, 23, 59, 59)
         if start_dt is None and end_dt is None:
             start_dt = now - timedelta(days=7)
             end_dt = now

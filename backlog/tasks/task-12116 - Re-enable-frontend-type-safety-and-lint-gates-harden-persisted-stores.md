@@ -1,0 +1,93 @@
+---
+id: TASK-12116
+title: 'Re-enable frontend type-safety and lint gates, harden persisted stores'
+status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-09-11 14:42'
+labels:
+  - tech-debt
+  - high
+  - frontend
+  - ci
+  - packages-ui
+dependencies: []
+documentation:
+  - apps/FRONTEND_AUDIT.md
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+**Severity: High (safety nets disabled — the reason bug classes ship silently).** From the 2026-07-02 frontend audit (§9). All verified by direct read.
+
+- `apps/tldw-frontend/tsconfig.json:11` and `apps/extension/tsconfig.json:9` — **`"strict": false`** in both apps. No null-safety on a ~1.2M-LOC shared surface.
+- `apps/tldw-frontend/next.config.mjs:59` — **`typescript.ignoreBuildErrors: true`**. TS errors never fail the build or CI.
+- `apps/tldw-frontend/eslint.config.mjs:78-84` — the newer **react-compiler-era `react-hooks` rules are disabled** (`immutability`, `purity`, `preserve-manual-memoization`, `refs`, `set-state-in-effect`, `static-components`, `use-memo`); `set-state-in-effect` in particular would flag effect-race bugs. **The classic `react-hooks/rules-of-hooks` is NOT globally disabled** — the `off` at `:118` is scoped to `e2e/**` only; the rule is active everywhere else via the `reactHooksRules` preset. `@typescript-eslint/no-explicit-any` is only `warn`.
+- **Persisted stores lack `version`/`migrate`** (8 of 9): `playground-session`, `persona-buddy-shell`, `notes-dock`, `ui-mode`, `actor`, `quick-ingest-session`, `folder`, `feedback`, `acp-sessions`. The day someone adds `version:1` to reshape a store without a `migrate`, all users' persisted state is discarded; a field rename before then ships `undefined` into consumers.
+- **Shared-code dependency skew**: frontend vs extension pin different majors of libraries that both feed `packages/ui` — `zustand ^5`/`^4`, `dexie-react-hooks ^4`/`^1.1.7`, `marked 17`/`15`, `d3-dsv 3`/`2`, `react ^18.3`/pinned `18.2`, TS `5.6`/`5.9`. (Zustand specifically is currently safe, but it is a standing hazard.)
+
+This is a phased hardening ticket; land incrementally so each step keeps CI green.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 A TypeScript typecheck runs in CI and gates merges (either remove `ignoreBuildErrors` once `packages/ui` typechecks, or add a separate `tsc --noEmit` gate).
+- [ ] #2 `strict` is turned on incrementally (start with `noImplicitAny`, then `strictNullChecks`), with a tracked path to `strict: true`.
+- [ ] #3 `react-hooks/rules-of-hooks` is re-enabled and violations fixed; the remaining `react-hooks` rules are re-enabled or individually justified.
+- [x] #4 Every persisted Zustand store declares a `version` + `migrate` (or a documented reason it needs neither).
+- [x] #5 Shared-code dependency majors are aligned between frontend and extension (or hoisted to one workspace-level version), with a note on the reconciliation.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+PR2761 refresh: repairing the real nonincremental WebUI TypeScript baseline, then adding an explicit failing typecheck step to frontend-required. No tsconfig relaxation; remaining strictness/hooks/dependency-major work stays open. Persisted version/migration work from PR2575 and661b is present in frozen candidate and should be verified before closing criterion4.
+
+Verified all9 named persisted Zustand stores already declare version1 plus identity migrate in this candidate (playground-session, persona-buddy-shell, notes-dock, ui-mode, actor, quick-ingest-session, folder, feedback, acp-sessions). Existing five-suite persistence/store selection passed17tests. Criterion4 closed for the current unchanged schema; this does not claim forward-schema migrations. WebUI nonincremental tsc also passes; CI gate added but criterion1 awaits new-head CI evidence. Strictness/additional hook rules/dependency-major alignment remain open.
+
+30338follow-up: typecheck remains skipped because frontend aggregate stops after shard5 failure; criterion1 stays open. Measured separate flags: noImplicitAny948diagnostics/252files; strictNullChecks664/177. Seven disabled compiler-hook rules add25diagnostics/14files in328file sample. Five runtime major mismatches remain (zustand,dexie-react-hooks,marked,d3-dsv,property-information). Baseline logs under/tmp/pr2761-*baseline.log; plan records counts. No broad strictness/dependency change made.
+
+Continuing requester-authorized release blocker closure. Investigating shared dependency major alignment and individually justified React compiler hook rules while current-head typecheck awaits frontend test repair; no gate suppression or wholesale strictness claim.
+
+Aligned five shared runtime dependency majors and peer ranges; frozen install resolves identical zustand5.0.10/dexie-react-hooks4.2.0/marked17.0.1/d3-dsv3.0.1/property-information7.1.0 in extension/WebUI/UI. 28 persistence-Markdown plus10Dexie-TTS tests pass; full WebUI and existing extension strict compile pass. Added required strict project for four shared security/error utilities; actual compiler rejects implicit-any and null probes. Re-enabled use-memo after fixing two Timeline dependency expressions. Other strictness/hooks criteria remain open; detailed scope and full baseline in Docs/Evidence/PR2761-frontend-hardening.md.
+
+PR2761 follow-up after source910c526/metadata d5ba8b5: narrow React purity/static-components enforcement authorized. Inventory19 diagnostics across12 shared component/hook files. Plan: RED tests for actual undo-expiry/execution-clock bugs and stable generated values; fix eager clock/init and render-created components; document/test only genuine event/registry false positives; enable both rules; run focused runtime and full lint checks. Scope excludes dependency/supply-chain files; dedicated evidence Docs/Evidence/PR2761-hooks-enforcement.md. No commits or licensing manifest edits in this delegated work.
+
+Next incremental strictness repair: normalize optional config reads in deriveRequestTimeout. Existing guarded numeric reads are runtime-safe but do not narrow nullable config for TypeScript; use consistent optional access, preserve request timeout behavior, run existing timeout/refresh regressions and strictNullChecks baseline.
+
+Repairing strict-null inference in existing Skills runner test harness: preserve generic override members when defaults are used, type async teardown as void, and describe synchronous promise/callback capture initialization. Existing47 lifecycle tests remain behavioral verification; no test assertions disabled.
+
+To enforce timeout selection under the new strict gate, move its dependency-free calculation into existing utils/request-timeout.ts while keeping the public request-core wrapper and normalization unchanged. Extend existing timeout tests across endpoint defaults and override precedence before extraction. This avoids pulling the entire API client import graph into the incremental strict project.
+
+PR2761 shared-hook enforcement follow-up: extend the existing frontend-required job with a dedicated checker covering shared packages/ui/src and WebUI pages using the existing shared ESLint configuration. Preserve the full existing frontend lint step. Checker must fail purity/static-components/use-memo diagnostics and configuration/parser failures; add behavioral checker regressions. Parent authorized ownership of the new checker/tests, workflow step, and relevant CI contract assertions.
+
+The shared-hook checker uncovered two pre-existing unknown-rule errors in the SplashOverlay inline jsx-a11y disable directive: the named rules are unavailable in the shared configuration. Parent approved removal of this ineffective directive without changing behavior or rule severity. Keep unrelated nonfatal unused-disable warnings outside the bounded gate; parser/configuration errors and ignored-source coverage still fail.
+
+PR2761 bounded hook batch verified: fixed 19 purity/static findings, enabled both rules as errors, and added required shared-hook CI checker for shared UI src plus WebUI pages using existing configuration. Parent enabled use-memo separately. Runtime regressions/characterizations 52 tests pass; checker behavioral tests 12 pass; CI contracts 10 pass; Actionlint both frontend-required/container workflows pass; final WebUI tsc exits 0; existing full frontend lint 793 files/0 errors/169 warnings. Actual final shared-hook command exits 0 across5158 files with0 gate failures and1379 explicitly unrelated ESLint errors. Three documented single-line event/registry false-positive dispositions remain with runtime tests; ineffective unknown-rule directive removed from SplashOverlay. Evidence: Docs/Evidence/PR2761-hooks-enforcement.md. Remaining403 compiler-rule findings and unrelated lint debt remain open; no blanket suppression, manifests, commits, or pushes performed in this delegated batch. Bandit: frontend has no Python input; Python contract scope only47 ordinary pytest B101 low assertions. All source edits frozen for parent integration.
+
+Parent follow-up verified strict timeout extraction: public normalization preserved, endpoint defaults/overrides/floors 22 tests pass and strict project passes; 11 nullable configuration diagnostics removed. Skills test harness generic/callback types repaired, 47 tests plus scoped strict-null compile and lint pass. Full WebUI typecheck passes after shared-hook batch. This is incremental enforcement; AC2/AC3 remain open, with 403 remaining disabled-hook findings and unresolved whole-WebUI strictness.
+
+PR2761 follow-up authorized after c97cb2a1ab: bounded repair of useVoiceChatMessages async persistence clearing a newer turn and nonreactive activeAssistantId, plus useComposerTokens retaining the old count after an empty conversation. Before implementation, reproduce with behavioral RED tests in existing suites; preserve streaming freeze and message/history behavior. Scope: only the two hooks, their existing tests, and dedicated Docs/Evidence/PR2761-chat-hook-state.md. No rule flips, package changes, commits, pushes, manifests, builds, installs, or large audits; focused tests/typechecks due host disk pressure.
+
+PR2761 chat hook batch verified: six behavioral RED failures reproduced (both asynchronous turn-save races, reset/completion ID reactivity, stale token cache); minimal fixes now pass12 focused tests and34 including adjacent voice-stream suites. Guard cleanup by saved-turn identity; keep activeAssistantId reactive; retain pure non-streaming token estimates including0 with guarded state, preserving freeze during sends. Focused ESLint with all four remaining compiler rules enforced reports0 errors/4 pre-existing warnings and clears the9 inventoried refs findings in these hooks. Temporary focused no-emit TypeScript config passes with0 diagnostics; no packages/build artifacts/large audits. Evidence Docs/Evidence/PR2761-chat-hook-state.md. Bandit attempted from project venv but cannot parse TS (two parser errors); not claimed as a successful security scan. Source edits frozen for parent review/integration; no commits, pushes, manifests or rule flips.
+
+PR2761 notification hook follow-up: reproduce automatic notification-count recovery after account/server scope changes without forced rerenders, preserving cross-account privacy; reproduce useAntdNotification mutation of frozen shared APIs and verify adapter behavior. Scope limited to those two hooks, focused regression tests, and optional notification-hook evidence. Run focused Vitest, compiler-rule ESLint, and typecheck; parent integrates, no commits or rule changes.
+
+PR2761 bounded strict handoff plan: reproduce optional storage method narrowing failures under strict:true; capture get/set/remove methods and preserve their storage receiver, replace ambient dependence with a precise local optional Chrome boundary, and verify callback/Promise/missing-method/error/tombstone fallback behavior. Add only genuinely compiling implementation imports to required strict scope. Files: services/web-clipper/agent-task-handoff.ts, its existing test suite, tsconfig.strict.json if import graph permits, dedicated evidence. No behavior expansion, global ambient changes, commits, or release metadata edits.
+
+Handoff import inspection shows PendingClipDraft reaches capture/parser/screenshot code. Bounded plan refinement: extract the existing extension read/write/remove adapter into services/web-clipper/extension-storage.ts, type its optional Chrome boundary locally, preserve method receivers, and add this complete runtime module to tsconfig.strict.json. Verify original six errors first, then existing plus added handoff storage behavior tests; full handoff remains outside strict scope pending wider capture dependencies.
+
+PR2761 bounded web-clipper storage strictness verified: extracted existing extension get/set/remove adapter, captured optional methods with receiver-preserving .call, and added the complete runtime module to the required strict project with a precise local optional Chrome shape. Six TS2722/TS18048 diagnostics reproduced before fix; strict gate now passes. 12 behavior characterizations passed before/after extraction; final suite13 passes including conflicting callback/Promise results. Scoped ESLint passes with existing Next pages-discovery warning; git diff check passes. Bandit attempted in root venv but reports two TS parser errors, not a successful security scan. Wider handoff import graph retains two screenshot implicit-any diagnostics plus missing Turndown declaration; AC2 remains open. Evidence Docs/Evidence/PR2761-web-clipper-storage-strictness.md. No commits, pushes, manifests, dependency changes, or global declarations changed; parent integrates.
+
+PR2761 fourth batch independently reviewed: notification account-switch recovery/race/privacy and immutable Antd adapter25WebUItests plus23overlapping shared tests pass, WebUI/installed-Plasmo scoped typechecks clean. Strict extension storage adapter13tests and required strict project pass, clearing6optional-method diagnostics. Full WebUI nonincremental tsc passes; required three-rule shared-hook gate scans5160files with0failures,1379unrelated ESLinterrors. Four remaining compiler rules pass only touched notification scope; whole-WebUI strictness/global compiler closure remain open. Evidence PR2761-notification-hooks.md and PR2761-web-clipper-storage-strictness.md; source/metadata batch prepared by parent.
+
+PR2761 bounded RAG hook boundary plan: reproduced exactly128 react-hooks/refs diagnostics in RagSearchBar. Its searchInputRef is declared/returned by useRagSearchState but only attached/read by RagSearchBar. Move the DOM ref into its owning component and remove it from the general search-state return object; preserve all state/search behavior and existing effect timing. Verify input autofocus lifecycle with focused characterizations, scoped compiler-rule ESLint, existing RAG suites, and typecheck. No rule ignores/disables, global rule flips, release metadata, commits, pushes, builds, installs, or subagents.
+
+PR2761 RAG input-ref boundary verified: moved the UI-only InputRef into RagSearchBar and removed it from useRagSearchState return, preserving focus effect/dependencies and all search state. Exactly128 scoped refs errors reproduced before; final component/hook/test four-rule lint exits0 with25 existing warnings. Four runtime characterizations plus seven existing RAG tests pass (11 total); full WebUI nonincremental typecheck and separate new-test typecheck pass; diff check passes. Bandit invoked from project venv reports three TypeScript AST parser errors, not a successful scan. Evidence: Docs/Evidence/PR2761-rag-input-ref.md. No suppressions, global rules, dependencies, release metadata, commits, or pushes changed; broader AC2/AC3 remain open. Source frozen for parent review/integration.
+
+PR2761 release-specific read-only reconciliation at08946442af: required lint, nonincremental typecheck, shared-hook and five-module strict-boundary gates pass. AC1 permits separate typechecking; AC2 requires incremental strictness plus tracked expansion, not blanket immediate strict:true. AC3 remains open: four compiler-era hook rules disabled,265 findings across138files; all source/config hashes match recordedinventory. Against frozen dev6c4bdcbc,257findings are in133untouchedfiles and8in5followupfiles; no new runtime defect demonstrated by this inventory. Proposed release scope decision (NOT YET APPROVED): retain all current gates, publish no frontend binaries, leave global four-rule enforcement in this owning task without claiming full compiler-rule compliance forv0.1.42. Release plan4.2 requires explicit requester acceptance before this dependency is scope-cleared.
+<!-- SECTION:NOTES:END -->

@@ -1558,7 +1558,7 @@ async def create_definition(
     # Basic step type validation is deferred to engine in v0.1; store as-is
     try:
         workflow_id = db.create_definition(
-            tenant_id=str(current_user.tenant_id) if hasattr(current_user, "tenant_id") else "default",
+            tenant_id=_tenant_id_for_user(current_user),
             name=body.name,
             version=body.version,
             owner_id=str(current_user.id),
@@ -1888,7 +1888,7 @@ async def run_saved(
     run_id = str(uuid4())
     db.create_run(
         run_id=run_id,
-        tenant_id=str(current_user.tenant_id) if hasattr(current_user, "tenant_id") else "default",
+        tenant_id=tenant_id,
         user_id=str(current_user.id),
         inputs=(body.inputs if body else {}) or {},
         workflow_id=d.id,
@@ -1921,23 +1921,23 @@ async def run_saved(
                         has_failure_route = False
                     if not has_failure_route:
                         # Append minimal events and step failure (fast-fail)
-                        db.append_event(str(getattr(current_user, 'tenant_id', 'default')), run_id, "run_started", {"mode": mode})
+                        db.append_event(tenant_id, run_id, "run_started", {"mode": mode})
                         step_run_id = f"{run_id}:{s0.get('id','s1')}:{int(__import__('time').time()*1000)}"
                         with contextlib.suppress(_WORKFLOWS_NONCRITICAL_EXCEPTIONS):
                             db.create_step_run(
                                 step_run_id=step_run_id,
-                                tenant_id=str(getattr(current_user, "tenant_id", "default")),
+                                tenant_id=tenant_id,
                                 run_id=run_id,
                                 step_id=s0.get("id", "s1"),
                                 name=s0.get("name") or s0.get("id", "s1"),
                                 step_type="prompt",
                                 inputs={"config": cfg},
                             )
-                        db.append_event(str(getattr(current_user, 'tenant_id', 'default')), run_id, "step_started", {"step_id": s0.get('id','s1'), "type": "prompt"})
+                        db.append_event(tenant_id, run_id, "step_started", {"step_id": s0.get('id','s1'), "type": "prompt"})
                         with contextlib.suppress(_WORKFLOWS_NONCRITICAL_EXCEPTIONS):
                             db.complete_step_run(step_run_id=step_run_id, status="failed", outputs={}, error="forced_error")
                         db.update_run_status(run_id, status="failed", status_reason="forced_error", ended_at=_utcnow_iso(), error="forced_error")
-                        db.append_event(str(getattr(current_user, 'tenant_id', 'default')), run_id, "run_failed", {"error": "forced_error"})
+                        db.append_event(tenant_id, run_id, "run_failed", {"error": "forced_error"})
                         run = db.get_run(run_id)
                         return WorkflowRunResponse(
                             run_id=run.run_id,
@@ -2376,7 +2376,7 @@ async def run_adhoc(
     run_id = str(uuid4())
     db.create_run(
         run_id=run_id,
-        tenant_id=str(current_user.tenant_id) if hasattr(current_user, "tenant_id") else "default",
+        tenant_id=tenant_id,
         user_id=str(current_user.id),
         inputs=body.inputs or {},
         workflow_id=None,
@@ -3660,7 +3660,7 @@ async def control_run(
         imp = str(request.headers.get("x-impersonate-user", "")).strip()
         is_admin = _is_workflows_admin_user(current_user)
         if imp and is_admin and str(imp) != str(current_user.id):
-            db.append_event(str(getattr(current_user, 'tenant_id', 'default')), run_id, "admin_impersonation", {"actor": str(current_user.id), "target_user_id": imp, "action": action})
+            db.append_event(tenant_id, run_id, "admin_impersonation", {"actor": str(current_user.id), "target_user_id": imp, "action": action})
     except _WORKFLOWS_NONCRITICAL_EXCEPTIONS:
         pass
     result = "applied"
@@ -4608,7 +4608,7 @@ async def reject_step(
                         ) from exc
                 try:
                     db.append_event(
-                        str(getattr(current_user, "tenant_id", "default")),
+                        tenant_id,
                         run_id,
                         "human_rejected",
                         {"step_id": step_id},
@@ -4702,7 +4702,7 @@ async def reject_step(
                 ) from exc
         try:
             db.append_event(
-                str(getattr(current_user, "tenant_id", "default")),
+                tenant_id,
                 run_id,
                 "human_rejected",
                 {"step_id": step_id},

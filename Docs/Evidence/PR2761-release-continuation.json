@@ -1,0 +1,105 @@
+{
+  "verified_head": "08946442af85f58f8078c2e3df1e4dc42bb40876",
+  "counts": {
+    "SKIPPED": 38,
+    "SUCCESS": 75
+  },
+  "required_gates": [
+    {
+      "link": "https://github.com/rmusser01/tldw_server/actions/runs/34564977708/job/103157964853",
+      "name": "frontend-required",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/rmusser01/tldw_server/actions/runs/34564977702/job/103156978483",
+      "name": "container-build-check",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/rmusser01/tldw_server/actions/runs/34564982305/job/103155413906",
+      "name": "e2e-required",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/rmusser01/tldw_server/actions/runs/34564977686/job/103155386853",
+      "name": "coverage-required",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/rmusser01/tldw_server/runs/103155383138",
+      "name": "CodeQL",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/rmusser01/tldw_server/actions/runs/34564977687/job/103155229483",
+      "name": "security-required",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/rmusser01/tldw_server/actions/runs/34564977698/job/103155243462",
+      "name": "backend-required",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "",
+      "name": "frontend-license-policy/trusted/main",
+      "state": "SUCCESS"
+    }
+  ],
+  "human_summary": {
+    "status": "waived_by_requester",
+    "scope": "PR2761 only",
+    "request": "continue, the human summary aint happening for this, this is too large of a pr for that to make sense",
+    "repository_wide_policy_changed": false
+  },
+  "other_risk_waivers": [],
+  "planned_followup": "Normalized DSR erasure fix, controlled recovery evidence, and exact-backend-image security inventory; fresh CI required after source changes.",
+  "continuation_verification": {
+    "dsr": {
+      "tests_passed": 61,
+      "independent_review": "approved",
+      "evidence": "Docs/Evidence/PR2761-dsr-recovery-profile.md"
+    },
+    "backend_inventory": {
+      "agent_selection_passed": 38,
+      "root_workflow_tests_passed": 21,
+      "independent_review": "approved",
+      "style": "Black, Ruff, Actionlint syntax passed",
+      "bandit": "Inline verifier zero findings/errors; tests retain assertions and trusted sys.executable subprocess warnings without suppression",
+      "runtime": "Hosted Docker-daemon collection pending; no vulnerability admission decision"
+    }
+  },
+  "hosted_continuation": {
+    "head": "d8002fd4b400a2148edaa7d8df929512263d399c",
+    "counts": {
+      "SUCCESS": 69,
+      "SKIPPED": 38,
+      "FAILURE": 6
+    },
+    "container_run": "https://github.com/rmusser01/tldw_server/actions/runs/34613362218",
+    "container_failure": "All three backend scanner preparations cannot mkdir /cache/db: permission denied; raw vulnerability reports unavailable.",
+    "jobs_failure": "Batch test first lease acquired at 15:05:37.991 expires at 15:05:38; third acquisition at 15:05:38.002 correctly reclaims job1.",
+    "jobs_fix_verification": {
+      "scope": "Test lease60s and renewal120s; all assertions unchanged",
+      "tests_passed": 36,
+      "independent_review": "approved",
+      "ruff": "passed",
+      "bandit": "Three existing B105 synthetic completion-token fixture warnings; no findings introduced in changed lines"
+    },
+    "frontend_failure": "40 inherited failures and one strict comparison mismatch; same console assertion on head and main. Full JSON reports were not retained. Exact fingerprint delta remains unknown; retain evidence on rerun without weakening gate.",
+    "scanner_fix_verification": {
+      "scope": "Runner UID/GID owns private0700 mounts; only offline scan receives Docker socket supplemental group",
+      "focused_tests_passed": 40,
+      "actual_pinned_scanner": "Linux-owned volume failed before fix and writes successfully after; offline Docker inventory of synthetic metadata image matched immutable imageID and wrote one-package report",
+      "limits": "Tiny inventory probe validates permissions and Docker access, not full candidate vulnerability results",
+      "style": "Black, Ruff, Actionlint syntax passed",
+      "bandit": "Test assertions and trusted literal subprocess warnings retained; inline verifier unchanged",
+      "independent_review": "Root reviewed frozen workflow and test diff"
+    },
+    "frontend_report_retention": {
+      "tests_passed": 18,
+      "independent_review": "approved",
+      "scope": "Always retain four existing head/base JSON and safety reports; no gate weakening"
+    }
+  }
+}

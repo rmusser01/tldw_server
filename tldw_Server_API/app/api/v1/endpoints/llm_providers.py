@@ -1,6 +1,7 @@
 # llm_providers.py
 import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import time
 from functools import partial
@@ -20,6 +21,12 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
 )
 from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_config_option_names,
+    custom_openai_provider_name,
+    iter_custom_openai_provider_numbers,
+    iter_custom_openai_provider_names,
+)
 from tldw_Server_API.app.core.exceptions import (
     EgressPolicyError,
     NetworkError,
@@ -37,6 +44,7 @@ from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
     discover_openrouter_models as _discover_openrouter_models_shared,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
+    configured_provider_generation_metadata,
     has_custom_openai_env_configuration,
     resolve_provider_api_key_value,
     resolve_provider_endpoint_url,
@@ -1020,9 +1028,14 @@ def parse_model_string(model_value: str) -> list[str]:
 
 
 # Local model discovery helpers (best-effort; cached to avoid hammering endpoints)
-LOCAL_MODEL_DISCOVERY_TIMEOUT = 3.0  # seconds
+LOCAL_MODEL_DISCOVERY_TIMEOUT = 1.5  # seconds
+# Local/LAN endpoints answer in milliseconds when present. This bound is only
+# ever paid in full by an endpoint that is configured but not listening, so it
+# is kept short: it is discovery, and a miss degrades to "no models found".
 LOCAL_MODEL_DISCOVERY_TTL = 300  # seconds
 _LOCAL_MODEL_CACHE: dict[str, tuple[float, ModelDiscoveryResult]] = {}
+# Upper bound on simultaneous discovery probes for one endpoint.
+_MODEL_DISCOVERY_MAX_PARALLEL_PROBES = 6
 OPENROUTER_MODEL_DISCOVERY_TIMEOUT = 5.0  # seconds
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 
@@ -1168,7 +1181,9 @@ def discover_models_from_endpoint(
         "auth_failed": 3,
         "ready": 4,
     }
-    for url in candidates:
+    def _probe_candidate(url: str) -> ModelDiscoveryResult:
+        """Probe one candidate URL and classify the outcome."""
+        candidate_result = ModelDiscoveryResult("unreachable")
         try:
             resp = _http_fetch(
                 method="GET",
@@ -1216,11 +1231,40 @@ def discover_models_from_endpoint(
         except Exception:  # noqa: BLE001 - best-effort local discovery must fail open
             logger.debug("Model discovery endpoint query failed unexpectedly")
             candidate_result = ModelDiscoveryResult("unreachable")
+        return candidate_result
 
-        if precedence[candidate_result.status] > precedence[best_result.status]:
-            best_result = candidate_result
-        if best_result.status == "ready":
-            break
+    def _merge(result: ModelDiscoveryResult) -> None:
+        nonlocal best_result
+        if precedence[result.status] > precedence[best_result.status]:
+            best_result = result
+
+    # Candidates are probed concurrently. An endpoint that is not listening burns
+    # LOCAL_MODEL_DISCOVERY_TIMEOUT per candidate, so probing them in series cost
+    # timeout x len(candidates) on every call -- and failures are deliberately
+    # never cached, so that cost repeated on every request.
+    #
+    # Cancelling on the first "ready" only skips candidates that have not started
+    # yet, which is why it is worth doing at all: with more candidates than
+    # workers, the queued ones never run. Probes already in flight are still
+    # waited for -- the executor shuts down normally rather than abandoning
+    # threads -- so the floor is one probe's worth of time, bounded by
+    # LOCAL_MODEL_DISCOVERY_TIMEOUT, not the sum across candidates.
+    #
+    # A healthy endpoint does receive the extra candidate requests, but a "ready"
+    # result is cached for LOCAL_MODEL_DISCOVERY_TTL, so that happens at most
+    # once per TTL rather than per request.
+    if candidates:
+        with ThreadPoolExecutor(
+            max_workers=min(len(candidates), _MODEL_DISCOVERY_MAX_PARALLEL_PROBES),
+            thread_name_prefix="model-discovery",
+        ) as pool:
+            futures = [pool.submit(_probe_candidate, url) for url in candidates]
+            for future in as_completed(futures):
+                _merge(future.result())
+                if best_result.status == "ready":
+                    for pending in futures:
+                        pending.cancel()
+                    break
 
     if best_result.status in {"ready", "unsupported"}:
         _LOCAL_MODEL_CACHE[cache_key] = (now, best_result)
@@ -1425,7 +1469,10 @@ def get_configured_providers(
         providers = []
 
         # Check if we have the required sections or env-only custom OpenAI config
-        has_env_custom_openai = has_custom_openai_env_configuration("custom_openai_api")
+        has_env_custom_openai = any(
+            has_custom_openai_env_configuration(provider_name)
+            for provider_name in iter_custom_openai_provider_names()
+        )
         if (
             not config_parser.has_section('API')
             and not config_parser.has_section('Local-API')
@@ -1641,6 +1688,58 @@ def get_configured_providers(
                 'model_discovery': 'openai',
             }
         }
+
+        def _configured_option_name(option_names: tuple[str, ...]) -> str:
+            """Select the configured alias while retaining deterministic fallback."""
+            if config_parser.has_section("API"):
+                for option_name in option_names:
+                    if config_parser.has_option("API", option_name):
+                        return option_name
+            return option_names[0]
+
+        for provider_number in iter_custom_openai_provider_numbers(start=2):
+            provider_name = custom_openai_provider_name(provider_number)
+            endpoint_field = _configured_option_name(
+                custom_openai_config_option_names(provider_number, "ip")
+            )
+            model_field = _configured_option_name(
+                custom_openai_config_option_names(provider_number, "model")
+            )
+            api_key_field = _configured_option_name(
+                custom_openai_config_option_names(provider_number, "key")
+            )
+            if not any(
+                (
+                    resolve_provider_endpoint_url(
+                        provider_name,
+                        config_parser,
+                        "API",
+                        endpoint_field,
+                    ),
+                    resolve_provider_model_value(
+                        provider_name,
+                        config_parser,
+                        "API",
+                        model_field,
+                    ),
+                    resolve_provider_api_key_value(
+                        provider_name,
+                        config_parser,
+                        "API",
+                        api_key_field,
+                    ),
+                )
+            ):
+                continue
+            provider_mappings[provider_name] = {
+                "display_name": f"Custom OpenAI API {provider_number}",
+                "endpoint_field": endpoint_field,
+                "api_key_field": api_key_field,
+                "model_field": model_field,
+                "type": "local",
+                "section": "API",
+                "model_discovery": "openai",
+            }
 
         # Optional: live health report
         health_report = {}
@@ -1926,18 +2025,7 @@ def get_configured_providers(
                     ):
                         provider_data['endpoint'] = config_parser.get(section_name, endpoint_field, fallback='')
 
-            # Add other useful config fields
-            temp_field = f'{provider_name}_temperature'
-            if config_parser.has_option(section_name, temp_field):
-                provider_data['default_temperature'] = float(config_parser.get(section_name, temp_field, fallback='0.7'))
-
-            tokens_field = f'{provider_name}_max_tokens'
-            if config_parser.has_option(section_name, tokens_field):
-                provider_data['max_tokens'] = int(config_parser.get(section_name, tokens_field, fallback='4096'))
-
-            streaming_field = f'{provider_name}_streaming'
-            if config_parser.has_option(section_name, streaming_field):
-                provider_data['supports_streaming'] = config_parser.get(section_name, streaming_field, fallback='False').lower() == 'true'
+            provider_data.update(configured_provider_generation_metadata(config_parser, section_name, provider_name))
 
             # Centralized capability diagnostics
             try:
@@ -2278,8 +2366,6 @@ async def get_llm_providers(include_deprecated: bool = False):
     """
     try:
         result = await get_configured_providers_async(include_deprecated=include_deprecated)
-        result = apply_llm_provider_overrides_to_listing(result)
-        result = apply_llm_provider_overrides_to_listing(result)
 
         # Inject Diagnostics UI interval bounds from server config if available
         try:

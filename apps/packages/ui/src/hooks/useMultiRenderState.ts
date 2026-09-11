@@ -41,6 +41,8 @@ const configToOverrides = (config: RenderStripConfig): TtsProviderOverrides => {
   if (config.provider === "tldw") {
     overrides.tldwModel = config.model
     overrides.tldwVoice = config.voice
+    overrides.tldwBackend = config.backend
+    overrides.tldwAllowFallback = config.allowFallback
     overrides.tldwResponseFormat = config.format
     overrides.tldwSpeed = config.speed
   } else if (config.provider === "openai") {
@@ -192,7 +194,10 @@ export const useMultiRenderState = () => {
           errorSettingsHref: undefined,
           metadata: buildTtsResultMetadata(text, createdAt, {
             audioSizeBytes: blob.size,
-            clientLatencyMs
+            clientLatencyMs,
+            requestedBackend: entry.config.backend,
+            actualBackend: audio.actualBackend,
+            fallbackUsed: audio.fallbackUsed
           })
         })
       } catch (error) {

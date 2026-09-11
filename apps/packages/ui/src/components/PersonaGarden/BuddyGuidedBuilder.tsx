@@ -16,11 +16,9 @@ import { BuddySourcePicker } from "./BuddySourcePicker"
 import { BuddyStateConfigurationPanel } from "./BuddyStateConfigurationPanel"
 import { BuddyStarterCatalogPicker } from "./BuddyStarterCatalogPicker"
 import {
-  BUDDY_BUILDER_STEPS,
   resetBuddyBuilderForSource,
   type BuddyBuilderSource,
-  type BuddyBuilderState,
-  type BuddyBuilderStep
+  type BuddyBuilderState
 } from "./buddyBuilderState"
 
 export type BuddyGuidedBuilderProps = {
@@ -41,6 +39,7 @@ export type BuddyGuidedBuilderProps = {
   importPreview?: PersonaVisualImportPreviewResponse | null
   activationBlockers?: string[]
   savingManifest?: boolean
+  onRetryStarterCatalog?: () => void
   onCopyStarterPack: (starterPackId: string) => void
   onStartBlank?: () => void
   onOpenLibrary?: () => void
@@ -56,35 +55,6 @@ const INITIAL_BUILDER_STATE: BuddyBuilderState = {
   importPreview: null,
   selectedDraftPackId: null,
   activationReady: false
-}
-
-const getStepLabel = (
-  step: BuddyBuilderStep,
-  t: (key: string, options: { defaultValue: string }) => string
-): string => {
-  if (step === "source") {
-    return t("sidepanel:personaGarden.visuals.builder.sourceStep", {
-      defaultValue: "Choose a source"
-    })
-  }
-  if (step === "draft") {
-    return t("sidepanel:personaGarden.visuals.builder.draftStep", {
-      defaultValue: "Create a draft"
-    })
-  }
-  if (step === "review") {
-    return t("sidepanel:personaGarden.visuals.builder.reviewStep", {
-      defaultValue: "Review readiness"
-    })
-  }
-  if (step === "configure") {
-    return t("sidepanel:personaGarden.visuals.builder.configureStep", {
-      defaultValue: "Configure states"
-    })
-  }
-  return t("sidepanel:personaGarden.visuals.builder.activateStep", {
-    defaultValue: "Activate"
-  })
 }
 
 const formatTemplate = (
@@ -116,6 +86,7 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
   importPreview = null,
   activationBlockers = [],
   savingManifest = false,
+  onRetryStarterCatalog,
   onCopyStarterPack,
   onStartBlank,
   onOpenLibrary,
@@ -142,13 +113,6 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
     t("sidepanel:personaGarden.visuals.builder.activePackFallback", {
       defaultValue: "Active visual buddy"
     })
-  const descriptionText = formatTemplate(
-    t("sidepanel:personaGarden.visuals.builder.description", {
-      defaultValue:
-        "Choose, import, review, configure, and activate a visual buddy for {{persona}}."
-    }),
-    { persona: selectedPersonaName }
-  )
   const packCountText =
     packCount === 1
       ? t("sidepanel:personaGarden.visuals.builder.packCountOne", {
@@ -165,24 +129,9 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
     <section
       data-testid="buddy-guided-builder"
       data-persona-id={selectedPersonaId}
+      aria-label={t("sidepanel:personaGarden.visuals.builder.choicesFor", { defaultValue: "Buddy choices for {{persona}}", persona: selectedPersonaName })}
       className="space-y-3"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
-            {t("sidepanel:personaGarden.visuals.builder.eyebrow", {
-              defaultValue: "Persona visuals"
-            })}
-          </div>
-          <h2 className="mt-1 text-base font-semibold text-text">
-            {t("sidepanel:personaGarden.visuals.builder.heading", {
-              defaultValue: "Buddy builder"
-            })}
-          </h2>
-          <div className="mt-1 text-xs leading-5 text-text-muted">
-            {descriptionText}
-          </div>
-        </div>
         {hasActiveVisual ? (
           <div
             data-testid="buddy-guided-builder-active-pack"
@@ -193,54 +142,34 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
               {displayActivePackTitle}
             </div>
             <div className="mt-1 flex items-center gap-2 text-text-muted">
-              <Tag color="green">active</Tag>
+              <Tag>{t("sidepanel:personaGarden.visuals.builder.active", { defaultValue: "Active" })}</Tag>
               <span>
                 {packCountText}
               </span>
             </div>
           </div>
         ) : null}
-      </div>
-
-      <ol
-        aria-label={t("sidepanel:personaGarden.visuals.builder.stepperAria", {
-          defaultValue: "Buddy builder steps"
-        })}
-        className="grid gap-1 text-xs sm:grid-cols-5"
-      >
-        {BUDDY_BUILDER_STEPS.map((step, index) => (
-          <li
-            key={step}
-            className="rounded border border-border bg-bg px-2 py-1 text-text-muted"
-          >
-            <span className="font-medium text-text">{index + 1}. </span>
-            {getStepLabel(step, t)}
-          </li>
-        ))}
-      </ol>
-
-      <BuddySourcePicker
-        selectedSource={selectedSource}
-        onSelectSource={selectSource}
-        onStartBlank={onStartBlank}
-        onOpenLibrary={onOpenLibrary}
-        onOpenDuplicate={onOpenDuplicate}
-      />
 
       {selectedSource === "bundled" ? (
         <BuddyStarterCatalogPicker
           starterPacks={starterPacks}
           loading={starterCatalogLoading}
           error={starterCatalogError}
+          onRetry={onRetryStarterCatalog}
           copyingStarterId={copyingStarterId}
           onCopyStarterPack={onCopyStarterPack}
         />
       ) : null}
 
-      <BuddyImportFormatPanel
-        source={selectedSource}
-        importPreviewPanel={importPreviewPanel}
-      />
+      <details open={selectedSource !== "bundled" || undefined} className="border-t border-border pt-3">
+        <summary className="cursor-pointer rounded text-sm font-medium text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+          {t("sidepanel:personaGarden.visuals.builder.otherSources", { defaultValue: "Import or customize a Buddy" })}
+        </summary>
+        <div className="mt-3 space-y-3">
+          <BuddySourcePicker selectedSource={selectedSource} onSelectSource={selectSource} onStartBlank={onStartBlank} onOpenLibrary={onOpenLibrary} onOpenDuplicate={onOpenDuplicate} />
+          <BuddyImportFormatPanel source={selectedSource} importPreviewPanel={importPreviewPanel} />
+        </div>
+      </details>
 
       {draftManifest || importPreview ? (
         <BuddyDraftReviewPanel
@@ -265,7 +194,7 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
         <div className="rounded-md border border-border bg-bg p-3 text-xs leading-5 text-text-muted">
           {t("sidepanel:personaGarden.visuals.builder.blankHelp", {
             defaultValue:
-              "Blank drafts use the existing title and create-draft controls below."
+              "Name your custom draft in the advanced creation section below."
           })}
         </div>
       ) : null}
@@ -273,7 +202,7 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
         <div className="rounded-md border border-border bg-bg p-3 text-xs leading-5 text-text-muted">
           {t("sidepanel:personaGarden.visuals.builder.libraryHelp", {
             defaultValue:
-              "Use the existing library panel below to attach or duplicate saved packs."
+              "Choose a saved pack in the library section below."
           })}
         </div>
       ) : null}
@@ -281,7 +210,7 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
         <div className="rounded-md border border-border bg-bg p-3 text-xs leading-5 text-text-muted">
           {t("sidepanel:personaGarden.visuals.builder.duplicateHelp", {
             defaultValue:
-              "Use the existing duplicate controls below to copy a pack from another persona."
+              "Choose a persona and pack in the duplicate section below."
           })}
         </div>
       ) : null}

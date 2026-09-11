@@ -1,0 +1,10 @@
+{
+  "run_id": "backend-1788643661766506000",
+  "source_root": "/private/tmp/tldw-server-migu-buddy-uat",
+  "revision": "220bf544b7110b0ee37fdf99a046e8a03d7ba868",
+  "dirty_paths": [],
+  "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "wrapper_pid": 87564,
+  "launched_at": 1788643661.950442,
+  "pid": 87570
+}

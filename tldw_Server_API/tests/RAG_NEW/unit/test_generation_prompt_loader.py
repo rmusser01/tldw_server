@@ -1,14 +1,24 @@
 """Unit tests for RAG generation prompt-template loading behavior."""
 
+import asyncio
+import gc
+import threading
+import weakref
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Context_Integrity.models import ContextIntegrityBootState
+from tldw_Server_API.app.core.Context_Integrity.resolver import (
+    ContextIntegrityResolver,
+    get_global_context_integrity_resolver,
+    set_global_context_integrity_resolver,
+)
 from tldw_Server_API.app.core.RAG.rag_service import generation as generation_mod
 from tldw_Server_API.app.core.RAG.rag_service.generation import PromptTemplates
-
+from tldw_Server_API.app.core.Utils import prompt_loader as prompt_loader_mod
 
 pytestmark = pytest.mark.unit
 
@@ -39,6 +49,120 @@ def test_prompt_templates_load_switchable_profile_prompt_keys() -> None:
     assert "{question}" in text
 
 
+def test_prompt_template_cache_tracks_context_integrity_resolver_transitions() -> None:
+    previous_resolver = get_global_context_integrity_resolver()
+    enforcing_resolver = ContextIntegrityResolver(
+        ContextIntegrityBootState(
+            mode="enforce",
+            degraded=True,
+            manifest_sequence=None,
+            manifest_digest=None,
+        )
+    )
+    PromptTemplates._load_rag_prompt_cached.cache_clear()
+
+    try:
+        set_global_context_integrity_resolver(None)
+        unrestricted = PromptTemplates.get_template("instruction_tuned")
+        set_global_context_integrity_resolver(enforcing_resolver)
+        blocked = PromptTemplates.get_template("instruction_tuned")
+        set_global_context_integrity_resolver(None)
+        unrestricted_again = PromptTemplates.get_template("instruction_tuned")
+    finally:
+        set_global_context_integrity_resolver(previous_resolver)
+        PromptTemplates._load_rag_prompt_cached.cache_clear()
+
+    assert "Use the provided context" in unrestricted
+    assert blocked == PromptTemplates.DEFAULT
+    assert "Use the provided context" in unrestricted_again
+
+
+@pytest.mark.asyncio
+async def test_prompt_load_uses_resolver_captured_before_concurrent_transition(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    previous_resolver = get_global_context_integrity_resolver()
+    captured_resolver = ContextIntegrityResolver(
+        ContextIntegrityBootState(
+            mode="audit_only",
+            degraded=False,
+            manifest_sequence=None,
+            manifest_digest=None,
+        )
+    )
+    replacement_resolver = ContextIntegrityResolver(
+        ContextIntegrityBootState(
+            mode="enforce",
+            degraded=True,
+            manifest_sequence=None,
+            manifest_digest=None,
+        )
+    )
+    override_file = tmp_path / "resolver-race.txt"
+    override_file.write_text("captured resolver prompt", encoding="utf-8")
+    monkeypatch.setenv(
+        "TLDW_PROMPT_FILE_RAG__RESOLVER_RACE",
+        str(override_file),
+    )
+    read_started = threading.Event()
+    release_read = threading.Event()
+    original_read = prompt_loader_mod._read_regular_file_bytes_no_follow
+
+    def barrier_read(path: Any) -> bytes:
+        read_started.set()
+        assert release_read.wait(timeout=1.0)  # nosec B101
+        return original_read(path)
+
+    monkeypatch.setattr(
+        prompt_loader_mod,
+        "_read_regular_file_bytes_no_follow",
+        barrier_read,
+    )
+    PromptTemplates._load_rag_prompt_cached.cache_clear()
+    set_global_context_integrity_resolver(captured_resolver)
+    task = asyncio.create_task(
+        asyncio.to_thread(PromptTemplates.get_template, "resolver_race")
+    )
+    try:
+        assert await asyncio.to_thread(read_started.wait, 1.0)  # nosec B101
+        set_global_context_integrity_resolver(replacement_resolver)
+        release_read.set()
+        prompt = await task
+    finally:
+        release_read.set()
+        await asyncio.gather(task, return_exceptions=True)
+        set_global_context_integrity_resolver(previous_resolver)
+        PromptTemplates._load_rag_prompt_cached.cache_clear()
+
+    assert prompt == "captured resolver prompt"  # nosec B101
+
+
+def test_prompt_cache_does_not_retain_context_integrity_resolver() -> None:
+    previous_resolver = get_global_context_integrity_resolver()
+    resolver = ContextIntegrityResolver(
+        ContextIntegrityBootState(
+            mode="audit_only",
+            degraded=False,
+            manifest_sequence=None,
+            manifest_digest=None,
+        )
+    )
+    resolver_ref = weakref.ref(resolver)
+    PromptTemplates._load_rag_prompt_cached.cache_clear()
+
+    try:
+        set_global_context_integrity_resolver(resolver)
+        PromptTemplates.get_template("instruction_tuned")
+        set_global_context_integrity_resolver(None)
+        del resolver
+        gc.collect()
+        assert resolver_ref() is None  # nosec B101
+    finally:
+        set_global_context_integrity_resolver(previous_resolver)
+        PromptTemplates._load_rag_prompt_cached.cache_clear()
+
+
 def test_prompt_templates_falls_back_to_default_for_unknown_key() -> None:
     unknown = PromptTemplates.get_template("does_not_exist")
 
@@ -51,7 +175,13 @@ def test_prompt_templates_sanitizes_loader_failure_log(
 ) -> None:
     logger_stub = _LoggerStub()
 
-    def _fail_load_prompt(_category: str, _name: str) -> str:
+    def _fail_load_prompt(
+        _category: str,
+        _name: str,
+        *,
+        integrity_resolver: Any,
+    ) -> str:
+        del integrity_resolver
         raise RuntimeError(
             "prompt loader failed at /private/prompts/rag.yaml "
             "api_key=sk-test-private-token"
@@ -261,3 +391,58 @@ async def test_streaming_claims_overlay_debug_log_omits_raw_exception(
     assert "/private/" not in rendered
     assert "secret-token" not in rendered
     assert "claims overlay failed" not in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_claims_stream_wrapper_closes_only_its_own_base_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle: dict[str, list[str]] = {"a": [], "b": []}
+
+    class _StubGenerator:
+        async def generate_stream(
+            self,
+            context: Any,
+            _query: str,
+            **_kwargs: Any,
+        ) -> AsyncIterator[str]:
+            label = context.label
+            try:
+                yield f"{label} answer"
+                await asyncio.Event().wait()
+            finally:
+                lifecycle[label].append("base_stream_close")
+
+    class _ClaimsEngine:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+    monkeypatch.setattr(generation_mod, "create_generator", lambda _config: _StubGenerator())
+    monkeypatch.setattr(generation_mod, "ClaimsEngine", _ClaimsEngine)
+
+    async def build(label: str) -> Any:
+        context = SimpleNamespace(
+            label=label,
+            config={"generation": {"provider": "openai", "model": "gpt-4o-mini"}},
+            query="stream cleanup",
+            metadata={},
+            documents=[],
+        )
+        return await generation_mod.generate_streaming_response(
+            context,
+            enable_claims=True,
+        )
+
+    context_a, context_b = await asyncio.gather(build("a"), build("b"))
+    assert await context_a.stream_generator.__anext__() == "a answer"
+    assert await context_b.stream_generator.__anext__() == "b answer"
+
+    await context_a.stream_generator.aclose()
+    assert lifecycle == {"a": ["base_stream_close"], "b": []}
+
+    await context_b.stream_generator.aclose()
+    assert lifecycle == {
+        "a": ["base_stream_close"],
+        "b": ["base_stream_close"],
+    }

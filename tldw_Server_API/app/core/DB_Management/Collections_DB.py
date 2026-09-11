@@ -29,6 +29,7 @@ from uuid import uuid4
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.schema_once import ensure_once
 from tldw_Server_API.app.core.Collections.utils import (
     build_highlight_context,
     find_highlight_span,
@@ -629,6 +630,17 @@ def _decorate_collections_public_operations(cls: type["CollectionsDatabase"]) ->
     return cls
 
 
+# Spans the whole of ensure_schema(): the first table it creates through the
+# last, so a partially built database fails verification.
+_COLLECTIONS_REQUIRED_TABLES = (
+    "output_templates",
+    "outputs",
+    "reminder_tasks",
+    "file_artifacts",
+    "audio_studio_idempotency_keys",
+)
+
+
 @_decorate_collections_public_operations
 class CollectionsDatabase:
     """Adapter for Collections tables stored in the per-user Media DB."""
@@ -653,7 +665,22 @@ class CollectionsDatabase:
         if self._backend.backend_type == BackendType.POSTGRESQL:
             self._ensure_bootstrap_for_backend(self._backend)
         else:
-            self._run_backend_bootstrap()
+            # SQLite replayed the schema on every construction -- roughly 85 DDL
+            # statements, and this class is built per request. It is
+            # de-duplicated on the database's *file identity* rather than the
+            # Postgres target key, which for SQLite is just a path: a database
+            # deleted and recreated at that path must be set up again.
+            ensure_once(
+                "collections",
+                getattr(getattr(self._backend, "config", None), "sqlite_path", None),
+                self.ensure_schema,
+                verify=self._collections_schema_present,
+            )
+            # Deliberately outside the memo. This reconciles output templates
+            # against files that change on disk, so it has to keep running:
+            # "the tables exist" says nothing about whether their contents are
+            # current. Only the schema DDL above is safe to skip.
+            self._seed_watchlists_output_templates()
 
     @classmethod
     def for_user(cls, user_id: int | str) -> CollectionsDatabase:
@@ -715,6 +742,31 @@ class CollectionsDatabase:
 
     def _get_pinned_backend(self) -> DatabaseBackend | None:
         return getattr(self._local, "backend_pin", None)
+
+    def _collections_schema_present(self) -> bool:
+        """Cheap check that this database still has the collections tables.
+
+        Test fixtures delete and recreate the database at a fixed path, and a
+        filesystem may reuse the inode, so file identity alone can produce a
+        false memo hit. A catalogue lookup catches that, and is still far
+        cheaper than replaying the whole schema.
+
+        Checks a set spanning the whole of ``ensure_schema()`` rather than one
+        table, so a database holding only part of the schema is rebuilt instead
+        of being accepted. ``audio_studio_idempotency_keys`` is the last table
+        the routine creates. Failures propagate to :func:`ensure_once`, which
+        logs them and rebuilds.
+        """
+        rows = self._backend.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+            "(?, ?, ?, ?, ?)",
+            _COLLECTIONS_REQUIRED_TABLES,
+        )
+        # QueryResult yields dict rows, so the column has to be named:
+        # row[0] raises KeyError, which ensure_once() swallows as "absent"
+        # and then replays the whole schema on every single call.
+        found = {row["name"] for row in rows}
+        return found.issuperset(_COLLECTIONS_REQUIRED_TABLES)
 
     def _run_backend_bootstrap(self) -> None:
         self.ensure_schema()
@@ -824,6 +876,65 @@ class CollectionsDatabase:
                     del self._local.backend_pin
             else:
                 self._local.backend_pin = previous_backend
+
+    @contextlib.contextmanager
+    def _read_snapshot(self) -> Generator[Any, None, None]:
+        """Yield one non-blocking, cross-statement read snapshot."""
+        backend = self.backend
+        pool = backend.get_pool()
+        connection = pool.get_connection()
+        previous_autocommit: bool | None = None
+        primary_failure: BaseException | None = None
+        owns_snapshot = True
+        try:
+            if backend.backend_type == BackendType.POSTGRESQL:
+                # Pool checkout applies session-scoped RLS settings using SQL,
+                # which starts an implicit transaction. Commit that setup
+                # before beginning the read transaction at its required
+                # isolation level. Temporarily enabling autocommit prevents
+                # psycopg from emitting a plain BEGIN before our explicit one.
+                connection.commit()
+                previous_autocommit = bool(connection.autocommit)
+                connection.autocommit = True
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+                    )
+            else:
+                owns_snapshot = not bool(
+                    getattr(connection, "in_transaction", False)
+                )
+                if owns_snapshot:
+                    connection.execute("BEGIN DEFERRED")
+            yield connection
+        except BaseException as exc:  # noqa: BLE001 - preserve primary failure
+            primary_failure = exc
+            raise
+        finally:
+            cleanup_failure: BaseException | None = None
+            if owns_snapshot:
+                try:
+                    connection.rollback()
+                except BaseException as exc:  # noqa: BLE001 - preserve primary failure
+                    cleanup_failure = exc
+            if previous_autocommit is not None:
+                try:
+                    connection.autocommit = previous_autocommit
+                except BaseException as exc:  # noqa: BLE001
+                    cleanup_failure = cleanup_failure or exc
+            try:
+                pool.return_connection(connection)
+            except BaseException as exc:  # noqa: BLE001
+                cleanup_failure = cleanup_failure or exc
+            if cleanup_failure is not None:
+                if primary_failure is not None:
+                    logger.bind(
+                        exception_type=type(cleanup_failure).__name__
+                    ).warning("Collections read snapshot cleanup failed")
+                elif not isinstance(cleanup_failure, Exception):
+                    raise cleanup_failure
+                else:
+                    raise DatabaseError("Collections read snapshot cleanup failed") from None
 
     def _execute_insert(self, query: str, params: tuple[Any, ...], connection: Any | None = None) -> Any:
         if self.backend.backend_type == BackendType.POSTGRESQL:
@@ -2744,35 +2855,19 @@ class CollectionsDatabase:
     @staticmethod
     def _fts_query_string(query: str) -> str:
         """Build a simple FTS query string with prefix matches."""
-        tokens = [tok.strip() for tok in query.replace('"', " ").split() if tok.strip()]
+        tokens = re.findall(r"\w+", query, flags=re.UNICODE)
         if not tokens:
             return ""
-        return " AND ".join(f"{token}*" for token in tokens)
+        return " AND ".join(f'"{token}"*' for token in tokens)
 
     @staticmethod
     def _fts_query_candidates(query: str) -> list[str]:
-        """Generate FTS query candidates, preferring safe variants when needed."""
+        """Generate one parser-safe natural-language FTS query."""
         raw = (query or "").strip()
         if not raw:
             return []
         sanitized = CollectionsDatabase._fts_query_string(raw)
-        upper = raw.upper()
-        raw_ops = {"AND", "OR", "NOT", "NEAR"}
-        has_operator = any(op in upper.split() for op in raw_ops)
-        has_syntax = bool(re.search(r'[":*()]', raw))
-        prefer_raw = has_operator or has_syntax
-
-        candidates: list[str] = []
-        if prefer_raw:
-            candidates.append(raw)
-            if sanitized and sanitized != raw:
-                candidates.append(sanitized)
-        else:
-            if sanitized:
-                candidates.append(sanitized)
-            if raw and raw not in candidates:
-                candidates.append(raw)
-        return [cand for cand in candidates if cand]
+        return [sanitized] if sanitized else []
 
     @staticmethod
     def _is_unique_violation(exc: Exception) -> bool:
@@ -2843,7 +2938,12 @@ class CollectionsDatabase:
                 # Ignore unique violations (already linked)
                 continue
 
-    def _fetch_tags_for_item_ids(self, item_ids: Iterable[int]) -> dict[int, list[str]]:
+    def _fetch_tags_for_item_ids(
+        self,
+        item_ids: Iterable[int],
+        *,
+        connection: Any | None = None,
+    ) -> dict[int, list[str]]:
         ids = [int(i) for i in set(item_ids or []) if i is not None]
         if not ids:
             return {}
@@ -2856,6 +2956,7 @@ class CollectionsDatabase:
             WHERE cit.item_id IN ({placeholders})
             """.format_map(locals()),  # nosec B608
             tuple(ids),
+            connection=connection,
         ).rows
         mapping: dict[int, list[str]] = {item_id: [] for item_id in ids}
         for row in rows:
@@ -4032,7 +4133,6 @@ class CollectionsDatabase:
             base_from = f"FROM content_items ci{joins_sql}"
             subquery = f"SELECT ci.id {base_from} WHERE {where_sql} {group_by} {having}"
             count_sql = f"SELECT COUNT(*) AS cnt FROM ({subquery}) AS subq"  # nosec B608
-            total = int(self.backend.execute(count_sql, tuple(clause_params)).scalar or 0)
 
             resolved_limit = limit if isinstance(limit, int) and limit > 0 else size
             resolved_offset = offset if isinstance(offset, int) and offset >= 0 else max(0, (page - 1) * size)
@@ -4065,9 +4165,25 @@ class CollectionsDatabase:
                 LIMIT ? OFFSET ?
             """
             row_params = tuple(clause_params + [resolved_limit, resolved_offset])
-            rows = self.backend.execute(rows_sql, row_params).rows
-            item_ids = [int(r.get("id")) for r in rows]
-            tags_map = self._fetch_tags_for_item_ids(item_ids)
+            with self._read_snapshot() as connection:
+                total = int(
+                    self.backend.execute(
+                        count_sql,
+                        tuple(clause_params),
+                        connection=connection,
+                    ).scalar
+                    or 0
+                )
+                rows = self.backend.execute(
+                    rows_sql,
+                    row_params,
+                    connection=connection,
+                ).rows
+                item_ids = [int(r.get("id")) for r in rows]
+                tags_map = self._fetch_tags_for_item_ids(
+                    item_ids,
+                    connection=connection,
+                )
             content_rows = [self._row_to_content_item(r, tags_map.get(int(r.get("id")), [])) for r in rows]
             return content_rows, total
 
@@ -7161,30 +7277,24 @@ class CollectionsDatabase:
             "pending",
             None,
         )
-        duplicate_dedupe_error = False
+        insert_error: DatabaseError | None = None
         try:
             res = self._execute_insert(q, params)
         except DatabaseError as exc:
-            duplicate_dedupe_error = bool(
-                dedupe_key
-                and (
-                    "unique constraint failed: user_notifications.user_id, user_notifications.dedupe_key"
-                    in str(exc).lower()
-                    or "duplicate key value violates unique constraint" in str(exc).lower()
-                    or "ux_user_notifications_user_dedupe" in str(exc).lower()
-                )
-            )
-            if not duplicate_dedupe_error:
+            if not dedupe_key:
                 raise
+            insert_error = exc
             res = None
         new_id = self._extract_lastrowid(res) if res is not None else None
-        if (duplicate_dedupe_error or not new_id) and dedupe_key:
+        if (insert_error is not None or not new_id) and dedupe_key:
             existing = self.backend.execute(
                 "SELECT * FROM user_notifications WHERE user_id = ? AND dedupe_key = ? ORDER BY id DESC LIMIT 1",
                 (self.user_id, dedupe_key),
             ).first
             if existing:
                 return self._notification_row_from_db(existing)
+        if insert_error is not None:
+            raise insert_error
         if not new_id:
             raise DatabaseError("Failed to create user notification")
         row = self.backend.execute(

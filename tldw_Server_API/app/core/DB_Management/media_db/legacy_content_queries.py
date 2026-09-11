@@ -29,7 +29,8 @@ def get_all_content_from_database(db_instance: MediaDbLike) -> list[dict[str, An
     try:
         cursor = db_instance.execute_query(
             "SELECT id, uuid, content, title, author, type, url, ingestion_date, last_modified "
-            "FROM Media WHERE deleted = 0 AND is_trash = 0 ORDER BY last_modified DESC"
+            "FROM Media WHERE deleted = 0 AND is_trash = 0 "
+            "AND system_operation_id IS NULL ORDER BY last_modified DESC"
         )
         return [dict(item) for item in cursor.fetchall()]
     except (DatabaseError, sqlite3.Error) as exc:
@@ -73,9 +74,10 @@ def fetch_keywords_for_media_batch(
         "JOIN Keywords k ON mk.keyword_id = k.id "
         "JOIN Media m ON mk.media_id = m.id "
         f"WHERE mk.media_id IN ({placeholders}) AND k.deleted = ? AND m.deleted = ? "
+        "AND m.system_operation_id IS NULL "
         f"ORDER BY mk.media_id, {order_expr}"
     )
-    params = tuple([*safe_media_ids, False, False])
+    params = (*safe_media_ids, False, False)
     try:
         cursor = db_instance.execute_query(query, params)
         for row in cursor.fetchall():

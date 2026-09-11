@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -651,6 +652,89 @@ def test_federation_callback_jit_creates_user_when_policy_allows(
     link = asyncio.run(_fetch_link())
     assert link is not None
     assert int(link["user_id"]) == int(created_user["id"])
+
+
+def test_federated_password_generation_retries_until_policy_accepts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.exceptions import WeakPasswordError
+    from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+    password_service = PasswordService(get_settings())
+    validate_password = password_service.validate_password_strength
+    attempts = 0
+
+    def _reject_first_candidate(password: str, username: str | None = None) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise WeakPasswordError("synthetic policy rejection")
+        validate_password(password, username)
+
+    monkeypatch.setattr(
+        password_service,
+        "validate_password_strength",
+        _reject_first_candidate,
+    )
+
+    password = password_service.generate_secure_password(username="federated-user")
+
+    assert attempts >= 2
+    validate_password(password, "federated-user")
+
+
+def test_federated_provisioning_fails_closed_when_password_policy_rejects_all_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints.auth import _provision_federated_user
+    from tldw_Server_API.app.core.AuthNZ.exceptions import WeakPasswordError
+    from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+    password_service = PasswordService(get_settings())
+
+    def _reject_candidate(_password: str, _username: str | None = None) -> None:
+        raise WeakPasswordError("synthetic policy rejection")
+
+    monkeypatch.setattr(
+        password_service,
+        "validate_password_strength",
+        _reject_candidate,
+    )
+
+    class _RegistrationService:
+        def __init__(self) -> None:
+            self.password_service = password_service
+            self.register_calls = 0
+
+        async def register_user(self, **_kwargs: Any) -> dict[str, Any]:
+            self.register_calls += 1
+            return {
+                "user_id": 1,
+                "username": "federated-user",
+                "email": "federated@example.com",
+                "role": "user",
+            }
+
+    registration_service = _RegistrationService()
+
+    with pytest.raises(
+        RuntimeError,
+        match="Unable to generate a password that satisfies the configured policy",
+    ):
+        asyncio.run(
+            _provision_federated_user(
+                mapped_claims={
+                    "email": "federated@example.com",
+                    "username": "federated-user",
+                },
+                registration_service=registration_service,  # type: ignore[arg-type]
+                default_role="user",
+            )
+        )
+
+    assert registration_service.register_calls == 0
 
 
 def test_federation_callback_applies_mapped_grants_in_jit_grant_only_mode(

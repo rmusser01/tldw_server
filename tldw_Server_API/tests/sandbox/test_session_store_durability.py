@@ -14,6 +14,8 @@ from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflig
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 from tldw_Server_API.app.core.Sandbox.store import get_store
 
+THREAD_START_TIMEOUT_SEC = 5.0
+
 
 def _configure_sqlite_store(monkeypatch, tmp_path: Path) -> None:
     db_path = str(tmp_path / "sandbox_store.db")
@@ -833,7 +835,7 @@ def test_delete_snapshot_waits_for_cross_service_snapshot_create(monkeypatch, tm
 
     def _blocked_create(session_id: str, workspace_path: str) -> dict:
         snapshot_entered.set()
-        release_snapshot.wait(timeout=2.0)
+        release_snapshot.wait()
         return base_create(session_id, workspace_path)
 
     monkeypatch.setattr(svc_create._snapshots, "create_snapshot", _blocked_create)
@@ -860,25 +862,26 @@ def test_delete_snapshot_waits_for_cross_service_snapshot_create(monkeypatch, tm
         except BaseException as exc:  # pragma: no cover - asserted via errors list
             delete_errors.append(exc)
 
-    create_thread = threading.Thread(target=_run_create, daemon=True)
-    create_thread.start()
-    assert snapshot_entered.wait(timeout=1.0)
-
     delete_attempted = threading.Event()
 
     def _run_delete_with_signal() -> None:
         delete_attempted.set()
         _run_delete()
 
+    create_thread = threading.Thread(target=_run_create, daemon=True)
     delete_thread = threading.Thread(target=_run_delete_with_signal, daemon=True)
-    delete_thread.start()
-    assert delete_attempted.wait(timeout=1.0)
-    assert not delete_called.is_set(), "snapshot delete should not reach the underlying store while create holds the lock"
-    assert "deleted" not in delete_result, "cross-service snapshot delete should wait for in-progress create"
-
-    release_snapshot.set()
-    create_thread.join(timeout=5.0)
-    delete_thread.join(timeout=5.0)
+    create_thread.start()
+    try:
+        assert snapshot_entered.wait(timeout=THREAD_START_TIMEOUT_SEC)
+        delete_thread.start()
+        assert delete_attempted.wait(timeout=THREAD_START_TIMEOUT_SEC)
+        assert not delete_called.is_set(), "snapshot delete should not reach the underlying store while create holds the lock"
+        assert "deleted" not in delete_result, "cross-service snapshot delete should wait for in-progress create"
+    finally:
+        release_snapshot.set()
+        create_thread.join(timeout=5.0)
+        if delete_thread.ident is not None:
+            delete_thread.join(timeout=5.0)
 
     assert not create_thread.is_alive(), "snapshot create did not finish after release"
     assert not delete_thread.is_alive(), "snapshot delete did not finish after release"

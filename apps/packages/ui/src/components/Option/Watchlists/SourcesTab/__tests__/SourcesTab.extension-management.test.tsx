@@ -307,16 +307,23 @@ describe("SourcesTab constrained management", () => {
 
     const card = screen.getByTestId("watchlists-source-card-101")
     expect(within(card).getByText("CISA KEV RSS")).toBeInTheDocument()
-    expect(within(card).getByText("https://www.cisa.gov/known-exploited-vulnerabilities-catalog.xml")).toBeInTheDocument()
+    expect(
+      within(card).getByRole("link", {
+        name: "Open source website: CISA KEV RSS"
+      })
+    ).toHaveAttribute(
+      "href",
+      "https://www.cisa.gov/known-exploited-vulnerabilities-catalog.xml"
+    )
     expect(within(card).getByText("RSS")).toBeInTheDocument()
     expect(within(card).getByText("cve")).toBeInTheDocument()
     expect(within(card).getByText("1 group")).toBeInTheDocument()
     expect(within(card).getByText("Healthy")).toBeInTheDocument()
-    expect(within(card).getByRole("button", { name: "Toggle active for CISA KEV RSS" })).toBeInTheDocument()
-    expect(within(card).getByRole("button", { name: "Check now for CISA KEV RSS" })).toBeInTheDocument()
-    expect(within(card).getByRole("button", { name: "Source Health & Dedup Stats for CISA KEV RSS" })).toBeInTheDocument()
-    expect(within(card).getByRole("button", { name: "Edit CISA KEV RSS" })).toBeInTheDocument()
-    expect(within(card).getByRole("button", { name: "Delete CISA KEV RSS" })).toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Toggle active: CISA KEV RSS" })).toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Check now: CISA KEV RSS" })).toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Open source health: CISA KEV RSS" })).toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Edit source: CISA KEV RSS" })).toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Delete source: CISA KEV RSS" })).toBeInTheDocument()
   })
 
   it("keeps constrained source selection and bulk actions reachable without a table", async () => {
@@ -326,7 +333,9 @@ describe("SourcesTab constrained management", () => {
     fireEvent.click(await screen.findByRole("checkbox", { name: "Select CISA KEV RSS" }))
 
     expect(screen.getByText("1 selected")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Check Now" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Check now for 1 selected sources" })
+    ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Enable" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Disable" })).toBeInTheDocument()
     expect(screen.getByLabelText("Move to group")).toBeInTheDocument()

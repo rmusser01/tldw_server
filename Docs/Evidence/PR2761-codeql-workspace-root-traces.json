@@ -1,0 +1,410 @@
+{
+  "analysis_id": 1759364372,
+  "sarif_source_sha": "49cce1c8530252a6581e8013db6277a42f0288fa",
+  "sarif_sha256": "f894ee7bb7398df63fda41f9480773887b6be05aac50622573373fa0a4c8d0a0",
+  "current_head": "a03a5d12e57aa439cdf799be910585dabdc2d755",
+  "source_files": [
+    {
+      "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+      "sha256": "4c38c1182cead62c0942213682c8ff372d2caef0f805374b043a945f1f20316c"
+    },
+    {
+      "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+      "sha256": "b6a78a4f5c3ae35273d1e63acd07b171d80b28751b8fb9aa2eac8541c4a8274e"
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py",
+      "sha256": "1477cd8ad945cb288426ca0c6ff1d0aa496edbdaf8e5ee75b63720b6ff43145c"
+    }
+  ],
+  "alerts": [
+    {
+      "alert_id": 2686,
+      "rule": "py/path-injection",
+      "sink": {
+        "artifactLocation": {
+          "index": 73,
+          "uri": "tldw_Server_API/app/core/Utils/path_utils.py"
+        },
+        "region": {
+          "endColumn": 39,
+          "endLine": 45,
+          "startColumn": 27,
+          "startLine": 45
+        }
+      },
+      "flows": [
+        [
+          {
+            "path": "tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py",
+            "line": 2832
+          },
+          {
+            "path": "tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py",
+            "line": 2843
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 2153
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 2163
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 513
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 514
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 517
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 517
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 517
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 520
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 525
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 15
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 40
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 40
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 40
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 45
+          }
+        ]
+      ],
+      "instances": [
+        {
+          "ref": "refs/pull/2761/head",
+          "analysis_key": "dynamic/github-code-scanning/codeql:analyze",
+          "environment": "{\"build-mode\":\"none\",\"category\":\"/language:python\",\"language\":\"python\",\"runner\":\"[\\\"ubuntu-latest\\\"]\"}",
+          "category": "/language:python",
+          "state": "open",
+          "commit_sha": "49cce1c8530252a6581e8013db6277a42f0288fa",
+          "message": {
+            "text": "This path depends on a user-provided value."
+          },
+          "location": {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "start_line": 45,
+            "end_line": 45,
+            "start_column": 27,
+            "end_column": 39
+          },
+          "classifications": []
+        }
+      ],
+      "classification": "false-positive: authorized configuration root validation",
+      "comment": "Admin/system.configure-only workspace root configuration. The caller passes dirname and nonempty basename of a normalized absolute root; reported equality-branch probe is not reached by these inputs. Root selection is authorized, not an unprivileged path API.",
+      "comment_length": 259
+    },
+    {
+      "alert_id": 2687,
+      "rule": "py/path-injection",
+      "sink": {
+        "artifactLocation": {
+          "index": 73,
+          "uri": "tldw_Server_API/app/core/Utils/path_utils.py"
+        },
+        "region": {
+          "endColumn": 34,
+          "endLine": 63,
+          "startColumn": 27,
+          "startLine": 63
+        }
+      },
+      "flows": [
+        [
+          {
+            "path": "tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py",
+            "line": 2832
+          },
+          {
+            "path": "tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py",
+            "line": 2843
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 2153
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 2163
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 513
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 514
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 517
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 517
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 517
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 520
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 525
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 15
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 40
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 40
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 40
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 58
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 62
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 63
+          }
+        ],
+        [
+          {
+            "path": "tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py",
+            "line": 2832
+          },
+          {
+            "path": "tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py",
+            "line": 2843
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 2153
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 2163
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 513
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 514
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 517
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 517
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 517
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 520
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 525
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 15
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 40
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 40
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 40
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 53
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 59
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 62
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 63
+          }
+        ],
+        [
+          {
+            "path": "tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py",
+            "line": 2832
+          },
+          {
+            "path": "tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py",
+            "line": 2843
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 2153
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 2163
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 513
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 514
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 517
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 517
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 517
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 520
+          },
+          {
+            "path": "tldw_Server_API/app/services/mcp_hub_service.py",
+            "line": 525
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 15
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 40
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 40
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 40
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 58
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 62
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 62
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 62
+          },
+          {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "line": 63
+          }
+        ]
+      ],
+      "instances": [
+        {
+          "ref": "refs/pull/2761/head",
+          "analysis_key": "dynamic/github-code-scanning/codeql:analyze",
+          "environment": "{\"build-mode\":\"none\",\"category\":\"/language:python\",\"language\":\"python\",\"runner\":\"[\\\"ubuntu-latest\\\"]\"}",
+          "category": "/language:python",
+          "state": "open",
+          "commit_sha": "49cce1c8530252a6581e8013db6277a42f0288fa",
+          "message": {
+            "text": "This path depends on a user-provided value."
+          },
+          "location": {
+            "path": "tldw_Server_API/app/core/Utils/path_utils.py",
+            "start_line": 63,
+            "end_line": 63,
+            "start_column": 27,
+            "end_column": 34
+          },
+          "classifications": []
+        }
+      ],
+      "classification": "false-positive: authorized configuration root validation",
+      "comment": "Intentional admin configuration: shared-workspace creation requires admin or system.configure/*. absolute_root selects the root; islink validates it before persistence and configured allowed roots are enforced afterward. Ordinary users fail before the service.",
+      "comment_length": 260
+    }
+  ],
+  "base_trust": "base_dir is request-selected dirname; NOT sanitized into an independent trusted root. Safety is privileged root-configuration authorization; optional allowed-root policy validates before persistence. Never use these findings to model all tainted safe_join bases as sanitized.",
+  "runtime_proof": "/tmp/pr2761-safe-join-new-alert-runtime.log",
+  "regression_log": "/tmp/pr2761-safe-join-new-alert-tests.log",
+  "scope": "Both exact new alerts have only refs/pull/2761/head at49cce1 in instances API. No main or other historical/active refs. No mutations performed."
+}

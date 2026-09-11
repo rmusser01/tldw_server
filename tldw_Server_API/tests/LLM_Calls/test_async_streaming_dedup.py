@@ -1,17 +1,16 @@
-import asyncio
+from collections.abc import Iterable
+from unittest.mock import Mock
+
 import httpx
 import pytest
-import requests
-from unittest.mock import Mock
-from typing import Iterable
 
-from tldw_Server_API.app.core.LLM_Calls.chat_calls import (
-    get_openai_embeddings,
-    get_openai_embeddings_batch,
-)
 from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call,
     perform_chat_api_call_async,
+)
+from tldw_Server_API.app.core.LLM_Calls.chat_calls import (
+    get_openai_embeddings,
+    get_openai_embeddings_batch,
 )
 from tldw_Server_API.app.core.LLM_Calls.sse import sse_done
 
@@ -44,8 +43,7 @@ class _FakeResp:
         return False
 
     def iter_lines(self):
-        for line in self._lines:
-            yield line
+        yield from self._lines
 
 
 class _FakeClient:
@@ -174,6 +172,31 @@ def test_get_openai_embeddings_includes_dimensions(monkeypatch):
     assert payload.get("dimensions") == 128
 
 
+def test_get_openai_embeddings_forwards_configured_org_and_project_headers(monkeypatch):
+    session = _mock_session_with_response([{"embedding": [0.1, 0.2]}])
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.LLM_Calls.chat_calls.create_session_with_retries",
+        lambda **kwargs: session,
+    )
+
+    get_openai_embeddings(
+        "hello",
+        "text-embedding-3-small",
+        app_config={
+            "openai_api": {
+                "api_key": "test-key",
+                "org_id": "org-single",
+                "project_id": "project-single",
+            }
+        },
+    )
+
+    headers = session.post.call_args.kwargs["headers"]
+    assert headers["Authorization"] == "Bearer test-key"
+    assert headers["OpenAI-Organization"] == "org-single"
+    assert headers["OpenAI-Project"] == "project-single"
+
+
 def test_get_openai_embeddings_batch_uses_timeout_and_closes(monkeypatch):
     session = _mock_session_with_response(
         [
@@ -231,6 +254,36 @@ def test_get_openai_embeddings_batch_includes_dimensions(monkeypatch):
 
     payload = session.post.call_args[1]["json"]
     assert payload.get("dimensions") == 256
+
+
+def test_get_openai_embeddings_batch_forwards_configured_org_and_project_headers(monkeypatch):
+    session = _mock_session_with_response(
+        [
+            {"embedding": [0.1, 0.2]},
+            {"embedding": [0.3, 0.4]},
+        ]
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.LLM_Calls.chat_calls.create_session_with_retries",
+        lambda **kwargs: session,
+    )
+
+    get_openai_embeddings_batch(
+        ["first", "second"],
+        "text-embedding-3-small",
+        app_config={
+            "openai_api": {
+                "api_key": "test-key",
+                "organization": "org-batch",
+                "project": "project-batch",
+            }
+        },
+    )
+
+    headers = session.post.call_args.kwargs["headers"]
+    assert headers["Authorization"] == "Bearer test-key"
+    assert headers["OpenAI-Organization"] == "org-batch"
+    assert headers["OpenAI-Project"] == "project-batch"
 
 
 def test_get_openai_embeddings_respects_api_base(monkeypatch):

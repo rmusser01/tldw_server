@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from loguru import logger
@@ -237,12 +238,7 @@ def _context_with_observed_marker(
     metadata = dict(_metadata(context))
     metadata[_OBSERVED_METADATA_KEY] = True
     metadata[_OUTER_SURFACE_METADATA_KEY] = "gateway"
-    return GatewayRequestContext(
-        request_id=context.request_id,
-        client_id=context.client_id,
-        user_id=context.user_id,
-        metadata=metadata,
-    )
+    return replace(context, metadata=metadata)
 
 
 def _duration_ms(started_at: float) -> float:

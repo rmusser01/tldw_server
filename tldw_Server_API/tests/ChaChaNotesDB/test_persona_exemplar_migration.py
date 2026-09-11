@@ -100,6 +100,9 @@ class _FakeBackend:
     def table_exists(self, _name: str, connection=None) -> bool:
         return True
 
+    def escape_identifier(self, identifier: str) -> str:
+        return '"' + identifier.replace('"', '""') + '"'
+
     def execute(self, statement, *_args, **_kwargs):
         self.executed_statements.append(str(statement))
         return None

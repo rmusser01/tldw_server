@@ -1,0 +1,25 @@
+{
+  "totalCount": 2,
+  "studies": [
+    {
+      "protocolSection": {
+        "identificationModule": {
+          "nctId": "NCT90000002",
+          "officialTitle": "Synthetic official-only trial title two"
+        },
+        "statusModule": {
+          "overallStatus": "COMPLETED",
+          "startDateStruct": {"date": "2025-02-28"},
+          "completionDateStruct": {"date": "2026-02-28"}
+        },
+        "conditionsModule": {"conditions": []},
+        "armsInterventionsModule": {"interventions": []},
+        "sponsorCollaboratorsModule": {
+          "leadSponsor": {"name": "Synthetic sponsor two"}
+        },
+        "designModule": {"studyType": "OBSERVATIONAL"}
+      },
+      "hasResults": true
+    }
+  ]
+}

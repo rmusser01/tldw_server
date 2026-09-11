@@ -97,17 +97,29 @@ class PersonaVisualStarterCatalogService:
         self._validate_starter_fixture(starter)
         detail = self._starter_summary(starter)
         detail["manifest"] = deepcopy(starter.manifest)
-        detail["assets"] = [
-            {
-                "asset_key": asset.asset_key,
-                "filename": asset.filename,
-                "mime_type": asset.mime_type,
-                "asset_role": asset.asset_role,
-                "byte_size": len(asset.content),
-            }
-            for asset in starter.assets
-        ]
+        detail["assets"] = []
+        for asset in starter.assets:
+            width, height = PersonaVisualService._validate_image_bytes(asset.content, mime_type=asset.mime_type)
+            detail["assets"].append(
+                {
+                    "asset_key": asset.asset_key,
+                    "filename": asset.filename,
+                    "mime_type": asset.mime_type,
+                    "asset_role": asset.asset_role,
+                    "byte_size": len(asset.content),
+                    "width": width,
+                    "height": height,
+                }
+            )
         return detail
+
+    def get_starter_asset_content(self, starter_pack_id: str, asset_key: str) -> tuple[bytes, str]:
+        """Read only a bundled fixture asset, without accepting filesystem paths."""
+        starter = self._get_starter(starter_pack_id)
+        for asset in starter.assets:
+            if asset.asset_key == asset_key:
+                return asset.content, asset.mime_type
+        raise PersonaVisualStarterCatalogError("starter_asset_not_found", "Starter artwork not found")
 
     def copy_starter_pack_to_persona(
         self,

@@ -14,6 +14,8 @@ This module tests all 8 video adapters:
 from __future__ import annotations
 
 import subprocess
+
+from tldw_Server_API.tests.Workflows.adapters.conftest import patch_ffmpeg, setattr_ffmpeg
 from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -42,7 +44,7 @@ def mock_subprocess_run(monkeypatch):
                     _ = None
         return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
-    monkeypatch.setattr(subprocess, "run", _mock_run)
+    setattr_ffmpeg(monkeypatch, _mock_run)
     return _mock_run
 
 
@@ -136,7 +138,7 @@ class TestVideoThumbnailAdapter:
             Path(output_path).write_bytes(b"thumbnail image data")
             return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
 
         # Mock resolve_workflow_file_path
         monkeypatch.setattr(
@@ -193,7 +195,7 @@ class TestVideoThumbnailAdapter:
         def mock_run(cmd, **kwargs):
             raise subprocess.CalledProcessError(1, cmd, b"", b"ffmpeg error")
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.video.processing.resolve_workflow_file_path",
             make_mock_resolve_workflow_file_path(tmp_video_file)
@@ -228,7 +230,7 @@ class TestVideoTrimAdapter:
             Path(output_path).write_bytes(b"trimmed video content")
             return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.video.processing.resolve_workflow_file_path",
             make_mock_resolve_workflow_file_path(tmp_video_file)
@@ -260,7 +262,7 @@ class TestVideoTrimAdapter:
             Path(output_path).write_bytes(b"trimmed video content")
             return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.video.processing.resolve_workflow_file_path",
             make_mock_resolve_workflow_file_path(tmp_video_file)
@@ -311,7 +313,7 @@ class TestVideoTrimAdapter:
         def mock_run(cmd, **kwargs):
             raise subprocess.TimeoutExpired(cmd, 600)
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.video.processing.resolve_workflow_file_path",
             make_mock_resolve_workflow_file_path(tmp_video_file)
@@ -346,7 +348,7 @@ class TestVideoConcatAdapter:
             Path(output_path).write_bytes(b"concatenated video content")
             return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
 
         # Mock resolve_workflow_file_path to return paths based on input
         def mock_resolve(path_value, context, config=None):
@@ -412,7 +414,7 @@ class TestVideoConcatAdapter:
         def mock_run(cmd, **kwargs):
             raise subprocess.CalledProcessError(1, cmd, b"", b"concat error")
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
 
         def mock_resolve(path_value, context, config=None):
             return Path(path_value)
@@ -454,7 +456,7 @@ class TestVideoConvertAdapter:
             Path(output_path).write_bytes(b"converted video content")
             return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.video.processing.resolve_workflow_file_path",
             make_mock_resolve_workflow_file_path(tmp_video_file)
@@ -492,7 +494,7 @@ class TestVideoConvertAdapter:
             Path(output_path).write_bytes(b"converted video content")
             return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.video.processing.resolve_workflow_file_path",
             make_mock_resolve_workflow_file_path(tmp_video_file)
@@ -559,7 +561,7 @@ class TestVideoExtractFramesAdapter:
                 frame_path.write_bytes(f"frame {i} data".encode())
             return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.video.processing.resolve_workflow_file_path",
             make_mock_resolve_workflow_file_path(tmp_video_file)
@@ -613,7 +615,7 @@ class TestVideoExtractFramesAdapter:
         def mock_run(cmd, **kwargs):
             raise subprocess.CalledProcessError(1, cmd, b"", b"ffmpeg extract error")
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.video.processing.resolve_workflow_file_path",
             make_mock_resolve_workflow_file_path(tmp_video_file)
@@ -919,7 +921,7 @@ class TestSubtitleBurnAdapter:
             Path(output_path).write_bytes(b"video with burned subtitles")
             return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
 
         # Mock resolve_workflow_file_path to handle both video and subtitle paths
         def mock_resolve(path_value, context, config=None):
@@ -994,7 +996,7 @@ class TestSubtitleBurnAdapter:
         def mock_run(cmd, **kwargs):
             raise subprocess.CalledProcessError(1, cmd, b"", b"subtitle burn error")
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
 
         def mock_resolve(path_value, context, config=None):
             path = Path(path_value)
@@ -1034,7 +1036,7 @@ class TestSubtitleBurnAdapter:
             Path(output_path).write_bytes(b"video with top subtitles")
             return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
 
         def mock_resolve(path_value, context, config=None):
             path = Path(path_value)
@@ -1075,7 +1077,7 @@ class TestSubtitleBurnAdapter:
             Path(output_path).write_bytes(b"video with burned subtitles")
             return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        setattr_ffmpeg(monkeypatch, mock_run)
 
         def mock_resolve(path_value, context, config=None):
             path = Path(path_value)
@@ -1184,7 +1186,7 @@ class TestVideoAdapterErrorSanitization:
             "tldw_Server_API.app.core.Workflows.adapters.video.processing.resolve_artifacts_dir",
             lambda x: tmp_path / "artifacts",
         )
-        monkeypatch.setattr(subprocess, "run", raise_backend_error)
+        setattr_ffmpeg(monkeypatch, raise_backend_error)
 
         result = await getattr(video_adapters, adapter_name)(config, basic_context)
 
@@ -1291,7 +1293,7 @@ class TestVideoAdapterErrorSanitization:
             "tldw_Server_API.app.core.Workflows.adapters.video.subtitles.resolve_artifacts_dir",
             lambda x: tmp_path / "artifacts",
         )
-        monkeypatch.setattr(subprocess, "run", raise_backend_error)
+        setattr_ffmpeg(monkeypatch, raise_backend_error)
 
         result = await run_subtitle_burn_adapter(
             {"video_path": str(tmp_video_file), "subtitle_path": str(tmp_subtitle_file)},

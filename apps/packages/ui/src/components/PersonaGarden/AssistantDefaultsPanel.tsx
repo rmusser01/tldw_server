@@ -15,7 +15,9 @@ import {
   type PersonaVoiceDefaults,
   useResolvedPersonaVoiceDefaults
 } from "@/hooks/useResolvedPersonaVoiceDefaults"
+import type { PersonaProfileResponse } from "@/routes/personaTypes"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { fetchTtsProviders } from "@/services/tldw/audio-providers"
 import { toAllowedPath } from "@/services/tldw/path-utils"
 
 type AssistantDefaultsPanelProps = {
@@ -29,18 +31,17 @@ type AssistantDefaultsPanelProps = {
     token: number
   } | null
   onSetupHandoffFocusConsumed?: (token: number) => void
-  onSaved?: (voiceDefaults: PersonaVoiceDefaults) => void
-}
-
-type PersonaProfileResponse = {
-  id?: string
-  voice_defaults?: PersonaVoiceDefaults | null
+  onSaved?: (
+    voiceDefaults: PersonaVoiceDefaults,
+    profile: PersonaProfileResponse
+  ) => void
 }
 
 type AssistantDefaultsFormState = {
   sttLanguage: string
   sttModel: string
   ttsProvider: string
+  ttsModel: string
   ttsVoice: string
   confirmationMode: PersonaConfirmationMode
   wakeBehavior: PersonaWakeBehavior
@@ -58,6 +59,7 @@ const DEFAULT_FORM_STATE: AssistantDefaultsFormState = {
   sttLanguage: "",
   sttModel: "",
   ttsProvider: "",
+  ttsModel: "",
   ttsVoice: "",
   confirmationMode: "destructive_only",
   wakeBehavior: "one_shot",
@@ -93,6 +95,7 @@ const buildFormState = (
   sttLanguage: normalizeText(voiceDefaults?.stt_language),
   sttModel: normalizeText(voiceDefaults?.stt_model),
   ttsProvider: normalizeText(voiceDefaults?.tts_provider),
+  ttsModel: normalizeText(voiceDefaults?.tts_model),
   ttsVoice: normalizeText(voiceDefaults?.tts_voice),
   confirmationMode: voiceDefaults?.confirmation_mode || "destructive_only",
   wakeBehavior: voiceDefaults?.wake_behavior || "one_shot",
@@ -131,6 +134,7 @@ const buildPayload = (
   stt_language: normalizeText(formState.sttLanguage) || null,
   stt_model: normalizeText(formState.sttModel) || null,
   tts_provider: normalizeText(formState.ttsProvider) || null,
+  tts_model: normalizeText(formState.ttsModel) || null,
   tts_voice: normalizeText(formState.ttsVoice) || null,
   confirmation_mode: formState.confirmationMode,
   wake_behavior: formState.wakeBehavior,
@@ -178,8 +182,51 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
   const confirmationModeRef = React.useRef<HTMLSelectElement | null>(null)
   const lastHandledHandoffTokenRef = React.useRef<number | null>(null)
 
+  const [serverProviders, setServerProviders] = React.useState<string[]>([])
+  const [providerCatalogFailed, setProviderCatalogFailed] = React.useState(false)
+  const [providerCatalogLoading, setProviderCatalogLoading] = React.useState(false)
+  const [providerCatalogRetry, setProviderCatalogRetry] = React.useState(0)
+  React.useEffect(() => {
+    if (!isActive || !selectedPersonaId) return
+    let cancelled = false
+    setProviderCatalogLoading(true)
+    const loadProviders = async () => {
+      try {
+        const catalog = await fetchTtsProviders({ throwOnError: true })
+        if (cancelled) return
+        if (!catalog) {
+          setProviderCatalogFailed(true)
+          return
+        }
+        setServerProviders(Object.keys(catalog.providers))
+        setProviderCatalogFailed(false)
+      } catch {
+        if (!cancelled) setProviderCatalogFailed(true)
+      } finally {
+        if (!cancelled) setProviderCatalogLoading(false)
+      }
+    }
+    void loadProviders()
+    return () => {
+      cancelled = true
+    }
+  }, [isActive, selectedPersonaId, providerCatalogRetry])
+  const ttsProviderOptions = Array.from(
+    new Set([
+      "browser",
+      "tldw",
+      "openai",
+      "elevenlabs",
+      ...serverProviders,
+      ...(formState.ttsProvider ? [formState.ttsProvider] : [])
+    ])
+  )
+
+  const saveGenerationRef = React.useRef(0)
+
   React.useEffect(() => {
     let cancelled = false
+    setSaving(false)
 
     const load = async () => {
       if (!isActive || !selectedPersonaId) {
@@ -232,6 +279,7 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
     void load()
     return () => {
       cancelled = true
+      saveGenerationRef.current += 1
     }
   }, [isActive, selectedPersonaId])
 
@@ -293,6 +341,7 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
 
   const handleSave = React.useCallback(async () => {
     if (!selectedPersonaId) return
+    const saveGeneration = saveGenerationRef.current
     setSaving(true)
     setError(null)
     setSuccess(null)
@@ -316,15 +365,20 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
         )
       }
       const payload = (await response.json()) as PersonaProfileResponse
+      if (saveGeneration !== saveGenerationRef.current) return
       const nextFormState = buildFormState(payload.voice_defaults)
       setFormState(nextFormState)
-      onSaved?.(payload.voice_defaults || buildPayload(formState))
+      onSaved?.(payload.voice_defaults || buildPayload(formState), {
+        ...payload,
+        id: selectedPersonaId
+      })
       setSuccess(
         t("sidepanel:personaGarden.profile.assistantDefaultsSaved", {
           defaultValue: "Assistant defaults saved."
         })
       )
     } catch (saveError) {
+      if (saveGeneration !== saveGenerationRef.current) return
       setError(
         saveError instanceof Error
           ? saveError.message
@@ -333,7 +387,7 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
             })
       )
     } finally {
-      setSaving(false)
+      if (saveGeneration === saveGenerationRef.current) setSaving(false)
     }
   }, [formState, onSaved, selectedPersonaId, t])
 
@@ -376,6 +430,24 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
       {success ? (
         <div className="mt-3 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
           {success}
+        </div>
+      ) : null}
+
+      {isActive && selectedPersonaId && providerCatalogFailed ? (
+        <div role="alert" className="mt-3 rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-text">
+          <p>
+            {t("sidepanel:personaGarden.profile.assistantDefaults.providerCatalogError", {
+              defaultValue: "Unable to load server speech providers. Available options may be incomplete. Your selected provider is preserved."
+            })}
+          </p>
+          <button
+            type="button"
+            className="mt-2 rounded-md border border-border px-3 py-1 disabled:opacity-60"
+            disabled={providerCatalogLoading}
+            onClick={() => setProviderCatalogRetry((current) => current + 1)}
+          >
+            {t("common:retry", { defaultValue: "Retry" })}
+          </button>
         </div>
       ) : null}
 
@@ -429,11 +501,27 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
                 defaultValue: "Use browser fallback"
               })}
             </option>
-            <option value="browser">browser</option>
-            <option value="tldw">tldw</option>
-            <option value="openai">openai</option>
-            <option value="elevenlabs">elevenlabs</option>
+            {ttsProviderOptions.map((provider) => (
+              <option key={provider} value={provider}>
+                {provider}
+              </option>
+            ))}
           </select>
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm text-text">
+          <span>
+            {t("sidepanel:personaGarden.profile.assistantDefaults.ttsModel", {
+              defaultValue: "TTS model"
+            })}
+          </span>
+          <input
+            id="persona-assistant-defaults-tts-model"
+            className="rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-text"
+            value={formState.ttsModel}
+            onChange={(event) => updateField("ttsModel", event.target.value)}
+            disabled={!selectedPersonaId || loading || saving}
+          />
         </label>
 
         <label className="flex flex-col gap-1 text-sm text-text">
@@ -634,8 +722,12 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
             <dd>{resolvedDefaults.ttsProvider || "unset"}</dd>
           </div>
           <div>
+            <dt className="text-xs text-text-muted">TTS model</dt>
+            <dd>{resolvedDefaults.ttsModel || "Server default"}</dd>
+          </div>
+          <div>
             <dt className="text-xs text-text-muted">TTS voice</dt>
-            <dd>{resolvedDefaults.ttsVoice || "unset"}</dd>
+            <dd>{resolvedDefaults.ttsVoice || "Provider default"}</dd>
           </div>
           <div>
             <dt className="text-xs text-text-muted">Confirmation mode</dt>

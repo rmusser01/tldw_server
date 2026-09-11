@@ -308,27 +308,65 @@ class ModuleRegistry:
                 result[module_id] = registration.module_instance
         return result
 
+    def _is_current_operational_instance_locked(
+        self,
+        module_id: str,
+        module: BaseModule,
+    ) -> bool:
+        """Check operational registration identity while the registry lock is held."""
+
+        registration = self._modules.get(module_id)
+        return bool(
+            registration is not None
+            and registration.is_operational()
+            and registration.module_instance is module
+            and self._module_instances.get(module_id) is module
+        )
+
     async def find_module_for_tool(self, tool_name: str) -> Optional[BaseModule]:
         """Find module that provides a specific tool"""
         async with self._lock:
             module_id = self._tool_registry.get(tool_name)
-        if module_id:
-            module = await self.get_module(module_id)
-            if module is not None and await module.has_tool(tool_name):
-                return module
+            module = self._module_instances.get(module_id) if module_id else None
+            if module is not None and not self._is_current_operational_instance_locked(
+                module_id,
+                module,
+            ):
+                module = None
+
+        if module_id and module is not None:
+            has_tool = await module.has_tool(tool_name)
+            async with self._lock:
+                if (
+                    has_tool
+                    and self._tool_registry.get(tool_name) == module_id
+                    and self._is_current_operational_instance_locked(module_id, module)
+                ):
+                    return module
+                if self._tool_registry.get(tool_name) == module_id:
+                    self._tool_registry.pop(tool_name, None)
+        elif module_id:
             async with self._lock:
                 if self._tool_registry.get(tool_name) == module_id:
                     self._tool_registry.pop(tool_name, None)
 
         # Fallback: search all modules
         async with self._lock:
-            module_snapshot = list(self._module_instances.items())
+            module_snapshot = [
+                (candidate_id, candidate)
+                for candidate_id, candidate in self._module_instances.items()
+                if self._is_current_operational_instance_locked(candidate_id, candidate)
+            ]
         for module_id, module in module_snapshot:
             if await module.has_tool(tool_name):
                 async with self._lock:
-                    if module_id in self._module_instances:
-                        self._tool_registry[tool_name] = module_id  # Cache for next time
-                return module
+                    mapped_module_id = self._tool_registry.get(tool_name)
+                    if (
+                        mapped_module_id in {None, module_id}
+                        and self._is_current_operational_instance_locked(module_id, module)
+                    ):
+                        self._tool_registry[tool_name] = module_id
+                        return module
 
         return None
 

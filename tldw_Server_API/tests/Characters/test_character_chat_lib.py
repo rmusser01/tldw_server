@@ -1805,28 +1805,68 @@ def test_load_chat_and_character_handles_legacy_you_sender(db):
     assert history == [("Hi Botty", "Hello Friend")]
 
 
+@pytest.mark.integration
 def test_start_new_chat_session_decodes_alternate_greeting_bytes(db):
     char_id = db.add_character_card({"name": "ByteGreeter", "first_message": "Default {{user}}"})
-    raw_char = {
-        "id": char_id,
-        "name": "ByteGreeter",
-        "first_message": "Default {{user}}",
-        "alternate_greetings": [b"Bytes hi {{user}}"],
-    }
-
-    with mock.patch.object(db, "get_character_card_by_id", return_value=raw_char):
-        conv_id, _, init_hist, _ = start_new_chat_session(
-            db,
-            char_id,
-            "Alice",
-            greeting_strategy="alternate_index",
-            alternate_index=0,
+    with db.transaction() as conn:
+        # Simulate a legacy database row created before the sync trigger began
+        # rejecting BLOB-backed JSON values.
+        conn.execute("DROP TRIGGER IF EXISTS character_cards_sync_update")
+        conn.execute(
+            "UPDATE character_cards SET alternate_greetings = ? WHERE id = ?",
+            (b'["Bytes hi {{user}}"]', char_id),
         )
+
+    conv_id, _, init_hist, _ = start_new_chat_session(
+        db,
+        char_id,
+        "Alice",
+        greeting_strategy="alternate_index",
+        alternate_index=0,
+    )
 
     assert conv_id is not None
     assert init_hist == [(None, "Bytes hi Alice")]
     stored_messages = db.get_messages_for_conversation(conv_id, limit=1)
     assert stored_messages[0]["content"] == "Bytes hi {{user}}"
+
+
+@pytest.mark.integration
+def test_start_new_chat_session_creates_atomic_resumable_snapshot(db, monkeypatch):
+    monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "local-llm")
+    monkeypatch.setenv("CHAR_CHAT_MODEL", "local-test")
+    char_id = db.add_character_card(
+        {
+            "name": "SnapshotGreeter",
+            "first_message": "Stable hello, {{user}}",
+            "system_prompt": "Keep this behavior.",
+            "extensions": {
+                "tldw": {
+                    "generation": {
+                        "temperature": 0.0,
+                        "top_p": 0.0,
+                        "repetition_penalty": 0.0,
+                        "stop": [],
+                    }
+                }
+            },
+        }
+    )
+
+    conv_id, _, _, _ = start_new_chat_session(db, char_id, "Alice")
+
+    assert conv_id is not None
+    state = db.get_roleplay_resume_state(conv_id)
+    assert state["behavior_snapshot"]["status"] == "valid"
+    assert state["resume_eligible"] is True
+    assert state["settings_version"] == 1
+    assert state["history_version"] == 2
+    assert state["effective_completion"]["sampling"] == {
+        "temperature": 0.0,
+        "top_p": 0.0,
+        "repetition_penalty": 0.0,
+        "stop": [],
+    }
 
 
 @mock.patch(f"{MODULE_PATH_PREFIX}.character_chat.time.strftime", return_value=MOCK_TIME_STRFTIME)

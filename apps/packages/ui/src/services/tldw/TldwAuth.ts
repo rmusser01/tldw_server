@@ -4,6 +4,9 @@ import { emitSplashAfterLoginSuccess } from "@/services/splash-events"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import { clearSourceReviewHandoffs } from "@/services/tldw/source-review-handoff"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { clearStandaloneHtmlSessionRecords } from "@/services/tldw/standalone-html-session-records"
+import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 
 export interface LoginCredentials {
   username: string
@@ -35,6 +38,15 @@ export interface UserInfo {
 
 const API_KEY_PROFILE_PATH = "/api/v1/users/me/profile"
 const API_KEY_VALIDATION_TIMEOUT_MS = 30000
+
+const emitLogoutPrincipalBoundary = (): void => {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(
+    new CustomEvent("tldw:auth-principal-changed", {
+      detail: { kind: "logout" }
+    })
+  )
+}
 
 const buildApiKeyValidationUrl = (serverUrl: string): string => {
   const trimmed = String(serverUrl || "").trim()
@@ -211,9 +223,11 @@ export class TldwAuthService {
           method: 'DELETE'
         })
         await tldwClient.clearCookieSingleUserSession()
+        emitLogoutPrincipalBoundary()
         return
       }
       await tldwClient.clearManualSingleUserCredentials()
+      emitLogoutPrincipalBoundary()
       return
     }
 
@@ -239,6 +253,9 @@ export class TldwAuthService {
       clearTimeout(this.refreshTimer)
       this.refreshTimer = null
     }
+
+    clearStandaloneHtmlSessionRecords()
+    emitLogoutPrincipalBoundary()
   }
 
   /**
@@ -259,28 +276,45 @@ export class TldwAuthService {
   }
 
   private async performTokenRefresh(): Promise<TokenResponse> {
+    await tldwClient.initialize()
     const config = await tldwClient.getConfig()
     if (!config || !config.refreshToken) {
       throw new Error('No refresh token available')
     }
 
+    const scopedUserId = deriveScopedUserId({
+      userId: null,
+      authMode: config.authMode,
+      accessToken: config.accessToken ?? null
+    })
+    const expectedUserId = scopedUserId === "user:anonymous"
+      ? null
+      : scopedUserId.slice("user:".length)
+
     const tokens = await bgRequest<TokenResponse>({
       path: '/api/v1/auth/refresh',
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: { refresh_token: config.refreshToken }
+      body: { refresh_token: config.refreshToken },
+      servicePromptConfig: {
+        serverUrl: config.serverUrl,
+        authMode: config.authMode,
+        authSource: config.authSource,
+        orgId: config.orgId,
+        expectedUserId,
+        expectedRefreshToken: config.refreshToken
+      }
     })
 
-    const latestConfig = await tldwClient.getConfig()
-
-    // Persist rotated refresh tokens; the backend rotates them by default.
-    await tldwClient.updateConfig({
-      accessToken: tokens.access_token,
-      refreshToken:
-        tokens.refresh_token ||
-        latestConfig?.refreshToken ||
-        config.refreshToken
-    })
+    const committed = await tldwClient.commitTokenRefresh(
+      config,
+      config.refreshToken,
+      {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token || config.refreshToken
+      }
+    )
+    if (!committed) throw createServicePromptScopeChangedError()
 
     // Set up auto-refresh if expires_in is provided
     if (tokens.expires_in) {
@@ -334,7 +368,10 @@ export class TldwAuthService {
         noAuth: true
       })
       if (!session?.authenticated || !session.user) {
-        throw new Error('Not authenticated')
+        throw Object.assign(new Error('Not authenticated'), {
+          status: 401,
+          code: 'not_authenticated'
+        })
       }
       return session.user
     }

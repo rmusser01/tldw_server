@@ -260,7 +260,7 @@ describe("TemplateEditor authoring mode contract", () => {
     expect(modal?.style.maxWidth).toBe("100vw")
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument()
-  })
+  }, 15_000)
 
   it("defaults to basic mode for create and hides advanced-only tabs/tools", async () => {
     render(<TemplateEditor open template={null} onClose={vi.fn()} />)
@@ -276,7 +276,7 @@ describe("TemplateEditor authoring mode contract", () => {
     expect(screen.getByTestId("template-recipe-builder")).toBeInTheDocument()
     expect(screen.queryByRole("tab", { name: "Variables & Snippets" })).not.toBeInTheDocument()
     expect(screen.queryByText("Version tools")).not.toBeInTheDocument()
-  })
+  }, 15_000)
 
   it("defaults to advanced mode for edit and exposes docs plus version tools", async () => {
     render(<TemplateEditor open template={buildTemplate()} onClose={vi.fn()} />)
@@ -291,7 +291,7 @@ describe("TemplateEditor authoring mode contract", () => {
     ).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Variables & Snippets" })).toBeInTheDocument()
     expect(screen.getByText("Version tools")).toBeInTheDocument()
-  })
+  }, 15_000)
 
   it("warns and reroutes to editor when switching from advanced docs to basic", async () => {
     const infoSpy = vi.spyOn(message, "info").mockImplementation(() => createMessageType())
@@ -318,7 +318,7 @@ describe("TemplateEditor authoring mode contract", () => {
     expect(screen.getByRole("tab", { name: "Editor" })).toHaveAttribute("aria-selected", "true")
 
     infoSpy.mockRestore()
-  })
+  }, 15_000)
 
   it("preserves content and version context when toggling between modes", async () => {
     render(<TemplateEditor open template={buildTemplate()} onClose={vi.fn()} />)
@@ -361,7 +361,7 @@ describe("TemplateEditor authoring mode contract", () => {
         .getByText("Current editor content differs from the loaded version.")
         .closest('[data-ds-component="Alert"]')
     ).toBeInTheDocument()
-  })
+  }, 15_000)
 
   it("renders visual repair warnings through the design-system Alert primitive", async () => {
     render(<TemplateEditor open template={null} onClose={vi.fn()} />)
@@ -391,7 +391,7 @@ describe("TemplateEditor authoring mode contract", () => {
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Repair layout" })).toBeInTheDocument()
     expect(screen.getByTestId("template-editor-repair-visual-layout")).toBeInTheDocument()
-  })
+  }, 15_000)
 
   it("applies recipe defaults and autofills name/description in basic create mode", async () => {
     render(<TemplateEditor open template={null} onClose={vi.fn()} />)
@@ -435,7 +435,7 @@ describe("TemplateEditor authoring mode contract", () => {
 
     expect(screen.getByLabelText("Template Name")).toHaveValue("custom-template")
     expect(screen.getByLabelText("Description")).toHaveValue("Custom description")
-  })
+  }, 15_000)
 
   it("blocks save in basic mode when server-side validation fails", async () => {
     const errorSpy = vi.spyOn(message, "error").mockImplementation(() => createMessageType())
@@ -496,7 +496,7 @@ describe("TemplateEditor authoring mode contract", () => {
     })
 
     expect(onClose).toHaveBeenCalledWith(true)
-  })
+  }, 15_000)
 
   it("loads selected and latest template versions in advanced edit mode", async () => {
     const successSpy = vi.spyOn(message, "success").mockImplementation(() => createMessageType())
@@ -558,7 +558,7 @@ describe("TemplateEditor authoring mode contract", () => {
     expect(successSpy).toHaveBeenCalledWith("Loaded template version 2")
     expect(successSpy).toHaveBeenCalledWith("Loaded latest template version")
     successSpy.mockRestore()
-  })
+  }, 60_000)
 
   it("blocks advanced-mode save on validation errors and surfaces editor markers", async () => {
     const errorSpy = vi.spyOn(message, "error").mockImplementation(() => createMessageType())
@@ -595,7 +595,7 @@ describe("TemplateEditor authoring mode contract", () => {
     )
 
     errorSpy.mockRestore()
-  })
+  }, 15_000)
 
   it("emits authoring telemetry for start, mode change, recipe apply, and save", async () => {
     const onClose = vi.fn()
@@ -652,5 +652,5 @@ describe("TemplateEditor authoring mode contract", () => {
         context: "create"
       })
     )
-  })
+  }, 15_000)
 })

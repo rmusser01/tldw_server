@@ -1,10 +1,23 @@
+import { readFileSync } from "node:fs"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 import i18n, { ensureI18nNamespaces } from "@/i18n"
 import option from "@/assets/locale/en/option.json"
 import watchlists from "@/assets/locale/en/watchlists.json"
 
+const testDir = dirname(fileURLToPath(import.meta.url))
+const i18nSource = readFileSync(resolve(testDir, "..", "index.ts"), "utf8")
+
 describe("sources locale wiring", () => {
+  it("keeps the Vite locale map available in the packaged browser runtime", () => {
+    expect(i18nSource).toContain(
+      'import.meta.glob("../assets/locale/*/*.json")'
+    )
+    expect(i18nSource).not.toContain("typeof import.meta.glob")
+  })
+
   it("loads shared and route-local english namespaces on demand", async () => {
     i18n.removeResourceBundle("en", "common")
     i18n.removeResourceBundle("en", "sources")

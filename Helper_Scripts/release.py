@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-from datetime import datetime, timezone
-from difflib import SequenceMatcher
 import json
-from pathlib import Path
+import os
 import re
 import shutil
+
 # Bandit B404 is expected here because the helper shells out to fixed git/gh commands.
 import subprocess  # nosec B404
-from typing import Any, Mapping, Protocol, Sequence
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
+from difflib import SequenceMatcher
+from pathlib import Path
+from typing import Any, Protocol
 
 try:  # Python 3.11+
     import tomllib
@@ -258,7 +261,10 @@ def promote_changelog_unreleased_section(
     if prefix:
         prefix += "\n\n"
 
-    reset_unreleased = _render_changelog_section("Unreleased", {section: () for section in ALLOWED_CHANGELOG_SECTIONS})
+    reset_unreleased = _render_changelog_section(
+        "Unreleased",
+        dict.fromkeys(ALLOWED_CHANGELOG_SECTIONS, ()),
+    )
     promoted_section = _render_changelog_section(version, subsections, date=release_date)
     suffix = "\n".join(lines[section_end:]).lstrip("\n")
 
@@ -676,6 +682,7 @@ class ShellReleaseRunner:
         *,
         check: bool = True,
         capture_output: bool = True,
+        env: Mapping[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         if not args:
             raise ValueError("Command arguments must not be empty")
@@ -695,6 +702,7 @@ class ShellReleaseRunner:
             text=True,
             capture_output=capture_output,
             check=False,
+            env=env,
         )  # nosec B603
         if check and completed.returncode != 0:
             stderr = (completed.stderr or "").strip()
@@ -890,26 +898,28 @@ class ShellReleaseRunner:
         if not self._prepared_paths:
             raise RuntimeError("Release metadata has not been prepared")
 
-        rel_paths = [str(path.relative_to(self.repo_root)) for path in self._prepared_paths]
+        rel_paths = [
+            path.relative_to(self.repo_root).as_posix()
+            for path in self._prepared_paths
+        ]
         if self.dry_run:
             return f"dry-run-release-{next_version}"
 
+        refresh_env = os.environ.copy()
+        for name in (
+            "TLDW_DOCS_SOURCE_DIR",
+            "TLDW_DOCS_PUBLISHED_DIR",
+            "TLDW_DOCS_TEST_FAIL_AFTER_BACKUP",
+            "TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP",
+            "TLDW_DOCS_TEST_MODE",
+        ):
+            refresh_env.pop(name, None)
         self._run_command(
             [
-                "/usr/bin/env",
-                "-u",
-                "TLDW_DOCS_SOURCE_DIR",
-                "-u",
-                "TLDW_DOCS_PUBLISHED_DIR",
-                "-u",
-                "TLDW_DOCS_TEST_FAIL_AFTER_BACKUP",
-                "-u",
-                "TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP",
-                "-u",
-                "TLDW_DOCS_TEST_MODE",
-                "/bin/bash",
+                "bash",
                 str(self.repo_root / "Helper_Scripts" / "refresh_docs_published.sh"),
-            ]
+            ],
+            env=refresh_env,
         )
         self._run_command(["git", "add", *rel_paths])
         self._run_command(["git", "commit", "-m", release_commit_message(next_version)])

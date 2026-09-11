@@ -5,7 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps import (
@@ -25,6 +25,9 @@ pytestmark = pytest.mark.unit
 def _dependency_kwargs(func: Callable[..., Any], **overrides: Any) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
     for name, parameter in inspect.signature(func).parameters.items():
+        if name == "request":
+            kwargs[name] = Request({"type": "http", "headers": []})
+            continue
         default = parameter.default
         kwargs[name] = default.default if hasattr(default, "default") else default
     kwargs.update(overrides)

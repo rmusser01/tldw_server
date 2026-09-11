@@ -8,7 +8,8 @@ import wave
 from io import BytesIO
 from typing import Optional
 
-import av
+# `av` (PyAV) is imported where it is used; at module scope it loaded in every
+# process that registers the audio router.
 import numpy as np
 from loguru import logger
 
@@ -76,6 +77,8 @@ class StreamingAudioWriter:
                     logger.debug("Disabling Xing VBR header for MP3 encoding.")
 
                 # Open the container for writing
+                import av
+
                 self.container = av.open(
                     self.output_buffer,
                     mode="w",
@@ -162,6 +165,8 @@ class StreamingAudioWriter:
             return data
         else:
             # Create audio frame from numpy array
+            import av
+
             frame = av.AudioFrame.from_ndarray(
                 audio_data.reshape(1, -1),
                 format="s16",

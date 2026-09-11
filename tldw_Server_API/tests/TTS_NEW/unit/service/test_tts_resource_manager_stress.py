@@ -4,6 +4,16 @@ import asyncio
 from tldw_Server_API.app.core.TTS.tts_resource_manager import get_resource_manager, close_resource_manager
 
 
+@pytest.fixture(autouse=True)
+async def _isolate_resource_manager():
+    """Ensure each stress case owns a fresh process-global manager."""
+    await close_resource_manager()
+    try:
+        yield
+    finally:
+        await close_resource_manager()
+
+
 @pytest.mark.asyncio
 async def test_http_client_pool_reuse_and_stats():
     mgr = await get_resource_manager({

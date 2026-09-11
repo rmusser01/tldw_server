@@ -5,12 +5,17 @@ import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+)
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_endpoint_env_keys,
     custom_openai_provider_name,
     custom_openai_section_name,
 )
-from tldw_Server_API.app.core.exceptions import EgressPolicyError
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
 from tldw_Server_API.app.core.http_client import fetch as _hc_fetch
 from tldw_Server_API.app.core.http_client import stream_response as _hc_stream_response
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
@@ -20,15 +25,27 @@ from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
     resolve_trusted_provider_endpoint,
 )
 from tldw_Server_API.app.core.LLM_Calls.sse import (
-    finalize_stream,
     is_done_line,
     normalize_provider_line,
     sse_done,
 )
-from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
+from tldw_Server_API.app.core.LLM_Calls.streaming import (
+    provider_stream_error_frame,
+    wrap_sync_stream,
+)
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .base import ChatProvider
+
+
+def _provider_response_has_error(value: Any) -> bool:
+    """Detect a protocol-owned provider error without retaining its detail."""
+
+    from tldw_Server_API.app.core.Chat.streaming_utils import (
+        normalize_provider_stream_error,
+    )
+
+    return normalize_provider_stream_error(value) is not None
 
 
 class CustomOpenAIAdapter(ChatProvider):
@@ -58,6 +75,7 @@ class CustomOpenAIAdapter(ChatProvider):
             "http_fetcher",
             "http_streamer",
             "trusted_base_url_override",
+            PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
         }
     )
 
@@ -129,7 +147,7 @@ class CustomOpenAIAdapter(ChatProvider):
         cfg = request.get("app_config") or {}
         section = cfg.get(self.config_section) or {}
         base = section.get("api_ip") or section.get("api_base_url")
-        if not base:
+        if not base and request.get("credentials_resolved") is not True:
             for env_key in self.default_base_url_env:
                 env_val = os.getenv(env_key)
                 if isinstance(env_val, str) and env_val.strip():
@@ -169,8 +187,20 @@ class CustomOpenAIAdapter(ChatProvider):
     def _resolve_transport_context(
         self,
         request: dict[str, Any],
+        credentials: ProviderCallCredentials | None = None,
     ) -> tuple[str, TrustedProviderEndpoint | None]:
         """Resolve a scoped server endpoint or an explicit ordinary-egress endpoint."""
+        if credentials is not None:
+            endpoint = credentials.trusted_endpoint
+            if self._is_configured_custom():
+                if endpoint is None:
+                    raise ChatConfigurationError(
+                        provider=self.name,
+                        message=f"{self.name} endpoint is not configured.",
+                    )
+                return endpoint.base_url, endpoint
+            return self._resolve_base(request), endpoint
+
         if not self._is_configured_custom():
             return self._resolve_base(request), None
 
@@ -182,6 +212,17 @@ class CustomOpenAIAdapter(ChatProvider):
         if endpoint is None:
             raise RuntimeError(f"{self.name} requires an explicit configured base URL")
         return endpoint.base_url, endpoint
+
+    def _consume_runtime_credentials(
+        self,
+        request: dict[str, Any],
+    ) -> ProviderCallCredentials | None:
+        """Replace loose credential fields with one authentic runtime snapshot."""
+
+        bound, credentials = self._bind_request_credentials_with_handle(request)
+        request.clear()
+        request.update(bound)
+        return credentials
 
     @staticmethod
     def _build_chat_completions_url(base: str) -> str:
@@ -237,7 +278,8 @@ class CustomOpenAIAdapter(ChatProvider):
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         raw_request = dict(request or {})
-        base, endpoint = self._resolve_transport_context(raw_request)
+        credentials = self._consume_runtime_credentials(raw_request)
+        base, endpoint = self._resolve_transport_context(raw_request, credentials)
         request = validate_payload(self.name, self._sanitize_request(raw_request))
         if self._use_native_http():
             api_key = request.get("api_key")
@@ -262,18 +304,22 @@ class CustomOpenAIAdapter(ChatProvider):
                 )
                 try:
                     resp.raise_for_status()
-                    return self._normalize_response(resp.json())
+                    data = resp.json()
+                    if _provider_response_has_error(data):
+                        raise RuntimeError("Provider returned an error response")
+                    return self._normalize_response(data)
                 finally:
                     resp.close()
             except EgressPolicyError:
                 raise
             except Exception as e:
-                raise self.normalize_error(e) from e
+                raise_detached_error(super().normalize_error(e))
         raise RuntimeError("CustomOpenAIAdapter native HTTP disabled by configuration")
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
         raw_request = dict(request or {})
-        base, endpoint = self._resolve_transport_context(raw_request)
+        credentials = self._consume_runtime_credentials(raw_request)
+        base, endpoint = self._resolve_transport_context(raw_request, credentials)
         request = validate_payload(self.name, self._sanitize_request(raw_request))
         if self._use_native_http():
             api_key = request.get("api_key")
@@ -284,6 +330,8 @@ class CustomOpenAIAdapter(ChatProvider):
             payload = merge_extra_body(payload, request)
             headers = merge_extra_headers(headers, request)
             try:
+                provider_error = False
+                stream_completed = False
                 with self.http_streamer(
                     method="POST",
                     url=url,
@@ -293,7 +341,6 @@ class CustomOpenAIAdapter(ChatProvider):
                     timeout=timeout or 120.0,
                 ) as resp:
                     resp.raise_for_status()
-                    seen_done = False
                     for raw in resp.iter_lines():
                         if not raw:
                             continue
@@ -302,19 +349,24 @@ class CustomOpenAIAdapter(ChatProvider):
                         except Exception:
                             line = str(raw)
                         if is_done_line(line):
-                            if not seen_done:
-                                seen_done = True
-                                yield sse_done()
-                            continue
+                            break
+                        if _provider_response_has_error(line):
+                            provider_error = True
+                            break
                         normalized = normalize_provider_line(line)
                         if normalized is not None:
                             yield normalized
-                    yield from finalize_stream(response=resp, done_already=seen_done)
+                    stream_completed = True
+                if not stream_completed:
+                    raise RuntimeError("Provider stream did not complete")
+                if provider_error:
+                    yield provider_stream_error_frame(self.name)
+                yield sse_done()
                 return
             except EgressPolicyError:
                 raise
             except Exception as e:
-                raise self.normalize_error(e) from e
+                raise_detached_error(super().normalize_error(e))
         raise RuntimeError("CustomOpenAIAdapter native HTTP disabled by configuration")
 
     async def achat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
@@ -323,49 +375,6 @@ class CustomOpenAIAdapter(ChatProvider):
     async def astream(self, request: dict[str, Any], *, timeout: float | None = None) -> AsyncIterator[str]:
         async for item in wrap_sync_stream(self.stream(request, timeout=timeout)):
             yield item
-
-    def normalize_error(self, exc: Exception):  # type: ignore[override]
-        from tldw_Server_API.app.core.LLM_Calls.error_utils import (
-            get_http_error_text,
-            get_http_status_from_exception,
-            is_http_status_error,
-            log_http_400_body,
-        )
-        if is_http_status_error(exc):
-            from tldw_Server_API.app.core.Chat.Chat_Deps import (
-                ChatAPIError,
-                ChatAuthenticationError,
-                ChatBadRequestError,
-                ChatProviderError,
-                ChatRateLimitError,
-            )
-            resp = getattr(exc, "response", None)
-            status = get_http_status_from_exception(exc)
-            detail = None
-            try:
-                body = resp.json() if resp is not None else None
-            except Exception:
-                body = None
-            log_http_400_body(self.name, exc, body)
-            if isinstance(body, dict):
-                err = body.get("error")
-                if isinstance(err, dict):
-                    msg = (err.get("message") or "").strip()
-                    typ = (err.get("type") or "").strip()
-                    detail = (f"{typ} {msg}" if typ else msg) or None
-            if not detail:
-                detail = get_http_error_text(exc)
-            if status in (400, 404, 422):
-                return ChatBadRequestError(provider=self.name, message=str(detail))
-            if status in (401, 403):
-                return ChatAuthenticationError(provider=self.name, message=str(detail))
-            if status == 429:
-                return ChatRateLimitError(provider=self.name, message=str(detail))
-            if status and 500 <= status < 600:
-                return ChatProviderError(provider=self.name, message=str(detail), status_code=status)
-            return ChatAPIError(provider=self.name, message=str(detail), status_code=status or 500)
-        return super().normalize_error(exc)
-
 
 class CustomOpenAIAdapter2(CustomOpenAIAdapter):
     name = "custom-openai-api-2"

@@ -3,8 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   pageAssistModel: vi.fn(),
-  saveMessageOnSuccess: vi.fn(async () => "history-1"),
-  saveMessageOnError: vi.fn(async () => "history-1"),
+  saveMessageOnSuccess: vi.fn<
+    (payload: any) => Promise<string | null>
+  >(async () => "history-1"),
+  saveMessageOnError: vi.fn<
+    (payload: any) => Promise<string | null>
+  >(async () => "history-1"),
   setMessages: vi.fn(),
   setHistory: vi.fn(),
   setIsProcessing: vi.fn(),
@@ -16,6 +20,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/models", () => ({
   pageAssistModel: (...args: unknown[]) => mocks.pageAssistModel(...args)
 }))
+
+// The pipeline only imports a type from this module. Keep this unit test from
+// loading the API client's unrelated runtime barrel and its circular imports.
+vi.mock("@/services/tldw/TldwApiClient", () => ({}))
 
 vi.mock("@/db/dexie/helpers", () => ({
   generateID: vi.fn(() => "generated-id")
@@ -122,6 +130,43 @@ describe("runChatPipeline abort lifecycle", () => {
     expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
   })
 
+  it("passes the captured prompt request scope to the final model client", async () => {
+    const requestScope = Object.freeze({
+      config: Object.freeze({
+        serverUrl: "https://scope.example",
+        authMode: "multi-user" as const,
+        authSource: "manual" as const,
+        orgId: 4
+      }),
+      userId: 19
+    })
+    const signal = new AbortController().signal
+
+    await runChatPipeline(
+      mode,
+      "Tell me a story",
+      "",
+      false,
+      [],
+      [],
+      signal,
+      buildParams({
+        servicePromptSnapshot: {
+          scopeKey: "scope-19",
+          requestScope,
+          capability: "supported",
+          definitions: {},
+          scopeSignal: signal,
+          release: vi.fn()
+        }
+      })
+    )
+
+    expect(mocks.pageAssistModel).toHaveBeenCalledWith(
+      expect.objectContaining({ requestScope })
+    )
+  })
+
   it("saves a partially-streamed abort as interrupted, never via the success path", async () => {
     const controller = new AbortController()
     mocks.pageAssistModel.mockResolvedValue({
@@ -151,6 +196,330 @@ describe("runChatPipeline abort lifecycle", () => {
         botMessage: expect.stringContaining("partial answer")
       })
     )
+  })
+
+  it("persists a manual-stop partial even when a scoped lease signal also aborts", async () => {
+    const userController = new AbortController()
+    const scopeController = new AbortController()
+    const requestScope = Object.freeze({
+      config: Object.freeze({
+        serverUrl: "https://scope.example",
+        authMode: "multi-user" as const
+      }),
+      userId: 19
+    })
+    mocks.pageAssistModel.mockResolvedValue({
+      saveToDb: false,
+      stream: async function* () {
+        yield "partial answer"
+        userController.abort()
+        scopeController.abort()
+      }
+    })
+
+    const result = await runChatPipeline(
+      mode,
+      "Tell me a story",
+      "",
+      false,
+      [],
+      [],
+      scopeController.signal,
+      buildParams({
+        servicePromptSnapshot: {
+          scopeKey: "scope-19",
+          requestScope,
+          capability: "supported",
+          definitions: {},
+          scopeSignal: scopeController.signal,
+          release: vi.fn()
+        },
+        discardCurrentTurnOnAbort: () =>
+          scopeController.signal.aborted && !userController.signal.aborted
+      })
+    )
+
+    expect(result).toMatchObject({ status: "skipped" })
+    expect(mocks.saveMessageOnError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        botMessage: expect.stringContaining("partial answer"),
+        requestScope,
+        scopeSignal: scopeController.signal,
+        shouldAbortForScopeChange: expect.any(Function)
+      })
+    )
+    const [savePayload] = mocks.saveMessageOnError.mock.calls.at(-1)!
+    expect(savePayload.shouldAbortForScopeChange()).toBe(false)
+  })
+
+  it("discards a partially-streamed turn when its prompt scope is aborted", async () => {
+    const scopeController = new AbortController()
+    const previousMessages = [
+      {
+        id: "previous-user",
+        isBot: false,
+        name: "You",
+        message: "Earlier question",
+        sources: [],
+        createdAt: 1
+      }
+    ]
+    const previousHistory = [
+      { role: "user" as const, content: "Earlier question" }
+    ]
+    let messagesState = previousMessages
+    let historyState = previousHistory
+    const setMessages = vi.fn((next: any) => {
+      messagesState = typeof next === "function" ? next(messagesState) : next
+    })
+    const setHistory = vi.fn((next: any) => {
+      historyState = typeof next === "function" ? next(historyState) : next
+    })
+
+    mocks.pageAssistModel.mockResolvedValue({
+      saveToDb: false,
+      stream: async function* () {
+        yield "partial answer"
+        scopeController.abort()
+      }
+    })
+
+    const result = await runChatPipeline(
+      mode,
+      "Tell me a story",
+      "",
+      false,
+      previousMessages,
+      previousHistory,
+      scopeController.signal,
+      buildParams({
+        setMessages,
+        setHistory,
+        discardCurrentTurnOnAbort: () => true
+      })
+    )
+
+    expect(result).toMatchObject({ status: "skipped" })
+    expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+    expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
+    expect(messagesState).toEqual(previousMessages)
+    expect(historyState).toEqual(previousHistory)
+  })
+
+  it("discards a server-rejected scope-changed turn before the scope signal aborts", async () => {
+    const scopeChangedError = Object.assign(new Error("scope changed"), {
+      status: 412,
+      details: {
+        detail: { code: "request_config_scope_changed" }
+      }
+    })
+    const previousMessages = [
+      {
+        id: "previous-user",
+        isBot: false,
+        name: "You",
+        message: "Earlier question",
+        sources: [],
+        createdAt: 1
+      }
+    ]
+    const previousHistory = [
+      { role: "user" as const, content: "Earlier question" }
+    ]
+    let messagesState = previousMessages
+    let historyState = previousHistory
+    const setMessages = vi.fn((next: any) => {
+      messagesState = typeof next === "function" ? next(messagesState) : next
+    })
+    const setHistory = vi.fn((next: any) => {
+      historyState = typeof next === "function" ? next(historyState) : next
+    })
+
+    mocks.pageAssistModel.mockResolvedValue({
+      saveToDb: false,
+      stream: async function* () {
+        yield "partial answer"
+        throw scopeChangedError
+      }
+    })
+
+    const result = await runChatPipeline(
+      mode,
+      "Tell me a story",
+      "",
+      false,
+      previousMessages,
+      previousHistory,
+      new AbortController().signal,
+      buildParams({ setMessages, setHistory })
+    )
+
+    expect(result).toMatchObject({ status: "skipped" })
+    expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+    expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
+    expect(messagesState).toEqual(previousMessages)
+    expect(historyState).toEqual(previousHistory)
+  })
+
+  it("discards a turn when its prompt scope changes during final persistence", async () => {
+    let resolveSave!: (value: string) => void
+    const pendingSave = new Promise<string>((resolve) => {
+      resolveSave = resolve
+    })
+    mocks.saveMessageOnSuccess.mockReturnValueOnce(pendingSave)
+    const scopeController = new AbortController()
+    const previousMessages = [
+      {
+        id: "previous-user",
+        isBot: false,
+        name: "You",
+        message: "Earlier question",
+        sources: [],
+        createdAt: 1
+      }
+    ]
+    const previousHistory = [
+      { role: "user" as const, content: "Earlier question" }
+    ]
+    let messagesState = previousMessages
+    let historyState = previousHistory
+    const setMessages = vi.fn((next: any) => {
+      messagesState = typeof next === "function" ? next(messagesState) : next
+    })
+    const setHistory = vi.fn((next: any) => {
+      historyState = typeof next === "function" ? next(historyState) : next
+    })
+    const requestScope = Object.freeze({
+      config: Object.freeze({
+        serverUrl: "https://scope.example",
+        authMode: "multi-user" as const
+      }),
+      userId: 19
+    })
+
+    const submission = runChatPipeline(
+      mode,
+      "Tell me a story",
+      "",
+      false,
+      previousMessages,
+      previousHistory,
+      scopeController.signal,
+      buildParams({
+        setMessages,
+        setHistory,
+        servicePromptSnapshot: {
+          scopeKey: "scope-19",
+          requestScope,
+          capability: "supported",
+          definitions: {},
+          scopeSignal: scopeController.signal,
+          release: vi.fn()
+        },
+        discardCurrentTurnOnAbort: () => true
+      })
+    )
+
+    await vi.waitFor(() => {
+      expect(mocks.saveMessageOnSuccess).toHaveBeenCalledTimes(1)
+    })
+    expect(mocks.saveMessageOnSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestScope,
+        scopeSignal: scopeController.signal
+      })
+    )
+    scopeController.abort()
+    resolveSave("history-1")
+
+    await expect(submission).resolves.toMatchObject({ status: "skipped" })
+    expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
+    expect(messagesState).toEqual(previousMessages)
+    expect(historyState).toEqual(previousHistory)
+  })
+
+  it("discards a turn when its prompt scope changes during error persistence", async () => {
+    let resolveSave!: (value: string) => void
+    const pendingSave = new Promise<string>((resolve) => {
+      resolveSave = resolve
+    })
+    mocks.saveMessageOnError.mockReturnValueOnce(pendingSave)
+    const scopeController = new AbortController()
+    const previousMessages = [
+      {
+        id: "previous-user",
+        isBot: false,
+        name: "You",
+        message: "Earlier question",
+        sources: [],
+        createdAt: 1
+      }
+    ]
+    const previousHistory = [
+      { role: "user" as const, content: "Earlier question" }
+    ]
+    let messagesState = previousMessages
+    let historyState = previousHistory
+    const setMessages = vi.fn((next: any) => {
+      messagesState = typeof next === "function" ? next(messagesState) : next
+    })
+    const setHistory = vi.fn((next: any) => {
+      historyState = typeof next === "function" ? next(historyState) : next
+    })
+    const requestScope = Object.freeze({
+      config: Object.freeze({
+        serverUrl: "https://scope.example",
+        authMode: "multi-user" as const
+      }),
+      userId: 19
+    })
+    mocks.pageAssistModel.mockResolvedValue({
+      saveToDb: false,
+      stream: async function* () {
+        yield "partial answer"
+        throw new Error("provider failed")
+      }
+    })
+
+    const submission = runChatPipeline(
+      mode,
+      "Tell me a story",
+      "",
+      false,
+      previousMessages,
+      previousHistory,
+      scopeController.signal,
+      buildParams({
+        setMessages,
+        setHistory,
+        servicePromptSnapshot: {
+          scopeKey: "scope-19",
+          requestScope,
+          capability: "supported",
+          definitions: {},
+          scopeSignal: scopeController.signal,
+          release: vi.fn()
+        },
+        discardCurrentTurnOnAbort: () => scopeController.signal.aborted
+      })
+    )
+
+    await vi.waitFor(() => {
+      expect(mocks.saveMessageOnError).toHaveBeenCalledTimes(1)
+    })
+    const [savePayload] = mocks.saveMessageOnError.mock.calls[0]!
+    expect(savePayload).toMatchObject({
+      requestScope,
+      scopeSignal: scopeController.signal
+    })
+    expect(savePayload.shouldAbortForScopeChange).toEqual(expect.any(Function))
+    scopeController.abort()
+    expect(savePayload.shouldAbortForScopeChange()).toBe(true)
+    resolveSave("history-1")
+
+    await expect(submission).resolves.toMatchObject({ status: "skipped" })
+    expect(messagesState).toEqual(previousMessages)
+    expect(historyState).toEqual(previousHistory)
   })
 
   it("marks a stream_transport_interrupted answer as interrupted, never via saveMessageOnSuccess", async () => {

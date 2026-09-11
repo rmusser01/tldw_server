@@ -6,8 +6,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
+from tldw_Server_API.app.api.v1.endpoints.audio import audiobooks as audiobook_endpoints
 from tldw_Server_API.app.api.v1.endpoints.audio.audiobooks import router as audiobooks_router
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.TTS.gateway_config import normalize_gateway_specs
 
 pytestmark = pytest.mark.integration
 
@@ -178,6 +180,181 @@ def test_job_access_denied_for_other_user(client_audiobooks_jobs, job_payload):
 
     artifacts_resp = client_audiobooks_jobs.get(f"/api/v1/audiobooks/jobs/{data['job_id']}/artifacts")
     assert artifacts_resp.status_code == 404
+
+
+def test_gateway_audiobook_job_persists_only_preflighted_route_identity(
+    client_audiobooks_jobs,
+    monkeypatch,
+):
+    specs = normalize_gateway_specs(
+        {},
+        {
+            "company": {
+                "enabled": True,
+                "allow_user_api_key": True,
+                "base_url": "https://speech.example.test/v1",
+                "speech_path": "audio/speech",
+                "default_model": "Vendor/Exact-TTS",
+                "default_voice": "narrator",
+                "allowed_models": ["Vendor/Exact-TTS"],
+                "capability_defaults": {
+                    "formats": ["mp3"],
+                    "supports_speed": True,
+                },
+            }
+        },
+    )
+    monkeypatch.setattr(
+        audiobook_endpoints,
+        "get_tts_config_manager",
+        lambda: type("Manager", (), {"get_gateway_specs": lambda self: specs})(),
+    )
+    payload = {
+        "project_title": "Gateway Book",
+        "source": {"input_type": "txt", "raw_text": "Hello world."},
+        "tts_backend": "company",
+        "tts_allow_fallback": True,
+        "tts_model": "Vendor/Exact-TTS",
+        "chapters": [
+            {"chapter_id": "ch_001", "include": True, "speed": 1.0},
+        ],
+        "output": {"merge": False, "per_chapter": True, "formats": ["mp3"]},
+    }
+
+    response = client_audiobooks_jobs.post("/api/v1/audiobooks/jobs", json=payload)
+
+    assert response.status_code == 200
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    job = JobManager().get_job(response.json()["job_id"])
+    assert job is not None
+    stored = job["payload"]
+    assert stored["tts_backend"] == "gateway:company"
+    assert stored["tts_model"] == "Vendor/Exact-TTS"
+    assert stored["tts_voice"] == "narrator"
+    assert stored["tts_allow_fallback"] is False
+    assert stored["chapters"][0]["voice"] == "narrator"
+    serialized = json.dumps(stored).casefold()
+    for forbidden in (
+        "api_key",
+        "authorization",
+        "base_url",
+        "speech_path",
+        "headers",
+        "credential_scope",
+        "credential_source",
+        "credential_revision",
+    ):
+        assert forbidden not in serialized
+
+
+def test_gateway_audiobook_job_rejects_authority_metadata(
+    client_audiobooks_jobs,
+    monkeypatch,
+):
+    specs = normalize_gateway_specs(
+        {},
+        {
+            "company": {
+                "enabled": True,
+                "allow_user_api_key": True,
+                "base_url": "https://speech.example.test/v1",
+                "speech_path": "audio/speech",
+                "default_model": "Vendor/Exact-TTS",
+                "default_voice": "narrator",
+                "allowed_models": ["Vendor/Exact-TTS"],
+                "capability_defaults": {"formats": ["mp3"]},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        audiobook_endpoints,
+        "get_tts_config_manager",
+        lambda: type("Manager", (), {"get_gateway_specs": lambda self: specs})(),
+    )
+    payload = {
+        "project_title": "Unsafe Gateway Book",
+        "source": {"input_type": "txt", "raw_text": "Hello world."},
+        "tts_backend": "company",
+        "tts_model": "Vendor/Exact-TTS",
+        "chapters": [{"chapter_id": "ch_001", "include": True}],
+        "output": {"merge": False, "per_chapter": True, "formats": ["mp3"]},
+        "metadata": {"base_url": "https://attacker.invalid/v1"},
+    }
+
+    response = client_audiobooks_jobs.post("/api/v1/audiobooks/jobs", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_chapter_gateway_override_resolves_its_own_voice_and_fallback_policy(
+    client_audiobooks_jobs,
+    monkeypatch,
+):
+    def gateway(default_voice, fallback=None):
+        return {
+            "enabled": True,
+            "allow_user_api_key": True,
+            "base_url": "https://speech.example.test/v1",
+            "speech_path": "audio/speech",
+            "default_model": "Vendor/Exact-TTS",
+            "default_voice": default_voice,
+            "allowed_models": ["Vendor/Exact-TTS"],
+            "capability_defaults": {"formats": ["mp3"]},
+            "fallback": fallback or {},
+        }
+
+    specs = normalize_gateway_specs(
+        {},
+        {
+            "primary": gateway("voice-a"),
+            "chapter": gateway(
+                "voice-b",
+                {
+                    "on": ["timeout"],
+                    "max_attempts": 2,
+                    "targets": [
+                        {
+                            "backend": "gateway:primary",
+                            "model": "Vendor/Exact-TTS",
+                        }
+                    ],
+                },
+            ),
+        },
+    )
+    monkeypatch.setattr(
+        audiobook_endpoints,
+        "get_tts_config_manager",
+        lambda: type("Manager", (), {"get_gateway_specs": lambda self: specs})(),
+    )
+    payload = {
+        "project_title": "Cross-gateway Book",
+        "source": {"input_type": "txt", "raw_text": "Hello world."},
+        "tts_backend": "primary",
+        "tts_allow_fallback": True,
+        "tts_model": "Vendor/Exact-TTS",
+        "chapters": [
+            {
+                "chapter_id": "ch_001",
+                "include": True,
+                "tts_backend": "chapter",
+            }
+        ],
+        "output": {"merge": False, "per_chapter": True, "formats": ["mp3"]},
+    }
+
+    response = client_audiobooks_jobs.post("/api/v1/audiobooks/jobs", json=payload)
+
+    assert response.status_code == 200
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    stored = JobManager().get_job(response.json()["job_id"])["payload"]
+    assert stored["tts_voice"] == "voice-a"
+    assert stored["tts_allow_fallback"] is False
+    assert stored["chapters"][0]["tts_backend"] == "gateway:chapter"
+    assert stored["chapters"][0]["voice"] == "voice-b"
+    assert stored["chapters"][0]["tts_allow_fallback"] is True
 
 
 def test_project_chapters_include_canonical_offset_pagination(client_audiobook_project_lists) -> None:

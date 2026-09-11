@@ -1,17 +1,30 @@
-import os
-import pytest
 import asyncio
 import inspect
-from pathlib import Path
+import os
 from collections.abc import Iterable
 from typing import Final
 
-from tldw_Server_API.app.main import app
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
-from tldw_Server_API.app.api.v1.API_Deps import auth_deps
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    set_llm_provider_overrides_cache_for_tests,
+)
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.main import app
+
+
+@pytest.fixture(autouse=True)
+def healthy_provider_override_snapshot():
+    """Keep non-lifespan embedding tests on a deterministic healthy snapshot."""
+    set_llm_provider_overrides_cache_for_tests({})
+    try:
+        yield
+    finally:
+        set_llm_provider_overrides_cache_for_tests({})
 
 
 @pytest.fixture
@@ -206,6 +219,7 @@ def test_client(disable_heavy_startup):
 
     Scope: function - keeps isolation across property-based runs.
     """
+    _overrides_before = dict(app.dependency_overrides)
     try:
         csrf = "test-csrf"
         with TestClient(app) as client:
@@ -216,9 +230,14 @@ def test_client(disable_heavy_startup):
             client.headers["Authorization"] = f"Bearer {get_settings().SINGLE_USER_API_KEY}"
             yield client
     finally:
-        # Ensure dependency overrides do not leak across tests
+        # Restore, do not clear. These overrides live on the shared global app,
+        # so clear() removed entries this fixture never installed -- including
+        # the auth overrides another fixture had put there for the running test.
+        # Whichever test asked for ambient authentication next then got a 401,
+        # which is why the victim moved around between runs.
         try:
             app.dependency_overrides.clear()
+            app.dependency_overrides.update(_overrides_before)
         except Exception:
             _ = None
 
@@ -238,36 +257,6 @@ def auth_headers():
 @pytest.fixture
 def regular_user():
     return User(id=1, username="testuser", email="t@example.com", is_active=True, is_admin=False)
-
-
-@pytest.fixture(autouse=True)
-def _reset_app_lifecycle_state():
-    """Clear stale drain state on THIS conftest's pinned ``app`` before each test.
-
-    Why the root-conftest reset (tests/conftest.py,
-    _reset_main_app_lifecycle_state_between_tests) is not enough here,
-    verified empirically for issue #2581 (46F -> 0F with this fixture;
-    removing it reproduces the 46 failures):
-
-    1. Test modules import ``app`` at collection time, pinning the ORIGINAL
-       app object (this conftest pins the same one at line 8).
-    2. ``test_backpressure_and_quotas.py`` calls ``reload_app_main()``, which
-       permanently replaces ``sys.modules['tldw_Server_API.app.main']`` with
-       a new module (new app object) and never restores the original.
-    3. A later ``with TestClient(app)`` lifespan exit marks the pinned
-       ORIGINAL app draining (mark_lifecycle_shutdown).
-    4. The root fixture re-imports ``app.main`` at reset time, so it resets
-       only the NEW app; the drained original — which every pinned test
-       still routes through — stays drained, and DrainGateMiddleware 503s
-       every request: {"status": "not_ready", "reason": "shutdown_in_progress"}.
-
-    This fixture resets the pinned original directly. The underlying
-    reload_app_main sys.modules leak is tracked in issue #2585.
-    """
-    from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
-
-    reset_lifecycle_state(app)
-    yield
 
 
 @pytest.fixture(autouse=True)

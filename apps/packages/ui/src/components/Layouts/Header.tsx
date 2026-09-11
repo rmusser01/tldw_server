@@ -515,7 +515,7 @@ export const Header: React.FC<Props> = ({
             </div>
             {shareLinksLoading ? (
               <p className="text-xs text-text-muted">
-                {t("common:loading", "Loading...")}
+                {t("common:loading.title", "Loading...")}
               </p>
             ) : shareLinks.length === 0 ? (
               <p className="text-xs text-text-muted">

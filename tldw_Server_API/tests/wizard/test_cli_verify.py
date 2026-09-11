@@ -2,12 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
-from typer.testing import CliRunner
-
 from tldw_Server_API.cli.wizard import cli as wizard_cli
+from tldw_Server_API.tests.wizard.cli_runner import CliRunner
 from tldw_Server_API.tests.wizard.helpers import assert_action_field, assert_wizard_json
-
 
 runner = CliRunner()
 

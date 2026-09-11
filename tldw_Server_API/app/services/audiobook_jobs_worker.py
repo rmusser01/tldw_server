@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.Chunking.strategies.ebook_chapters import EbookCha
 from tldw_Server_API.app.core.config import get_config_value
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib import (
     extract_epub_metadata_from_text,
     process_epub,
@@ -38,12 +39,13 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resol
 from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib import (
     extract_text_and_format_from_pdf,
 )
+from tldw_Server_API.app.core.Jobs.event_stream import emit_job_event
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.testing import is_truthy
-from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.TTS.adapter_registry import TTSProvider
 from tldw_Server_API.app.core.TTS.audio_converter import AudioConverter
+from tldw_Server_API.app.core.TTS.gateway_preflight import gateway_route_provenance
 from tldw_Server_API.app.core.TTS.tts_request_resolution import normalize_tts_provider as normalize_tts_provider_name
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
 from tldw_Server_API.app.core.TTS.tts_validation import TTSInputValidator
@@ -96,6 +98,8 @@ class ChapterPlanItem:
     end_offset: int
     voice: str | None
     speed: float | None
+    tts_backend: str | None
+    tts_allow_fallback: bool | None
     voice_profile_id: str | None
     index: int
     total: int
@@ -398,7 +402,10 @@ def _resolve_item_requests(payload: dict[str, Any]) -> list[dict[str, Any]]:
     default_subtitles = payload.get("subtitles") or {}
     default_metadata = payload.get("metadata") or {}
     default_voice_profile_id = payload.get("voice_profile_id")
-    default_tts_provider = _normalize_tts_provider(
+    default_tts_backend = payload.get("tts_backend")
+    default_tts_allow_fallback = payload.get("tts_allow_fallback")
+    default_tts_voice = payload.get("tts_voice")
+    default_tts_provider = None if default_tts_backend else _normalize_tts_provider(
         payload.get("tts_provider") or default_metadata.get("tts_provider")
     )
     default_tts_model = payload.get("tts_model") or default_metadata.get("tts_model")
@@ -409,7 +416,7 @@ def _resolve_item_requests(payload: dict[str, Any]) -> list[dict[str, Any]]:
             raise AudiobookJobError("missing_source", retryable=False)
         if not default_output:
             raise AudiobookJobError("missing_output", retryable=False)
-        if _is_kokoro_request(default_tts_provider, default_tts_model) and not default_subtitles:
+        if not default_tts_backend and _is_kokoro_request(default_tts_provider, default_tts_model) and not default_subtitles:
             raise AudiobookJobError("missing_subtitles", retryable=False)
         return [
             {
@@ -421,6 +428,9 @@ def _resolve_item_requests(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "metadata": default_metadata,
                 "tts_provider": default_tts_provider,
                 "tts_model": default_tts_model,
+                "tts_backend": default_tts_backend,
+                "tts_allow_fallback": default_tts_allow_fallback,
+                "tts_voice": default_tts_voice,
             }
         ]
 
@@ -435,7 +445,12 @@ def _resolve_item_requests(payload: dict[str, Any]) -> list[dict[str, Any]]:
         if not source:
             raise AudiobookJobError("missing_item_source", retryable=False)
         item_override = item.get("metadata") or {}
-        tts_provider = _normalize_tts_provider(
+        tts_backend = item.get("tts_backend") or default_tts_backend
+        tts_allow_fallback = item.get("tts_allow_fallback")
+        if tts_allow_fallback is None:
+            tts_allow_fallback = default_tts_allow_fallback
+        tts_voice = item.get("tts_voice") or default_tts_voice
+        tts_provider = None if tts_backend else _normalize_tts_provider(
             item.get("tts_provider") or item_override.get("tts_provider") or default_tts_provider
         )
         tts_model = item.get("tts_model") or item_override.get("tts_model") or default_tts_model
@@ -443,7 +458,7 @@ def _resolve_item_requests(payload: dict[str, Any]) -> list[dict[str, Any]]:
         subtitle_cfg = item.get("subtitles") if "subtitles" in item else default_subtitles
         if not output_cfg:
             raise AudiobookJobError("missing_item_output", retryable=False)
-        if _is_kokoro_request(tts_provider, tts_model) and not subtitle_cfg:
+        if not tts_backend and _is_kokoro_request(tts_provider, tts_model) and not subtitle_cfg:
             raise AudiobookJobError("missing_item_subtitles", retryable=False)
         item_metadata = {}
         if default_metadata:
@@ -461,6 +476,9 @@ def _resolve_item_requests(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "item_index": idx,
                 "tts_provider": tts_provider,
                 "tts_model": tts_model,
+                "tts_backend": tts_backend,
+                "tts_allow_fallback": tts_allow_fallback,
+                "tts_voice": tts_voice,
             }
         )
     return resolved
@@ -797,6 +815,8 @@ def _build_chapter_plan(
                 end_offset=end_offset,
                 voice=voice_override,
                 speed=speed_override,
+                tts_backend=spec.get("tts_backend"),
+                tts_allow_fallback=spec.get("tts_allow_fallback"),
                 voice_profile_id=voice_profile.profile_id if voice_profile else None,
                 index=len(plan),
                 total=len(selected),
@@ -816,6 +836,8 @@ def _build_chapter_plan(
             end_offset=item.end_offset,
             voice=item.voice,
             speed=item.speed,
+            tts_backend=item.tts_backend,
+            tts_allow_fallback=item.tts_allow_fallback,
             voice_profile_id=item.voice_profile_id,
             index=i,
             total=total,
@@ -1040,13 +1062,35 @@ def _resolve_output_formats(output_cfg: dict[str, Any]) -> tuple[list[str], bool
     return resolved, wants_m4b
 
 
-def _validate_text(text: str, *, provider: str | None, model: str | None) -> str:
+def _explicit_text_validation_backend(
+    item_backend: str | None,
+    chapter_specs: Any,
+) -> str | None:
+    """Select neutral text validation when any chapter uses an explicit gateway."""
+    if item_backend:
+        return item_backend
+    if isinstance(chapter_specs, list):
+        for chapter in chapter_specs:
+            if isinstance(chapter, dict) and chapter.get("tts_backend"):
+                return str(chapter["tts_backend"])
+    return None
+
+
+def _validate_text(
+    text: str,
+    *,
+    provider: str | None,
+    model: str | None,
+    backend: str | None = None,
+) -> str:
     validator = TTSInputValidator({"strict_validation": True})
-    provider_hint, _resolved_model, _resolved_voice = _resolve_audiobook_generation_defaults(
-        provider,
-        model,
-        None,
-    )
+    provider_hint = None
+    if not backend:
+        provider_hint, _resolved_model, _resolved_voice = _resolve_audiobook_generation_defaults(
+            provider,
+            model,
+            None,
+        )
     sanitized = validator.sanitize_text(text, provider=provider_hint)
     if not sanitized or not sanitized.strip():
         raise AudiobookJobError("empty_text_after_sanitization", retryable=False)
@@ -1058,29 +1102,41 @@ async def _generate_tts_audio(
     text: str,
     model: str | None,
     provider: str | None,
+    backend: str | None,
+    allow_fallback: bool | None,
     voice: str | None,
     speed: float | None,
     response_format: str,
     user_id: int | None,
-) -> tuple[bytes, dict | None]:
-    provider_hint, resolved_model, resolved_voice = _resolve_audiobook_generation_defaults(
-        provider,
-        model,
-        voice,
-    )
-    request = OpenAISpeechRequest(
-        model=resolved_model,
-        input=text,
-        voice=resolved_voice,
-        response_format=response_format,
-        speed=float(speed) if speed is not None else 1.0,
-        stream=False,
-    )
+) -> tuple[bytes, dict | None, dict[str, Any]]:
+    if backend:
+        provider_hint = None
+        resolved_model = str(model or "")
+        resolved_voice = str(voice or "")
+    else:
+        provider_hint, resolved_model, resolved_voice = _resolve_audiobook_generation_defaults(
+            provider,
+            model,
+            voice,
+        )
+    request_values: dict[str, Any] = {
+        "model": resolved_model,
+        "input": text,
+        "voice": resolved_voice,
+        "response_format": response_format,
+        "stream": False,
+    }
+    if speed is not None:
+        request_values["speed"] = float(speed)
+    if backend:
+        request_values["backend"] = backend
+        request_values["allow_fallback"] = bool(allow_fallback)
+    request = OpenAISpeechRequest(**request_values)
     tts_service = await get_tts_service_v2()
     audio_iter = tts_service.generate_speech(
         request,
         provider=provider_hint,
-        fallback=True,
+        fallback=not bool(backend),
         user_id=user_id,
     )
     chunks = b""
@@ -1088,7 +1144,53 @@ async def _generate_tts_audio(
         chunks += chunk
     metadata = getattr(request, "_tts_metadata", None)
     alignment = metadata.get("alignment") if isinstance(metadata, dict) else None
-    return chunks, alignment
+    route = gateway_route_provenance(
+        requested_backend=backend,
+        requested_model=resolved_model,
+        metadata=metadata,
+    )
+    return chunks, alignment, route
+
+
+def _merge_route_metadata(current: dict[str, Any], update: dict[str, Any]) -> None:
+    """Merge per-segment route identity while retaining any fallback/conversion use."""
+    fallback_used = bool(current.get("fallback_used") or update.get("fallback_used"))
+    conversion_used = bool(current.get("conversion_used") or update.get("conversion_used"))
+    identity_fields = (
+        "requested_backend",
+        "requested_model",
+        "actual_backend",
+        "actual_model",
+    )
+    mixed_fields = {
+        field
+        for field in identity_fields
+        if current.get(field) is not None
+        and update.get(field) is not None
+        and current[field] != update[field]
+    }
+    current.update(update)
+    for field in mixed_fields:
+        current[field] = "mixed"
+    if mixed_fields or current.get("mixed_route"):
+        current["mixed_route"] = True
+    current["fallback_used"] = fallback_used
+    current["conversion_used"] = conversion_used
+
+
+def _mark_route_metadata_mixed(current: dict[str, Any]) -> None:
+    """Mark an aggregate containing routed and unrouted audio as heterogeneous."""
+    if not current:
+        return
+    for field in (
+        "requested_backend",
+        "requested_model",
+        "actual_backend",
+        "actual_model",
+    ):
+        if field in current:
+            current[field] = "mixed"
+    current["mixed_route"] = True
 
 
 async def process_audiobook_job(
@@ -1172,6 +1274,8 @@ async def process_audiobook_job(
     quota_tracker = _init_audiobook_quota(collections_db)
 
     outputs: list[dict[str, Any]] = []
+    job_route: dict[str, Any] = {}
+    job_had_unrouted_route = False
     project_db_id: int | None = None
     try:
         project_source_ref = _build_project_source_ref(item_requests)
@@ -1203,6 +1307,9 @@ async def process_audiobook_job(
             "voice_profile_id": payload.get("voice_profile_id"),
             "tts_provider": payload.get("tts_provider") or (payload.get("metadata") or {}).get("tts_provider"),
             "tts_model": payload.get("tts_model") or (payload.get("metadata") or {}).get("tts_model"),
+            "tts_backend": payload.get("tts_backend"),
+            "tts_allow_fallback": payload.get("tts_allow_fallback"),
+            "tts_voice": payload.get("tts_voice"),
         }
         if queue_settings:
             project_settings["queue"] = queue_settings
@@ -1230,8 +1337,15 @@ async def process_audiobook_job(
             item_chapter_specs = item.get("chapters")
             item_voice_profile_id = item.get("voice_profile_id")
             item_metadata = item.get("metadata") or {}
-            item_tts_provider = _normalize_tts_provider(item.get("tts_provider") or item_metadata.get("tts_provider"))
+            item_tts_backend = item.get("tts_backend")
+            item_tts_allow_fallback = item.get("tts_allow_fallback")
+            item_tts_voice = item.get("tts_voice")
+            item_tts_provider = None if item_tts_backend else _normalize_tts_provider(
+                item.get("tts_provider") or item_metadata.get("tts_provider")
+            )
             item_tts_model = item.get("tts_model") or item_metadata.get("tts_model")
+            item_route: dict[str, Any] = {}
+            item_had_unrouted_route = False
 
             jm.update_job_progress(
                 job_id,
@@ -1243,7 +1357,15 @@ async def process_audiobook_job(
                 progress_percent=_progress_percent(item_index, total_items, 0, 1, 0.0),
             )
             text, source_metadata, tag_result = _load_source_text(item_source, user_id)
-            normalized_text = _validate_text(text, provider=item_tts_provider, model=item_tts_model)
+            normalized_text = _validate_text(
+                text,
+                provider=item_tts_provider,
+                model=item_tts_model,
+                backend=_explicit_text_validation_backend(
+                    item_tts_backend,
+                    item_chapter_specs,
+                ),
+            )
             voice_profile = _load_voice_profile(collections_db, item_voice_profile_id)
             chapter_plan = _build_chapter_plan(
                 normalized_text,
@@ -1279,7 +1401,10 @@ async def process_audiobook_job(
                 raise AudiobookJobError("no_supported_output_formats", retryable=False)
 
             subtitle_formats = [str(fmt).lower() for fmt in (item_subtitle_cfg.get("formats") or [])]
-            alignment_supported = _is_kokoro_request(item_tts_provider, item_tts_model)
+            alignment_supported = not item_tts_backend and _is_kokoro_request(
+                item_tts_provider,
+                item_tts_model,
+            )
             if subtitle_formats and not alignment_supported:
                 raise AudiobookJobError("subtitles_not_supported_for_provider", retryable=False)
             chapter_audio_paths: list[Path] = []
@@ -1289,28 +1414,25 @@ async def process_audiobook_job(
             for chapter in chapter_plan:
                 chapter_global_index = global_chapter_index
                 global_chapter_index += 1
+                chapter_backend = chapter.tts_backend or item_tts_backend
+                chapter_allow_fallback = chapter.tts_allow_fallback
+                if chapter_allow_fallback is None:
+                    chapter_allow_fallback = item_tts_allow_fallback
+                chapter_voice = chapter.voice or item_tts_voice
                 chapter_metadata = {
                     "chapter_id": chapter.chapter_id,
                     "chapter_index": chapter_global_index,
                     "item_index": item_index,
                     "item_tag": item_tag,
                     "item_title": item_title,
-                    "voice": chapter.voice,
+                    "voice": chapter_voice,
                     "speed": chapter.speed,
                     "voice_profile_id": chapter.voice_profile_id,
                     "tts_provider": item_tts_provider,
                     "tts_model": item_tts_model,
                 }
-                collections_db.create_audiobook_chapter(
-                    project_id=project_db_id,
-                    chapter_index=chapter_global_index,
-                    title=chapter.title,
-                    start_offset=chapter.start_offset,
-                    end_offset=chapter.end_offset,
-                    voice_profile_id=chapter.voice_profile_id,
-                    speed=chapter.speed,
-                    metadata_json=json.dumps(chapter_metadata),
-                )
+                if chapter_backend:
+                    chapter_metadata["requested_backend"] = chapter_backend
                 jm.update_job_progress(
                     job_id,
                     progress_message=_progress_message(
@@ -1328,7 +1450,6 @@ async def process_audiobook_job(
                         0.0,
                     ),
                 )
-                chapter_voice = chapter.voice
                 requested_speed = chapter.speed
                 time_stretch_ratio = _resolve_time_stretch_ratio(requested_speed)
                 tts_speed = 1.0 if time_stretch_ratio else requested_speed
@@ -1353,18 +1474,28 @@ async def process_audiobook_job(
                 segment_alignments: list[dict | None] = []
                 segment_durations: list[int] = []
                 segment_offsets: list[int] = []
+                chapter_route: dict[str, Any] = {}
                 for seg_idx, segment in enumerate(segments):
                     if base_format not in SUPPORTED_TTS_FORMATS:
                         raise AudiobookJobError("unsupported_base_format", retryable=False)
-                    seg_audio_bytes, seg_alignment = await _generate_tts_audio(
+                    generated = await _generate_tts_audio(
                         text=segment.text,
                         model=item_tts_model,
                         provider=item_tts_provider,
+                        backend=chapter_backend,
+                        allow_fallback=chapter_allow_fallback,
                         voice=chapter_voice,
                         speed=tts_speed,
                         response_format=base_format,
                         user_id=user_id,
                     )
+                    if len(generated) == 3:
+                        seg_audio_bytes, seg_alignment, segment_route = generated
+                    else:
+                        seg_audio_bytes, seg_alignment = generated
+                        segment_route = {}
+                    if segment_route:
+                        _merge_route_metadata(chapter_route, segment_route)
                     if not alignment_supported:
                         seg_alignment = None
                     if len(segments) == 1:
@@ -1419,6 +1550,40 @@ async def process_audiobook_job(
                 if not alignment_supported:
                     alignment_payload = None
 
+                if chapter_route:
+                    chapter_metadata.update(chapter_route)
+                    _merge_route_metadata(item_route, chapter_route)
+                    _merge_route_metadata(job_route, chapter_route)
+                    if item_had_unrouted_route:
+                        _mark_route_metadata_mixed(item_route)
+                    if job_had_unrouted_route:
+                        _mark_route_metadata_mixed(job_route)
+                    with contextlib.suppress(_AUDIOBOOK_JOBS_NONCRITICAL_EXCEPTIONS):
+                        emit_job_event(
+                            "audiobook.tts.route",
+                            job={"id": job_id},
+                            attrs={
+                                "chapter_id": chapter.chapter_id,
+                                "item_index": item_index,
+                                **chapter_route,
+                            },
+                        )
+                elif not chapter_backend:
+                    item_had_unrouted_route = True
+                    job_had_unrouted_route = True
+                    _mark_route_metadata_mixed(item_route)
+                    _mark_route_metadata_mixed(job_route)
+                collections_db.create_audiobook_chapter(
+                    project_id=project_db_id,
+                    chapter_index=chapter_global_index,
+                    title=chapter.title,
+                    start_offset=chapter.start_offset,
+                    end_offset=chapter.end_offset,
+                    voice_profile_id=chapter.voice_profile_id,
+                    speed=chapter.speed,
+                    metadata_json=json.dumps(chapter_metadata),
+                )
+
                 chapter_audio_paths.append(base_path)
 
                 if time_stretch_ratio:
@@ -1471,6 +1636,7 @@ async def process_audiobook_job(
                         "item_title": item_title,
                         "tts_provider": item_tts_provider,
                         "tts_model": item_tts_model,
+                        **chapter_route,
                     }
                     base_row = await asyncio.to_thread(
                         _create_output_and_link,
@@ -1491,6 +1657,7 @@ async def process_audiobook_job(
                             "type": OUTPUT_TYPE_AUDIO,
                             "format": base_format,
                             "item_index": item_index,
+                            **chapter_route,
                         }
                     )
 
@@ -1541,6 +1708,7 @@ async def process_audiobook_job(
                             "item_title": item_title,
                             "tts_provider": item_tts_provider,
                             "tts_model": item_tts_model,
+                            **chapter_route,
                         }
                         row = await asyncio.to_thread(
                             _create_output_and_link,
@@ -1561,6 +1729,7 @@ async def process_audiobook_job(
                                 "type": OUTPUT_TYPE_AUDIO,
                                 "format": fmt,
                                 "item_index": item_index,
+                                **chapter_route,
                             }
                         )
 
@@ -1601,6 +1770,7 @@ async def process_audiobook_job(
                         "item_title": item_title,
                         "tts_provider": item_tts_provider,
                         "tts_model": item_tts_model,
+                        **chapter_route,
                     }
                     align_row = await asyncio.to_thread(
                         _create_output_and_link,
@@ -1621,6 +1791,7 @@ async def process_audiobook_job(
                             "type": OUTPUT_TYPE_ALIGNMENT,
                             "format": "json",
                             "item_index": item_index,
+                            **chapter_route,
                         }
                     )
 
@@ -1673,6 +1844,7 @@ async def process_audiobook_job(
                                 "item_title": item_title,
                                 "tts_provider": item_tts_provider,
                                 "tts_model": item_tts_model,
+                                **chapter_route,
                             }
                             subtitle_row = await asyncio.to_thread(
                                 _create_output_and_link,
@@ -1693,6 +1865,7 @@ async def process_audiobook_job(
                                     "type": OUTPUT_TYPE_SUBTITLE,
                                     "format": fmt,
                                     "item_index": item_index,
+                                    **chapter_route,
                                 }
                             )
 
@@ -1741,6 +1914,7 @@ async def process_audiobook_job(
                         "item_title": item_title,
                         "tts_provider": item_tts_provider,
                         "tts_model": item_tts_model,
+                        **item_route,
                     }
                     merged_row = await asyncio.to_thread(
                         _create_output_and_link,
@@ -1761,6 +1935,7 @@ async def process_audiobook_job(
                             "type": OUTPUT_TYPE_AUDIO,
                             "format": base_format,
                             "item_index": item_index,
+                            **item_route,
                         }
                     )
 
@@ -1787,6 +1962,7 @@ async def process_audiobook_job(
                             "item_title": item_title,
                             "tts_provider": item_tts_provider,
                             "tts_model": item_tts_model,
+                            **item_route,
                         }
                         merged_row = await asyncio.to_thread(
                             _create_output_and_link,
@@ -1807,6 +1983,7 @@ async def process_audiobook_job(
                                 "type": OUTPUT_TYPE_AUDIO,
                                 "format": fmt,
                                 "item_index": item_index,
+                                **item_route,
                             }
                         )
 
@@ -1836,6 +2013,7 @@ async def process_audiobook_job(
                             "item_title": item_title,
                             "tts_provider": item_tts_provider,
                             "tts_model": item_tts_model,
+                            **item_route,
                         }
                         m4b_row = await asyncio.to_thread(
                             _create_output_and_link,
@@ -1856,6 +2034,7 @@ async def process_audiobook_job(
                                 "type": OUTPUT_TYPE_PACKAGE,
                                 "format": "m4b",
                                 "item_index": item_index,
+                                **item_route,
                             }
                         )
 
@@ -1874,7 +2053,7 @@ async def process_audiobook_job(
                 logger.warning("audiobook worker: failed to update project status: {}", exc)
         jm.complete_job(
             job_id,
-            result={"project_id": project_id, "outputs": outputs},
+            result={"project_id": project_id, "outputs": outputs, **job_route},
             worker_id=worker_id,
             lease_id=lease_id,
             completion_token=lease_id,

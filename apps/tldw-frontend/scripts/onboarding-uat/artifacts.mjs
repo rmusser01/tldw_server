@@ -22,10 +22,10 @@ export const SYNTHETIC_SECRETS = [
 ]
 
 const genericSecretPatterns = [
-  /\b[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET)\s*=\s*(?!\[REDACTED\]\b)[^\s]+/i,
+  /\b[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET)\s*=\s*(?!\[REDACTED\](?:\s|$))[^\s]+/i,
   /"(?:[^"]*(?:api[_-]?key|token|secret)[^"]*)"\s*:\s*"(?!\[REDACTED\]")[^"]+"/i,
   /Bearer\s+sk-[A-Za-z0-9._-]+/i,
-  /x-api-key:\s*(?!\[REDACTED\]\b)[A-Za-z0-9._-]+/i,
+  /x-api-key:\s*(?!\[REDACTED\](?:\s|$))[A-Za-z0-9._-]+/i,
   /"x-api-key"\s*:\s*"(?!\[REDACTED\]")[^"]+"/i,
   /\bsk-[A-Za-z0-9._-]{8,}\b/,
   /\bgh[pousr]_[A-Za-z0-9_]{8,}\b/,

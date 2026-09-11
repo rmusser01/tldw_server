@@ -38,7 +38,6 @@ from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
     BUDDY_VISUAL_STATIC_SOURCE_ASSET_GROUP_IDS,
 )
 
-
 pytestmark = pytest.mark.unit
 
 _BASIC_STARTER_PACK_IDS = {
@@ -193,7 +192,7 @@ def test_starter_catalog_lists_bundled_packs_with_basic_tier_art_ready(
     assert starter["total_bytes"] > 0
     assert _REQUIRED_BUDDY_STATES.issubset(set(starter["states_offered"]))
     basic_starters = [starter for starter in starters if starter["id"] in _BASIC_STARTER_PACK_IDS]
-    scaffold_starters = [starter for starter in starters if starter["id"] not in _BASIC_STARTER_PACK_IDS]
+    scaffold_starters = [starter for starter in starters if starter["production_status"] == "scaffold"]
     assert {starter["production_status"] for starter in basic_starters} == {"art_ready"}
     assert all("catalog:art-ready" in starter["tags"] for starter in basic_starters)
     assert all("scaffold" not in starter["description"].lower() for starter in basic_starters)
@@ -918,3 +917,15 @@ def test_copy_starter_pack_cleans_up_when_status_update_returns_none(
 
     assert exc_info.value.code == "starter_copy_failed"
     assert db_instance.list_persona_visual_packs(persona_id=persona_id, user_id=user_id) == []
+
+
+def test_pixel_migu_is_independent_art_ready_starter(db_instance: CharactersRAGDB) -> None:
+    """The pixel-art starter remains distinct from the existing marker design."""
+    service = PersonaVisualStarterCatalogService(db_instance)
+    detail = service.get_starter_pack("pixel-migu")
+    assert service.get_starter_pack("migu-marker-basic")["id"] == "migu-marker-basic"
+    assert detail["production_status"] == "art_ready"
+    assert detail["asset_count"] == 64
+    assert len(detail["manifest"]["states"]) == 31
+    assert detail["manifest"]["animations"]["wave"]["loop"] is False
+    assert len(detail["manifest"]["animations"]["speaking"]["frames"]) == 4

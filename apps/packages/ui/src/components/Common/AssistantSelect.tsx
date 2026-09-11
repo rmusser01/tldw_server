@@ -33,6 +33,12 @@ type Props = {
   variant?: "inline" | "dropdown"
   labelOverride?: string
   selectionModePreference?: "tracked" | "overlay"
+  initialTab?: AssistantSelectTab
+  selection?: AssistantSelection | null
+  onSelectionChange?: (selection: AssistantSelection) => void | Promise<void>
+  onSelectionComplete?: (
+    selection: AssistantSelection
+  ) => void | Promise<void>
 }
 
 type CharacterSummary = Record<string, unknown> & {
@@ -114,11 +120,16 @@ export const AssistantSelect: React.FC<Props> = ({
   showLabel = true,
   variant = "inline",
   labelOverride,
-  selectionModePreference = "tracked"
+  selectionModePreference = "tracked",
+  initialTab,
+  selection,
+  onSelectionChange,
+  onSelectionComplete
 }) => {
   const { t } = useTranslation(["option", "common"])
-  const [selectedAssistant, setSelectedAssistant] =
+  const [storedAssistant, setSelectedAssistant] =
     useSelectedAssistant(null)
+  const selectedAssistant = selection === undefined ? storedAssistant : selection
   const historyId = useStoreMessageOption((state) => state.historyId)
   const serverChatId = useStoreMessageOption((state) => state.serverChatId)
   const setHistoryId = useStoreMessageOption((state) => state.setHistoryId)
@@ -159,8 +170,11 @@ export const AssistantSelect: React.FC<Props> = ({
     selectionModePreference
   )
   const [activeTab, setActiveTab] = React.useState<"character" | "persona">(
-    selectedAssistant?.kind ?? "character"
+    initialTab ?? selectedAssistant?.kind ?? "character"
   )
+  React.useEffect(() => {
+    if (initialTab) setActiveTab(initialTab)
+  }, [initialTab])
   const [characters, setCharacters] = React.useState<CharacterSummary[]>([])
   const [personas, setPersonas] = React.useState<PersonaInfo[]>([])
   const [charactersLoading, setCharactersLoading] = React.useState(true)
@@ -380,6 +394,8 @@ export const AssistantSelect: React.FC<Props> = ({
   )
 
   React.useEffect(() => {
+    if (variant !== "inline" && !open) return
+
     let cancelled = false
     const isCancelled = () => cancelled
 
@@ -388,7 +404,7 @@ export const AssistantSelect: React.FC<Props> = ({
     return () => {
       cancelled = true
     }
-  }, [loadCharacters, loadPersonas])
+  }, [loadCharacters, loadPersonas, open, variant])
 
   const characterEntries = React.useMemo(
     () =>
@@ -533,6 +549,10 @@ export const AssistantSelect: React.FC<Props> = ({
           selectionMode: nextMode
         }
       }
+      if (onSelectionChange) {
+        await onSelectionChange(nextEntry)
+        return
+      }
       if (
         nextMode === "tracked" &&
         serverChatId &&
@@ -563,10 +583,13 @@ export const AssistantSelect: React.FC<Props> = ({
           )
         }
       }
+      await onSelectionComplete?.(nextEntry)
     },
     [
       effectiveAssistantState.mode,
       clearActiveServerChat,
+      onSelectionChange,
+      onSelectionComplete,
       restoreReturnFocus,
       selectionModePreference,
       serverChatId,
@@ -799,7 +822,7 @@ export const AssistantSelect: React.FC<Props> = ({
   const content = (
     <div
       data-testid="assistant-select-panel"
-      className="w-[320px] rounded-lg border border-border bg-surface text-text shadow-lg"
+      className="w-[320px] max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-surface text-text shadow-lg"
     >
       <div className="border-b border-border p-2">
         <Input
@@ -811,7 +834,14 @@ export const AssistantSelect: React.FC<Props> = ({
           allowClear
           size="small"
           onChange={(event) => setSearchText(event.target.value)}
-          onKeyDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            event.stopPropagation()
+            if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              setOpen(false)
+              restoreReturnFocus()
+            }
+          }}
         />
       </div>
       <div

@@ -9,7 +9,6 @@ from tldw_Server_API.app.api.v1.schemas.chunking_schema import (
     ChunkingTextRequest,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -76,6 +75,11 @@ def _assert_logs_are_sanitized(logger_stub: _LoggerStub) -> None:
     assert "/private/" not in rendered
     assert "SECRET_TOKEN" not in rendered
     assert "exc_info" not in rendered
+
+
+def _assert_http_exception_is_detached(error: HTTPException) -> None:
+    assert error.__cause__ is None
+    assert error.__context__ is None
 
 
 def _successful_chunker(text: str, options: dict[str, Any], *_args) -> list[dict[str, Any]]:
@@ -164,6 +168,7 @@ async def test_chunk_text_unexpected_error_log_and_detail_are_sanitized(monkeypa
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "An internal error occurred during text chunking"
+    _assert_http_exception_is_detached(exc_info.value)
     assert any(
         level == "error" and "Unexpected error during chunking process" in message
         for level, message, _args, _kwargs in logger_stub.messages
@@ -206,10 +211,75 @@ async def test_chunk_file_unexpected_error_log_and_detail_are_sanitized(monkeypa
     assert file.closed is True
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Internal error during file chunking"
+    _assert_http_exception_is_detached(exc_info.value)
     assert any(
         level == "error" and "Unexpected error during chunking file" in message
         for level, message, _args, _kwargs in logger_stub.messages
     )
     rendered = _render_logs(logger_stub)
     assert "RuntimeError" in rendered
+    _assert_logs_are_sanitized(logger_stub)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        chunking.ChunkingError("backend exploded SECRET_TOKEN"),
+        ValueError("backend exploded SECRET_TOKEN"),
+    ],
+)
+async def test_chunk_text_expected_failures_are_sanitized_and_detached(
+    monkeypatch,
+    error,
+):
+    logger_stub = _LoggerStub()
+
+    def fail(*_args):
+        raise error
+
+    monkeypatch.setattr(chunking, "logger", logger_stub)
+    monkeypatch.setattr(chunking, "improved_chunking_process", fail)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chunking.process_text_for_chunking_json(
+            _text_request("safe.py"),
+            http_request=object(),
+            current_user=object(),
+            media_db=None,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Chunking input or options are invalid."
+    _assert_http_exception_is_detached(exc_info.value)
+    _assert_logs_are_sanitized(logger_stub)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        chunking.ChunkingError("backend exploded SECRET_TOKEN"),
+        ValueError("backend exploded SECRET_TOKEN"),
+    ],
+)
+async def test_chunk_file_expected_failures_are_sanitized_and_detached(
+    monkeypatch,
+    error,
+):
+    logger_stub = _LoggerStub()
+    file = _FakeUploadFile("safe.py")
+
+    def fail(*_args):
+        raise error
+
+    monkeypatch.setattr(chunking, "logger", logger_stub)
+    monkeypatch.setattr(chunking, "improved_chunking_process", fail)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chunking.process_file_for_chunking(**_file_endpoint_kwargs(file))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Chunking input or options are invalid."
+    _assert_http_exception_is_detached(exc_info.value)
     _assert_logs_are_sanitized(logger_stub)

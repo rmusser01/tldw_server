@@ -301,6 +301,8 @@ class PersonaVisualStarterAssetResponse(BaseModel):
     mime_type: str
     asset_role: PersonaVisualAssetRole
     byte_size: int
+    width: int | None = None
+    height: int | None = None
 
 
 class PersonaVisualStarterProductionRecipeResponse(BaseModel):
@@ -661,7 +663,26 @@ class PersonaSessionSummary(BaseModel):
     scope_audit: dict[str, object] = Field(default_factory=dict)
 
 
+class PersonaPendingPlanStep(BaseModel):
+    """A read-only pending step for owner review, without an approval grant."""
+
+    idx: int
+    tool: str
+    step_type: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    description: str | None = None
+    why: str | None = None
+
+
+class PersonaPendingPlanReview(BaseModel):
+    """Read-only review data; confirmation revalidates current server policy."""
+
+    plan_id: str
+    steps: list[PersonaPendingPlanStep] = Field(max_length=100)
+
+
 class PersonaSessionDetail(PersonaSessionSummary):
+    pending_plan: PersonaPendingPlanReview | None = None
     turns: list[dict[str, object]] = Field(default_factory=list)
 
 
@@ -746,6 +767,7 @@ class PersonaVoiceDefaults(BaseModel):
     stt_language: str | None = None
     stt_model: str | None = None
     tts_provider: str | None = None
+    tts_model: str | None = None
     tts_voice: str | None = None
     confirmation_mode: PersonaConfirmationMode | None = None
     voice_chat_trigger_phrases: list[str] = Field(default_factory=list)
@@ -758,7 +780,7 @@ class PersonaVoiceDefaults(BaseModel):
     turn_stop_secs: float | None = None
     min_utterance_secs: float | None = None
 
-    @field_validator("stt_language", "stt_model", "tts_provider", "tts_voice", mode="before")
+    @field_validator("stt_language", "stt_model", "tts_provider", "tts_model", "tts_voice", mode="before")
     @classmethod
     def _strip_optional_text(cls, value: Any) -> Any:
         if not isinstance(value, str):

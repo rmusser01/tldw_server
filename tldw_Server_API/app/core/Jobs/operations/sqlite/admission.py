@@ -4,26 +4,41 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Any
-
-from loguru import logger
 
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionRejectionReason,
     AdmissionResult,
     CreateJobCommand,
+    OperationOutcome,
+    canonical_admin_webhook_row_matches,
+    is_admin_webhook_delivery_queue,
 )
 
 _MAX_QUEUED_MESSAGE = "Quota exceeded: max queued per user/domain"
 _SUBMITS_PER_MINUTE_MESSAGE = "Quota exceeded: submits per minute"
-_COUNTER_NONCRITICAL_ERRORS: tuple[type[BaseException], ...] = (
-    AttributeError,
-    RuntimeError,
-    TypeError,
-    ValueError,
-    sqlite3.Error,
-)
+_EXECUTION_CONTROL_CONFLICT_MESSAGE = "Idempotent job execution controls conflict"
+
+
+def _execution_controls_match(row: dict[str, Any], command: CreateJobCommand) -> bool:
+    """Return whether an existing row has the requested immutable controls."""
+
+    if is_admin_webhook_delivery_queue(command.domain, command.queue):
+        try:
+            payload = json.loads(row.get("payload"))
+        except (TypeError, ValueError):
+            return False
+        canonical_row = {**row, "payload": payload}
+        return canonical_admin_webhook_row_matches(
+            canonical_row,
+            expected_payload=command.payload,
+        )
+    return (
+        row.get("expired_lease_policy") == command.expired_lease_policy.value
+        and row.get("quarantine_threshold") == command.quarantine_threshold
+    )
 
 
 def _sqlite_timestamp(value: datetime) -> str:
@@ -31,8 +46,18 @@ def _sqlite_timestamp(value: datetime) -> str:
 
     normalized = value
     if value.tzinfo is not None:
-        normalized = value.astimezone(UTC).replace(tzinfo=None)
+        normalized = value.astimezone(timezone.utc).replace(tzinfo=None)
     return normalized.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _future_available_at(value: datetime | None, *, now: datetime) -> datetime | None:
+    """Keep only future schedule times; immediate jobs use a NULL ready marker."""
+
+    if value is None:
+        return None
+    normalized_value = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    normalized_now = now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+    return normalized_value if normalized_value > normalized_now else None
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
@@ -128,24 +153,6 @@ def _bump_counters(
     )
 
 
-def _bump_counters_best_effort(
-    conn: sqlite3.Connection,
-    *,
-    command: CreateJobCommand,
-    available_at_sql: str | None,
-) -> None:
-    try:
-        _bump_counters(conn, command=command, available_at_sql=available_at_sql)
-    except _COUNTER_NONCRITICAL_ERRORS as exc:
-        logger.warning(
-            "Non-critical SQLite jobs counter update failed for {}:{}:{}: {}",
-            command.domain,
-            command.queue,
-            command.job_type,
-            exc,
-        )
-
-
 def _quota_rejection(
     conn: sqlite3.Connection,
     *,
@@ -159,37 +166,27 @@ def _quota_rejection(
     if not command.owner_user_id:
         return None
 
-    try:
-        if max_queued_quota:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND status='queued'",
-                (command.domain, command.owner_user_id),
-            ).fetchone()
-            if int(row[0] if row else 0) >= max_queued_quota:
-                return AdmissionResult.rejected(
-                    AdmissionRejectionReason.QUOTA_EXCEEDED,
-                    message=_MAX_QUEUED_MESSAGE,
-                )
+    if max_queued_quota:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND status='queued'",
+            (command.domain, command.owner_user_id),
+        ).fetchone()
+        if int(row[0] if row else 0) >= max_queued_quota:
+            return AdmissionResult.rejected(
+                AdmissionRejectionReason.QUOTA_EXCEEDED,
+                message=_MAX_QUEUED_MESSAGE,
+            )
 
-        if submits_per_minute_quota:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND created_at >= DATETIME(?, '-60 seconds')",
-                (command.domain, command.owner_user_id, now_sql),
-            ).fetchone()
-            if int(row[0] if row else 0) >= submits_per_minute_quota:
-                return AdmissionResult.rejected(
-                    AdmissionRejectionReason.QUOTA_EXCEEDED,
-                    message=_SUBMITS_PER_MINUTE_MESSAGE,
-                )
-    except sqlite3.Error as exc:
-        logger.warning(
-            "SQLite jobs quota check failed for {}:{}:{}; continuing without quota rejection: {}",
-            command.domain,
-            command.queue,
-            command.job_type,
-            exc,
-        )
-        return None
+    if submits_per_minute_quota:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND created_at >= DATETIME(?, '-60 seconds')",
+            (command.domain, command.owner_user_id, now_sql),
+        ).fetchone()
+        if int(row[0] if row else 0) >= submits_per_minute_quota:
+            return AdmissionResult.rejected(
+                AdmissionRejectionReason.QUOTA_EXCEEDED,
+                message=_SUBMITS_PER_MINUTE_MESSAGE,
+            )
 
     return None
 
@@ -211,16 +208,18 @@ def _insert_job(
         INSERT OR IGNORE INTO jobs (
           uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
           idempotency_key, payload, result, status, priority, max_retries,
-          retry_count, available_at, created_at, updated_at, request_id, trace_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?, ?, ?)
+          expired_lease_policy, quarantine_threshold, retry_count, available_at,
+          created_at, updated_at, request_id, trace_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
         """
     else:
         sql = """
         INSERT INTO jobs (
           uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
           idempotency_key, payload, result, status, priority, max_retries,
-          retry_count, available_at, created_at, updated_at, request_id, trace_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?, ?, ?)
+          expired_lease_policy, quarantine_threshold, retry_count, available_at,
+          created_at, updated_at, request_id, trace_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
         """
     before_changes = int(getattr(conn, "total_changes", 0))
     conn.execute(
@@ -237,6 +236,8 @@ def _insert_job(
             payload_json,
             command.priority,
             command.max_retries,
+            command.expired_lease_policy.value,
+            command.quarantine_threshold,
             available_at_sql,
             now_sql,
             now_sql,
@@ -259,23 +260,45 @@ def create_job_admission(
     max_queued_quota: int,
     submits_per_minute_quota: int,
     counters_enabled: bool,
+    begin_immediate: bool = False,
+    pre_admission_lookup: Callable[
+        [sqlite3.Connection], dict[str, Any] | None
+    ] | None = None,
 ) -> AdmissionResult:
     """Create or replay a queued job admission inside a SQLite transaction."""
 
     payload_json = json.dumps(command.payload)
     now_sql = _sqlite_timestamp(now)
-    available_at_sql = _sqlite_timestamp(command.available_at) if command.available_at else None
+    available_at = _future_available_at(command.available_at, now=now)
+    available_at_sql = _sqlite_timestamp(available_at) if available_at else None
+
+    quota_enabled = bool(command.owner_user_id and (max_queued_quota or submits_per_minute_quota))
+    if quota_enabled or begin_immediate:
+        conn.execute("BEGIN IMMEDIATE")
 
     with conn:
-        quota_result = _quota_rejection(
-            conn,
-            command=command,
-            now_sql=now_sql,
-            max_queued_quota=max_queued_quota,
-            submits_per_minute_quota=submits_per_minute_quota,
-        )
-        if quota_result is not None:
-            return quota_result
+        if pre_admission_lookup is not None:
+            existing = pre_admission_lookup(conn)
+            if existing is not None:
+                return AdmissionResult.existing(row=existing)
+        idempotent_replay = False
+        if quota_enabled and command.idempotency_key:
+            row = conn.execute(
+                "SELECT 1 FROM jobs WHERE domain = ? AND queue = ? AND job_type = ? AND idempotency_key = ?",
+                (command.domain, command.queue, command.job_type, command.idempotency_key),
+            ).fetchone()
+            idempotent_replay = row is not None
+
+        if not idempotent_replay:
+            quota_result = _quota_rejection(
+                conn,
+                command=command,
+                now_sql=now_sql,
+                max_queued_quota=max_queued_quota,
+                submits_per_minute_quota=submits_per_minute_quota,
+            )
+            if quota_result is not None:
+                return quota_result
 
         if command.idempotency_key:
             row_id = _insert_job(
@@ -302,8 +325,14 @@ def create_job_admission(
                     "queue": command.queue,
                     "job_type": command.job_type,
                 }
+            if not inserted and not _execution_controls_match(row, command):
+                return AdmissionResult(
+                    outcome=OperationOutcome.BACKEND_CONFLICT,
+                    row=row,
+                    message=_EXECUTION_CONTROL_CONFLICT_MESSAGE,
+                )
             if inserted and counters_enabled:
-                _bump_counters_best_effort(conn, command=command, available_at_sql=available_at_sql)
+                _bump_counters(conn, command=command, available_at_sql=available_at_sql)
             event = _insert_created_event(
                 conn,
                 row=row,
@@ -335,7 +364,7 @@ def create_job_admission(
                 "job_type": command.job_type,
             }
         if counters_enabled:
-            _bump_counters_best_effort(conn, command=command, available_at_sql=available_at_sql)
+            _bump_counters(conn, command=command, available_at_sql=available_at_sql)
         event = _insert_created_event(
             conn,
             row=row,

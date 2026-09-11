@@ -3,11 +3,16 @@ import { describe, expect, it } from "vitest"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import {
   MANUAL_SESSION_KEY,
+  REFRESH_ROTATION_KEY,
   clearManualCredentials,
+  hasNewerCurrentAccessToken,
+  hasNewerCurrentRefreshRotation,
   normalizeServerOrigin,
   resolveEffectiveTldwConfig,
   resolveManualCredential,
+  storeRefreshRotationIfCurrent,
   toPersistedTldwConfig,
+  waitForNewerCurrentAccessToken,
   type CredentialStorage
 } from "@/services/tldw/single-user-credential"
 
@@ -36,6 +41,17 @@ const deviceConfig = {
   apiKeyServerOrigin: "https://api.example.test"
 } satisfies TldwConfig
 
+const multiUserConfig = {
+  authMode: "multi-user",
+  authSource: "manual",
+  serverUrl: "https://api.example.test/v1",
+  orgId: 7,
+  accessToken: "access-0",
+  refreshToken: "refresh-0"
+} satisfies TldwConfig
+const jwtForUser = (userId: string | number): string =>
+  `header.${btoa(JSON.stringify({ sub: String(userId) }))}.signature`
+
 describe("manual single-user credential policy", () => {
   it("hydrates an exact-origin session key without persisting it", async () => {
     const persistent = new MemoryStorage()
@@ -53,6 +69,14 @@ describe("manual single-user credential policy", () => {
       credentialSource: "manual",
       apiKeyPersistence: "session",
       apiKeyServerOrigin: "https://api.example.test"
+    })
+    await persistent.set(REFRESH_ROTATION_KEY, {
+      accessToken: "stale-access",
+      refreshToken: "stale-refresh"
+    })
+    await persistent.set(REFRESH_ROTATION_KEY, {
+      accessToken: "stale-access",
+      refreshToken: "stale-refresh"
     })
 
     await expect(
@@ -244,6 +268,7 @@ describe("manual single-user credential policy", () => {
       serverUrl: "https://api.example.test/v1"
     })
     expect(await session.get(MANUAL_SESSION_KEY)).toBeUndefined()
+    expect(await persistent.get(REFRESH_ROTATION_KEY)).toBeUndefined()
   })
 
   it("surfaces a persistent read failure after attempting session clearing", async () => {
@@ -306,5 +331,323 @@ describe("manual single-user credential policy", () => {
     )
     expect(normalizeServerOrigin("ftp://api.example.test")).toBeNull()
     expect(normalizeServerOrigin("not a URL")).toBeNull()
+  })
+})
+
+describe("scoped refresh-token rotation", () => {
+  it("applies a guarded rotation when advanced transport leaves serverUrl unset", async () => {
+    const persistent = new MemoryStorage()
+    const session = new MemoryStorage()
+    const advancedConfig = {
+      authMode: "multi-user" as const,
+      accessToken: "access-0",
+      refreshToken: "refresh-0"
+    }
+    await persistent.set("tldwConfig", advancedConfig)
+
+    await expect(storeRefreshRotationIfCurrent(
+      persistent,
+      advancedConfig as never,
+      "refresh-0",
+      { accessToken: "access-1", refreshToken: "refresh-1" }
+    )).resolves.toBe(true)
+
+    await expect(
+      resolveEffectiveTldwConfig({ persistent, session })
+    ).resolves.toEqual({
+      ...advancedConfig,
+      accessToken: "access-1",
+      refreshToken: "refresh-1"
+    })
+  })
+
+  it("overlays a rotation only while its target and source token still match", async () => {
+    const persistent = new MemoryStorage()
+    const session = new MemoryStorage()
+    await persistent.set("tldwConfig", multiUserConfig)
+    await persistent.set(REFRESH_ROTATION_KEY, {
+      version: 1,
+      serverUrl: multiUserConfig.serverUrl,
+      authMode: multiUserConfig.authMode,
+      authSource: multiUserConfig.authSource,
+      orgId: multiUserConfig.orgId,
+      sourceAccessToken: "access-0",
+      sourceRefreshToken: "refresh-0",
+      accessToken: "access-1",
+      refreshToken: "refresh-1"
+    })
+
+    await expect(
+      resolveEffectiveTldwConfig({ persistent, session })
+    ).resolves.toEqual({
+      ...multiUserConfig,
+      accessToken: "access-1",
+      refreshToken: "refresh-1"
+    })
+    await expect(persistent.get("tldwConfig")).resolves.toEqual(multiUserConfig)
+
+    const replacementAccount = {
+      ...multiUserConfig,
+      accessToken: "other-access",
+      refreshToken: "other-refresh"
+    }
+    await persistent.set("tldwConfig", replacementAccount)
+    await expect(
+      resolveEffectiveTldwConfig({ persistent, session })
+    ).resolves.toEqual(replacementAccount)
+
+    const replacementTarget = {
+      ...multiUserConfig,
+      serverUrl: "https://other.example.test",
+      accessToken: "target-access",
+      refreshToken: "refresh-0"
+    }
+    await persistent.set("tldwConfig", replacementTarget)
+    await expect(
+      resolveEffectiveTldwConfig({ persistent, session })
+    ).resolves.toEqual(replacementTarget)
+  })
+
+  it("preserves the original source token across consecutive rotations", async () => {
+    const persistent = new MemoryStorage()
+    const session = new MemoryStorage()
+    const target = {
+      serverUrl: multiUserConfig.serverUrl,
+      authMode: multiUserConfig.authMode,
+      authSource: multiUserConfig.authSource,
+      orgId: multiUserConfig.orgId
+    }
+    await persistent.set("tldwConfig", multiUserConfig)
+
+    await expect(storeRefreshRotationIfCurrent(
+      persistent,
+      target,
+      "refresh-0",
+      { accessToken: "access-1", refreshToken: "refresh-1" }
+    )).resolves.toBe(true)
+    await expect(hasNewerCurrentRefreshRotation(
+      persistent,
+      target,
+      "access-0"
+    )).resolves.toBe(true)
+    await expect(storeRefreshRotationIfCurrent(
+      persistent,
+      target,
+      "refresh-1",
+      { accessToken: "access-2", refreshToken: "refresh-2" }
+    )).resolves.toBe(true)
+    await expect(hasNewerCurrentRefreshRotation(
+      persistent,
+      target,
+      "access-1"
+    )).resolves.toBe(true)
+    await expect(hasNewerCurrentRefreshRotation(
+      persistent,
+      target,
+      "access-2"
+    )).resolves.toBe(false)
+
+    await expect(persistent.get(REFRESH_ROTATION_KEY)).resolves.toMatchObject({
+      sourceAccessToken: "access-0",
+      sourceRefreshToken: "refresh-0",
+      accessToken: "access-2",
+      refreshToken: "refresh-2"
+    })
+    await expect(
+      resolveEffectiveTldwConfig({ persistent, session })
+    ).resolves.toEqual({
+      ...multiUserConfig,
+      accessToken: "access-2",
+      refreshToken: "refresh-2"
+    })
+
+    await persistent.set("tldwConfig", {
+      ...multiUserConfig,
+      accessToken: "other-access",
+      refreshToken: "other-refresh"
+    })
+    await expect(hasNewerCurrentRefreshRotation(
+      persistent,
+      target,
+      "access-2"
+    )).resolves.toBe(false)
+  })
+
+  it("allows another refresh when the current access token expires without refresh rotation", async () => {
+    const persistent = new MemoryStorage()
+    const target = {
+      serverUrl: multiUserConfig.serverUrl,
+      authMode: multiUserConfig.authMode,
+      authSource: multiUserConfig.authSource,
+      orgId: multiUserConfig.orgId
+    }
+    await persistent.set("tldwConfig", multiUserConfig)
+    await expect(storeRefreshRotationIfCurrent(
+      persistent,
+      target,
+      "refresh-0",
+      { accessToken: "access-1", refreshToken: "refresh-0" }
+    )).resolves.toBe(true)
+
+    await expect(hasNewerCurrentRefreshRotation(
+      persistent,
+      target,
+      "access-1"
+    )).resolves.toBe(false)
+  })
+
+  it("observes a newer rotation written by another request context", async () => {
+    const persistent = new MemoryStorage()
+    const target = {
+      serverUrl: multiUserConfig.serverUrl,
+      authMode: multiUserConfig.authMode,
+      authSource: multiUserConfig.authSource,
+      orgId: multiUserConfig.orgId
+    }
+    await persistent.set("tldwConfig", multiUserConfig)
+    const waiting = waitForNewerCurrentAccessToken(
+      persistent,
+      target,
+      "access-0",
+      { timeoutMs: 100, pollIntervalMs: 1 }
+    )
+    setTimeout(() => {
+      void storeRefreshRotationIfCurrent(
+        persistent,
+        target,
+        "refresh-0",
+        { accessToken: "access-1", refreshToken: "refresh-1" }
+      )
+    }, 5)
+
+    await expect(waiting).resolves.toBe(true)
+  })
+
+  it("observes newer raw credentials written by an ordinary refresh", async () => {
+    const persistent = new MemoryStorage()
+    const capturedAccess = jwtForUser(42)
+    const target = {
+      serverUrl: multiUserConfig.serverUrl,
+      authMode: multiUserConfig.authMode,
+      authSource: multiUserConfig.authSource,
+      orgId: multiUserConfig.orgId
+    }
+    await persistent.set("tldwConfig", {
+      ...multiUserConfig,
+      accessToken: `${jwtForUser(42)}-rotated`,
+      refreshToken: "ordinary-refresh"
+    })
+
+    await expect(hasNewerCurrentAccessToken(
+      persistent,
+      target,
+      capturedAccess
+    )).resolves.toBe(true)
+  })
+
+  it("does not treat unverifiable raw token drift as a refresh winner", async () => {
+    const persistent = new MemoryStorage()
+    await persistent.set("tldwConfig", {
+      ...multiUserConfig,
+      accessToken: "other-account-access",
+      refreshToken: "other-account-refresh"
+    })
+
+    await expect(hasNewerCurrentAccessToken(
+      persistent,
+      multiUserConfig,
+      "access-0"
+    )).resolves.toBe(false)
+  })
+
+  it("cannot overwrite a target change racing the rotation-record write", async () => {
+    const replacement = {
+      ...multiUserConfig,
+      serverUrl: "https://replacement.example.test",
+      accessToken: "replacement-access",
+      refreshToken: "replacement-refresh"
+    }
+    class RacingStorage extends MemoryStorage {
+      override async set<T>(key: string, value: T): Promise<void> {
+        if (key === REFRESH_ROTATION_KEY) {
+          this.values.set("tldwConfig", replacement)
+        }
+        await super.set(key, value)
+      }
+    }
+    const persistent = new RacingStorage()
+    const session = new MemoryStorage()
+    await persistent.set("tldwConfig", multiUserConfig)
+
+    await expect(storeRefreshRotationIfCurrent(
+      persistent,
+      {
+        serverUrl: multiUserConfig.serverUrl,
+        authMode: multiUserConfig.authMode,
+        authSource: multiUserConfig.authSource,
+        orgId: multiUserConfig.orgId
+      },
+      "refresh-0",
+      { accessToken: "access-1", refreshToken: "refresh-1" }
+    )).resolves.toBe(true)
+
+    await expect(persistent.get("tldwConfig")).resolves.toEqual(replacement)
+    await expect(
+      resolveEffectiveTldwConfig({ persistent, session })
+    ).resolves.toEqual(replacement)
+  })
+
+  it("makes a rotation inert when raw access changes during the record write", async () => {
+    const replacementAccount = {
+      ...multiUserConfig,
+      accessToken: "account-b-access"
+    }
+    class RacingStorage extends MemoryStorage {
+      override async set<T>(key: string, value: T): Promise<void> {
+        if (key === REFRESH_ROTATION_KEY) {
+          this.values.set("tldwConfig", replacementAccount)
+        }
+        await super.set(key, value)
+      }
+    }
+    const persistent = new RacingStorage()
+    const session = new MemoryStorage()
+    await persistent.set("tldwConfig", multiUserConfig)
+
+    await expect(storeRefreshRotationIfCurrent(
+      persistent,
+      { ...multiUserConfig, accessToken: "access-0" },
+      "refresh-0",
+      { accessToken: "access-1", refreshToken: "refresh-1" }
+    )).resolves.toBe(true)
+
+    await expect(
+      resolveEffectiveTldwConfig({ persistent, session })
+    ).resolves.toEqual(replacementAccount)
+    await expect(persistent.get(REFRESH_ROTATION_KEY)).resolves.toMatchObject({
+      sourceAccessToken: "access-0"
+    })
+  })
+
+  it("rejects same-target account drift even when the refresh token is unchanged", async () => {
+    const persistent = new MemoryStorage()
+    await persistent.set("tldwConfig", {
+      ...multiUserConfig,
+      accessToken: "account-b-access"
+    })
+
+    await expect(storeRefreshRotationIfCurrent(
+      persistent,
+      {
+        serverUrl: multiUserConfig.serverUrl,
+        authMode: multiUserConfig.authMode,
+        authSource: multiUserConfig.authSource,
+        orgId: multiUserConfig.orgId,
+        accessToken: "account-a-access"
+      },
+      "refresh-0",
+      { accessToken: "access-1", refreshToken: "refresh-1" }
+    )).resolves.toBe(false)
+    await expect(persistent.get(REFRESH_ROTATION_KEY)).resolves.toBeUndefined()
   })
 })

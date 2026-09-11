@@ -30,7 +30,19 @@ import soundfile as sf  # type: ignore
 from loguru import logger
 
 from tldw_Server_API.app.core.config import get_stt_config
-from tldw_Server_API.app.core.exceptions import BadRequestError, CancelCheckError, TranscriptionCancelled
+from tldw_Server_API.app.core.exceptions import (
+    BadRequestError,
+    CancelCheckError,
+    STTExecutionPlanError,
+    TranscriptionCancelled,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    SttAudioEgress,
+    SttBatchExecutionPlan,
+    SttTranscriptionOutcome,
+    _normalize_audio_endpoint,
+    actual_execution_from_route,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 from tldw_Server_API.app.core.testing import is_truthy
 
@@ -248,8 +260,16 @@ def _load_qwen3_asr_model(settings: dict[str, Any]) -> tuple[Any, Any, str]:
     dtype_name = str(settings["dtype"])
     allow_download = bool(settings["allow_download"])
     model_revision = str(settings.get("model_revision") or "").strip() or None
+    planned_device = settings.get("planned_device")
+    if planned_device is not None and device != str(planned_device):
+        raise STTExecutionPlanError(
+            "Qwen3-ASR loaded device does not match the execution plan"
+        )
 
-    cache_key = f"qwen3_asr|{model_path}|{device}|{dtype_name}"
+    cache_key = (
+        f"qwen3_asr|{model_path}|{model_revision}|{device}|"
+        f"{dtype_name}|{allow_download}"
+    )
     with _MODEL_LOCK:
         cached = _MODEL_CACHE.get(cache_key)
         if cached is not None:
@@ -269,7 +289,7 @@ def _load_qwen3_asr_model(settings: dict[str, Any]) -> tuple[Any, Any, str]:
         torch_dtype = _get_torch_dtype(dtype_name)
         local_only = not allow_download
 
-        logger.info("Qwen3-ASR: loading model from '{}' on device '{}'", model_path, device)
+        logger.info("Qwen3-ASR: loading local model on device '{}'", device)
 
         processor = AutoProcessor.from_pretrained(
             str(validated_path),
@@ -551,13 +571,15 @@ def _transcribe_vllm_http(
             "httpx is required for vLLM HTTP transcription. Install with: pip install httpx"
         ) from exc
 
-    base_url = str(settings["vllm_base_url"]).rstrip("/")
-    if not base_url:
+    base_url = str(settings.get("vllm_base_url") or "").rstrip("/")
+    endpoint = str(settings.get("endpoint") or "").strip()
+    if not endpoint and not base_url:
         raise BadRequestError(
             "vLLM base URL not configured. Set [STT-Settings].qwen3_asr_vllm_base_url in config."
         )
 
-    url = f"{base_url}/v1/audio/transcriptions"
+    url = endpoint or f"{base_url}/v1/audio/transcriptions"
+    planned = bool(endpoint)
 
     _check_cancel(cancel_check, label="vllm http request")
 
@@ -572,6 +594,7 @@ def _transcribe_vllm_http(
         duration_seconds = 0.0
 
     # Build multipart form data and send request
+    planned_failure: str | None = None
     try:
         with open(audio_path, "rb") as f:
             # Determine content type based on file extension
@@ -586,26 +609,92 @@ def _transcribe_vllm_http(
             content_type = content_types.get(ext, "audio/wav")
 
             files = {"file": (audio_path.name, f, content_type)}
-            data: dict[str, Any] = {"model": "qwen3-asr"}
+            data: dict[str, Any] = {
+                "model": str(
+                    settings.get("request_model")
+                    or "qwen3-asr"
+                )
+            }
             if language:
                 data["language"] = language
 
             # Use sync httpx client with generous timeout for large files
-            with httpx.Client(timeout=300.0) as client:
-                response = client.post(url, files=files, data=data)
-                response.raise_for_status()
-                result = response.json()
+            if planned:
+                from tldw_Server_API.app.core.http_client import (
+                    RetryPolicy,
+                    create_client,
+                    fetch,
+                    opaque_stt_http_observability,
+                )
+                from tldw_Server_API.app.core.Security.egress import (
+                    ConfiguredEndpointScope,
+                )
+
+                endpoint_id = str(
+                    settings.get("endpoint_id") or ""
+                )
+                with opaque_stt_http_observability(endpoint_id):
+                    with create_client(
+                        timeout=300.0,
+                        trust_env=False,
+                    ) as client:
+                        response = fetch(
+                            method="POST",
+                            url=url,
+                            client=client,
+                            timeout=300.0,
+                            allow_redirects=False,
+                            files=files,
+                            data=data,
+                            retry=RetryPolicy(attempts=1),
+                            configured_endpoint=ConfiguredEndpointScope.from_url(
+                                url
+                            ),
+                        )
+                    response.raise_for_status()
+                    result = response.json()
+            else:
+                with httpx.Client(
+                    timeout=300.0,
+                    follow_redirects=False,
+                ) as client:
+                    response = client.post(
+                        url,
+                        files=files,
+                        data=data,
+                    )
+                    response.raise_for_status()
+                    result = response.json()
 
     except httpx.HTTPStatusError as exc:
-        raise BadRequestError(
-            f"vLLM server returned error: {exc.response.status_code} - {exc.response.text}"
-        ) from exc
+        if planned:
+            planned_failure = (
+                "Planned Qwen3-ASR server returned an HTTP error"
+            )
+        else:
+            raise BadRequestError(
+                f"vLLM server returned error: {exc.response.status_code} - {exc.response.text}"
+            ) from exc
     except httpx.RequestError as exc:
-        raise BadRequestError(
-            f"Failed to connect to vLLM server at {base_url}: {exc}"
-        ) from exc
+        if planned:
+            planned_failure = (
+                "Planned Qwen3-ASR server request failed"
+            )
+        else:
+            raise BadRequestError(
+                f"Failed to connect to vLLM server at {base_url}: {exc}"
+            ) from exc
     except Exception as exc:
-        raise BadRequestError(f"vLLM HTTP transcription failed: {exc}") from exc
+        if planned:
+            planned_failure = (
+                "Planned Qwen3-ASR HTTP transcription failed"
+            )
+        else:
+            raise BadRequestError(
+                f"vLLM HTTP transcription failed: {exc}"
+            ) from exc
+    if planned_failure is not None:
+        raise BadRequestError(planned_failure) from None
 
     # Extract result fields with sensible defaults
     text = str(result.get("text", "")).strip()
@@ -687,7 +776,8 @@ def transcribe_with_qwen3_asr(
     word_timestamps: bool = False,
     base_dir: Path | None = None,
     cancel_check: Callable[[], bool] | None = None,
-) -> dict[str, Any]:
+    execution_plan: SttBatchExecutionPlan | None = None,
+) -> dict[str, Any] | SttTranscriptionOutcome:
     """
     Transcribe audio using Qwen3-ASR.
 
@@ -702,6 +792,92 @@ def transcribe_with_qwen3_asr(
     Returns:
         Normalized transcription artifact with text, segments, and metadata
     """
+    if execution_plan is not None:
+        route = execution_plan.descriptor.primary_route
+        runtime = execution_plan.runtime_values()
+        if (
+            len(execution_plan.descriptor.routes) != 1
+            or route.provider != "qwen3-asr"
+            or route.model_label
+            != execution_plan.descriptor.resolved_model_label
+        ):
+            raise STTExecutionPlanError(
+                "Invalid Qwen3-ASR execution route"
+            )
+        settings = dict(runtime)
+        if route.backend == "vllm_http":
+            endpoint, egress, endpoint_id = _normalize_audio_endpoint(
+                str(runtime.get("endpoint") or "")
+            )
+            if (
+                route.source != "vllm_http"
+                or route.audio_egress is not egress
+                or route.endpoint_id != endpoint_id
+                or runtime.get("request_model")
+                != route.model_label
+            ):
+                raise STTExecutionPlanError(
+                    "Qwen3-ASR endpoint does not match its plan"
+                )
+            settings["endpoint"] = endpoint
+            settings["endpoint_id"] = endpoint_id
+            resolved_path = _resolve_audio_path(audio_path, base_dir)
+            artifact = _transcribe_vllm_http(
+                resolved_path,
+                settings,
+                execution_plan.language,
+                cancel_check,
+            )
+            actual = actual_execution_from_route(
+                route,
+                device=None,
+            )
+        elif route.backend == "transformers":
+            if (
+                route.source != "local"
+                or route.audio_egress is not SttAudioEgress.NONE
+                or not route.local_model_available
+                or route.would_download
+                or execution_plan.language is not None
+                or runtime.get("device") != route.device
+                or runtime.get("dtype") != route.dtype
+                or runtime.get("allow_download") is not False
+            ):
+                raise STTExecutionPlanError(
+                    "Qwen3-ASR local route does not match its plan"
+                )
+            settings["planned_device"] = route.device
+            resolved_path = _resolve_audio_path(audio_path, base_dir)
+            _check_cancel(cancel_check, label="audio loading")
+            audio_np, sample_rate, duration_seconds = _load_audio(
+                resolved_path,
+                target_sample_rate=int(
+                    settings.get("sample_rate") or 16000
+                ),
+            )
+            artifact = _transcribe_local(
+                audio_np=audio_np,
+                sample_rate=sample_rate,
+                duration_seconds=duration_seconds,
+                settings=settings,
+                language=None,
+                word_timestamps=False,
+                cancel_check=cancel_check,
+            )
+            actual = actual_execution_from_route(
+                route,
+                device=route.device,
+                dtype=route.dtype,
+            )
+        else:
+            raise STTExecutionPlanError(
+                "Qwen3-ASR plan selected an unsupported route"
+            )
+        return SttTranscriptionOutcome(
+            artifact=artifact,
+            actual_execution=actual,
+        )
+
     settings = _resolve_settings()
 
     if not settings["enabled"]:

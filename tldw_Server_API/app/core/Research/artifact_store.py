@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.db_path_utils import normalize_output_storage_filename
 from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import (
     ResearchArtifactRow,
     ResearchSessionsDB,
 )
-from tldw_Server_API.app.core.DB_Management.db_path_utils import normalize_output_storage_filename
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 
 class ResearchArtifactStore:
@@ -30,18 +32,25 @@ class ResearchArtifactStore:
         return f"session_{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]}"
 
     def _resolve_artifact_path(self, session_id: str, safe_name: str) -> Path:
-        base = (self.base_dir / "research").resolve(strict=False)
-        session_dir = (base / self._safe_session_component(session_id)).resolve(strict=False)
-        try:
-            session_dir.relative_to(base)
-        except ValueError as exc:
-            raise ValueError("artifact session path escapes research directory") from exc
+        base = Path(safe_join(
+            str(self.base_dir),
+            "research",
+            error_factory=lambda _exc: ValueError("artifact research path escapes output directory"),
+        ))
+        session_dir = Path(safe_join(
+            str(base),
+            self._safe_session_component(session_id),
+            error_factory=lambda _exc: ValueError("artifact session path escapes research directory"),
+        ))
         session_dir.mkdir(parents=True, exist_ok=True)
         path = (session_dir / safe_name).resolve(strict=False)
-        try:
-            path.relative_to(session_dir)
-        except ValueError as exc:
-            raise ValueError("artifact path escapes session directory") from exc
+        # Windows can distinguish case-only sibling directories; compare the
+        # canonical spelling while preserving links within this same session.
+        # The root itself is not an artifact: versioning it would name a sibling.
+        canonical_path = str(path)
+        session_root = str(session_dir)
+        if not canonical_path.startswith(os.path.join(session_root, "")):
+            raise ValueError("artifact path escapes session directory")
         return path
 
     @staticmethod
@@ -237,11 +246,28 @@ class ResearchArtifactStore:
         )
         return artifact
 
+    def _recorded_artifact_path(self, session_id: str, storage_path: str) -> Path:
+        """Confine recorded reads to the owning session without following links."""
+        session_dir = Path(safe_join(
+            str(self.base_dir),
+            f"research/{self._safe_session_component(session_id)}",
+            error_factory=lambda _exc: ValueError("Invalid artifact storage path"),
+        ))
+        try:
+            relative_path = Path(storage_path).relative_to(session_dir)
+        except ValueError as exc:
+            raise ValueError("Invalid artifact storage path") from exc
+        return Path(safe_join(
+            str(session_dir),
+            str(relative_path),
+            error_factory=lambda _exc: ValueError("Invalid artifact storage path"),
+        ))
+
     def read_json(self, *, session_id: str, artifact_name: str) -> dict[str, Any] | None:
         artifact = self._latest_artifact(session_id, artifact_name)
         if artifact is None:
             return None
-        path = Path(artifact.storage_path)
+        path = self._recorded_artifact_path(session_id, artifact.storage_path)
         if not path.exists():
             return None
         try:
@@ -254,7 +280,7 @@ class ResearchArtifactStore:
         artifact = self._latest_artifact(session_id, artifact_name)
         if artifact is None:
             return None
-        path = Path(artifact.storage_path)
+        path = self._recorded_artifact_path(session_id, artifact.storage_path)
         if not path.exists():
             return None
         records: list[dict[str, Any]] = []
@@ -275,7 +301,7 @@ class ResearchArtifactStore:
         artifact = self._latest_artifact(session_id, artifact_name)
         if artifact is None:
             return None
-        path = Path(artifact.storage_path)
+        path = self._recorded_artifact_path(session_id, artifact.storage_path)
         if not path.exists():
             return None
         return path.read_text(encoding="utf-8")

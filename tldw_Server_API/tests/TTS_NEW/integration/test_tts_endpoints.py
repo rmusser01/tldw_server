@@ -256,14 +256,8 @@ class TestTTSGenerateEndpoint:
             assert getattr(call_args, 'extra_params', None) is not None
 
     async def test_generate_with_invalid_provider(self, test_client, auth_headers):
-        """Test generation with invalid provider."""
-        async def mock_stream(*args, **kwargs):
-            # Simulate service emitting an error payload instead of raising
-            yield b"ERROR: No adapter"
-
+        """Unknown models fail closed before provider dispatch."""
         with patch('tldw_Server_API.app.core.TTS.tts_service_v2.TTSServiceV2.generate_speech') as mock_gen:
-            mock_gen.side_effect = lambda *args, **kwargs: mock_stream()
-
             response = test_client.post(
                 "/api/v1/audio/speech",
                 json={
@@ -276,7 +270,8 @@ class TestTTSGenerateEndpoint:
                 headers=auth_headers
             )
 
-            assert response.status_code == status.HTTP_200_OK
+            assert response.status_code == status.HTTP_404_NOT_FOUND
+            mock_gen.assert_not_called()
 
     async def test_generate_returns_alignment_metadata_header(self, test_client, auth_headers):
         """Test non-streaming speech returns alignment metadata header when available."""
@@ -1250,13 +1245,30 @@ class TestTTSJobsHistoryIntegration:
             job_id = int(submit_data["job_id"])
 
             jm = audio_jobs.get_job_manager()
-            job = jm.get_job(job_id)
+            worker_id = "tts-history-integration-worker"
+            job = jm.acquire_next_job(
+                domain="audio",
+                queue="default",
+                job_type="tts_longform",
+                lease_seconds=60,
+                worker_id=worker_id,
+            )
             assert job is not None
+            assert int(job["id"]) == job_id
+            assert job["worker_id"] == worker_id
+            lease_id = str(job["lease_id"])
+            assert lease_id
 
             result = await _handle_tts_job(job)
             output_id = int(result["output_id"])
             assert output_id > 0
-            jm.complete_job(job_id, result=result)
+            assert jm.complete_job(
+                job_id,
+                result=result,
+                worker_id=worker_id,
+                lease_id=lease_id,
+                enforce=True,
+            )
 
             artifacts_resp = test_client.get(
                 f"/api/v1/audio/speech/jobs/{job_id}/artifacts",

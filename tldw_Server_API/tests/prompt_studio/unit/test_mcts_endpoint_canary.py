@@ -1,7 +1,6 @@
-import json
 import uuid
-import pytest
 
+import pytest
 
 pytestmark = pytest.mark.unit
 
@@ -28,8 +27,6 @@ def _mk_prompt(client, project_id: int, backend_label: str) -> int:
 
 
 def test_create_mcts_optimization_canary(prompt_studio_dual_backend_client, monkeypatch):
-
-
     backend_label, client, db = prompt_studio_dual_backend_client
 
     # Enable MCTS (gated by default)
@@ -37,6 +34,12 @@ def test_create_mcts_optimization_canary(prompt_studio_dual_backend_client, monk
 
     pid = _mk_project(client, backend_label)
     prompt_id = _mk_prompt(client, pid, backend_label)
+    test_case = db.create_test_case(
+        project_id=pid,
+        name=f"MCTSCase-{uuid.uuid4().hex[:6]} ({backend_label})",
+        inputs={"text": "hello"},
+        expected_outputs={"response": "hello"},
+    )
 
     body = {
         "project_id": pid,
@@ -52,7 +55,7 @@ def test_create_mcts_optimization_canary(prompt_studio_dual_backend_client, monk
                 "prompt_candidates_per_node": 1
             }
         },
-        "test_case_ids": [],
+        "test_case_ids": [int(test_case["id"])],
         "name": "mcts-canary-endpoint"
     }
 
@@ -63,4 +66,4 @@ def test_create_mcts_optimization_canary(prompt_studio_dual_backend_client, monk
     # Minimal assertions: optimization created and job queued
     assert data
     assert (data.get("optimization") or {}).get("id") or data.get("id")
-    assert data.get("job_id") is not None or True  # some modes may not queue immediately in tests
+    assert data.get("job_id") is not None

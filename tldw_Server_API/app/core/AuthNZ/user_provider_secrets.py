@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.Security.crypto import (
     decrypt_json_blob_with_key,
     encrypt_json_blob_with_key,
@@ -12,6 +13,48 @@ from tldw_Server_API.app.core.Security.crypto import (
 
 def normalize_provider_name(provider: str) -> str:
     return (provider or "").strip().lower()
+
+
+class ProviderCredentialAliasConflictError(ValueError):
+    """Raised when more than one legacy alias row exists for one provider."""
+
+
+def fold_provider_credential_rows(
+    rows: list[dict[str, Any]],
+    *,
+    identity_fields: tuple[str, ...] = (),
+    include_revoked: bool = False,
+) -> list[dict[str, Any]]:
+    """Select one authoritative row per canonical provider identity."""
+    grouped: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for row in rows:
+        stored_provider = str(row.get("provider") or "")
+        canonical = canonical_provider_name(stored_provider)
+        key = tuple(row.get(field) for field in identity_fields) + (canonical,)
+        grouped.setdefault(key, []).append(row)
+
+    selected: list[dict[str, Any]] = []
+    for key, candidates in grouped.items():
+        canonical = str(key[-1])
+        canonical_rows = [
+            row
+            for row in candidates
+            if str(row.get("provider") or "").strip().lower() == canonical
+        ]
+        if len(canonical_rows) > 1:
+            raise ProviderCredentialAliasConflictError("conflicting canonical provider credentials")
+        if canonical_rows:
+            row = canonical_rows[0]
+        elif len(candidates) == 1:
+            row = candidates[0]
+        else:
+            raise ProviderCredentialAliasConflictError("conflicting legacy provider credentials")
+        if not include_revoked and row.get("revoked_at") is not None:
+            continue
+        materialized = dict(row)
+        materialized["provider"] = canonical
+        selected.append(materialized)
+    return selected
 
 
 def normalize_secret_owner_scope_type(scope_type: str) -> str:

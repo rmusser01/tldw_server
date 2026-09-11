@@ -1,0 +1,1225 @@
+### Page
+- Page URL: http://127.0.0.1:18384/persona
+- Console: 199 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [ref=f5e10]:
+  - generic [ref=f5e11]:
+    - generic [ref=f5e13]:
+      - generic [ref=f5e14]:
+        - button "Expand sidebar" [ref=f5e15] [cursor=pointer]
+        - button "New Chat" [ref=f5e19] [cursor=pointer]
+        - generic [ref=f5e22]:
+          - button "Quick Ingest" [ref=f5e23] [cursor=pointer]
+          - button "Chat" [ref=f5e27] [cursor=pointer]
+          - button "Prompts" [ref=f5e30] [cursor=pointer]
+          - button "Characters" [ref=f5e34] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f5e39] [cursor=pointer]
+          - button "World Books" [ref=f5e43] [cursor=pointer]
+          - button "Notes" [ref=f5e46] [cursor=pointer]
+          - button "Knowledge QA" [ref=f5e50] [cursor=pointer]
+          - button "Media" [ref=f5e58] [cursor=pointer]
+          - button "Document Workspace" [ref=f5e61] [cursor=pointer]
+          - button "Research Workspace" [ref=f5e67] [cursor=pointer]
+          - button "Kanban" [ref=f5e73] [cursor=pointer]
+          - button "Watchlists" [ref=f5e75] [cursor=pointer]
+        - generic [ref=f5e80]:
+          - button "Open Notes Dock" [ref=f5e81] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f5e86] [cursor=pointer]
+          - button "Settings" [ref=f5e89] [cursor=pointer]
+      - main [ref=f5e93]:
+        - generic [ref=f5e94]:
+          - generic [ref=f5e97]:
+            - generic [ref=f5e98]:
+              - button "Expand sidebar" [ref=f5e99] [cursor=pointer]
+              - generic [ref=f5e101]:
+                - img "tldw Assistant" [ref=f5e102]
+                - generic [ref=f5e103]: tldw Assistant
+                - button "Companion Home" [ref=f5e104] [cursor=pointer]
+                - button "Show shortcuts" [ref=f5e108] [cursor=pointer]
+            - generic [ref=f5e111]:
+              - button "Search - Open command palette" [ref=f5e112] [cursor=pointer]:
+                - generic [ref=f5e116]: Search
+                - generic [ref=f5e117]: ⌘K
+              - button "Open settings" [ref=f5e118] [cursor=pointer]
+              - generic [ref=f5e130]:
+                - button "Notifications, 0 unread" [ref=f5e131] [cursor=pointer]
+                - status [ref=f5e135]: Notifications are active
+              - button "Switch to light theme" [ref=f5e136] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f5e143] [cursor=pointer]:
+                - generic [ref=f5e144]: "?"
+          - generic [ref=f5e146]:
+            - generic [ref=f5e147]:
+              - generic [ref=f5e148]:
+                - button "Expand sidebar" [ref=f5e149] [cursor=pointer]
+                - button "Connected to your tldw server" [ref=f5e151] [cursor=pointer]
+                - generic [ref=f5e155]:
+                  - img "tldw Assistant" [ref=f5e156]
+                  - generic [ref=f5e157]: tldw Assistant
+                - generic "Persona Garden" [ref=f5e159]
+              - generic [ref=f5e161]:
+                - button "TTS clips" [ref=f5e162] [cursor=pointer]
+                - link "Open Persona Garden" [ref=f5e167] [cursor=pointer]:
+                  - /url: /persona
+                - button "Open dashboard" [ref=f5e171] [cursor=pointer]
+                - button "Open full chat in WebUI" [ref=f5e177] [cursor=pointer]
+                - generic [ref=f5e182]: Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context.
+                - link "Open settings" [ref=f5e183] [cursor=pointer]:
+                  - /url: /settings
+            - generic [ref=f5e195]:
+              - generic [ref=f5e436]:
+                - generic [ref=f5e437]: Review visual setup, then return to assistant setup.
+                - button "Return to setup" [ref=f5e438] [cursor=pointer]
+              - generic [ref=f5e439]:
+                - tablist "Persona Garden sections" [ref=f5e440]:
+                  - tab "Visuals" [selected] [ref=f5e441] [cursor=pointer]
+                - tabpanel "Visuals" [ref=f5e443]:
+                  - generic [ref=f5e444]:
+                    - generic [ref=f5e1003]:
+                      - generic [ref=f5e1004]:
+                        - generic [ref=f5e1005]:
+                          - generic [ref=f5e1006]: Persona visuals
+                          - heading "Buddy builder" [level=2] [ref=f5e1007]
+                          - generic [ref=f5e1008]: Choose, import, review, configure, and activate a visual buddy for Migu UAT.
+                        - generic [ref=f5e2027]:
+                          - generic [ref=f5e2028]: Migu Marker Basic
+                          - generic [ref=f5e2032]:
+                            - generic [ref=f5e2033]: active
+                            - generic [ref=f5e2034]: 1 pack
+                      - list "Buddy builder steps" [ref=f5e1009]:
+                        - listitem [ref=f5e1010]:
+                          - generic [ref=f5e1011]: "1."
+                          - text: Choose a source
+                        - listitem [ref=f5e1012]:
+                          - generic [ref=f5e1013]: "2."
+                          - text: Create a draft
+                        - listitem [ref=f5e1014]:
+                          - generic [ref=f5e1015]: "3."
+                          - text: Review readiness
+                        - listitem [ref=f5e1016]:
+                          - generic [ref=f5e1017]: "4."
+                          - text: Configure states
+                        - listitem [ref=f5e1018]:
+                          - generic [ref=f5e1019]: "5."
+                          - text: Activate
+                      - generic [ref=f5e1020]:
+                        - generic [ref=f5e1021]: Choose a source
+                        - generic [ref=f5e1025]:
+                          - button "Bundled Buddy" [pressed] [ref=f5e1026] [cursor=pointer]:
+                            - generic [ref=f5e1033]:
+                              - generic [ref=f5e1034]:
+                                - generic [ref=f5e1035]: Bundled Buddy
+                                - generic [ref=f5e1036]: recommended
+                              - generic [ref=f5e1037]: Start from one of the reviewed Basic defaults.
+                          - button "Import Codex/Petdex pet" [ref=f5e1038] [cursor=pointer]:
+                            - generic [ref=f5e1044]:
+                              - generic [ref=f5e1045]:
+                                - generic [ref=f5e1046]: Import Codex/Petdex pet
+                                - generic [ref=f5e1047]: .zip
+                              - generic [ref=f5e1048]: Reuse a Codex-compatible pet archive.
+                          - button "Import Persona Visual pack" [ref=f5e1049] [cursor=pointer]:
+                            - generic [ref=f5e1055]:
+                              - generic [ref=f5e1056]:
+                                - generic [ref=f5e1057]: Import Persona Visual pack
+                                - generic [ref=f5e1058]: .tldw-persona-vpack
+                              - generic [ref=f5e1059]: Restore or move a native Persona Visual archive.
+                          - button "Use library pack" [ref=f5e1060] [cursor=pointer]:
+                            - generic [ref=f5e1065]:
+                              - generic [ref=f5e1066]: Use library pack
+                              - generic [ref=f5e1068]: Attach a saved visual pack already in your library.
+                          - button "Duplicate from persona" [ref=f5e1069] [cursor=pointer]:
+                            - generic [ref=f5e1075]:
+                              - generic [ref=f5e1076]: Duplicate from persona
+                              - generic [ref=f5e1078]: Copy a pack from another persona into this one.
+                          - button "Start blank" [ref=f5e1079] [cursor=pointer]:
+                            - generic [ref=f5e1084]:
+                              - generic [ref=f5e1085]: Start blank
+                              - generic [ref=f5e1087]: Create a draft when the buddy needs custom states.
+                      - generic [ref=f5e1088]:
+                        - generic [ref=f5e1089]: Choose a bundled default
+                        - generic [ref=f5e1096]:
+                          - generic [ref=f5e1097]: Basic defaults
+                          - generic [ref=f5e1098]:
+                            - generic [ref=f5e1099]:
+                              - generic [ref=f5e1100]:
+                                - generic [ref=f5e1101]:
+                                  - generic [ref=f5e1102]: Search Lens Basic
+                                  - generic [ref=f5e1103]: "Bundled art-ready basic Buddy default: friendly magnifying-glass research helper with approved 3x4 source-sheet frames."
+                                - generic [ref=f5e1104]: sprite_frames
+                              - generic [ref=f5e1105]:
+                                - generic [ref=f5e1106]: Recommended
+                                - generic [ref=f5e1107]: Art Ready
+                                - generic [ref=f5e1108]: Basic
+                                - generic [ref=f5e1109]: Neutral anchor required
+                                - generic [ref=f5e1110]: starter
+                                - generic [ref=f5e1111]: sprite_frames
+                                - generic [ref=f5e1112]: catalog:art-ready
+                                - generic [ref=f5e1113]: tier:basic
+                                - generic [ref=f5e1114]: search
+                                - generic [ref=f5e1115]: research
+                                - generic [ref=f5e1116]: object-buddy
+                                - generic [ref=f5e1117]: bundled
+                              - generic [ref=f5e1118]:
+                                - generic [ref=f5e1119]: "Expected assets:"
+                                - text: Identity Brief, Neutral Anchor, Preview Image, Required State Loops
+                              - generic [ref=f5e1120]:
+                                - generic [ref=f5e1121]: "Coverage:"
+                                - text: Reviewed bundled basic default with neutral-anchor-derived required-state loops.
+                              - button "Copy as draft" [ref=f5e1122] [cursor=pointer]
+                            - generic [ref=f5e1128]:
+                              - generic [ref=f5e1129]:
+                                - generic [ref=f5e1130]:
+                                  - generic [ref=f5e1131]: Index Card Basic
+                                  - generic [ref=f5e1132]: "Bundled art-ready basic Buddy default: animated tabbed index-card research helper with approved 3x4 source-sheet frames."
+                                - generic [ref=f5e1133]: sprite_frames
+                              - generic [ref=f5e1134]:
+                                - generic [ref=f5e1135]: Recommended
+                                - generic [ref=f5e1136]: Art Ready
+                                - generic [ref=f5e1137]: Basic
+                                - generic [ref=f5e1138]: Neutral anchor required
+                                - generic [ref=f5e1139]: starter
+                                - generic [ref=f5e1140]: sprite_frames
+                                - generic [ref=f5e1141]: catalog:art-ready
+                                - generic [ref=f5e1142]: tier:basic
+                                - generic [ref=f5e1143]: index-card
+                                - generic [ref=f5e1144]: notes
+                                - generic [ref=f5e1145]: paper-buddy
+                                - generic [ref=f5e1146]: bundled
+                              - generic [ref=f5e1147]:
+                                - generic [ref=f5e1148]: "Expected assets:"
+                                - text: Identity Brief, Neutral Anchor, Preview Image, Required State Loops
+                              - generic [ref=f5e1149]:
+                                - generic [ref=f5e1150]: "Coverage:"
+                                - text: Reviewed bundled basic default with neutral-anchor-derived required-state loops.
+                              - button "Copy as draft" [ref=f5e1151] [cursor=pointer]
+                            - generic [ref=f5e1157]:
+                              - generic [ref=f5e1158]:
+                                - generic [ref=f5e1159]:
+                                  - generic [ref=f5e1160]: Archive Cube Basic
+                                  - generic [ref=f5e1161]: "Bundled art-ready basic Buddy default: compact archive cube helper with approved 3x4 source-sheet frames."
+                                - generic [ref=f5e1162]: sprite_frames
+                              - generic [ref=f5e1163]:
+                                - generic [ref=f5e1164]: Recommended
+                                - generic [ref=f5e1165]: Art Ready
+                                - generic [ref=f5e1166]: Basic
+                                - generic [ref=f5e1167]: Neutral anchor required
+                                - generic [ref=f5e1168]: starter
+                                - generic [ref=f5e1169]: sprite_frames
+                                - generic [ref=f5e1170]: catalog:art-ready
+                                - generic [ref=f5e1171]: tier:basic
+                                - generic [ref=f5e1172]: archive
+                                - generic [ref=f5e1173]: storage
+                                - generic [ref=f5e1174]: object-buddy
+                                - generic [ref=f5e1175]: bundled
+                              - generic [ref=f5e1176]:
+                                - generic [ref=f5e1177]: "Expected assets:"
+                                - text: Identity Brief, Neutral Anchor, Preview Image, Required State Loops
+                              - generic [ref=f5e1178]:
+                                - generic [ref=f5e1179]: "Coverage:"
+                                - text: Reviewed bundled basic default with neutral-anchor-derived required-state loops.
+                              - button "Copy as draft" [ref=f5e1180] [cursor=pointer]
+                            - generic [ref=f5e1186]:
+                              - generic [ref=f5e1187]:
+                                - generic [ref=f5e1188]:
+                                  - generic [ref=f5e1189]: Paperclip Basic
+                                  - generic [ref=f5e1190]: "Bundled art-ready basic Buddy default: expressive paperclip helper with approved 3x4 source-sheet frames."
+                                - generic [ref=f5e1191]: sprite_frames
+                              - generic [ref=f5e1192]:
+                                - generic [ref=f5e1193]: Recommended
+                                - generic [ref=f5e1194]: Art Ready
+                                - generic [ref=f5e1195]: Basic
+                                - generic [ref=f5e1196]: Neutral anchor required
+                                - generic [ref=f5e1197]: starter
+                                - generic [ref=f5e1198]: sprite_frames
+                                - generic [ref=f5e1199]: catalog:art-ready
+                                - generic [ref=f5e1200]: tier:basic
+                                - generic [ref=f5e1201]: paperclip
+                                - generic [ref=f5e1202]: office
+                                - generic [ref=f5e1203]: object-buddy
+                                - generic [ref=f5e1204]: bundled
+                              - generic [ref=f5e1205]:
+                                - generic [ref=f5e1206]: "Expected assets:"
+                                - text: Identity Brief, Neutral Anchor, Preview Image, Required State Loops
+                              - generic [ref=f5e1207]:
+                                - generic [ref=f5e1208]: "Coverage:"
+                                - text: Reviewed bundled basic default with neutral-anchor-derived required-state loops.
+                              - button "Copy as draft" [ref=f5e1209] [cursor=pointer]
+                            - generic [ref=f5e1215]:
+                              - generic [ref=f5e1216]:
+                                - generic [ref=f5e1217]:
+                                  - generic [ref=f5e1218]: Terminal Tile Basic
+                                  - generic [ref=f5e1219]: "Bundled art-ready basic Buddy default: compact terminal-window tile helper with approved 3x4 source-sheet frames."
+                                - generic [ref=f5e1220]: sprite_frames
+                              - generic [ref=f5e1221]:
+                                - generic [ref=f5e1222]: Recommended
+                                - generic [ref=f5e1223]: Art Ready
+                                - generic [ref=f5e1224]: Basic
+                                - generic [ref=f5e1225]: Neutral anchor required
+                                - generic [ref=f5e1226]: starter
+                                - generic [ref=f5e1227]: sprite_frames
+                                - generic [ref=f5e1228]: catalog:art-ready
+                                - generic [ref=f5e1229]: tier:basic
+                                - generic [ref=f5e1230]: terminal
+                                - generic [ref=f5e1231]: cli
+                                - generic [ref=f5e1232]: object-buddy
+                                - generic [ref=f5e1233]: bundled
+                              - generic [ref=f5e1234]:
+                                - generic [ref=f5e1235]: "Expected assets:"
+                                - text: Identity Brief, Neutral Anchor, Preview Image, Required State Loops
+                              - generic [ref=f5e1236]:
+                                - generic [ref=f5e1237]: "Coverage:"
+                                - text: Reviewed bundled basic default with neutral-anchor-derived required-state loops.
+                              - button "Copy as draft" [ref=f5e1238] [cursor=pointer]
+                            - generic [ref=f5e1244]:
+                              - generic [ref=f5e1245]:
+                                - generic [ref=f5e1246]:
+                                  - generic [ref=f5e1247]: Migu Marker Basic
+                                  - generic [ref=f5e1248]: "Bundled art-ready basic Buddy default: playful marker-line Migu helper with approved 3x4 source-sheet frames."
+                                - generic [ref=f5e1249]: sprite_frames
+                              - generic [ref=f5e1250]:
+                                - generic [ref=f5e1251]: Recommended
+                                - generic [ref=f5e1252]: Art Ready
+                                - generic [ref=f5e1253]: Basic
+                                - generic [ref=f5e1254]: Neutral anchor required
+                                - generic [ref=f5e1255]: starter
+                                - generic [ref=f5e1256]: sprite_frames
+                                - generic [ref=f5e1257]: catalog:art-ready
+                                - generic [ref=f5e1258]: tier:basic
+                                - generic [ref=f5e1259]: user-art
+                                - generic [ref=f5e1260]: marker
+                                - generic [ref=f5e1261]: bundled
+                              - generic [ref=f5e1262]:
+                                - generic [ref=f5e1263]: "Expected assets:"
+                                - text: Identity Brief, Neutral Anchor, Preview Image, Required State Loops
+                              - generic [ref=f5e1264]:
+                                - generic [ref=f5e1265]: "Coverage:"
+                                - text: Reviewed bundled basic default with neutral-anchor-derived required-state loops.
+                              - button "Copy as draft" [ref=f5e1266] [cursor=pointer]
+                        - generic [ref=f5e1272]:
+                          - generic [ref=f5e1273]: Intermediate production packets
+                          - generic [ref=f5e1274]:
+                            - generic [ref=f5e1275]:
+                              - generic [ref=f5e1276]:
+                                - generic [ref=f5e1277]:
+                                  - generic [ref=f5e1278]: Object Creature Intermediate
+                                  - generic [ref=f5e1279]: "Catalog scaffold fixture, not final character art or animation: Non-human expressive object starter to show the format is not humanoid-only."
+                                - generic [ref=f5e1280]: sprite_frames
+                              - generic [ref=f5e1281]:
+                                - generic [ref=f5e1282]: Production packet
+                                - generic [ref=f5e1283]: Scaffold
+                                - generic [ref=f5e1284]: Intermediate
+                                - generic [ref=f5e1285]: Neutral anchor required
+                                - generic [ref=f5e1286]: starter
+                                - generic [ref=f5e1287]: sprite_frames
+                                - generic [ref=f5e1288]: catalog:scaffold
+                                - generic [ref=f5e1289]: tier:intermediate
+                                - generic [ref=f5e1290]: object
+                                - generic [ref=f5e1291]: creature
+                                - generic [ref=f5e1292]: bundled
+                              - generic [ref=f5e1293]:
+                                - generic [ref=f5e1294]: "Expected assets:"
+                                - text: Identity Brief, Neutral Anchor, Static Talking Sheet, Static Reaction Sheet, Required State Loops, Custom State Variants
+                              - generic [ref=f5e1295]:
+                                - generic [ref=f5e1296]: "Coverage:"
+                                - text: "Scaffold fixture only: final intermediate art should add a neutral model sheet, separate talking and reaction sheets, and short custom-state loops."
+                              - button "Copy production packet" [ref=f5e1297] [cursor=pointer]
+                            - generic [ref=f5e1303]:
+                              - generic [ref=f5e1304]:
+                                - generic [ref=f5e1305]:
+                                  - generic [ref=f5e1306]: Study Desk Intermediate
+                                  - generic [ref=f5e1307]: "Catalog scaffold fixture, not final character art or animation: Calm study companion starter with separate required-state frame assets."
+                                - generic [ref=f5e1308]: sprite_frames
+                              - generic [ref=f5e1309]:
+                                - generic [ref=f5e1310]: Production packet
+                                - generic [ref=f5e1311]: Scaffold
+                                - generic [ref=f5e1312]: Intermediate
+                                - generic [ref=f5e1313]: Neutral anchor required
+                                - generic [ref=f5e1314]: starter
+                                - generic [ref=f5e1315]: sprite_frames
+                                - generic [ref=f5e1316]: catalog:scaffold
+                                - generic [ref=f5e1317]: tier:intermediate
+                                - generic [ref=f5e1318]: study
+                                - generic [ref=f5e1319]: desk
+                                - generic [ref=f5e1320]: bundled
+                              - generic [ref=f5e1321]:
+                                - generic [ref=f5e1322]: "Expected assets:"
+                                - text: Identity Brief, Neutral Anchor, Static Talking Sheet, Static Reaction Sheet, Required State Loops, Custom State Variants
+                              - generic [ref=f5e1323]:
+                                - generic [ref=f5e1324]: "Coverage:"
+                                - text: "Scaffold fixture only: final intermediate art should add a neutral model sheet, separate talking and reaction sheets, and short custom-state loops."
+                              - button "Copy production packet" [ref=f5e1325] [cursor=pointer]
+                            - generic [ref=f5e1331]:
+                              - generic [ref=f5e1332]:
+                                - generic [ref=f5e1333]:
+                                  - generic [ref=f5e1334]: Tool Helper Intermediate
+                                  - generic [ref=f5e1335]: "Catalog scaffold fixture, not final character art or animation: Utility-themed starter with a declared exact tool animation variant."
+                                - generic [ref=f5e1336]: sprite_frames
+                              - generic [ref=f5e1337]:
+                                - generic [ref=f5e1338]: Production packet
+                                - generic [ref=f5e1339]: Scaffold
+                                - generic [ref=f5e1340]: Intermediate
+                                - generic [ref=f5e1341]: Neutral anchor required
+                                - generic [ref=f5e1342]: starter
+                                - generic [ref=f5e1343]: sprite_frames
+                                - generic [ref=f5e1344]: catalog:scaffold
+                                - generic [ref=f5e1345]: tier:intermediate
+                                - generic [ref=f5e1346]: tool
+                                - generic [ref=f5e1347]: variant
+                                - generic [ref=f5e1348]: bundled
+                              - generic [ref=f5e1349]:
+                                - generic [ref=f5e1350]: "Expected assets:"
+                                - text: Identity Brief, Neutral Anchor, Static Talking Sheet, Static Reaction Sheet, Required State Loops, Custom State Variants
+                              - generic [ref=f5e1351]:
+                                - generic [ref=f5e1352]: "Coverage:"
+                                - text: "Scaffold fixture only: final intermediate art should add a neutral model sheet, separate talking and reaction sheets, and short custom-state loops."
+                              - button "Copy production packet" [ref=f5e1353] [cursor=pointer]
+                        - generic [ref=f5e1359]:
+                          - generic [ref=f5e1360]: Intricate production packets
+                          - generic [ref=f5e1361]:
+                            - generic [ref=f5e1362]:
+                              - generic [ref=f5e1363]:
+                                - generic [ref=f5e1364]:
+                                  - generic [ref=f5e1365]: Action Guide Intricate
+                                  - generic [ref=f5e1366]: "Catalog scaffold fixture, not final character art or animation: Energetic guide starter with reaction beats and richer state metadata."
+                                - generic [ref=f5e1367]: sprite_frames
+                              - generic [ref=f5e1368]:
+                                - generic [ref=f5e1369]: Production packet
+                                - generic [ref=f5e1370]: Scaffold
+                                - generic [ref=f5e1371]: Intricate
+                                - generic [ref=f5e1372]: Neutral anchor required
+                                - generic [ref=f5e1373]: starter
+                                - generic [ref=f5e1374]: sprite_frames
+                                - generic [ref=f5e1375]: catalog:scaffold
+                                - generic [ref=f5e1376]: tier:intricate
+                                - generic [ref=f5e1377]: action
+                                - generic [ref=f5e1378]: reaction
+                                - generic [ref=f5e1379]: bundled
+                              - generic [ref=f5e1380]:
+                                - generic [ref=f5e1381]: "Expected assets:"
+                                - text: Identity Brief, Neutral Anchor, Model Sheet, Static Talking Sheet, Static Reaction Sheet, Required State Loops, Animation Strips, Animation Atlas, Custom State Variants
+                              - generic [ref=f5e1382]:
+                                - generic [ref=f5e1383]: "Coverage:"
+                                - text: "Scaffold fixture only: final intricate art should compile reviewed neutral-anchor-derived strips or atlas regions into runtime animations."
+                              - button "Copy production packet" [ref=f5e1384] [cursor=pointer]
+                            - generic [ref=f5e1390]:
+                              - generic [ref=f5e1391]:
+                                - generic [ref=f5e1392]:
+                                  - generic [ref=f5e1393]: Elaborate Persona Intricate
+                                  - generic [ref=f5e1394]: "Catalog scaffold fixture, not final character art or animation: High-detail fantasy/sci-fi starter demonstrating multiple custom-state rows."
+                                - generic [ref=f5e1395]: sprite_frames
+                              - generic [ref=f5e1396]:
+                                - generic [ref=f5e1397]: Production packet
+                                - generic [ref=f5e1398]: Scaffold
+                                - generic [ref=f5e1399]: Intricate
+                                - generic [ref=f5e1400]: Neutral anchor required
+                                - generic [ref=f5e1401]: starter
+                                - generic [ref=f5e1402]: sprite_frames
+                                - generic [ref=f5e1403]: catalog:scaffold
+                                - generic [ref=f5e1404]: tier:intricate
+                                - generic [ref=f5e1405]: fantasy
+                                - generic [ref=f5e1406]: sci-fi
+                                - generic [ref=f5e1407]: bundled
+                              - generic [ref=f5e1408]:
+                                - generic [ref=f5e1409]: "Expected assets:"
+                                - text: Identity Brief, Neutral Anchor, Model Sheet, Static Talking Sheet, Static Reaction Sheet, Required State Loops, Animation Strips, Animation Atlas, Custom State Variants
+                              - generic [ref=f5e1410]:
+                                - generic [ref=f5e1411]: "Coverage:"
+                                - text: "Scaffold fixture only: final intricate art should compile reviewed neutral-anchor-derived strips or atlas regions into runtime animations."
+                              - button "Copy production packet" [ref=f5e1412] [cursor=pointer]
+                            - generic [ref=f5e1418]:
+                              - generic [ref=f5e1419]:
+                                - generic [ref=f5e1420]:
+                                  - generic [ref=f5e1421]: Lo-fi Study Intricate
+                                  - generic [ref=f5e1422]: "Catalog scaffold fixture, not final character art or animation: Original study companion starter with atlas-backed loops and tool variant metadata."
+                                - generic [ref=f5e1423]: sprite_frames
+                              - generic [ref=f5e1424]:
+                                - generic [ref=f5e1425]: Production packet
+                                - generic [ref=f5e1426]: Scaffold
+                                - generic [ref=f5e1427]: Intricate
+                                - generic [ref=f5e1428]: Neutral anchor required
+                                - generic [ref=f5e1429]: starter
+                                - generic [ref=f5e1430]: sprite_frames
+                                - generic [ref=f5e1431]: catalog:scaffold
+                                - generic [ref=f5e1432]: tier:intricate
+                                - generic [ref=f5e1433]: atlas
+                                - generic [ref=f5e1434]: lofi
+                                - generic [ref=f5e1435]: study
+                                - generic [ref=f5e1436]: bundled
+                              - generic [ref=f5e1437]:
+                                - generic [ref=f5e1438]: "Expected assets:"
+                                - text: Identity Brief, Neutral Anchor, Model Sheet, Static Talking Sheet, Static Reaction Sheet, Required State Loops, Animation Strips, Animation Atlas, Custom State Variants
+                              - generic [ref=f5e1439]:
+                                - generic [ref=f5e1440]: "Coverage:"
+                                - text: "Scaffold fixture only: final intricate art should compile reviewed neutral-anchor-derived strips or atlas regions into runtime animations."
+                              - button "Copy production packet" [ref=f5e1441] [cursor=pointer]
+                      - generic [ref=f5e1447]:
+                        - generic [ref=f5e1448]:
+                          - generic [ref=f5e1449]:
+                            - generic [ref=f5e1450]: Review draft readiness
+                            - generic [ref=f5e1455]: Draft visual pack imported as a Persona Visual draft
+                          - generic [ref=f5e1456]: ready
+                        - generic [ref=f5e1457]:
+                          - generic [ref=f5e1458]: Draft preview
+                          - img "Buddy preview" [ref=f5e1463]
+                        - generic [ref=f5e1464]:
+                          - generic [ref=f5e1465]:
+                            - generic [ref=f5e1466]: Required states
+                            - list [ref=f5e1467]:
+                              - listitem [ref=f5e1468]:
+                                - generic [ref=f5e1469]: idle
+                                - generic [ref=f5e1470]: ready
+                              - listitem [ref=f5e1471]:
+                                - generic [ref=f5e1472]: listening
+                                - generic [ref=f5e1473]: ready
+                              - listitem [ref=f5e1474]:
+                                - generic [ref=f5e1475]: thinking
+                                - generic [ref=f5e1476]: ready
+                              - listitem [ref=f5e1477]:
+                                - generic [ref=f5e1478]: speaking
+                                - generic [ref=f5e1479]: ready
+                              - listitem [ref=f5e1480]:
+                                - generic [ref=f5e1481]: error
+                                - generic [ref=f5e1482]: ready
+                          - generic [ref=f5e1483]:
+                            - generic [ref=f5e1484]: Movement states
+                            - generic [ref=f5e1485]: No movement states.
+                        - generic [ref=f5e1486]:
+                          - generic [ref=f5e1487]: Custom states
+                          - list [ref=f5e1488]:
+                            - listitem [ref=f5e1489]: Success reaction (reaction) -> speaking, idle
+                        - button "Continue to activation" [ref=f5e1490] [cursor=pointer]
+                      - generic [ref=f5e1496]:
+                        - generic [ref=f5e1497]:
+                          - generic [ref=f5e1498]:
+                            - generic [ref=f5e1499]: Configure visual states
+                            - generic [ref=f5e1503]: Review the draft state map, movement states, and authored triggers before activation.
+                          - button "Save visual state configuration" [ref=f5e1504] [cursor=pointer]
+                        - generic [ref=f5e1511]:
+                          - generic [ref=f5e1512]: Core states
+                          - list [ref=f5e1513]:
+                            - listitem [ref=f5e1514]:
+                              - generic [ref=f5e1515]:
+                                - generic [ref=f5e1517]:
+                                  - generic [ref=f5e1518]: Idle
+                                  - generic [ref=f5e1519]: required
+                                - generic [ref=f5e1520]: mapped
+                              - generic [ref=f5e1521]:
+                                - generic [ref=f5e1522]:
+                                  - generic [ref=f5e1523]: Idle animation
+                                  - combobox "Idle animation" [disabled] [ref=f5e1524]:
+                                    - option "Not mapped"
+                                    - option "idle-loop" [selected]
+                                - generic [ref=f5e1525]:
+                                  - generic [ref=f5e1526]: Fallbacks
+                                  - generic [ref=f5e1527]: None
+                            - listitem [ref=f5e1528]:
+                              - generic [ref=f5e1529]:
+                                - generic [ref=f5e1531]:
+                                  - generic [ref=f5e1532]: Listening
+                                  - generic [ref=f5e1533]: required
+                                - generic [ref=f5e1534]: mapped
+                              - generic [ref=f5e1535]:
+                                - generic [ref=f5e1536]:
+                                  - generic [ref=f5e1537]: Listening animation
+                                  - combobox "Listening animation" [disabled] [ref=f5e1538]:
+                                    - option "Not mapped"
+                                    - option "listening-loop" [selected]
+                                - generic [ref=f5e1539]:
+                                  - generic [ref=f5e1540]: Fallbacks
+                                  - generic [ref=f5e1541]: None
+                            - listitem [ref=f5e1542]:
+                              - generic [ref=f5e1543]:
+                                - generic [ref=f5e1545]:
+                                  - generic [ref=f5e1546]: Thinking
+                                  - generic [ref=f5e1547]: required
+                                - generic [ref=f5e1548]: mapped
+                              - generic [ref=f5e1549]:
+                                - generic [ref=f5e1550]:
+                                  - generic [ref=f5e1551]: Thinking animation
+                                  - combobox "Thinking animation" [disabled] [ref=f5e1552]:
+                                    - option "Not mapped"
+                                    - option "thinking-loop" [selected]
+                                - generic [ref=f5e1553]:
+                                  - generic [ref=f5e1554]: Fallbacks
+                                  - generic [ref=f5e1555]: None
+                            - listitem [ref=f5e1556]:
+                              - generic [ref=f5e1557]:
+                                - generic [ref=f5e1559]:
+                                  - generic [ref=f5e1560]: Speaking
+                                  - generic [ref=f5e1561]: required
+                                - generic [ref=f5e1562]: mapped
+                              - generic [ref=f5e1563]:
+                                - generic [ref=f5e1564]:
+                                  - generic [ref=f5e1565]: Speaking animation
+                                  - combobox "Speaking animation" [disabled] [ref=f5e1566]:
+                                    - option "Not mapped"
+                                    - option "speaking-loop" [selected]
+                                - generic [ref=f5e1567]:
+                                  - generic [ref=f5e1568]: Fallbacks
+                                  - generic [ref=f5e1569]: None
+                            - listitem [ref=f5e1570]:
+                              - generic [ref=f5e1571]:
+                                - generic [ref=f5e1573]:
+                                  - generic [ref=f5e1574]: Error
+                                  - generic [ref=f5e1575]: required
+                                - generic [ref=f5e1576]: mapped
+                              - generic [ref=f5e1577]:
+                                - generic [ref=f5e1578]:
+                                  - generic [ref=f5e1579]: Error animation
+                                  - combobox "Error animation" [disabled] [ref=f5e1580]:
+                                    - option "Not mapped"
+                                    - option "error-loop" [selected]
+                                - generic [ref=f5e1581]:
+                                  - generic [ref=f5e1582]: Fallbacks
+                                  - generic [ref=f5e1583]: None
+                            - listitem [ref=f5e1584]:
+                              - generic [ref=f5e1585]:
+                                - generic [ref=f5e1586]: Wake armed
+                                - generic [ref=f5e1589]: missing
+                              - generic [ref=f5e1590]:
+                                - generic [ref=f5e1591]:
+                                  - generic [ref=f5e1592]: Wake armed animation
+                                  - combobox "Wake armed animation" [disabled] [ref=f5e1593]:
+                                    - option "Not mapped" [selected]
+                                - generic [ref=f5e1594]:
+                                  - generic [ref=f5e1595]: Fallbacks
+                                  - generic [ref=f5e1596]: None
+                            - listitem [ref=f5e1597]:
+                              - generic [ref=f5e1598]:
+                                - generic [ref=f5e1599]: Tool running
+                                - generic [ref=f5e1602]: missing
+                              - generic [ref=f5e1603]:
+                                - generic [ref=f5e1604]:
+                                  - generic [ref=f5e1605]: Tool running animation
+                                  - combobox "Tool running animation" [disabled] [ref=f5e1606]:
+                                    - option "Not mapped" [selected]
+                                - generic [ref=f5e1607]:
+                                  - generic [ref=f5e1608]: Fallbacks
+                                  - generic [ref=f5e1609]: None
+                            - listitem [ref=f5e1610]:
+                              - generic [ref=f5e1611]:
+                                - generic [ref=f5e1612]: Approval needed
+                                - generic [ref=f5e1615]: missing
+                              - generic [ref=f5e1616]:
+                                - generic [ref=f5e1617]:
+                                  - generic [ref=f5e1618]: Approval needed animation
+                                  - combobox "Approval needed animation" [disabled] [ref=f5e1619]:
+                                    - option "Not mapped" [selected]
+                                - generic [ref=f5e1620]:
+                                  - generic [ref=f5e1621]: Fallbacks
+                                  - generic [ref=f5e1622]: None
+                            - listitem [ref=f5e1623]:
+                              - generic [ref=f5e1624]:
+                                - generic [ref=f5e1625]: Offline
+                                - generic [ref=f5e1628]: missing
+                              - generic [ref=f5e1629]:
+                                - generic [ref=f5e1630]:
+                                  - generic [ref=f5e1631]: Offline animation
+                                  - combobox "Offline animation" [disabled] [ref=f5e1632]:
+                                    - option "Not mapped" [selected]
+                                - generic [ref=f5e1633]:
+                                  - generic [ref=f5e1634]: Fallbacks
+                                  - generic [ref=f5e1635]: None
+                        - generic [ref=f5e1636]:
+                          - generic [ref=f5e1637]: Movement states
+                          - heading "No movement states configured." [level=2] [ref=f5e1640]
+                        - generic [ref=f5e1641]:
+                          - generic [ref=f5e1642]: Custom states
+                          - list [ref=f5e1643]:
+                            - listitem [ref=f5e1644]:
+                              - generic [ref=f5e1645]:
+                                - generic [ref=f5e1646]:
+                                  - generic [ref=f5e1647]:
+                                    - generic [ref=f5e1648]: Success reaction
+                                    - generic [ref=f5e1649]: reaction
+                                  - generic [ref=f5e1650]: Single celebratory pose derived from the Migu Marker source sheet.
+                                  - generic [ref=f5e1651]: reaction
+                                - generic [ref=f5e1653]: mapped
+                              - generic [ref=f5e1654]:
+                                - generic [ref=f5e1655]:
+                                  - generic [ref=f5e1656]: Success reaction animation
+                                  - combobox "Success reaction animation" [disabled] [ref=f5e1657]:
+                                    - option "Not mapped"
+                                    - option "reaction-success-loop" [selected]
+                                - generic [ref=f5e1658]:
+                                  - generic [ref=f5e1659]: Fallbacks
+                                  - generic [ref=f5e1660]: speaking, idle
+                        - generic [ref=f5e1661]:
+                          - generic [ref=f5e1662]:
+                            - generic [ref=f5e1663]: Exact tool-name triggers
+                            - heading "No exact tool-name triggers." [level=2] [ref=f5e1666]
+                          - generic [ref=f5e1667]:
+                            - generic [ref=f5e1668]: Tool-category triggers
+                            - heading "No tool-category triggers." [level=2] [ref=f5e1671]
+                          - generic [ref=f5e1672]:
+                            - generic [ref=f5e1673]: Live/runtime triggers
+                            - heading "No live/runtime triggers." [level=2] [ref=f5e1676]
+                        - generic [ref=f5e1677]: Use the advanced manifest controls below for inline edits to animations, fallbacks, and trigger rows.
+                    - region "Expression packs" [ref=f5e889]:
+                      - generic [ref=f5e890]:
+                        - generic [ref=f5e891]:
+                          - generic [ref=f5e892]: Expression packs
+                          - generic [ref=f5e893]: Migu UAT
+                          - generic [ref=f5e894]:
+                            - generic [ref=f5e895]: no binding
+                            - generic [ref=f5e896]: placeholder
+                        - generic [ref=f5e897]:
+                          - button "Refresh" [ref=f5e898] [cursor=pointer]
+                          - button "Import expression pack ZIP" [ref=f5e906]
+                          - button "Import ZIP" [ref=f5e907] [cursor=pointer]
+                      - generic [ref=f5e913]:
+                        - generic [ref=f5e914]: 25 MB asset max
+                        - generic [ref=f5e915]: image/avif, image/gif, image/jpeg, image/png, image/webp
+                        - generic [ref=f5e916]: AVIF
+                      - generic [ref=f5e917]: Import a SillyTavern-style expressions ZIP to create a review draft. Activating the draft binds it to this persona by default.
+                    - region "Pack basics and active status" [ref=f5e918]:
+                      - region "Persona Visual management summary" [ref=f5e2035]:
+                        - generic [ref=f5e2036]:
+                          - generic [ref=f5e2037]:
+                            - generic [ref=f5e2038]: Selected persona
+                            - generic [ref=f5e2039]: Migu UAT
+                            - generic [ref=f5e2040]: Migu Marker Basic
+                          - generic "Pack lifecycle counts" [ref=f5e2041]:
+                            - generic [ref=f5e2042]: active 1
+                            - generic [ref=f5e2043]: draft 0
+                            - generic [ref=f5e2044]: review 0
+                            - generic [ref=f5e2045]: archived 0
+                            - generic [ref=f5e2046]: failed 0
+                        - generic [ref=f5e2047]:
+                          - generic [ref=f5e2048]:
+                            - generic [ref=f5e2049]: Generation unavailable
+                            - generic [ref=f5e2050]: Check generation readiness before queueing assets.
+                          - button "Open" [ref=f5e2051] [cursor=pointer]
+                      - button "Refresh" [ref=f5e923] [cursor=pointer]
+                      - generic [ref=f5e925]:
+                        - generic [ref=f5e926]:
+                          - generic [ref=f5e927]: Pack
+                          - combobox "Pack" [ref=f5e928]:
+                            - option "Migu Marker Basic" [selected]
+                        - generic [ref=f5e929]:
+                          - generic [ref=f5e930]: New draft title
+                          - textbox "New draft title" [ref=f5e931]
+                        - button "Create draft" [disabled] [ref=f5e932]
+                      - generic [ref=f5e1678]:
+                        - generic [ref=f5e1679]: active
+                        - generic [ref=f5e1680]: Migu Marker Basic
+                        - generic [ref=f5e1681]: v5
+                        - button "Save to library" [ref=f5e1682] [cursor=pointer]
+                      - generic [ref=f5e1687]:
+                        - generic [ref=f5e1688]: How Persona Visual packs work
+                        - generic [ref=f5e1689]: Assets are user-owned and attached to Migu UAT by default. Packs are stored as manifests with referenced assets, so they can be edited, exported, imported, and later duplicated or shared without changing the core format.
+                        - generic [ref=f5e1690]: The active pack is the one Persona Buddy renders now; other packs stay available for editing or review.
+                    - region "Reuse and portability" [ref=f5e937]:
+                      - generic [ref=f5e938]:
+                        - heading "Reuse and portability" [level=3] [ref=f5e939]
+                        - generic [ref=f5e940]: Create drafts from existing packs or manage portability actions.
+                      - generic [ref=f5e941]:
+                        - generic [ref=f5e942]:
+                          - generic [ref=f5e943]:
+                            - generic [ref=f5e944]: Reuse visual packs
+                            - generic [ref=f5e945]: Migu UAT
+                            - generic [ref=f5e946]: Assets are user-owned and attached to this persona by default. Each path creates or opens a draft for review; activate it only after the pack is ready.
+                          - generic [ref=f5e947]: draft first
+                        - generic [ref=f5e948]:
+                          - generic [ref=f5e949]:
+                            - generic [ref=f5e950]:
+                              - generic [ref=f5e951]: Start fresh
+                              - generic [ref=f5e952]: draft
+                            - generic [ref=f5e953]: Create an empty draft pack for new poses, animations, and state mappings.
+                            - button "Create draft" [ref=f5e954] [cursor=pointer]
+                          - generic [ref=f5e958]:
+                            - generic [ref=f5e959]:
+                              - generic [ref=f5e960]: Personal library
+                              - generic [ref=f5e961]: reference
+                            - generic [ref=f5e962]: No saved visual packs yet. Save a pack here first, or create/import a draft before adding it to the library.
+                            - button "Use personal library" [ref=f5e963] [cursor=pointer]
+                          - generic [ref=f5e968]:
+                            - generic [ref=f5e969]:
+                              - generic [ref=f5e970]: Portable archive
+                              - generic [ref=f5e971]: preview
+                            - generic [ref=f5e972]: Import an archive through preview, choose conflicts, then commit as a draft.
+                            - button "Import archive" [ref=f5e973] [cursor=pointer]
+                          - generic [ref=f5e981]:
+                            - generic [ref=f5e982]:
+                              - generic [ref=f5e983]: Another persona
+                              - generic [ref=f5e984]: copy
+                            - generic [ref=f5e985]: Copy the selected pack as a draft for another persona.
+                            - button "Duplicate to persona" [ref=f5e986] [cursor=pointer]
+                    - generic [ref=f5e1696]: Visual pack activated.
+                    - region "Personal library" [ref=f5e987]:
+                      - heading "Personal library" [level=3] [ref=f5e989]
+                      - generic [ref=f5e990]:
+                        - generic [ref=f5e991]: Save reusable Persona Visual packs as user-owned references. Using one creates a draft on the target persona.
+                        - button "Refresh library" [ref=f5e993] [cursor=pointer]
+                      - generic [ref=f5e1001]: No saved visual packs.
+                    - region "Assets" [ref=f5e1697]:
+                      - generic [ref=f5e1698]:
+                        - heading "Assets" [level=3] [ref=f5e1699]
+                        - generic [ref=f5e1700]: Upload and review the image assets referenced by this pack.
+                      - generic [ref=f5e1701]:
+                        - generic [ref=f5e1702]:
+                          - generic [ref=f5e1703]: Asset role
+                          - combobox "Asset role" [ref=f5e1704]:
+                            - option "frame" [selected]
+                            - option "still_pose"
+                            - option "sprite_sheet"
+                            - option "preview"
+                            - option "generated_candidate"
+                        - button "Choose File" [ref=f5e1705]
+                        - button "Upload" [disabled] [ref=f5e1706]
+                      - generic [ref=f5e1707]:
+                        - generic [ref=f5e1708]:
+                          - generic [ref=f5e1709]:
+                            - generic [ref=f5e1710]: still_pose
+                            - generic [ref=f5e1711]: migu-marker-basic-neutral-anchor.png
+                          - generic [ref=f5e1712]: dffb553e70234151b7ee15836eaca424
+                        - generic [ref=f5e1713]:
+                          - generic [ref=f5e1714]:
+                            - generic [ref=f5e1715]: preview
+                            - generic [ref=f5e1716]: migu-marker-basic-preview.png
+                          - generic [ref=f5e1717]: a1f5a4b4a5da4bea80356b40ace0e1b4
+                        - generic [ref=f5e1718]:
+                          - generic [ref=f5e1719]:
+                            - generic [ref=f5e1720]: frame
+                            - generic [ref=f5e1721]: migu-marker-basic-idle-1.png
+                          - generic [ref=f5e1722]: ba53496b39a442fd8ba8482d11b7c548
+                        - generic [ref=f5e1723]:
+                          - generic [ref=f5e1724]:
+                            - generic [ref=f5e1725]: frame
+                            - generic [ref=f5e1726]: migu-marker-basic-idle-2.png
+                          - generic [ref=f5e1727]: d729a37042914635bab7356c6c0d7e3e
+                        - generic [ref=f5e1728]:
+                          - generic [ref=f5e1729]:
+                            - generic [ref=f5e1730]: frame
+                            - generic [ref=f5e1731]: migu-marker-basic-listening-1.png
+                          - generic [ref=f5e1732]: 926325a48a2f47f6bf3e8df2d7c28192
+                        - generic [ref=f5e1733]:
+                          - generic [ref=f5e1734]:
+                            - generic [ref=f5e1735]: frame
+                            - generic [ref=f5e1736]: migu-marker-basic-listening-2.png
+                          - generic [ref=f5e1737]: 6e34bfb1cc6445578be4676997baaa2f
+                        - generic [ref=f5e1738]:
+                          - generic [ref=f5e1739]:
+                            - generic [ref=f5e1740]: frame
+                            - generic [ref=f5e1741]: migu-marker-basic-thinking-1.png
+                          - generic [ref=f5e1742]: 90ab636d20774ca8aeac364e9e2544c7
+                        - generic [ref=f5e1743]:
+                          - generic [ref=f5e1744]:
+                            - generic [ref=f5e1745]: frame
+                            - generic [ref=f5e1746]: migu-marker-basic-thinking-2.png
+                          - generic [ref=f5e1747]: 2a888ad08bc74678a41634f8853fc7f6
+                        - generic [ref=f5e1748]:
+                          - generic [ref=f5e1749]:
+                            - generic [ref=f5e1750]: frame
+                            - generic [ref=f5e1751]: migu-marker-basic-speaking-1.png
+                          - generic [ref=f5e1752]: 2aca9e9be7434526bbb3477a2c74f613
+                        - generic [ref=f5e1753]:
+                          - generic [ref=f5e1754]:
+                            - generic [ref=f5e1755]: frame
+                            - generic [ref=f5e1756]: migu-marker-basic-speaking-2.png
+                          - generic [ref=f5e1757]: 5f01a304d81a4e1e94aa91f712b18dea
+                        - generic [ref=f5e1758]:
+                          - generic [ref=f5e1759]:
+                            - generic [ref=f5e1760]: frame
+                            - generic [ref=f5e1761]: migu-marker-basic-reaction-success-1.png
+                          - generic [ref=f5e1762]: a071af2684ac43d7b66ede662aec43c1
+                        - generic [ref=f5e1763]:
+                          - generic [ref=f5e1764]:
+                            - generic [ref=f5e1765]: frame
+                            - generic [ref=f5e1766]: migu-marker-basic-error-1.png
+                          - generic [ref=f5e1767]: 5104dea52bf24f8eb4e114d8e23c111c
+                        - generic [ref=f5e1768]:
+                          - generic [ref=f5e1769]:
+                            - generic [ref=f5e1770]: frame
+                            - generic [ref=f5e1771]: migu-marker-basic-error-2.png
+                          - generic [ref=f5e1772]: 846d06821eaa4ed18ac29dbbc00d8704
+                    - region "Portable archive and duplicate actions" [ref=f5e1773]:
+                      - generic [ref=f5e1774]:
+                        - heading "Portable archive and duplicate actions" [level=3] [ref=f5e1775]
+                        - generic [ref=f5e1776]: Export, import, or duplicate this pack as a draft for review.
+                      - generic [ref=f5e1777]:
+                        - generic [ref=f5e1778]: Import preview validates a portable pack archive before it changes this persona.
+                        - generic [ref=f5e1779]: Commit import creates a reviewed draft pack for this persona.
+                        - generic [ref=f5e1780]: Export downloads a portable archive and does not publish to a shared library.
+                      - generic [ref=f5e1781]:
+                        - generic [ref=f5e1782]:
+                          - generic [ref=f5e1783]:
+                            - strong [ref=f5e1785]: Duplicate to persona
+                            - generic [ref=f5e1786]: creates draft
+                          - generic [ref=f5e1787]: Copy this pack to another persona. It stays a draft until reviewed and activated.
+                          - generic [ref=f5e1788]:
+                            - generic [ref=f5e1789]:
+                              - generic [ref=f5e1790]: Target persona
+                              - combobox "Target persona" [ref=f5e1791]:
+                                - option "Research Assistant" [selected]
+                            - generic [ref=f5e1792]:
+                              - generic [ref=f5e1793]: Draft title
+                              - textbox "Draft title" [ref=f5e1794]: Copy of Migu Marker Basic
+                            - button "Duplicate as draft" [ref=f5e1795] [cursor=pointer]
+                        - generic [ref=f5e1801]:
+                          - generic [ref=f5e1802]:
+                            - strong [ref=f5e1804]: Export archive
+                            - generic [ref=f5e1805]:
+                              - button "Export" [ref=f5e1806] [cursor=pointer]
+                              - button "Refresh" [disabled] [ref=f5e1812]
+                              - button "Download" [disabled] [ref=f5e1813]
+                          - generic [ref=f5e1814]: No export job.
+                    - region "State mappings and fallbacks" [ref=f5e1815]:
+                      - generic [ref=f5e1816]:
+                        - heading "State mappings and fallbacks" [level=3] [ref=f5e1817]
+                        - generic [ref=f5e1818]: Map runtime Persona Visual states to animations and define fallback chains.
+                      - generic [ref=f5e1819]:
+                        - generic [ref=f5e1820]:
+                          - generic [ref=f5e1821]:
+                            - generic [ref=f5e1822]: idle
+                            - generic [ref=f5e1823]: required
+                          - combobox "idle required" [ref=f5e1824]:
+                            - option "None"
+                            - option "error-loop"
+                            - option "idle-loop" [selected]
+                            - option "listening-loop"
+                            - option "reaction-success-loop"
+                            - option "speaking-loop"
+                            - option "thinking-loop"
+                        - generic [ref=f5e1825]:
+                          - generic [ref=f5e1826]:
+                            - generic [ref=f5e1827]: listening
+                            - generic [ref=f5e1828]: required
+                          - combobox "listening required" [ref=f5e1829]:
+                            - option "None"
+                            - option "error-loop"
+                            - option "idle-loop"
+                            - option "listening-loop" [selected]
+                            - option "reaction-success-loop"
+                            - option "speaking-loop"
+                            - option "thinking-loop"
+                        - generic [ref=f5e1830]:
+                          - generic [ref=f5e1831]:
+                            - generic [ref=f5e1832]: thinking
+                            - generic [ref=f5e1833]: required
+                          - combobox "thinking required" [ref=f5e1834]:
+                            - option "None"
+                            - option "error-loop"
+                            - option "idle-loop"
+                            - option "listening-loop"
+                            - option "reaction-success-loop"
+                            - option "speaking-loop"
+                            - option "thinking-loop" [selected]
+                        - generic [ref=f5e1835]:
+                          - generic [ref=f5e1836]:
+                            - generic [ref=f5e1837]: speaking
+                            - generic [ref=f5e1838]: required
+                          - combobox "speaking required" [ref=f5e1839]:
+                            - option "None"
+                            - option "error-loop"
+                            - option "idle-loop"
+                            - option "listening-loop"
+                            - option "reaction-success-loop"
+                            - option "speaking-loop" [selected]
+                            - option "thinking-loop"
+                        - generic [ref=f5e1840]:
+                          - generic [ref=f5e1841]:
+                            - generic [ref=f5e1842]: error
+                            - generic [ref=f5e1843]: required
+                          - combobox "error required" [ref=f5e1844]:
+                            - option "None"
+                            - option "error-loop" [selected]
+                            - option "idle-loop"
+                            - option "listening-loop"
+                            - option "reaction-success-loop"
+                            - option "speaking-loop"
+                            - option "thinking-loop"
+                        - generic [ref=f5e1845]:
+                          - generic [ref=f5e1846]: wake armed
+                          - combobox "wake armed" [ref=f5e1848]:
+                            - option "None" [selected]
+                            - option "error-loop"
+                            - option "idle-loop"
+                            - option "listening-loop"
+                            - option "reaction-success-loop"
+                            - option "speaking-loop"
+                            - option "thinking-loop"
+                        - generic [ref=f5e1849]:
+                          - generic [ref=f5e1850]: tool running
+                          - combobox "tool running" [ref=f5e1852]:
+                            - option "None" [selected]
+                            - option "error-loop"
+                            - option "idle-loop"
+                            - option "listening-loop"
+                            - option "reaction-success-loop"
+                            - option "speaking-loop"
+                            - option "thinking-loop"
+                        - generic [ref=f5e1853]:
+                          - generic [ref=f5e1854]: approval needed
+                          - combobox "approval needed" [ref=f5e1856]:
+                            - option "None" [selected]
+                            - option "error-loop"
+                            - option "idle-loop"
+                            - option "listening-loop"
+                            - option "reaction-success-loop"
+                            - option "speaking-loop"
+                            - option "thinking-loop"
+                        - generic [ref=f5e1857]:
+                          - generic [ref=f5e1858]: offline
+                          - combobox "offline" [ref=f5e1860]:
+                            - option "None" [selected]
+                            - option "error-loop"
+                            - option "idle-loop"
+                            - option "listening-loop"
+                            - option "reaction-success-loop"
+                            - option "speaking-loop"
+                            - option "thinking-loop"
+                      - generic [ref=f5e1861]: Custom States
+                      - generic [ref=f5e1863]:
+                        - generic [ref=f5e1864]:
+                          - generic [ref=f5e1865]: reaction.success
+                          - generic [ref=f5e1866]: reaction
+                        - combobox "reaction.success reaction" [ref=f5e1867]:
+                          - option "None"
+                          - option "error-loop"
+                          - option "idle-loop"
+                          - option "listening-loop"
+                          - option "reaction-success-loop" [selected]
+                          - option "speaking-loop"
+                          - option "thinking-loop"
+                      - generic [ref=f5e1868]:
+                        - generic [ref=f5e1869]:
+                          - generic [ref=f5e1870]: wake armed fallbacks
+                          - textbox "wake armed fallbacks" [ref=f5e1871]
+                        - generic [ref=f5e1872]:
+                          - generic [ref=f5e1873]: tool running fallbacks
+                          - textbox "tool running fallbacks" [ref=f5e1874]
+                        - generic [ref=f5e1875]:
+                          - generic [ref=f5e1876]: approval needed fallbacks
+                          - textbox "approval needed fallbacks" [ref=f5e1877]
+                        - generic [ref=f5e1878]:
+                          - generic [ref=f5e1879]: offline fallbacks
+                          - textbox "offline fallbacks" [ref=f5e1880]
+                        - generic [ref=f5e1881]:
+                          - generic [ref=f5e1882]: reaction.success fallbacks
+                          - textbox "reaction.success fallbacks" [ref=f5e1883]: speaking,idle
+                    - region "Animations" [ref=f5e1884]:
+                      - generic [ref=f5e1885]:
+                        - heading "Animations" [level=3] [ref=f5e1886]
+                        - generic [ref=f5e1887]: Edit animation timing, frame order, sprite regions, and looping behavior.
+                      - generic [ref=f5e1888]:
+                        - generic [ref=f5e1889]:
+                          - generic [ref=f5e1890]: Animation
+                          - combobox "Animation" [ref=f5e1891]:
+                            - option "error-loop" [selected]
+                            - option "idle-loop"
+                            - option "listening-loop"
+                            - option "reaction-success-loop"
+                            - option "speaking-loop"
+                            - option "thinking-loop"
+                        - generic [ref=f5e1892]:
+                          - generic [ref=f5e1893]: New animation
+                          - textbox "New animation" [ref=f5e1894]
+                        - button "Add animation" [disabled] [ref=f5e1895]
+                      - generic [ref=f5e1896]:
+                        - generic [ref=f5e1897]:
+                          - generic [ref=f5e1898]: Frame rate
+                          - spinbutton "Frame rate" [ref=f5e1899]: "4"
+                        - generic [ref=f5e1900]:
+                          - generic [ref=f5e1901]: Preview frame
+                          - combobox "Preview frame" [ref=f5e1902]:
+                            - option "0" [selected]
+                            - option "1"
+                        - generic [ref=f5e1903]:
+                          - generic [ref=f5e1904]: Alignment X
+                          - spinbutton "Alignment X" [ref=f5e1905]: "0.5"
+                        - generic [ref=f5e1906]:
+                          - generic [ref=f5e1907]: Alignment Y
+                          - spinbutton "Alignment Y" [ref=f5e1908]: "1"
+                        - generic [ref=f5e1909]:
+                          - checkbox "Loop" [checked] [ref=f5e1910]
+                          - generic [ref=f5e1911]: Loop
+                      - generic [ref=f5e1912]:
+                        - generic [ref=f5e1913]:
+                          - generic [ref=f5e1914]: Frame asset
+                          - combobox "Frame asset" [ref=f5e1915]:
+                            - option "Select asset" [selected]
+                            - option "migu-marker-basic-neutral-anchor.png"
+                            - option "migu-marker-basic-preview.png"
+                            - option "migu-marker-basic-idle-1.png"
+                            - option "migu-marker-basic-idle-2.png"
+                            - option "migu-marker-basic-listening-1.png"
+                            - option "migu-marker-basic-listening-2.png"
+                            - option "migu-marker-basic-thinking-1.png"
+                            - option "migu-marker-basic-thinking-2.png"
+                            - option "migu-marker-basic-speaking-1.png"
+                            - option "migu-marker-basic-speaking-2.png"
+                            - option "migu-marker-basic-reaction-success-1.png"
+                            - option "migu-marker-basic-error-1.png"
+                            - option "migu-marker-basic-error-2.png"
+                        - button "Add frame" [disabled] [ref=f5e1916]
+                      - generic [ref=f5e1917]:
+                        - generic [ref=f5e1918]:
+                          - generic [ref=f5e1919]:
+                            - generic [ref=f5e1920]: Asset
+                            - combobox "Asset" [ref=f5e1921]:
+                              - option "migu-marker-basic-neutral-anchor.png"
+                              - option "migu-marker-basic-preview.png"
+                              - option "migu-marker-basic-idle-1.png"
+                              - option "migu-marker-basic-idle-2.png"
+                              - option "migu-marker-basic-listening-1.png"
+                              - option "migu-marker-basic-listening-2.png"
+                              - option "migu-marker-basic-thinking-1.png"
+                              - option "migu-marker-basic-thinking-2.png"
+                              - option "migu-marker-basic-speaking-1.png"
+                              - option "migu-marker-basic-speaking-2.png"
+                              - option "migu-marker-basic-reaction-success-1.png"
+                              - option "migu-marker-basic-error-1.png" [selected]
+                              - option "migu-marker-basic-error-2.png"
+                          - generic [ref=f5e1922]:
+                            - generic [ref=f5e1923]: x
+                            - spinbutton "x" [ref=f5e1924]
+                          - generic [ref=f5e1925]:
+                            - generic [ref=f5e1926]: "y"
+                            - spinbutton "y" [ref=f5e1927]
+                          - generic [ref=f5e1928]:
+                            - generic [ref=f5e1929]: width
+                            - spinbutton "width" [ref=f5e1930]
+                          - generic [ref=f5e1931]:
+                            - generic [ref=f5e1932]: height
+                            - spinbutton "height" [ref=f5e1933]
+                          - generic [ref=f5e1934]:
+                            - generic [ref=f5e1935]: ms
+                            - spinbutton "ms" [ref=f5e1936]: "220"
+                          - generic [ref=f5e1937]:
+                            - button [disabled] [ref=f5e1938]
+                            - button [ref=f5e1939] [cursor=pointer]
+                        - generic [ref=f5e1943]:
+                          - generic [ref=f5e1944]:
+                            - generic [ref=f5e1945]: Asset
+                            - combobox "Asset" [ref=f5e1946]:
+                              - option "migu-marker-basic-neutral-anchor.png"
+                              - option "migu-marker-basic-preview.png"
+                              - option "migu-marker-basic-idle-1.png"
+                              - option "migu-marker-basic-idle-2.png"
+                              - option "migu-marker-basic-listening-1.png"
+                              - option "migu-marker-basic-listening-2.png"
+                              - option "migu-marker-basic-thinking-1.png"
+                              - option "migu-marker-basic-thinking-2.png"
+                              - option "migu-marker-basic-speaking-1.png"
+                              - option "migu-marker-basic-speaking-2.png"
+                              - option "migu-marker-basic-reaction-success-1.png"
+                              - option "migu-marker-basic-error-1.png"
+                              - option "migu-marker-basic-error-2.png" [selected]
+                          - generic [ref=f5e1947]:
+                            - generic [ref=f5e1948]: x
+                            - spinbutton "x" [ref=f5e1949]
+                          - generic [ref=f5e1950]:
+                            - generic [ref=f5e1951]: "y"
+                            - spinbutton "y" [ref=f5e1952]
+                          - generic [ref=f5e1953]:
+                            - generic [ref=f5e1954]: width
+                            - spinbutton "width" [ref=f5e1955]
+                          - generic [ref=f5e1956]:
+                            - generic [ref=f5e1957]: height
+                            - spinbutton "height" [ref=f5e1958]
+                          - generic [ref=f5e1959]:
+                            - generic [ref=f5e1960]: ms
+                            - spinbutton "ms" [ref=f5e1961]: "220"
+                          - generic [ref=f5e1962]:
+                            - button [ref=f5e1963] [cursor=pointer]
+                            - button [disabled] [ref=f5e1967]
+                    - region "Authored triggers" [ref=f5e1968]:
+                      - generic [ref=f5e1969]:
+                        - heading "Authored triggers" [level=3] [ref=f5e1970]
+                        - generic [ref=f5e1971]: Bind explicit trigger matches to visual states without changing runtime defaults.
+                      - generic [ref=f5e1972]:
+                        - combobox [ref=f5e1973]:
+                          - option "live_state"
+                          - option "tool_category" [selected]
+                          - option "tool_name"
+                          - option "mcp_runtime"
+                        - textbox [ref=f5e1974]
+                        - combobox [ref=f5e1975]:
+                          - option "idle"
+                          - option "listening"
+                          - option "thinking"
+                          - option "speaking"
+                          - option "error"
+                          - option "wake_armed"
+                          - option "tool_running" [selected]
+                          - option "approval_needed"
+                          - option "offline"
+                          - option "reaction.success"
+                        - spinbutton [ref=f5e1976]: "2500"
+                        - spinbutton [ref=f5e1977]: "20"
+                        - button "Add" [disabled] [ref=f5e1978]
+                    - region "Validation and activation" [ref=f5e1979]:
+                      - generic [ref=f5e1980]:
+                        - generic [ref=f5e1981]:
+                          - generic [ref=f5e1982]:
+                            - heading "Validation and activation" [level=3] [ref=f5e1983]
+                            - generic [ref=f5e1984]: Save manifest changes and explicitly activate only valid packs.
+                          - generic [ref=f5e1985]: Required states resolve.
+                        - generic [ref=f5e1986]:
+                          - button "Save manifest" [ref=f5e1987] [cursor=pointer]
+                          - button "Activate" [ref=f5e1994] [cursor=pointer]
+                          - button "Deactivate" [ref=f5e2000] [cursor=pointer]
+                    - region "Jobs and review" [ref=f5e2001]:
+                      - generic [ref=f5e2002]:
+                        - generic [ref=f5e2003]:
+                          - heading "Jobs and review" [level=3] [ref=f5e2004]
+                          - generic [ref=f5e2005]: Queue generation jobs and review generated candidates before applying them.
+                        - button "Refresh" [ref=f5e2006] [cursor=pointer]
+                      - generic [ref=f5e2008]: Generated candidates stay in review until accepted. Accepting a candidate updates this pack's manifest and assets; activation remains the explicit pack-level action.
+                      - generic [ref=f5e2009]:
+                        - generic [ref=f5e2010]:
+                          - generic [ref=f5e2011]: Prompt
+                          - textbox "Prompt" [ref=f5e2012]
+                        - generic [ref=f5e2013]:
+                          - generic [ref=f5e2014]: Target state
+                          - combobox "Target state" [ref=f5e2015]:
+                            - option "idle"
+                            - option "listening"
+                            - option "thinking" [selected]
+                            - option "speaking"
+                            - option "error"
+                            - option "wake_armed"
+                            - option "tool_running"
+                            - option "approval_needed"
+                            - option "offline"
+                            - option "reaction.success"
+                        - generic [ref=f5e2016]:
+                          - generic [ref=f5e2017]: Backend
+                          - combobox "Backend" [ref=f5e2018]
+                        - button "Queue" [disabled] [ref=f5e2019]
+                      - generic [ref=f5e2020]:
+                        - generic [ref=f5e2021]: Generation worker is not enabled.
+                        - generic [ref=f5e2022]: Enable PERSONA_VISUAL_GENERATION_WORKER_ENABLED before queueing Persona Buddy visual generation jobs.
+                        - generic [ref=f5e2023]: "Jobs queue: generation"
+                        - generic [ref=f5e2024]: "Enabled image backends: stable_diffusion_cpp"
+                      - generic [ref=f5e2025]: No generated candidates.
+    - generic [ref=f5e263]:
+      - generic [ref=f5e264]: Drag Buddy
+      - button "Toggle buddy for Migu UAT" [expanded] [ref=f5e433] [cursor=pointer]:
+        - img "Migu UAT" [ref=f5e2070]
+        - generic [ref=f5e266]:
+          - generic [ref=f5e267]: Migu UAT
+          - generic [ref=f5e268]: capybara
+          - generic [ref=f5e2098]: Idle
+        - generic [ref=f5e269]: −
+      - generic [ref=f5e2071]:
+        - generic [ref=f5e2072]: Persona Buddy
+        - generic [ref=f5e2073]: Migu UAT
+        - generic [ref=f5e2074]: Helps ingest, search, and summarize content
+        - generic [ref=f5e2075]:
+          - generic [ref=f5e2076]:
+            - button "Start" [ref=f5e2077] [cursor=pointer]
+            - button "Stop" [ref=f5e2081] [cursor=pointer]
+          - textbox "Message your buddy" [ref=f5e2084]: "Hello Migu. Reply with: Migu buddy UAT ready."
+          - generic [ref=f5e2099]: Persona live stream failed to connect
+          - button "Send" [active] [ref=f5e2085] [cursor=pointer]
+        - link "Open Full Live View" [ref=f5e2089] [cursor=pointer]:
+          - /url: /persona?persona_id=e19c631e-e2ac-452d-9935-293af03cee4e&tab=live
+        - link "Choose/Change Buddy" [ref=f5e2090] [cursor=pointer]:
+          - /url: /persona?persona_id=e19c631e-e2ac-452d-9935-293af03cee4e&tab=visuals
+  - button "Open Next.js Dev Tools" [ref=f5e275] [cursor=pointer]
+  - alert [ref=f5e279]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-05T14-38-53-736Z.log#L1211-L1214

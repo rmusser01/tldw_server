@@ -43,6 +43,24 @@ def test_infer_tts_provider_qwen3_aliases(model_name: str) -> None:
     assert _infer_tts_provider_from_model(model_name) == "qwen3_tts"
 
 
+@pytest.mark.parametrize(
+    ("model_name", "expected_provider"),
+    [
+        ("gpt-4o-mini-tts", "openai"),
+        ("pocket-tts-onnx", "pocket_tts"),
+        ("pocket-tts-cpp", "pocket_tts_cpp"),
+        ("vibevoice-realtime-0.5b", "vibevoice_realtime"),
+        ("s2-pro", "fish_s2"),
+        ("lux_tts", "lux_tts"),
+    ],
+)
+def test_infer_tts_provider_uses_authoritative_factory_routes(
+    model_name: str,
+    expected_provider: str,
+) -> None:
+    assert _infer_tts_provider_from_model(model_name) == expected_provider
+
+
 def test_sanitize_speech_request_passes_kitten_provider_hint(monkeypatch) -> None:
     captured: dict[str, str | None] = {}
 
@@ -66,3 +84,37 @@ def test_sanitize_speech_request_passes_kitten_provider_hint(monkeypatch) -> Non
 
     assert provider_hint == "kitten_tts"
     assert captured["provider"] == "kitten_tts"
+
+
+def test_sanitize_speech_request_skips_model_inference_for_explicit_backend(monkeypatch) -> None:
+    captured: dict[str, str | None] = {}
+
+    class FakeValidator:
+        def __init__(self, _config):
+            return
+
+        def sanitize_text(self, text: str, provider: str | None = None) -> str:
+            captured["provider"] = provider
+            return text
+
+    def fail_inference(_model: str) -> str:
+        raise AssertionError("explicit backends must not enter legacy model inference")
+
+    monkeypatch.setattr(tts_service, "get_tts_config", lambda: SimpleNamespace(strict_validation=False))
+    monkeypatch.setattr(tts_service, "TTSInputValidator", FakeValidator)
+    monkeypatch.setattr(tts_service, "_infer_tts_provider_from_model", fail_inference)
+
+    request = SimpleNamespace(
+        backend="gateway:Case-Sensitive",
+        model="Vendor/Case-Sensitive-TTS",
+        voice="NarratorVoice",
+        input="Hello from a gateway",
+    )
+
+    provider_hint = _sanitize_speech_request(request, request_id="req-gateway")
+
+    assert provider_hint is None
+    assert captured["provider"] is None
+    assert request.backend == "gateway:Case-Sensitive"
+    assert request.model == "Vendor/Case-Sensitive-TTS"
+    assert request.voice == "NarratorVoice"

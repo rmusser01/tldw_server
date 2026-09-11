@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
+
 
 @pytest.mark.asyncio
 async def test_api_key_rotation_marks_old_key_and_links():
@@ -34,17 +36,12 @@ async def test_api_key_rotation_marks_old_key_and_links():
         pool = await get_db_pool()
         ensure_authnz_tables(Path(pool.db_path))
 
-        # Create test user
-        async with pool.transaction() as conn:
-            await conn.execute(
-                """
-                INSERT INTO users (username, email, password_hash, is_active)
-                VALUES (?, ?, ?, 1)
-                """,
-                ("rotate_user", "rotate@example.com", "hash"),
-            )
-        user_id = await pool.fetchval(
-            "SELECT id FROM users WHERE username = ?", "rotate_user"
+        # Create test user through the guarded write path.
+        user_id = await create_authnz_test_user(
+            pool,
+            username="rotate_user",
+            email="rotate@example.com",
+            password_hash="hash",
         )
 
         mgr = APIKeyManager(pool)

@@ -10,10 +10,19 @@ from tldw_Server_API.app.core.RAG.rag_service.advanced_reranking import (
 
 
 class _DummyCrossEncoder:
-    def __init__(self, model_id: str, device=None, trust_remote_code: bool = False):  # noqa: D401
+    def __init__(
+        self,
+        model_id: str,
+        device=None,
+        trust_remote_code: bool = False,
+        revision=None,
+        local_files_only: bool = False,
+    ):  # noqa: D401
         self.model_id = model_id
         self.device = device
         self.trust_remote_code = trust_remote_code
+        self.revision = revision
+        self.local_files_only = local_files_only
 
     def predict(self, pairs, batch_size=32):  # pragma: no cover - unused in this test
         return [0.0 for _ in pairs]
@@ -39,3 +48,4 @@ def test_mxbai_reranker_enables_trust_remote_code(monkeypatch):
 
     assert reranker._trust_remote_code is True
     assert getattr(reranker._ce, "trust_remote_code", False) is True
+    assert getattr(reranker._ce, "local_files_only", True) is False

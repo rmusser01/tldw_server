@@ -2,8 +2,8 @@ import asyncio
 import importlib.machinery
 import json
 import sys
-from types import SimpleNamespace
 import types
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -47,6 +47,9 @@ if "transformers" not in sys.modules:
     sys.modules["transformers"] = _fake_tf
 
 from tldw_Server_API.app.api.v1.endpoints import audio
+from tldw_Server_API.app.api.v1.endpoints.audio import (
+    audio_streaming as audio_streaming_module,
+)
 from tldw_Server_API.app.core.TTS.realtime_session import RealtimeSessionHandle, RealtimeTTSSession
 
 
@@ -55,6 +58,7 @@ class DummyWebSocket:
         self.headers = dict(headers or {})
         self.query_params = dict(query_params or {})
         self.client = SimpleNamespace(host="127.0.0.1")
+        self.state = SimpleNamespace()
         self._messages = [json.dumps(p) for p in payloads]
         self.sent_bytes = []
         self.sent_json = []
@@ -351,3 +355,184 @@ async def test_websocket_tts_realtime_error_without_compat_alias(monkeypatch: py
     assert err.get("code") == "bad_request"
     assert err.get("error_type") is None
     assert ws.close_code == 4400
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_websocket_tts_realtime_keeps_two_user_snapshots_across_interrupt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Initial and reopened realtime sessions retain only their connection snapshot."""
+    from tldw_Server_API.app.core.Audio import tts_service as credential_service
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    def payloads() -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "config",
+                "provider": "openai",
+                "model": "tts-1",
+                "voice": "alloy",
+                "format": "pcm",
+            },
+            {"type": "text", "delta": "before interrupt"},
+            {"type": "commit"},
+            {"type": "interrupt", "reason": "test"},
+            {"type": "text", "delta": "after interrupt"},
+            {"type": "commit"},
+            {"type": "final"},
+        ]
+
+    first_ws = DummyWebSocket(payloads())
+    second_ws = DummyWebSocket(payloads())
+    user_ids = {id(first_ws): 101, id(second_ws): 202}
+    first_commit_entered = {
+        user_id: asyncio.Event() for user_id in user_ids.values()
+    }
+    first_commit_release = {
+        user_id: asyncio.Event() for user_id in user_ids.values()
+    }
+    open_calls: list[tuple[int, dict[str, Any]]] = []
+    runtimes: list[Any] = []
+
+    class Runtime:
+        def __init__(self, **kwargs: Any) -> None:
+            self.user_id = int(kwargs["user_id"])
+            self.handles: list[Any] = []
+            self.marked: list[Any] = []
+            self.closed = False
+            runtimes.append(self)
+
+        async def resolve(self, provider: str, *, model: str | None = None) -> Any:
+            handle = SimpleNamespace(
+                provider=provider,
+                api_key=f"realtime-user-{self.user_id}-key",
+                app_config={
+                    "openai_api": {
+                        "api_base_url": f"https://realtime-user-{self.user_id}.example/v1",
+                        "model": model,
+                    }
+                },
+                credentials_resolved=True,
+            )
+            self.handles.append(handle)
+            return handle
+
+        async def mark_used(self, handle: object) -> None:
+            self.marked.append(handle)
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class Session(RealtimeTTSSession):
+        def __init__(self, user_id: int, generation: int) -> None:
+            self.user_id = user_id
+            self.generation = generation
+            self.queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+            self.closed = False
+
+        async def push_text(self, _delta: str) -> None:
+            return None
+
+        async def commit(self) -> None:
+            if self.generation == 1:
+                first_commit_entered[self.user_id].set()
+                await first_commit_release[self.user_id].wait()
+            await self.queue.put(
+                f"audio-{self.user_id}-{self.generation}".encode()
+            )
+
+        async def finish(self) -> None:
+            if self.closed:
+                return
+            self.closed = True
+            await self.queue.put(None)
+
+        async def audio_stream(self):  # noqa: ANN202
+            while True:
+                item = await self.queue.get()
+                if item is None:
+                    break
+                yield item
+
+    class Service:
+        async def open_realtime_session(self, **kwargs: Any) -> RealtimeSessionHandle:
+            user_id = int(kwargs["user_id"])
+            open_calls.append((user_id, dict(kwargs)))
+            generation = sum(1 for called_user, _call in open_calls if called_user == user_id)
+            return RealtimeSessionHandle(
+                session=Session(user_id, generation),
+                provider="openai",
+            )
+
+    async def auth_stub(websocket: Any, *_args: Any, **_kwargs: Any) -> tuple[bool, int]:
+        user_id = user_ids[id(websocket)]
+        websocket.state.auth_principal = AuthPrincipal(
+            kind="user",
+            user_id=user_id,
+            subject=f"user:{user_id}",
+        )
+        return True, user_id
+
+    async def can_start_stream_stub(_user_id: int) -> tuple[bool, None]:
+        return True, None
+
+    async def finish_stream_stub(_user_id: int) -> None:
+        return None
+
+    async def get_service() -> Service:
+        return Service()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "global-realtime-key-must-not-dispatch")
+    monkeypatch.setattr(audio_streaming_module, "is_multi_user_mode", lambda: True)
+    monkeypatch.setattr(audio, "_audio_ws_authenticate", auth_stub)
+    monkeypatch.setattr(audio, "can_start_stream", can_start_stream_stub)
+    monkeypatch.setattr(audio, "finish_stream", finish_stream_stub)
+    monkeypatch.setattr(audio, "get_tts_service", get_service)
+    monkeypatch.setattr(credential_service, "ProviderCredentialRuntime", Runtime)
+    monkeypatch.setattr(
+        credential_service,
+        "load_server_config_snapshot",
+        lambda: {"openai_api": {"api_key": "global-realtime-key-must-not-dispatch"}},
+    )
+    monkeypatch.setattr(
+        credential_service,
+        "_capture_tts_provider_config",
+        lambda _provider: {"enabled": True},
+    )
+
+    first = asyncio.create_task(audio.websocket_tts_realtime(first_ws, token=None))
+    second = asyncio.create_task(audio.websocket_tts_realtime(second_ws, token=None))
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(
+                *(event.wait() for event in first_commit_entered.values())
+            ),
+            timeout=1.0,
+        )
+        first_commit_release[202].set()
+        await asyncio.wait_for(second, timeout=1.0)
+        first_commit_release[101].set()
+        await asyncio.wait_for(first, timeout=1.0)
+    finally:
+        for event in first_commit_release.values():
+            event.set()
+        await asyncio.gather(first, second, return_exceptions=True)
+
+    assert len(open_calls) == 4
+    for user_id in (101, 202):
+        calls = [kwargs for called_user, kwargs in open_calls if called_user == user_id]
+        assert len(calls) == 2
+        assert calls[0]["provider_overrides"] is calls[1]["provider_overrides"]
+        assert calls[0]["provider_overrides"]["openai_api_key"] == (
+            f"realtime-user-{user_id}-key"
+        )
+        assert all(call["user_id"] == user_id for call in calls)
+
+    assert "global-realtime-key-must-not-dispatch" not in repr(open_calls)
+    assert "global-realtime-key-must-not-dispatch" not in repr(
+        first_ws.sent_json + second_ws.sent_json
+    )
+    assert len(runtimes) == 2
+    assert all(runtime.marked == runtime.handles for runtime in runtimes)
+    assert all(runtime.closed for runtime in runtimes)

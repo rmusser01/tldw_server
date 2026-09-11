@@ -1,0 +1,210 @@
+{
+  "cases": [
+    {
+      "additional_metadata": {
+        "author": "Ada",
+        "language": "en"
+      },
+      "content": "Fixture body with caf\u00e9.",
+      "expected": "[METADATA]\n        {\n  \"url\": \"https://example.com/article\",\n  \"ingestion_date\": \"<TIMESTAMP>\",\n  \"content_hash\": \"5d46c3b97ef174b0d763c25c403ee394f30017cd2bc48a817539c86db4e41408\",\n  \"scraping_pipeline\": \"FixturePipeline\",\n  \"author\": \"Ada\",\n  \"language\": \"en\"\n}\n        [/METADATA]\n\n        Fixture body with caf\u00e9.",
+      "name": "canonical_formatted_envelope",
+      "operation": "format",
+      "pipeline": "FixturePipeline",
+      "url": "https://example.com/article"
+    },
+    {
+      "content": "  [METADATA]\n{\"url\":\"https://example.com/article\",\"literal\":\"brackets [{]} and \\\"quotes\\\"\"}\n[/METADATA]\n\nArticle body",
+      "expected": {
+        "clean_content": "Article body",
+        "content_hash": "91090fa36a4450088de28ad14fb61f5b78d2e69de36b7f6875c6ab43e34db9d3",
+        "has_metadata": true,
+        "metadata": {
+          "literal": "brackets [{]} and \"quotes\"",
+          "url": "https://example.com/article"
+        },
+        "stripped": "Article body"
+      },
+      "name": "canonical_envelope_inspection",
+      "operation": "inspect"
+    },
+    {
+      "content": "[METADATA]{\"url\":\"https://example.com\"}\nArticle body",
+      "expected": {
+        "clean_content": "[METADATA]{\"url\":\"https://example.com\"}\nArticle body",
+        "content_hash": "31be2ef0e89eebb43ba76854c6cd4a371b416ccff53cdaa8de1935d057c8dbcd",
+        "has_metadata": false,
+        "metadata": {},
+        "stripped": "[METADATA]{\"url\":\"https://example.com\"}\nArticle body"
+      },
+      "name": "malformed_envelope_passes_through",
+      "operation": "inspect"
+    },
+    {
+      "content": "[METADATA]{\"value\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}[/METADATA]\nArticle body",
+      "expected": {
+        "clean_content": "Article body",
+        "content_hash": "91090fa36a4450088de28ad14fb61f5b78d2e69de36b7f6875c6ab43e34db9d3",
+        "has_metadata": true,
+        "metadata": {
+          "value": [
+            [
+              [
+                [
+                  [
+                    [
+                      [
+                        [
+                          [
+                            [
+                              [
+                                [
+                                  [
+                                    [
+                                      [
+                                        [
+                                          [
+                                            [
+                                              [
+                                                [
+                                                  [
+                                                    [
+                                                      [
+                                                        [
+                                                          [
+                                                            [
+                                                              [
+                                                                [
+                                                                  [
+                                                                    [
+                                                                      [
+                                                                        [
+                                                                          [
+                                                                            [
+                                                                              [
+                                                                                [
+                                                                                  [
+                                                                                    [
+                                                                                      [
+                                                                                        [
+                                                                                          [
+                                                                                            [
+                                                                                              [
+                                                                                                [
+                                                                                                  [
+                                                                                                    [
+                                                                                                      [
+                                                                                                        [
+                                                                                                          [
+                                                                                                            [
+                                                                                                              [
+                                                                                                                [
+                                                                                                                  [
+                                                                                                                    [
+                                                                                                                      [
+                                                                                                                        [
+                                                                                                                          [
+                                                                                                                            [
+                                                                                                                              [
+                                                                                                                                [
+                                                                                                                                  [
+                                                                                                                                    [
+                                                                                                                                      [
+                                                                                                                                        0
+                                                                                                                                      ]
+                                                                                                                                    ]
+                                                                                                                                  ]
+                                                                                                                                ]
+                                                                                                                              ]
+                                                                                                                            ]
+                                                                                                                          ]
+                                                                                                                        ]
+                                                                                                                      ]
+                                                                                                                    ]
+                                                                                                                  ]
+                                                                                                                ]
+                                                                                                              ]
+                                                                                                            ]
+                                                                                                          ]
+                                                                                                        ]
+                                                                                                      ]
+                                                                                                    ]
+                                                                                                  ]
+                                                                                                ]
+                                                                                              ]
+                                                                                            ]
+                                                                                          ]
+                                                                                        ]
+                                                                                      ]
+                                                                                    ]
+                                                                                  ]
+                                                                                ]
+                                                                              ]
+                                                                            ]
+                                                                          ]
+                                                                        ]
+                                                                      ]
+                                                                    ]
+                                                                  ]
+                                                                ]
+                                                              ]
+                                                            ]
+                                                          ]
+                                                        ]
+                                                      ]
+                                                    ]
+                                                  ]
+                                                ]
+                                              ]
+                                            ]
+                                          ]
+                                        ]
+                                      ]
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        },
+        "stripped": "Article body"
+      },
+      "name": "nesting_boundary_is_accepted",
+      "operation": "inspect"
+    },
+    {
+      "content": "[METADATA]{\"value\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}[/METADATA]\nArticle body",
+      "expected": {
+        "clean_content": "[METADATA]{\"value\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}[/METADATA]\nArticle body",
+        "content_hash": "ce08a84b01676daca99f1c0c6baa560412fce9f36fd04ddfe480451b8f8f3860",
+        "has_metadata": false,
+        "metadata": {},
+        "stripped": "[METADATA]{\"value\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}[/METADATA]\nArticle body"
+      },
+      "name": "nesting_over_boundary_is_rejected",
+      "operation": "inspect"
+    },
+    {
+      "expected": false,
+      "name": "metadata_only_changes_do_not_change_body_hash",
+      "new_content": "[METADATA]{\"version\":2}[/METADATA]\nSame body",
+      "old_content": "[METADATA]{\"version\":1}[/METADATA]\nSame body",
+      "operation": "content_changed"
+    },
+    {
+      "expected": true,
+      "name": "body_changes_are_detected",
+      "new_content": "[METADATA]{\"version\":2}[/METADATA]\nNew body",
+      "old_content": "[METADATA]{\"version\":1}[/METADATA]\nOld body",
+      "operation": "content_changed"
+    }
+  ],
+  "category": "metadata"
+}

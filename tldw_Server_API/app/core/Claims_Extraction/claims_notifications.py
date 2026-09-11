@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
+import html
 import json
 import random
 import socket
@@ -30,6 +30,8 @@ _CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS = (
     ValueError,
 )
 _CLAIMS_NOTIFICATION_PARSE_EXCEPTIONS = (TypeError, ValueError, json.JSONDecodeError)
+_CLAIMS_NOTIFICATION_MAX_PENDING = 32
+_notification_slots = threading.BoundedSemaphore(_CLAIMS_NOTIFICATION_MAX_PENDING)
 
 try:
     import httpx as _claims_httpx
@@ -50,6 +52,28 @@ _CLAIMS_WEBHOOK_EXCEPTIONS = (
     TypeError,
     ValueError,
 ) + _CLAIMS_HTTPX_EXCEPTIONS
+
+
+def submit_claims_notification_delivery(fn, *args, **kwargs) -> bool:
+    """Start a bounded background delivery callback for legacy notifications."""
+    if not _notification_slots.acquire(blocking=False):
+        logger.warning("Claims notification dispatch queue is full")
+        return False
+
+    def _run() -> None:
+        """Release the delivery slot after the callback completes."""
+        try:
+            fn(*args, **kwargs)
+        finally:
+            _notification_slots.release()
+
+    try:
+        threading.Thread(target=_run, daemon=True).start()
+    except _CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS as exc:
+        _notification_slots.release()
+        logger.debug("Claims notification dispatch thread failed to start: {}", exc)
+        return False
+    return True
 
 
 def record_review_assignment_notifications(
@@ -358,10 +382,123 @@ def _build_review_email_bodies(notifications: list[dict[str, Any]]) -> tuple[str
         if claim_text:
             summary = f"{summary} | {claim_text}"
         lines.append(f"- {summary}")
-        html_lines.append(f"<li>{summary}</li>")
+        html_lines.append(f"<li>{html.escape(summary)}</li>")
     text_body = "Claims review notifications:\n" + "\n".join(lines)
     html_body = "<h2>Claims review notifications</h2><ul>" + "".join(html_lines) + "</ul>"
     return html_body, text_body
+
+
+def _normalize_notification_ids(notification_ids: list[int]) -> list[int]:
+    """Return sorted positive notification IDs with duplicates removed."""
+    normalized: set[int] = set()
+    for raw_id in notification_ids:
+        if isinstance(raw_id, bool):
+            continue
+        try:
+            notif_id = int(raw_id)
+        except (OverflowError, TypeError, ValueError):
+            continue
+        if notif_id > 0:
+            normalized.add(notif_id)
+    return sorted(normalized)
+
+
+def deliver_claim_review_notifications_now(
+    *,
+    db_path: str,
+    owner_user_id: str,
+    notification_ids: list[int],
+    initialize: bool = False,
+) -> dict[str, Any]:
+    """Deliver stored review notifications synchronously for a Jobs worker."""
+    normalized_ids = _normalize_notification_ids(notification_ids)
+    if not normalized_ids:
+        return {"outcome": "skipped", "reason": "no_notification_ids", "notification_ids": []}
+
+    with managed_media_database(
+        client_id=str(settings.get("SERVER_CLIENT_ID", "SERVER_API_V1")),
+        db_path=str(db_path),
+        initialize=initialize,
+        suppress_init_exceptions=_CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,
+        suppress_close_exceptions=_CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,
+    ) as db:
+        if db is None:
+            return {
+                "outcome": "failed",
+                "reason": "database_initialization_failed",
+                "notification_ids": normalized_ids,
+            }
+        config_row = db.get_claims_monitoring_settings(str(owner_user_id)) or {}
+        if config_row and not bool(config_row.get("enabled", True)):
+            return {"outcome": "skipped", "reason": "settings_disabled", "notification_ids": normalized_ids}
+
+        channels = _normalize_review_channels(config_row)
+        if not any(channels.values()):
+            return {"outcome": "skipped", "reason": "no_channels", "notification_ids": normalized_ids}
+
+        rows = db.get_claim_notifications_by_ids(normalized_ids)
+        if not rows:
+            return {"outcome": "skipped", "reason": "notifications_missing", "notification_ids": normalized_ids}
+
+        owner_rows = [row for row in rows if str(row.get("user_id")) == str(owner_user_id)]
+        if not owner_rows:
+            return {"outcome": "skipped", "reason": "notifications_owner_mismatch", "notification_ids": normalized_ids}
+
+        pending_id_set: set[int] = set()
+        notifications: list[dict[str, Any]] = []
+        for row in owner_rows:
+            if row.get("delivered_at"):
+                continue
+            notifications.append(_normalize_notification_row(row))
+            raw_row_id = row.get("id")
+            if isinstance(raw_row_id, bool):
+                continue
+            try:
+                pending_id = int(raw_row_id)
+            except (TypeError, ValueError):
+                continue
+            if pending_id in normalized_ids:
+                pending_id_set.add(pending_id)
+        if not notifications:
+            return {"outcome": "skipped", "reason": "already_delivered", "notification_ids": normalized_ids}
+        pending_ids = [notification_id for notification_id in normalized_ids if notification_id in pending_id_set]
+
+        payload = _build_review_digest_payload(user_id=str(owner_user_id), notifications=notifications)
+        delivery_results: dict[str, bool] = {}
+
+        slack_url = config_row.get("slack_webhook_url")
+        webhook_url = config_row.get("webhook_url")
+        recipients = _parse_email_recipients(config_row.get("email_recipients"))
+
+        if channels.get("slack") and slack_url:
+            slack_text = f"Claims review notifications: {len(notifications)} items"
+            delivery_results["slack"] = _deliver_review_webhook(
+                url=str(slack_url),
+                payload={"text": slack_text},
+                channel="slack",
+            )
+
+        if channels.get("webhook") and webhook_url:
+            delivery_results["webhook"] = _deliver_review_webhook(
+                url=str(webhook_url),
+                payload=payload,
+                channel="webhook",
+            )
+
+        if channels.get("email") and recipients:
+            html_body, text_body = _build_review_email_bodies(notifications)
+            delivery_results["email"] = _deliver_review_email_sync(
+                recipients=recipients,
+                subject=f"Claims review notifications ({len(notifications)})",
+                html_body=html_body,
+                text_body=text_body,
+            )
+
+        if not delivery_results or not all(delivery_results.values()):
+            return {"outcome": "failed", "reason": "delivery_failed", "notification_ids": normalized_ids}
+
+        marked = db.mark_claim_notifications_delivered(pending_ids)
+        return {"outcome": "ok", "notification_ids": normalized_ids, "delivered": int(marked)}
 
 
 def dispatch_claim_review_notifications(
@@ -375,56 +512,13 @@ def dispatch_claim_review_notifications(
 
     def _deliver() -> None:
         try:
-            with managed_media_database(
-                client_id=str(settings.get("SERVER_CLIENT_ID", "SERVER_API_V1")),
+            deliver_claim_review_notifications_now(
                 db_path=db_path,
-                suppress_init_exceptions=_CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,
-                suppress_close_exceptions=_CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,
-            ) as db:
-                config_row = db.get_claims_monitoring_settings(str(owner_user_id)) or {}
-                if config_row and not bool(config_row.get("enabled", True)):
-                    return
-                channels = _normalize_review_channels(config_row)
-                if not any(channels.values()):
-                    return
-                rows = db.get_claim_notifications_by_ids(notification_ids)
-                if not rows:
-                    return
-                notifications = [_normalize_notification_row(row) for row in rows]
-                payload = _build_review_digest_payload(user_id=str(owner_user_id), notifications=notifications)
-                delivered = False
-
-                slack_url = config_row.get("slack_webhook_url")
-                webhook_url = config_row.get("webhook_url")
-                recipients = _parse_email_recipients(config_row.get("email_recipients"))
-
-                if channels.get("slack") and slack_url:
-                    slack_text = f"Claims review notifications: {len(notifications)} items"
-                    delivered = _deliver_review_webhook(
-                        url=str(slack_url),
-                        payload={"text": slack_text},
-                        channel="slack",
-                    ) or delivered
-
-                if channels.get("webhook") and webhook_url:
-                    delivered = _deliver_review_webhook(
-                        url=str(webhook_url),
-                        payload=payload,
-                        channel="webhook",
-                    ) or delivered
-
-                if channels.get("email") and recipients:
-                    html_body, text_body = _build_review_email_bodies(notifications)
-                    delivered = _deliver_review_email_sync(
-                        recipients=recipients,
-                        subject=f"Claims review notifications ({len(notifications)})",
-                        html_body=html_body,
-                        text_body=text_body,
-                    ) or delivered
-
-                if delivered:
-                    db.mark_claim_notifications_delivered(notification_ids)
+                owner_user_id=owner_user_id,
+                notification_ids=notification_ids,
+                initialize=True,
+            )
         except _CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(f"Claims review notification delivery failed: {exc}")
 
-    threading.Thread(target=_deliver, daemon=True).start()
+    submit_claims_notification_delivery(_deliver)
