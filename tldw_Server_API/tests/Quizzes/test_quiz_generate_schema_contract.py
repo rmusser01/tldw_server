@@ -128,7 +128,7 @@ def test_quiz_generate_request_accepts_generation_profile():
     assert payload.generation_profile == QuizGenerationProfile.BEST_OF_FIVE
 
 
-def test_quiz_generate_request_parses_planned_osce_profile_for_runtime_guarding():
+def test_quiz_generate_request_parses_available_osce_profile():
     request = QuizGenerateRequest.model_validate(
         {
             "sources": [{"source_type": "note", "source_id": "note-1"}],
@@ -225,11 +225,9 @@ def test_question_generation_response_defaults_remain_compatible():
     assert response.osce_stations == []
 
 
-def test_available_generation_profiles_match_non_planned_catalog_profiles() -> None:
+def test_available_generation_profiles_match_catalog_profiles() -> None:
     assert {profile.value for profile in AvailableQuizGenerationProfile} == {
-        profile.value
-        for profile in QuizGenerationProfile
-        if profile is not QuizGenerationProfile.OSCE_SCENARIO
+        profile.value for profile in QuizGenerationProfile
     }
 
 

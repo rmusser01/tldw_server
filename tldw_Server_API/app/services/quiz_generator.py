@@ -144,7 +144,7 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "id": "osce_scenario",
         "label": "OSCE Scenario",
         "description": "Scenario practice with checklist and rubric feedback.",
-        "status": "planned",
+        "status": "available",
         "output_kind": "osce_stations",
         "default_num_stations": 1,
         "default_num_questions": 1,

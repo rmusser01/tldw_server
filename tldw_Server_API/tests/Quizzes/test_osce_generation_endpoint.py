@@ -74,10 +74,16 @@ def _row_counts(db: CharactersRAGDB) -> tuple[int, int]:
 
 
 @pytest.mark.asyncio
-async def test_planned_osce_profile_is_unavailable_without_persistence(
+async def test_recovery_planned_osce_profile_is_unavailable_without_persistence(
+    monkeypatch: pytest.MonkeyPatch,
     quizzes_db: CharactersRAGDB,
     media_db: MediaDatabase,
 ) -> None:
+    monkeypatch.setitem(
+        quiz_generator._PROFILE_BY_ID["osce_scenario"],
+        "status",
+        "planned",
+    )
     note_id = quizzes_db.add_note(title="Guide", content="Warfarin requires INR monitoring.")
 
     with pytest.raises(HTTPException) as exc_info:

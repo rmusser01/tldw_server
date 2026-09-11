@@ -116,7 +116,7 @@ describe("OSCE Generate and Create controls", () => {
     expect(screen.queryByTestId("generate-study-materials-toggle")).not.toBeInTheDocument()
   })
 
-  it("keeps the planned fallback OSCE profile hidden", async () => {
+  it("shows the available fallback OSCE profile when the catalog is unavailable", async () => {
     vi.mocked(listQuizGenerationProfiles).mockRejectedValueOnce(new Error("catalog unavailable"))
 
     renderGenerate()
@@ -124,7 +124,7 @@ describe("OSCE Generate and Create controls", () => {
     fireEvent.mouseDown(profile.querySelector(".ant-select-selector") ?? profile)
 
     expect(await screen.findByText("Standard Recall", { selector: ".ant-select-item-option-content" })).toBeInTheDocument()
-    expect(screen.queryByText("OSCE Scenario", { selector: ".ant-select-item-option-content" })).not.toBeInTheDocument()
+    expect(await screen.findByText("OSCE Scenario", { selector: ".ant-select-item-option-content" })).toBeInTheDocument()
   })
 
   it("sends num_stations and navigates successful OSCE generation to Manage", async () => {

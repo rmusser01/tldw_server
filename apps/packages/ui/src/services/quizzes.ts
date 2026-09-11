@@ -119,7 +119,7 @@ export const QUIZ_GENERATION_PROFILES: QuizGenerationProfileDefinition[] = [
     id: "osce_scenario",
     label: "OSCE Scenario",
     description: "Source-grounded clinical practice stations.",
-    status: "planned",
+    status: "available",
     output_kind: "osce_stations",
     default_num_stations: 1,
     default_num_questions: 1,

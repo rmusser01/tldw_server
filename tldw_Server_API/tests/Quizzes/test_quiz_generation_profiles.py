@@ -6,7 +6,6 @@ from tldw_Server_API.app.api.v1.schemas.quizzes import (
     QuizGenerateResponse,
     QuizGenerationProfile,
 )
-from tldw_Server_API.app.services import quiz_generator
 from tldw_Server_API.app.services.quiz_generator import (
     QuizGenerationRequestError,
     ensure_generation_profile_available,
@@ -24,24 +23,29 @@ def test_profile_catalog_exposes_output_kind_and_station_defaults() -> None:
     assert profiles["osce_scenario"]["output_kind"] == "osce_stations"
     assert profiles["osce_scenario"]["default_num_stations"] == 1
     assert profiles["osce_scenario"]["default_num_questions"] == 1
-    assert profiles["osce_scenario"]["status"] == "planned"
+    assert profiles["osce_scenario"]["status"] == "available"
 
 
-def test_planned_osce_profile_uses_stable_unavailable_error() -> None:
+def test_osce_profile_is_available() -> None:
+    ensure_generation_profile_available(QuizGenerationProfile.OSCE_SCENARIO)
+
+
+def test_osce_profile_can_be_disabled_only_by_catalog_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services import quiz_generator
+
+    monkeypatch.setitem(
+        quiz_generator._PROFILE_BY_ID["osce_scenario"],
+        "status",
+        "planned",
+    )
+
     with pytest.raises(
         QuizGenerationRequestError,
         match="^generation_profile_unavailable$",
     ):
         ensure_generation_profile_available(QuizGenerationProfile.OSCE_SCENARIO)
-
-
-def test_osce_profile_can_be_enabled_only_by_catalog_status_in_tests(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    profile = quiz_generator._PROFILE_BY_ID["osce_scenario"]
-    monkeypatch.setitem(profile, "status", "available")
-
-    ensure_generation_profile_available(QuizGenerationProfile.OSCE_SCENARIO)
 
 
 def test_question_generation_response_compatibility_defaults_remain_stable() -> None:

@@ -57,19 +57,16 @@ class AvailableQuizGenerationProfile(str, Enum):
     BEST_OF_FIVE = "best_of_five"
     EMQ = "emq"
     ASSERTION_REASONING = "assertion_reasoning"
+    OSCE_SCENARIO = "osce_scenario"
 
 
 def _validate_available_generation_profiles() -> None:
-    """Fail fast if request profiles drift from the available catalog subset."""
-    expected = {
-        profile.value
-        for profile in QuizGenerationProfile
-        if profile is not QuizGenerationProfile.OSCE_SCENARIO
-    }
+    """Fail fast if request profiles drift from the available catalog."""
+    expected = {profile.value for profile in QuizGenerationProfile}
     actual = {profile.value for profile in AvailableQuizGenerationProfile}
     if actual != expected:
         raise RuntimeError(
-            "AvailableQuizGenerationProfile must match all non-planned quiz profiles"
+            "AvailableQuizGenerationProfile must match all available quiz profiles"
         )
 
 

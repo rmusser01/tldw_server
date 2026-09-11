@@ -56,6 +56,7 @@ def test_postgres_quiz_content_mutations_lock_the_quiz_row() -> None:
     db._backend = _FakeBackend()
     db._uses_shared_content_backend = False
     db._local = SimpleNamespace()
+    db.client_id = "owner-a"
     connection = _RecordingConnection()
 
     row = db._get_quiz_row_for_mutation(connection, 42)
@@ -64,8 +65,9 @@ def test_postgres_quiz_content_mutations_lock_the_quiz_row() -> None:
     assert connection.queries == [
         (
             "SELECT id, version, activity_type, total_questions, total_stations, "
-            "time_limit_seconds, passing_score FROM quizzes WHERE id = ? AND deleted = FALSE FOR UPDATE",
-            (42,),
+            "time_limit_seconds, passing_score FROM quizzes "
+            "WHERE id = ? AND deleted = FALSE AND client_id = ? FOR UPDATE",
+            (42, "owner-a"),
         )
     ]
     assert "_get_quiz_row_for_mutation" in CharactersRAGDB.update_quiz.__code__.co_names
@@ -223,7 +225,7 @@ def test_postgres_v67_upgrade_preserves_legacy_quiz_as_questions(
         legacy.close_all_connections()
 
     upgraded_backend = DatabaseBackendFactory.create_backend(pg_database_config)
-    upgraded = CharactersRAGDB(":memory:", client_id="upgrade-v67", backend=upgraded_backend)
+    upgraded = CharactersRAGDB(":memory:", client_id="legacy-v66", backend=upgraded_backend)
     try:
         quiz = upgraded.get_quiz(1)
         assert quiz is not None
@@ -234,3 +236,10 @@ def test_postgres_v67_upgrade_preserves_legacy_quiz_as_questions(
         _assert_live_postgres_osce_schema(upgraded_backend)
     finally:
         upgraded.close_all_connections()
+
+    foreign_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    foreign = CharactersRAGDB(":memory:", client_id="upgrade-v67", backend=foreign_backend)
+    try:
+        assert foreign.get_quiz(1) is None
+    finally:
+        foreign.close_all_connections()
