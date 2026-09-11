@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Dropdown, Empty, Input, Modal, Tooltip } from "antd"
 import type { InputRef } from "antd"
 import type { TextAreaRef } from "antd/es/input/TextArea"
@@ -27,6 +27,7 @@ import {
 } from "./PromptAssist/usePromptAssist"
 import type { PromptImproveModelSelection } from "@/services/prompt-improvement"
 import { fetchPromptCapabilities } from "@/services/prompts-api"
+import { useRecipePersistenceOwner } from "@/hooks/useRecipePersistenceOwner"
 import {
   captureSystemPromptOverrideSnapshot,
   normalizeSystemPromptOverrideValue,
@@ -92,9 +93,12 @@ export const PromptSelect: React.FC<Props> = ({
   const [editorTemplateContent, setEditorTemplateContent] = useState("")
   const [editorOverrideActive, setEditorOverrideActive] = useState(false)
   const [recipeMode, setRecipeMode] = useState(false)
-  const [recipeAuthorizationRefreshing, setRecipeAuthorizationRefreshing] =
-    useState(false)
-  const [recipeUndo, setRecipeUndo] = useState<RecipeSystemPromptUndoSnapshot | null>(null)
+  const { owner: recipeOwner, loading: recipeOwnerLoading } =
+    useRecipePersistenceOwner(recipeMode && editorOpen)
+  const [authorizedRecipeOwner, setAuthorizedRecipeOwner] =
+    React.useState<typeof recipeOwner>(null)
+  const [recipeUndo, setRecipeUndo] =
+    useState<RecipeSystemPromptUndoSnapshot | null>(null)
   const searchInputRef = useRef<InputRef | null>(null)
   const editorInputRef = useRef<TextAreaRef | null>(null)
   const editorFocusRequestedRef = useRef(false)
@@ -139,11 +143,7 @@ export const PromptSelect: React.FC<Props> = ({
     editorLookupEpochRef.current += 1
   }
 
-  const {
-    data: promptCapabilities,
-    isFetching: promptCapabilitiesFetching,
-    refetch: refetchPromptCapabilities
-  } = useQuery({
+  const { data: promptCapabilities } = useQuery({
     queryKey: [
       "promptCapabilities",
       normalizedPromptAssistBackendKey,
@@ -159,12 +159,53 @@ export const PromptSelect: React.FC<Props> = ({
         promptCapabilities.prompt_improvement_v1.supported
       ? "supported"
       : "unsupported"
+  const {
+    data: resolvedRecipeCapabilities,
+    isFetching: recipeCapabilitiesFetching,
+    isError: recipeCapabilitiesError,
+    refetch: refetchRecipeCapabilities
+  } = useQuery({
+    queryKey: [
+      "promptCapabilities",
+      recipeOwner?.ownerId ?? null,
+      recipeOwner?.authorizationRevision ?? null
+    ],
+    queryFn: fetchPromptCapabilities,
+    enabled: false,
+    retry: false
+  })
+  const recipeQueryClient = useQueryClient()
+  React.useEffect(() => {
+    if (!recipeOwner) return
+    let current = true
+    // An earlier open's initial fetch may still be in flight. Do not deduplicate
+    // this open's authorization check onto that older request.
+    void recipeQueryClient
+      .cancelQueries({
+        queryKey: [
+          "promptCapabilities",
+          recipeOwner.ownerId,
+          recipeOwner.authorizationRevision
+        ],
+        exact: true
+      })
+      .then(async () => {
+        if (!current) return
+        const result = await refetchRecipeCapabilities()
+        if (current && result.isSuccess) setAuthorizedRecipeOwner(recipeOwner)
+      })
+    return () => {
+      current = false
+    }
+  }, [recipeOwner, recipeQueryClient, refetchRecipeCapabilities])
   const recipeCapabilities =
-    !normalizedPromptAssistBackendKey ||
-    recipeAuthorizationRefreshing ||
-    promptCapabilitiesFetching
-    ? undefined
-    : promptCapabilities
+    recipeOwner &&
+    !recipeOwnerLoading &&
+    authorizedRecipeOwner === recipeOwner &&
+    !recipeCapabilitiesFetching &&
+    !recipeCapabilitiesError
+      ? resolvedRecipeCapabilities
+      : undefined
 
   const updateEditorDraft = React.useCallback((nextDraft: string) => {
     editorLookupEpochRef.current += 1
@@ -449,16 +490,7 @@ export const PromptSelect: React.FC<Props> = ({
   const enterRecipeMode = React.useCallback(() => {
     promptAssist.dismiss()
     setRecipeMode(true)
-    if (!normalizedPromptAssistBackendKey) return
-    setRecipeAuthorizationRefreshing(true)
-    void refetchPromptCapabilities().finally(() => {
-      setRecipeAuthorizationRefreshing(false)
-    })
-  }, [
-    normalizedPromptAssistBackendKey,
-    promptAssist,
-    refetchPromptCapabilities
-  ])
+  }, [promptAssist])
 
   const leaveRecipeMode = React.useCallback(() => {
     setRecipeMode(false)
@@ -905,7 +937,7 @@ export const PromptSelect: React.FC<Props> = ({
             <PromptRecipeBuilder
               target="system"
               capabilities={recipeCapabilities}
-              persistenceScope={normalizedPromptAssistBackendKey}
+              persistenceScope={recipeOwner?.ownerId ?? null}
               onApply={applyRecipe}
               onBack={leaveRecipeMode}
             />

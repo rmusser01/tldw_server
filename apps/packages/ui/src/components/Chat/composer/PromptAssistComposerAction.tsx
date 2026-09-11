@@ -5,10 +5,11 @@ import {
   type PromptTargetAdapter,
   usePromptAssist
 } from "@/components/Common/PromptAssist/usePromptAssist"
+import { useRecipePersistenceOwner } from "@/hooks/useRecipePersistenceOwner"
 import type { useSimpleForm } from "@/hooks/useSimpleForm"
 import type { PromptImproveModelSelection } from "@/services/prompt-improvement"
 import { fetchPromptCapabilities } from "@/services/prompts-api"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Drawer } from "antd"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -66,9 +67,13 @@ export function PromptAssistComposerAction({
   const [panelOpen, setPanelOpen] = React.useState(false)
   const [inspectionOpen, setInspectionOpen] = React.useState(false)
   const [recipeOpen, setRecipeOpen] = React.useState(false)
-  const [recipeAuthorizationRefreshing, setRecipeAuthorizationRefreshing] =
-    React.useState(false)
-  const [recipeUndo, setRecipeUndo] = React.useState<{ draft: string } | null>(null)
+  const { owner: recipeOwner, loading: recipeOwnerLoading } =
+    useRecipePersistenceOwner(recipeOpen && surfaceOpen)
+  const [authorizedRecipeOwner, setAuthorizedRecipeOwner] =
+    React.useState<typeof recipeOwner>(null)
+  const [recipeUndo, setRecipeUndo] = React.useState<{ draft: string } | null>(
+    null
+  )
   const normalizedBackendKey = promptAssistBackendKey?.trim() || null
   const normalizedAuthorizationRevision =
     promptAssistAuthorizationRevision?.trim() || null
@@ -83,11 +88,7 @@ export function PromptAssistComposerAction({
   const setFieldValue = form.setFieldValue
   modelSelectionRef.current = modelSelection
 
-  const {
-    data: promptCapabilities,
-    isFetching: promptCapabilitiesFetching,
-    refetch: refetchPromptCapabilities
-  } = useQuery({
+  const { data: promptCapabilities } = useQuery({
     queryKey: [
       "promptCapabilities",
       normalizedBackendKey,
@@ -103,12 +104,53 @@ export function PromptAssistComposerAction({
         promptCapabilities.prompt_improvement_v1.supported
       ? "supported"
       : "unsupported"
+  const {
+    data: resolvedRecipeCapabilities,
+    isFetching: recipeCapabilitiesFetching,
+    isError: recipeCapabilitiesError,
+    refetch: refetchRecipeCapabilities
+  } = useQuery({
+    queryKey: [
+      "promptCapabilities",
+      recipeOwner?.ownerId ?? null,
+      recipeOwner?.authorizationRevision ?? null
+    ],
+    queryFn: fetchPromptCapabilities,
+    enabled: false,
+    retry: false
+  })
+  const recipeQueryClient = useQueryClient()
+  React.useEffect(() => {
+    if (!recipeOwner) return
+    let current = true
+    // An earlier open's initial fetch may still be in flight. Do not deduplicate
+    // this open's authorization check onto that older request.
+    void recipeQueryClient
+      .cancelQueries({
+        queryKey: [
+          "promptCapabilities",
+          recipeOwner.ownerId,
+          recipeOwner.authorizationRevision
+        ],
+        exact: true
+      })
+      .then(async () => {
+        if (!current) return
+        const result = await refetchRecipeCapabilities()
+        if (current && result.isSuccess) setAuthorizedRecipeOwner(recipeOwner)
+      })
+    return () => {
+      current = false
+    }
+  }, [recipeOwner, recipeQueryClient, refetchRecipeCapabilities])
   const recipeCapabilities =
-    !normalizedBackendKey ||
-    recipeAuthorizationRefreshing ||
-    promptCapabilitiesFetching
-    ? undefined
-    : promptCapabilities
+    recipeOwner &&
+    !recipeOwnerLoading &&
+    authorizedRecipeOwner === recipeOwner &&
+    !recipeCapabilitiesFetching &&
+    !recipeCapabilitiesError
+      ? resolvedRecipeCapabilities
+      : undefined
 
   const adapter = React.useMemo<PromptTargetAdapter>(
     () => ({
@@ -272,12 +314,7 @@ export function PromptAssistComposerAction({
     setPanelOpen(false)
     setInspectionOpen(false)
     setRecipeOpen(true)
-    if (!normalizedBackendKey) return
-    setRecipeAuthorizationRefreshing(true)
-    void refetchPromptCapabilities().finally(() => {
-      setRecipeAuthorizationRefreshing(false)
-    })
-  }, [dismissPromptAssist, normalizedBackendKey, refetchPromptCapabilities])
+  }, [dismissPromptAssist])
   const closeRecipeBuilder = React.useCallback(() => {
     pendingDrawerFocusRef.current = true
     setRecipeOpen(false)
@@ -409,7 +446,7 @@ export function PromptAssistComposerAction({
               <PromptRecipeBuilder
                 target="user_message"
                 capabilities={recipeCapabilities}
-                persistenceScope={normalizedBackendKey}
+                persistenceScope={recipeOwner?.ownerId ?? null}
                 onApply={applyRecipe}
                 onBack={closeRecipeBuilder}
               />
