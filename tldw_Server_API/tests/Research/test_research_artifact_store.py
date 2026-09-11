@@ -112,6 +112,70 @@ def test_artifact_store_rejects_artifact_symlink_escape(tmp_path):
         store._artifact_path("session", "plan.json")
 
 
+@pytest.mark.parametrize("target_kind", ["case-sibling", "same-session", "regular"])
+def test_artifact_windows_canonical_leaf_respects_exact_session_root(monkeypatch, target_kind):
+    import ntpath
+    from pathlib import PureWindowsPath
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Research import artifact_store
+    from tldw_Server_API.app.core.Utils import path_utils
+
+    session_name = artifact_store.ResearchArtifactStore._safe_session_component("session")
+    session_root = PureWindowsPath(r"C:\Outputs\research") / session_name
+    resolutions = []
+
+    class CanonicalWindowsPath(PureWindowsPath):
+        def mkdir(self, *, parents=False, exist_ok=False):
+            pass
+
+        def resolve(self, *, strict=False):
+            resolutions.append(str(self))
+            if self.name.startswith("artifact_"):
+                if target_kind == "case-sibling":
+                    return CanonicalWindowsPath(session_root.parent / session_name.upper() / "private.json")
+                if target_kind == "same-session":
+                    return CanonicalWindowsPath(session_root / "MixedCase.json")
+            return self
+
+    windows_os = SimpleNamespace(path=ntpath, sep="\\", pardir="..")
+    monkeypatch.setattr(ntpath, "islink", lambda _path: False)
+    monkeypatch.setattr(path_utils, "os", windows_os)
+    monkeypatch.setattr(artifact_store, "os", windows_os, raising=False)
+    monkeypatch.setattr(artifact_store, "Path", CanonicalWindowsPath)
+    store = artifact_store.ResearchArtifactStore(base_dir=r"C:\Outputs", db=None)
+    if target_kind == "case-sibling":
+        with pytest.raises(ValueError, match="artifact path escapes session directory"):
+            store._artifact_path("session", "plan.json")
+    else:
+        result = store._artifact_path("session", "plan.json")
+        assert str(result.parent) == str(session_root)
+        if target_kind == "same-session":
+            assert result.name == "MixedCase.json"
+    assert any("artifact_" in value for value in resolutions)
+
+
+def test_artifact_store_preserves_same_session_leaf_link(tmp_path):
+    from tldw_Server_API.app.core.Research.artifact_store import ResearchArtifactStore
+
+    store = ResearchArtifactStore(base_dir=tmp_path / "outputs", db=None)
+    path = store._artifact_path("session", "plan.json")
+    target = path.parent / "MixedCase.json"
+    target.write_text("{}", encoding="utf-8")
+    path.symlink_to(target)
+    assert store._artifact_path("session", "plan.json") == target
+
+
+def test_artifact_store_rejects_leaf_link_to_session_root_before_versioning(tmp_path):
+    from tldw_Server_API.app.core.Research.artifact_store import ResearchArtifactStore
+
+    store = ResearchArtifactStore(base_dir=tmp_path / "outputs", db=None)
+    path = store._artifact_path("session", "plan.json")
+    path.symlink_to(path.parent, target_is_directory=True)
+    with pytest.raises(ValueError, match="artifact path escapes session directory"):
+        store._versioned_artifact_path("session", "plan.json", 1)
+
+
 def test_artifact_store_rejects_research_root_symlink_escape(tmp_path):
     from tldw_Server_API.app.core.Research.artifact_store import ResearchArtifactStore
 

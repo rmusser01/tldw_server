@@ -88,3 +88,29 @@ The 7,117-file protected manifest remains byte-identical; source record and test
 pins are rebound to this commit. Legal dates/digests are unchanged. Hosted
 analysis must now verify this final source, including the earlier unrecognized
 main-shared paths; no global dismissal of their actual main defects is used.
+
+## Final rescan follow-up: Whisper and Research leaf boundaries
+
+Python analysis 1759306505 introduced Whisper alerts 2682–2684. Their exact
+flows exposed case-only Windows model-root escapes; source repair now requires
+exact lexical and canonical containment before directory checks, preserving
+valid model identifiers and mixed-case descendants. Nine new Windows-emulated
+regressions/controls pass, with 114 focused tests and no new Bandit findings.
+
+Independent Research leaf review also reproduced a case-only sibling target
+and a leaf link to the session root that allowed version naming outside that
+session. The artifact result must be a strict canonical descendant, preserving
+valid same-session file links. These follow-ups remain source repairs pending
+hosted confirmation; none is added to the 422 reviewed alert dispositions.
+Source commit, protected-source rebind and fresh hosted scans follow final
+independent review. Native Windows execution is not claimed.
+
+The follow-up batches passed final independent review: 38 Whisper model tests
+and 32 Research artifact tests, with all six source/test/evidence hashes
+matching their frozen manifests. Research has 56 combined artifact/helper
+tests; its Bandit scan has zero findings. Whisper retains exactly the existing
+eight scoped baseline findings and has no new findings or scan errors.
+Python analysis 1759364372 on 49cce1 cleared the ten prior snapshot/Research/
+checkpoint alerts. It retains three now-repaired Whisper alerts and introduces
+2686/2687 in administrative shared-workspace root validation; those exact
+traces are under independent review and remain open.

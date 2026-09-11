@@ -690,14 +690,16 @@ def _resolve_audio_input_path_for_provider(
 def _resolve_whisper_model_path(path: Path, base_dir: Path) -> Path:
     """Constrain model directories before probing them or following links."""
     root = base_dir.resolve(strict=False)
-    candidate = path
-    if not candidate.is_absolute():
-        candidate = root / candidate
-    candidate = Path(os.path.abspath(candidate))
-    try:
-        relative = candidate.relative_to(root)
-    except ValueError as exc:
-        raise ValueError(f"Whisper model path must resolve under {root}") from exc
+    root_text = str(root)
+    candidate = os.path.abspath(path if path.is_absolute() else root / path)
+    # Windows can have distinct case-only siblings; relative_to alone folds case.
+    if candidate == root_text:
+        local_path = root
+    elif candidate.startswith(os.path.join(root_text, "")):
+        local_path = Path(candidate)
+    else:
+        raise ValueError(f"Whisper model path must resolve under {root}")
+    relative = local_path.relative_to(root)
     current = root
     # Inspect parents first so a linked directory is never traversed to probe
     # its children. HF snapshot artifact links are handled by the model loader.
@@ -705,10 +707,15 @@ def _resolve_whisper_model_path(path: Path, base_dir: Path) -> Path:
         current = current / component
         if current.is_symlink():
             raise ValueError(f"Whisper model path may not traverse symlinks: {current}")
-    safe_path = resolve_safe_local_path(candidate, root)
+    safe_path = resolve_safe_local_path(local_path, root)
     if safe_path is None:
         raise ValueError(f"Whisper model path must resolve under {root}")
-    return safe_path
+    canonical_path = str(safe_path)
+    if canonical_path == root_text:
+        return root
+    if canonical_path.startswith(os.path.join(root_text, "")):
+        return Path(canonical_path)
+    raise ValueError(f"Whisper model path must resolve under {root}")
 
 
 def _normalize_whisper_model_identifier(
@@ -723,9 +730,10 @@ def _normalize_whisper_model_identifier(
     base_root = Path(base_dir if base_dir is not None else WHISPER_MODEL_BASE_DIR).resolve(strict=False)
     # Preserve CWD-relative local models only when the CWD candidate is inside
     # the managed root. Outside directories cannot shadow aliases or Hub IDs.
-    cwd_candidate = Path(os.path.abspath(raw))
-    if _path_is_within(cwd_candidate, base_root):
-        local_path = _resolve_whisper_model_path(cwd_candidate, base_root)
+    cwd_candidate = os.path.abspath(raw)
+    base_text = str(base_root)
+    if cwd_candidate == base_text or cwd_candidate.startswith(os.path.join(base_text, "")):
+        local_path = _resolve_whisper_model_path(Path(cwd_candidate), base_root)
         if local_path.is_dir():
             return str(local_path)
 

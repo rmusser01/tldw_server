@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -43,10 +44,13 @@ class ResearchArtifactStore:
         ))
         session_dir.mkdir(parents=True, exist_ok=True)
         path = (session_dir / safe_name).resolve(strict=False)
-        try:
-            path.relative_to(session_dir)
-        except ValueError as exc:
-            raise ValueError("artifact path escapes session directory") from exc
+        # Windows can distinguish case-only sibling directories; compare the
+        # canonical spelling while preserving links within this same session.
+        # The root itself is not an artifact: versioning it would name a sibling.
+        canonical_path = str(path)
+        session_root = str(session_dir)
+        if not canonical_path.startswith(os.path.join(session_root, "")):
+            raise ValueError("artifact path escapes session directory")
         return path
 
     @staticmethod

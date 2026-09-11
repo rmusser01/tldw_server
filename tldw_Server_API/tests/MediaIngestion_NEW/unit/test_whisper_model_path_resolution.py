@@ -224,3 +224,85 @@ def test_hub_identifier_never_reaches_absolute_path_existence_probe(model_env, m
     assert atlib.check_model_exists(identifier) is False
     assert exists_calls == []
     assert model_env.downloads == []
+
+
+@pytest.fixture
+def windows_model_paths(monkeypatch):
+    import ntpath
+    from pathlib import PureWindowsPath
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import path_utils
+
+    probes = []
+    canonical_targets = {}
+    directories = set()
+
+    class WindowsPath(PureWindowsPath):
+        def resolve(self, *, strict=False):
+            return WindowsPath(canonical_targets.get(str(self), str(self)))
+
+        def is_symlink(self):
+            probes.append(("is_symlink", str(self)))
+            return False
+
+        def is_dir(self):
+            probes.append(("is_dir", str(self)))
+            return str(self) in directories
+
+    paths = SimpleNamespace(**{
+        key: getattr(ntpath, key)
+        for key in ("join", "isabs", "commonpath", "realpath")
+    })
+    paths.abspath = lambda value: ntpath.normpath(
+        str(value) if ntpath.isabs(value) else ntpath.join(r"D:\cwd", str(value))
+    )
+    windows_os = SimpleNamespace(path=paths, sep="\\", altsep="/")
+    root = WindowsPath(r"C:\Cache")
+    monkeypatch.setattr(atlib, "Path", WindowsPath)
+    monkeypatch.setattr(atlib, "os", windows_os)
+    monkeypatch.setattr(atlib, "WHISPER_MODEL_BASE_DIR", root)
+    monkeypatch.setattr(path_utils, "Path", WindowsPath)
+    monkeypatch.setattr(path_utils, "os", windows_os)
+    return SimpleNamespace(root=root, probes=probes, canonical_targets=canonical_targets, directories=directories)
+
+
+@pytest.mark.parametrize("identifier", [r"C:\cache\SecretModel", r"..\cache\SecretModel"])
+def test_windows_case_sibling_is_rejected_before_model_probe(windows_model_paths, identifier):
+    windows_model_paths.directories.add(r"C:\cache\SecretModel")
+    with pytest.raises(ValueError, match="must resolve under"):
+        atlib._normalize_whisper_model_identifier(identifier)
+    assert windows_model_paths.probes == []
+
+
+def test_windows_canonical_model_path_cannot_return_case_sibling(windows_model_paths):
+    windows_model_paths.canonical_targets[r"C:\Cache\local"] = r"C:\cache\PrivateModel"
+    windows_model_paths.directories.add(r"C:\cache\PrivateModel")
+    with pytest.raises(ValueError, match="must resolve under"):
+        atlib._normalize_whisper_model_identifier(r".\local")
+    assert ("is_dir", r"C:\cache\PrivateModel") not in windows_model_paths.probes
+
+
+def test_windows_hub_cache_probe_cannot_follow_canonical_case_sibling(windows_model_paths):
+    windows_model_paths.canonical_targets[r"C:\Cache\org_model"] = r"C:\cache\PrivateModel"
+    windows_model_paths.directories.add(r"C:\cache\PrivateModel")
+    assert atlib.check_model_exists("org/model") is False
+    assert ("is_dir", r"C:\cache\PrivateModel") not in windows_model_paths.probes
+
+
+@pytest.mark.parametrize("identifier", [r"C:\Cache\MixedCaseModel", r".\MixedCaseModel", r"C:\Cache"])
+def test_windows_managed_model_paths_preserve_canonical_spelling(windows_model_paths, identifier):
+    expected = r"C:\Cache" if identifier == r"C:\Cache" else r"C:\Cache\MixedCaseModel"
+    windows_model_paths.directories.add(expected)
+    assert atlib._normalize_whisper_model_identifier(identifier) == expected
+
+
+@pytest.mark.parametrize("identifier", ["tiny.en", "org/model"])
+def test_windows_case_sibling_cwd_does_not_shadow_remote_identifier(windows_model_paths, monkeypatch, identifier):
+    import ntpath
+
+    monkeypatch.setattr(atlib.os.path, "abspath", lambda value: ntpath.normpath(
+        str(value) if ntpath.isabs(value) else ntpath.join(r"C:\cache", str(value))
+    ))
+    windows_model_paths.directories.add(ntpath.join(r"C:\cache", identifier))
+    assert atlib._normalize_whisper_model_identifier(identifier) == identifier
+    assert windows_model_paths.probes == []

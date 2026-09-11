@@ -572,3 +572,49 @@ positive control: a child request such as `..\CACHE\file` under `C:\Cache` is
 rejected before any realpath call, even if the OS would accept the alias. The
 regression now explicitly verifies that no such realpath call occurs. This is
 an intentional security boundary, not a claim of arbitrary path-alias support.
+
+## Research canonical leaf check follow-up (49cce1 review)
+
+Review of Python analysis `1759306505`, source
+`009505c4154ca5d4c8c58312cd6ad527a1b4d045`, found 37 remaining paths
+for ten alerts: four paths each for snapshot 2677/2334/2335 and Research
+2279/2280/2149/2150/2151/2152, plus one checkpoint 2685 path.
+Every snapshot and Research path traverses the shared `safe_join` boundary;
+the final direct candidate guards replace the earlier `normcase` comparison
+aliases. Checkpoint 2685's candidate resolution is now directly dominated by
+the exact lexical root check. These are source assessments, not a claim that
+the pending hosted Python scan has cleared them. Main 2281/2282 remain unsafe
+to dismiss globally because main lacks the PR's checkpoint ownership guard.
+
+A bounded review of Research's reported leaf resolver found a further Windows
+case-sensitive filesystem gap: its canonical `Path.relative_to(session_dir)`
+check case-folded a distinct sibling session directory. A pre-existing leaf
+link resolving from the authorized session to that case-only sibling could
+therefore return an outside path. A regression exercises the actual
+`_artifact_path`, `_resolve_artifact_path`, and shared `safe_join` functions with
+Windows path semantics and emulated canonical filesystem results. It failed
+before the repair (one failure, three passing controls). This is not a native
+Windows filesystem test.
+
+The repair changes only the leaf's canonical postcheck to an exact,
+separator-bounded strict-descendant prefix. It preserves the returned path's case and
+existing same-session leaf-link behavior. Controls cover ordinary Windows
+paths, same-session Windows leaf links, and a real POSIX same-session link.
+Research artifact and shared boundary suites passed **56 tests**; scoped Ruff
+passed and production Bandit reported zero findings. Logs:
+`/tmp/pr2761-research-windows-leaf-red.log`,
+`/tmp/pr2761-research-windows-leaf-green.log`,
+`/tmp/pr2761-research-windows-leaf-ruff.log`, and
+`/tmp/pr2761-research-windows-leaf-bandit.json`.
+
+Independent review also reproduced a POSIX leaf link to the session root itself:
+the previous equality acceptance allowed `_versioned_artifact_path.with_name`
+to generate a sibling path outside that session. An additional regression failed
+before the strict-descendant check and passes afterward; see
+`/tmp/pr2761-research-root-leaf-red.log`. A directory root cannot be a valid
+artifact file, while same-session file links remain supported.
+
+This follow-up does not change alert states or queries and does not claim
+protection against filesystem replacement races or all Windows reparse-point
+types. Hosted results and active-ref status must be reconciled after the
+parent integrates this source change.
