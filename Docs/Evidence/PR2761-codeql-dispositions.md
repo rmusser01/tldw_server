@@ -77,3 +77,21 @@ Python analysis **1759364372** on `49cce1c853` cleared the ten previous snapshot
 Research and checkpoint alerts. Its three remaining Whisper reports were
 repaired in `2e037be445`; hosted confirmation is pending. No additional real
 finding was dismissed.
+
+## Final verified result
+
+All three hosted analyses completed on **58070a0fea5e636d5426b25ced16b66e7147f397**:
+Python **1759451338**, JavaScript/TypeScript **1759415368**, Actions **1759389568**.
+The PR has **zero open CodeQL alerts** and its CodeQL check passed. The production
+source is **2e037be4452ddae74807ab672fec94a88c030cc0**; later commits contain
+release metadata and evidence. The three Whisper repairs are confirmed by this
+scan. Raw SARIF result counts include dismissed findings and are not open-alert
+counts. [Machine-readable result](PR2761-codeql-final-result.json).
+
+An independent GitHub reconciliation checked all **424** unique ledger rows
+against rule, reason, exact comment, timestamp and effective dismissed state,
+using both default-branch and PR-specific lists. Main findings **2281/2282**
+remain open and undismissed. At this verification checkpoint, CI had **73
+passing checks, zero failures, 38 skips**, with frontend/coverage aggregates
+still running. The CodeQL task is complete; the separate release gates and
+human Change summary remain open. No merge, tag or publication was performed.

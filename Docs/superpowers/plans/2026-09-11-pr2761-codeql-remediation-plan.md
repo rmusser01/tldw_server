@@ -8,7 +8,7 @@
 **Goal:** Save alert identities, source/sink traces, analyzed revisions, and rule counts.
 **Success Criteria:** Every alert maps to an owned investigation; mixed-revision scans are explicitly identified.
 **Tests:** GitHub alert/SARIF reconciliation and source location/hash comparisons.
-**Status:** Complete for initial snapshot; refresh after changes.
+**Status:** Complete; final head reconciled with zero open alerts.
 
 Initial snapshot: 443 open alerts: 241 Actions, 152 Python path injection,
 18 other Python, and 32 JavaScript. Actions analysis covers the current source;
@@ -18,7 +18,7 @@ the initial Python/JavaScript analyses cover preceding `43165c8c82`.
 **Goal:** Repair demonstrated security failures without changing unrelated behavior.
 **Success Criteria:** Failing behavior tests turn green; relevant neighboring tests and scoped lint/Bandit pass.
 **Tests:** Real loopback redirect tests, temporary-directory snapshot escape tests, and further source-specific boundary tests.
-**Status:** Initial and rescan follow-up repairs verified; hosted rescan pending.
+**Status:** Complete; follow-up repairs confirmed by hosted analysis.
 
 The current-source scan exposed operator-key persistence in the shared UAT
 initializer and a session-directory alias in snapshot listing/quota. The UAT
@@ -39,7 +39,7 @@ trust boundaries. Parent integrates changes and manages source metadata and GitH
 **Goal:** Distinguish unreachable analyzer flows from real or unresolved risks.
 **Success Criteria:** Every proposed false-positive closure has its exact alert ID, trace-specific explanation, source hashes and executable evidence. Shared causes may share tests, but every alert is individually mapped and checked.
 **Tests:** Event-specific checkout selection and real fetch-only Git workflow probes; sanitizer, persistence, hash and path containment invariants.
-**Status:** In Progress.
+**Status:** Complete; 424 individual dispositions independently reconciled.
 
 The requester approved the 416 remaining reviewed repository-wide dispositions.
 All completed and were independently reconciled with GitHub state. Together
@@ -60,7 +60,7 @@ must be repaired and rescanned. Unproven findings remain open.
 **Goal:** Commit verified batches, refresh the protected-source record, and obtain current-source analysis.
 **Success Criteria:** Every finding is repaired or individually resolved; all required checks refer to the final source; release PR accurately records remaining non-CodeQL gates.
 **Tests:** Focused suites, lint/Bandit, source/manifest equality, required CI and complete Python/JavaScript/Actions scans.
-**Status:** In Progress; source/evidence commits and protected manifest refresh underway.
+**Status:** Complete for CodeQL scope; separate release gates remain open.
 
 The verified follow-up source is `3f9866a860033b70b3434319fadfdd37b12819a2`.
 Its protected manifest covers 7,117 files, SHA-256
@@ -119,3 +119,13 @@ Follow-up source committed as `2e037be4452ddae74807ab672fec94a88c030cc0`.
 The protected-source record is rebound to this commit; all 7,117 protected
 files and the manifest digest remain unchanged. Legal dates and digests remain
 unchanged. Eleven licensing tests, licensing Ruff and Bandit pass.
+
+## Completion
+
+Verified head **58070a0fea5e636d5426b25ced16b66e7147f397** has zero open PR
+CodeQL alerts and a passing CodeQL check. Python analysis1759451338 confirms
+the final Whisper fixes; JavaScript1759415368 and Actions1759389568 cover the
+same head. All424 reviewed dispositions reconcile with GitHub.
+The final result and remaining CI/release limitations are recorded in
+[the result artifact](../../Evidence/PR2761-codeql-final-result.json).
+CodeQL remediation is complete; this does not complete the parent release.
