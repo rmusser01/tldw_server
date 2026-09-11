@@ -180,3 +180,132 @@ Local transcripts: `/tmp/pr2761-js-redirect-red.log`,
 committed artifacts. Analyzer closure and any per-alert state decision require
 separate current-candidate analysis/review; passing runtime tests alone does not
 establish CodeQL closure.
+
+## A440 rescan: four newly identified alerts
+
+These four alerts are separate from the prior approved disposition inventory.
+This assessment changes no alert state. Source references below match the A440
+SARIF and the subsequent F7 candidate before the UAT memory-storage repair
+described below. The test environment override was removed after A440 so the real HTTP
+regressions also run with the owning UI package's jsdom setup.
+
+| Alert | Exact source and sink | Classification and boundary evidence |
+| --- | --- | --- |
+| 2675 | Four SARIF flows: `RunDetailDrawer.tsx:531` WebSocket `event.data` → `parseWatchlistsRunStreamPayload` → snapshot/run-update `run.job_id` → `handleRetryRun` at 1019 → `watchlists.ts:785` fixed `/api/v1/watchlists/jobs/${jobId}/run` → `request-core.ts:457` initial fetch. | False positive for the reported request-forgery flow. `watchlists-stream.ts:61–79` converts the value to an integer, rejects a failed conversion, and returns a fresh object containing the numeric `job_id`. Its string representation cannot introduce URL separators or change the destination. The API path prefix and suffix are fixed. Independently, request-core rejects non-string runtime paths before configuration access, enforces exact configured/allowlisted absolute origins, prevents same-origin network-reference escapes, suppresses configured credentials for an explicitly selected external origin, and uses `redirect: "error"`. |
+| 2676 | The same four source flows and integer conversion, ending at `request-core.ts:525` refresh retry. | False positive for the reported request-forgery flow. The numeric/fixed-path boundary above still applies. The retry reuses the validated URL, forbids redirects, and compares the original configuration snapshot with refreshed server/auth mode/auth source/org and derived JWT principal before attaching a refreshed credential (`request-core.ts:499–505`). A changed scope throws 412 before retry dispatch. |
+| 2673 | Four SARIF flows from the real `apiKey` parameter at `browser-uat-seed.mjs:4`, through the config object at 10 and JSON serialization, into `localStorage.setItem("tldwConfig", …)` at 11. | Confirmed plaintext-storage finding, now repaired in source; awaiting a fresh scan. After the HTTP(S) and exact-origin guard, the UAT helper replaces both native storage properties with document-memory facades and seeds the config directly into `memoryLocal` (current helper line 46). All subsequent application storage calls use the facades. Native storage is never the fallback. |
+| 2674 | One SARIF flow from the same real `apiKey` parameter at 4 into the legacy `localStorage.setItem("apiKey", apiKey)` at 18. | Confirmed plaintext-storage finding, now repaired in source; awaiting a fresh scan. The legacy key is seeded directly into `memoryLocal` (current helper line 53), with the same origin/facade boundary and an additional `legacyBootstrap` requirement. Admin driver/interactions and stats retain their legacy fields; oversight/round3 retain their minimal seed. |
+
+The request classifications concern the exact reported flows. The integer parser
+accepts numeric prefixes (for example, `42?next=…` becomes the number 42); it is not
+a strict identifier syntax validator, but that behavior does not permit URL
+injection. These browser request helpers deliberately support the operator's
+configured server, including local/private addresses. They are not a general
+server-side network allowlist, nor do they replace backend job authorization.
+
+For the two storage alerts, origin confinement is not encryption. A compromised
+selected WebUI origin, an operator-selected untrusted origin, or access to the
+active browser context can expose the key. The helper deliberately permits HTTP
+for local self-hosted UAT; it does not enforce HTTPS for remote deployments. The
+regressions demonstrate origin confinement and absence from native Web Storage,
+not protection against renderer compromise or those transport risks. Removing the key or substituting a fake
+one without a compatible authentication bridge would break these real-server UAT scenarios. No synthetic-key rationale is
+claimed for either new storage alert.
+
+Alternatives assessed before the memory-storage repair:
+
+- Keeping the key in Node and using `route.fetch({ maxRedirects: 0, headers })`
+  followed by `route.fulfill({ response })` can authenticate ordinary HTTP
+  calls without putting the real key in renderer requests. Such a handler must
+  require both the selected server destination and an initiating frame from the
+  exact selected HTTP(S) WebUI origin; requests from foreign frames or without a
+  frame must not receive authentication. `route.continue` header replacement is
+  unsuitable because browser redirects can forward the replacement credential.
+- This is not currently a drop-in replacement for all UAT traffic. Installed
+  Playwright 1.58 buffers response chunks until completion in
+  `playwright-core/lib/server/fetch.js:343`; the `route.fetch` result therefore
+  cannot preserve the active notification SSE stream at
+  `services/notifications.ts:187–188`. These scripts explicitly account for
+  persistent streams during page settling and collect resulting errors.
+- `RunDetailDrawer.tsx:516–517` opens authenticated Watchlists WebSockets whose
+  `api_key` query comes from config. Installed `WebSocketRoute.connectToServer()`
+  has no URL/header override, so replacing the stored key with a marker also
+  requires a separate authenticated WebSocket relay to preserve this behavior.
+  Quickstart additionally sends API requests through the WebUI origin rather
+  than directly to the configured API origin; a server-only route misses them.
+- Existing `saveManualSingleUserCredential({ persistence: "session" })` is not a
+  no-storage alternative: `TldwApiClient.ts:2164` writes the real key to its
+  session storage adapter. Its memory fallback occurs only after storage fails,
+  and is not an explicit supported memory-only mode. The lower-level runtime
+  override setter is module-scoped, lacks an installed browser UAT bootstrap
+  bridge, and does not replace all config-based WebSocket consumers. A window
+  property alone is therefore not a verified replacement either.
+
+The implemented repair is confined to the shared manual UAT helper. A small
+Map-backed Storage facade replaces both global storage properties before seeding
+or app boot. Both property descriptors are checked first; installation failure
+throws before any credential is seeded, with no native fallback. Direct seeding
+uses `memoryLocal.setItem`, whose implementation calls `Map.set`. The facade
+supports get/set/remove/clear, null for missing keys, string coercion, key/length,
+named properties and key enumeration. Wrong/opaque origins return before changing
+either storage property. Genuine device/session-persistence E2E tests are untouched.
+
+This is deliberately document-scoped UAT state: reload and hard navigation discard
+app changes and rerun the initializer; same-origin frames have independently
+seeded Maps. It does not emulate cross-tab storage events or durable storage, and
+it is not a complete branded browser Storage implementation. The five scripts
+inspect admin pages, server statistics, selected-user oversight, role/forms and
+layout/first-steps behavior. They do not assert that browser settings, logout, or
+credentials persist across reload. Backend changes such as role creation are
+unaffected. The real credential remains in renderer memory for normal HTTP/SSE/
+WebSocket authentication; it is not stored in native local/session storage.
+
+Compatibility with the frontend Plasmo and wxt storage adapters was reviewed:
+they capture/read the global storage properties and use the supported methods,
+so installing before app boot covers their later writes. The browser fixture
+uses application-shaped storage calls, not a full app boot or the real
+`saveManualSingleUserCredential` method; SSE/WS compatibility is a source-based
+assessment, not a live-server UAT claim. No request interception or app/network
+behavior was changed. No alert was dismissed; analyzer closure needs a fresh scan.
+
+Verification on the current candidate:
+
+- Owning UI config: six suites, **59 tests passed** (`request-core` redirect,
+  quickstart, hosted, refresh/timeout; absolute URL guard; Watchlists stream).
+  The 13 redirect/security cases include native disposable loopback HTTP initial
+  and post-refresh 307 proofs, supported explicit external requests without the
+  server credential, five runtime path-type cases, and five scope-change cases.
+- Frontend seed suite: **12 tests passed**, including captured-native-store
+  checks after seed and application-shaped writes, locked-descriptor fail-closed
+  behavior, three unsupported protocols, five wrong/opaque origins, selected
+  origin config reads, and minimal versus legacy bootstrap. Together with the
+  existing dev-runtime/live-tier UAT suites: **61 tests passed**.
+- Standalone real Chromium regression: **1 passed**. Before the repair it failed
+  with nine native local-storage entries. Afterward both captured native stores
+  remain empty after seeding and application-shaped writes. It checks Chromium's
+  own configurable accessor descriptors, storage methods/coercion/enumeration/
+  named properties, reload reseeding, same/foreign-origin frames and navigation,
+  and absence of credentials from `context.storageState()` export. Run with
+  `node --test scripts/__tests__/browser-uat-seed.browser.test.mjs` from the
+  frontend package. The `.mjs` test is outside default Vitest `.ts/.tsx` globs,
+  so the frontend unit CI lane does not acquire an undeclared Chromium dependency.
+- Frontend typecheck and changed-module syntax checks pass.
+- A read-only execution of the actual exported Watchlists parser checked **32
+  cases** across both snapshot and run-update events: URL/network references,
+  traversal strings, numeric prefixes, arrays/objects/null/nonfinite values, and
+  valid numbers. Every accepted value was an integer whose fixed API path kept
+  the configured origin. This is additional local evidence, not a new committed
+  regression suite.
+- The earlier exact owning UI CI shard 6/8 replay passed **42 files / 545 tests**
+  after removing only the incompatible Node environment directive. Network
+  guards, package setup, and production source were unchanged.
+
+Local evidence: `/tmp/pr2761-js-four-traces.json`,
+`/tmp/pr2761-js-four-watchlists-proof.json`,
+`/tmp/pr2761-js-four-transport-tests.log`, `/tmp/pr2761-js-four-seed-tests.log`,
+and `/tmp/pr2761-ui-shard6-jsdom.log`. No live credential or external server was
+used. Additional repair transcripts: `/tmp/pr2761-uat-memory-browser-red.log`,
+`/tmp/pr2761-uat-memory-browser-green.log`, `/tmp/pr2761-uat-memory-focused.log`,
+`/tmp/pr2761-uat-memory-typecheck.log`, and `/tmp/pr2761-uat-memory-eslint.log`.
+The first non-escalated related-UAT run hit a sandbox loopback-bind restriction;
+the unchanged suites passed with their existing local fixture permissions.

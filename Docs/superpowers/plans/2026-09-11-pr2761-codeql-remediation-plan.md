@@ -18,7 +18,14 @@ the initial Python/JavaScript analyses cover preceding `43165c8c82`.
 **Goal:** Repair demonstrated security failures without changing unrelated behavior.
 **Success Criteria:** Failing behavior tests turn green; relevant neighboring tests and scoped lint/Bandit pass.
 **Tests:** Real loopback redirect tests, temporary-directory snapshot escape tests, and further source-specific boundary tests.
-**Status:** Complete for independently reviewed source batch; hosted rescan pending.
+**Status:** Initial batch verified; rescan follow-up repairs in progress.
+
+The current-source scan exposed operator-key persistence in the shared UAT
+initializer and a session-directory alias in snapshot listing/quota. The UAT
+helper now uses document-memory storage, verified against native Chromium
+storage; snapshot directories reject symlinks before canonicalization.
+Research writers are receiving the equivalent cross-session directory check.
+Fresh scan traces remain individually reviewed before classification.
 
 Independent ownership: Python path/file boundaries; Python HTTP/XPath/hash/regex
 boundaries; frontend transport/storage/DOM boundaries; Actions event and checkout
@@ -29,6 +36,13 @@ trust boundaries. Parent integrates changes and manages source metadata and GitH
 **Success Criteria:** Every proposed false-positive closure has its exact alert ID, trace-specific explanation, source hashes and executable evidence. Shared causes may share tests, but every alert is individually mapped and checked.
 **Tests:** Event-specific checkout selection and real fetch-only Git workflow probes; sanitizer, persistence, hash and path containment invariants.
 **Status:** In Progress.
+
+The requester approved the 416 remaining reviewed repository-wide dispositions.
+All completed and were independently reconciled with GitHub state. Together
+with the earlier alert 2671, this is 417 verified dispositions (405 false
+positives, 12 synthetic-test findings). See the
+[disposition ledger](../../Evidence/PR2761-codeql-dispositions.md).
+Real defects and main checkpoint alerts 2281/2282 remain excluded.
 
 Do not disable queries, lower thresholds, delete legitimate behavior/tests, or
 blanket-dismiss alerts. Apply individual false-positive dispositions only after

@@ -1,0 +1,834 @@
+alert,rule,reason,dismissed_at,comment
+2104,py/path-injection,false positive,2026-09-11T03:20:08Z,"2104: Audio paths are canonicalized and confined to allowed media/model roots before access. Main has containment; candidate additionally rejects symlinks.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2132,py/path-injection,false positive,2026-09-11T03:20:11Z,"2132: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2134,py/path-injection,false positive,2026-09-11T03:20:15Z,"2134: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2135,py/path-injection,false positive,2026-09-11T03:20:18Z,"2135: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2136,py/path-injection,false positive,2026-09-11T03:20:21Z,"2136: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2137,py/path-injection,false positive,2026-09-11T03:20:24Z,"2137: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2138,py/path-injection,false positive,2026-09-11T03:20:28Z,"2138: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2139,py/path-injection,false positive,2026-09-11T03:20:31Z,"2139: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2140,py/path-injection,false positive,2026-09-11T03:20:33Z,"2140: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2141,py/path-injection,false positive,2026-09-11T03:20:37Z,"2141: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2142,py/path-injection,false positive,2026-09-11T03:20:40Z,"2142: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2143,py/path-injection,false positive,2026-09-11T03:20:43Z,"2143: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2144,py/path-injection,false positive,2026-09-11T03:20:45Z,"2144: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2145,py/path-injection,false positive,2026-09-11T03:20:48Z,"2145: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2146,py/path-injection,false positive,2026-09-11T03:20:51Z,"2146: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2147,py/path-injection,false positive,2026-09-11T03:20:54Z,"2147: User root is normalized with numeric-ID validation and safe_join; fixed personalization JSON is confined before load/save. Same guard on main.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2154,py/path-injection,false positive,2026-09-11T03:20:56Z,"2154: Export display names become bounded safe filename components with generated suffixes; _resolve_export_path confines them to per-user export_dir.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2155,py/path-injection,false positive,2026-09-11T03:20:59Z,"2155: Export display names become bounded safe filename components with generated suffixes; _resolve_export_path confines them to per-user export_dir.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2157,py/path-injection,false positive,2026-09-11T03:21:02Z,"2157: Export display names become bounded safe filename components with generated suffixes; _resolve_export_path confines them to per-user export_dir.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2162,py/path-injection,false positive,2026-09-11T03:21:04Z,"2162: Generated database-ID/format filename passes output-name normalization and resolved user-temp-root containment before aiofiles.open.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2163,py/path-injection,false positive,2026-09-11T03:21:07Z,"2163: Request input is a normalized authenticated user ID, not arbitrary root. safe_join confines user root; backend validates paths before access/deletion.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2166,py/path-injection,false positive,2026-09-11T03:21:10Z,"2166: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2167,py/path-injection,false positive,2026-09-11T03:21:12Z,"2167: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2172,py/path-injection,false positive,2026-09-11T03:21:15Z,"2172: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2173,py/path-injection,false positive,2026-09-11T03:21:18Z,"2173: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2174,py/path-injection,false positive,2026-09-11T03:21:20Z,"2174: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2175,py/path-injection,false positive,2026-09-11T03:21:23Z,"2175: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2176,py/path-injection,false positive,2026-09-11T03:21:26Z,"2176: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2177,py/path-injection,false positive,2026-09-11T03:21:28Z,"2177: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2186,py/path-injection,false positive,2026-09-11T03:21:30Z,"2186: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2187,py/path-injection,false positive,2026-09-11T03:21:33Z,"2187: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2188,py/path-injection,false positive,2026-09-11T03:21:36Z,"2188: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2189,py/path-injection,false positive,2026-09-11T03:21:38Z,"2189: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2190,py/path-injection,false positive,2026-09-11T03:21:41Z,"2190: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2191,py/path-injection,false positive,2026-09-11T03:21:44Z,"2191: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2192,py/path-injection,false positive,2026-09-11T03:21:46Z,"2192: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2201,py/path-injection,false positive,2026-09-11T03:21:49Z,"2201: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2202,py/path-injection,false positive,2026-09-11T03:21:52Z,"2202: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2220,py/path-injection,false positive,2026-09-11T03:21:54Z,"2220: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2227,py/path-injection,false positive,2026-09-11T03:21:57Z,"2227: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2234,py/path-injection,false positive,2026-09-11T03:21:59Z,"2234: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2235,py/path-injection,false positive,2026-09-11T03:22:02Z,"2235: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2251,js/xss,false positive,2026-09-11T03:22:04Z,"2251: Selection normalization overwrites spread avatar_url with safeImageUrl result before rendering. JavaScript/SVG URL regressions pass; main has identical guard.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2264,py/weak-sensitive-data-hashing,false positive,2026-09-11T03:22:07Z,"2264: HMAC message is integer user_id extracted from validated credential lookup, not the credential. Its key is PBKDF2-derived; main code is identical.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2265,py/path-injection,false positive,2026-09-11T03:22:10Z,"2265: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2266,py/path-injection,false positive,2026-09-11T03:22:12Z,"2266: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2267,py/path-injection,false positive,2026-09-11T03:22:15Z,"2267: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2268,py/path-injection,false positive,2026-09-11T03:22:17Z,"2268: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2269,py/path-injection,false positive,2026-09-11T03:22:20Z,"2269: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2270,py/path-injection,false positive,2026-09-11T03:22:22Z,"2270: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2271,py/path-injection,false positive,2026-09-11T03:22:24Z,"2271: Positive numeric user ID is normalized into safe_join user root; fixed audit filenames cannot escape. Same guard on main; root/symlink tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2272,py/path-injection,false positive,2026-09-11T03:22:27Z,"2272: User root is normalized with numeric-ID validation and safe_join; fixed personalization JSON is confined before load/save. Same guard on main.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2273,py/path-injection,false positive,2026-09-11T03:22:29Z,"2273: User root is normalized with numeric-ID validation and safe_join; fixed personalization JSON is confined before load/save. Same guard on main.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2274,py/path-injection,false positive,2026-09-11T03:22:32Z,"2274: User root is normalized with numeric-ID validation and safe_join; fixed personalization JSON is confined before load/save. Same guard on main.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2275,py/path-injection,false positive,2026-09-11T03:22:35Z,"2275: Audio paths are canonicalized and confined to allowed media/model roots before access. Main has containment; candidate additionally rejects symlinks.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2276,py/path-injection,false positive,2026-09-11T03:22:38Z,"2276: User root is normalized; session IDs become fixed SHA256 components and artifact names are validated. This alert is the trusted base-root normalization.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2283,py/path-injection,false positive,2026-09-11T03:22:41Z,"2283: Export display names become bounded safe filename components with generated suffixes; _resolve_export_path confines them to per-user export_dir.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2284,py/path-injection,false positive,2026-09-11T03:22:43Z,"2284: Export display names become bounded safe filename components with generated suffixes; _resolve_export_path confines them to per-user export_dir.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2285,py/path-injection,false positive,2026-09-11T03:22:46Z,"2285: Export display names become bounded safe filename components with generated suffixes; _resolve_export_path confines them to per-user export_dir.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2286,py/path-injection,false positive,2026-09-11T03:22:49Z,"2286: Generated database-ID/format filename passes output-name normalization and resolved user-temp-root containment before aiofiles.open.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2287,py/path-injection,false positive,2026-09-11T03:22:51Z,"2287: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2288,py/path-injection,false positive,2026-09-11T03:22:54Z,"2288: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2289,py/path-injection,false positive,2026-09-11T03:22:56Z,"2289: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2290,py/path-injection,false positive,2026-09-11T03:22:59Z,"2290: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2291,py/path-injection,false positive,2026-09-11T03:23:02Z,"2291: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2292,py/path-injection,false positive,2026-09-11T03:23:04Z,"2292: Baseline ID has a strict allowlist; resolved candidate must be relative to configured baseline root before loading. Flagged resolve is the validation.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2293,py/path-injection,false positive,2026-09-11T03:23:06Z,"2293: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2294,py/path-injection,false positive,2026-09-11T03:23:09Z,"2294: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2295,py/path-injection,false positive,2026-09-11T03:23:12Z,"2295: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2296,py/path-injection,false positive,2026-09-11T03:23:14Z,"2296: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2297,py/path-injection,false positive,2026-09-11T03:23:17Z,"2297: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2298,py/path-injection,false positive,2026-09-11T03:23:20Z,"2298: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2301,py/path-injection,false positive,2026-09-11T03:23:22Z,"2301: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2302,py/path-injection,false positive,2026-09-11T03:23:25Z,"2302: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2303,py/path-injection,false positive,2026-09-11T03:23:27Z,"2303: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2304,py/path-injection,false positive,2026-09-11T03:23:30Z,"2304: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2305,py/path-injection,false positive,2026-09-11T03:23:33Z,"2305: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2306,py/path-injection,false positive,2026-09-11T03:23:35Z,"2306: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2307,py/path-injection,false positive,2026-09-11T03:23:38Z,"2307: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2308,py/path-injection,false positive,2026-09-11T03:23:40Z,"2308: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2309,py/path-injection,false positive,2026-09-11T03:23:43Z,"2309: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2310,py/path-injection,false positive,2026-09-11T03:23:45Z,"2310: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2311,py/path-injection,false positive,2026-09-11T03:23:48Z,"2311: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2312,py/path-injection,false positive,2026-09-11T03:23:50Z,"2312: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2313,py/path-injection,false positive,2026-09-11T03:23:53Z,"2313: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2314,py/path-injection,false positive,2026-09-11T03:23:56Z,"2314: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2315,py/path-injection,false positive,2026-09-11T03:23:58Z,"2315: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2316,py/path-injection,false positive,2026-09-11T03:24:01Z,"2316: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2317,py/path-injection,false positive,2026-09-11T03:24:03Z,"2317: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2318,py/path-injection,false positive,2026-09-11T03:24:06Z,"2318: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2319,py/path-injection,false positive,2026-09-11T03:24:08Z,"2319: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2320,py/path-injection,false positive,2026-09-11T03:24:11Z,"2320: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2321,py/path-injection,false positive,2026-09-11T03:24:13Z,"2321: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2322,py/path-injection,false positive,2026-09-11T03:24:16Z,"2322: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2323,py/path-injection,false positive,2026-09-11T03:24:18Z,"2323: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2324,py/path-injection,false positive,2026-09-11T03:24:21Z,"2324: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2325,py/path-injection,false positive,2026-09-11T03:24:23Z,"2325: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2326,py/path-injection,false positive,2026-09-11T03:24:26Z,"2326: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2327,py/path-injection,false positive,2026-09-11T03:24:29Z,"2327: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2328,py/path-injection,false positive,2026-09-11T03:24:31Z,"2328: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2329,py/path-injection,false positive,2026-09-11T03:24:34Z,"2329: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2330,py/path-injection,false positive,2026-09-11T03:24:36Z,"2330: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2331,py/path-injection,false positive,2026-09-11T03:24:39Z,"2331: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2332,py/path-injection,false positive,2026-09-11T03:24:41Z,"2332: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2333,py/path-injection,false positive,2026-09-11T03:24:44Z,"2333: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2336,py/path-injection,false positive,2026-09-11T03:24:46Z,"2336: Owned sandbox session supplies stored workspace under resolved sandbox root; IDs are sanitized/hashed and path checks reject root escapes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2337,py/full-ssrf,false positive,2026-09-11T03:24:49Z,"2337: httpx request receives the vetted pinned IP and original SNI; redirects are disabled. Real-policy tests block private targets, redirect hops and DNS rebinding.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2339,py/path-injection,false positive,2026-09-11T03:24:51Z,"2339: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2340,py/path-injection,false positive,2026-09-11T03:24:54Z,"2340: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2341,py/path-injection,false positive,2026-09-11T03:24:56Z,"2341: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2342,py/path-injection,false positive,2026-09-11T03:24:59Z,"2342: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2343,py/path-injection,false positive,2026-09-11T03:25:02Z,"2343: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2344,py/path-injection,false positive,2026-09-11T03:25:04Z,"2344: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2345,py/path-injection,false positive,2026-09-11T03:25:06Z,"2345: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2346,py/path-injection,false positive,2026-09-11T03:25:09Z,"2346: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2347,py/path-injection,false positive,2026-09-11T03:25:11Z,"2347: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2348,py/path-injection,false positive,2026-09-11T03:25:14Z,"2348: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2349,py/path-injection,false positive,2026-09-11T03:25:17Z,"2349: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2350,py/path-injection,false positive,2026-09-11T03:25:19Z,"2350: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2351,py/path-injection,false positive,2026-09-11T03:25:21Z,"2351: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2352,py/path-injection,false positive,2026-09-11T03:25:24Z,"2352: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2353,py/path-injection,false positive,2026-09-11T03:25:26Z,"2353: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2354,py/path-injection,false positive,2026-09-11T03:25:28Z,"2354: Names/archive IDs are allowlisted; supporting paths are confined; no-follow descriptor reads and link/parent checks protect Skills lifecycle operations.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2357,js/clear-text-storage-of-sensitive-data,used in tests,2026-09-11T03:25:30Z,"2357: Persistence regression intentionally uses manual-persistence-e2e-key on a loopback fixture; no operator key reaches this seed. Same fixture on main.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2358,js/clear-text-storage-of-sensitive-data,used in tests,2026-09-11T03:25:32Z,"2358: Persistence regression intentionally uses manual-persistence-e2e-key on a loopback fixture; no operator key reaches this seed. Same fixture on main.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2359,actions/untrusted-checkout/high,false positive,2026-09-11T03:25:34Z,"2359: PR fetch only updates separate refs; trusted checkout/classifier stay unchanged. Immutable SHA checks and name-only diff disable external execution. Hostile-PR test passes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2360,actions/cache-poisoning/direct-cache,false positive,2026-09-11T03:25:36Z,"2360: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2361,actions/cache-poisoning/direct-cache,false positive,2026-09-11T03:25:39Z,"2361: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2362,actions/cache-poisoning/direct-cache,false positive,2026-09-11T03:25:41Z,"2362: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2363,actions/cache-poisoning/direct-cache,false positive,2026-09-11T03:25:43Z,"2363: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2364,actions/cache-poisoning/direct-cache,false positive,2026-09-11T03:25:45Z,"2364: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2366,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:25:47Z,"2366: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2367,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:25:49Z,"2367: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2368,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:25:52Z,"2368: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2369,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:25:54Z,"2369: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2370,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:25:56Z,"2370: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2371,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:25:58Z,"2371: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2372,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:00Z,"2372: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2373,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:02Z,"2373: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2374,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:04Z,"2374: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2375,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:07Z,"2375: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2376,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:09Z,"2376: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2377,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:11Z,"2377: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2378,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:13Z,"2378: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2379,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:15Z,"2379: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2380,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:17Z,"2380: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2381,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:19Z,"2381: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2382,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:21Z,"2382: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2383,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:23Z,"2383: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2384,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:25Z,"2384: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2385,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:28Z,"2385: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2386,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:30Z,"2386: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2387,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:32Z,"2387: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2388,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:34Z,"2388: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2389,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:36Z,"2389: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2390,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:38Z,"2390: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2391,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:40Z,"2391: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2392,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:42Z,"2392: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2393,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:44Z,"2393: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2394,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:46Z,"2394: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2395,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:49Z,"2395: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2396,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:51Z,"2396: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2397,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:53Z,"2397: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2398,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:55Z,"2398: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2399,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:57Z,"2399: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2400,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:26:59Z,"2400: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2401,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:01Z,"2401: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2402,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:04Z,"2402: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2403,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:06Z,"2403: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2404,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:08Z,"2404: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2405,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:10Z,"2405: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2406,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:12Z,"2406: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2407,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:14Z,"2407: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2408,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:16Z,"2408: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2409,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:18Z,"2409: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2410,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:20Z,"2410: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2411,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:23Z,"2411: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2412,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:25Z,"2412: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2413,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:27Z,"2413: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2414,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:30Z,"2414: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2415,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:32Z,"2415: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2416,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:34Z,"2416: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2417,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:36Z,"2417: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2418,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:38Z,"2418: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2419,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:40Z,"2419: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2420,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:42Z,"2420: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2421,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:45Z,"2421: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2422,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:47Z,"2422: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2424,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:49Z,"2424: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2425,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:52Z,"2425: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2426,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:54Z,"2426: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2427,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:56Z,"2427: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2428,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:27:58Z,"2428: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2429,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:00Z,"2429: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2430,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:02Z,"2430: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2431,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:04Z,"2431: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2432,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:06Z,"2432: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2433,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:08Z,"2433: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2434,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:10Z,"2434: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2435,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:12Z,"2435: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2436,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:14Z,"2436: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2437,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:16Z,"2437: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2438,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:19Z,"2438: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2439,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:21Z,"2439: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2440,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:23Z,"2440: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2441,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:25Z,"2441: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2442,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:27Z,"2442: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2443,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:29Z,"2443: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2444,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:32Z,"2444: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2445,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:34Z,"2445: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2446,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:36Z,"2446: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2447,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:38Z,"2447: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2448,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:40Z,"2448: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2449,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:42Z,"2449: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2451,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:44Z,"2451: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2452,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:46Z,"2452: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2453,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:48Z,"2453: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2454,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:51Z,"2454: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2455,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:53Z,"2455: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2456,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:56Z,"2456: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2457,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:28:58Z,"2457: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2458,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:00Z,"2458: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2459,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:03Z,"2459: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2460,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:05Z,"2460: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2461,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:07Z,"2461: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2462,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:09Z,"2462: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2463,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:11Z,"2463: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2464,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:13Z,"2464: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2465,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:15Z,"2465: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2466,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:18Z,"2466: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2467,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:20Z,"2467: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2468,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:22Z,"2468: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2469,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:24Z,"2469: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2470,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:26Z,"2470: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2471,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:28Z,"2471: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2472,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:30Z,"2472: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2473,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:32Z,"2473: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2474,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:34Z,"2474: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2475,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:36Z,"2475: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2476,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:38Z,"2476: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2477,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:40Z,"2477: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2478,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:42Z,"2478: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2479,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:44Z,"2479: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2480,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:47Z,"2480: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2481,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:49Z,"2481: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2482,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:51Z,"2482: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2483,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:53Z,"2483: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2484,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:55Z,"2484: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2485,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:29:57Z,"2485: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2486,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:00Z,"2486: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2487,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:02Z,"2487: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2488,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:04Z,"2488: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2489,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:06Z,"2489: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2490,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:08Z,"2490: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2491,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:10Z,"2491: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2492,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:12Z,"2492: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2493,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:15Z,"2493: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2494,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:17Z,"2494: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2495,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:19Z,"2495: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2496,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:21Z,"2496: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2497,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:23Z,"2497: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2498,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:25Z,"2498: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2499,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:27Z,"2499: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2500,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:30Z,"2500: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2501,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:32Z,"2501: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2502,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:34Z,"2502: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2503,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:36Z,"2503: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2504,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:38Z,"2504: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2505,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:41Z,"2505: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2506,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:43Z,"2506: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2507,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:45Z,"2507: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2508,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:47Z,"2508: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2509,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:49Z,"2509: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2510,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:51Z,"2510: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2511,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:53Z,"2511: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2512,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:56Z,"2512: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2513,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:30:58Z,"2513: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2514,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:00Z,"2514: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2515,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:02Z,"2515: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2516,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:04Z,"2516: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2517,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:06Z,"2517: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2518,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:09Z,"2518: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2519,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:11Z,"2519: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2520,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:13Z,"2520: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2521,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:15Z,"2521: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2522,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:17Z,"2522: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2523,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:19Z,"2523: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2524,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:21Z,"2524: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2525,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:23Z,"2525: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2526,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:25Z,"2526: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2527,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:27Z,"2527: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2528,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:29Z,"2528: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2529,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:32Z,"2529: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2530,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:34Z,"2530: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2531,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:36Z,"2531: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2532,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:38Z,"2532: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2533,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:40Z,"2533: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2534,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:43Z,"2534: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2535,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:45Z,"2535: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2536,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:47Z,"2536: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2537,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:49Z,"2537: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2538,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:51Z,"2538: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2539,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:53Z,"2539: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2540,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:55Z,"2540: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2541,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:57Z,"2541: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2542,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:31:59Z,"2542: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2543,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:02Z,"2543: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2544,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:04Z,"2544: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2545,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:06Z,"2545: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2546,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:08Z,"2546: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2547,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:11Z,"2547: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2548,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:13Z,"2548: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2549,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:15Z,"2549: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2550,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:17Z,"2550: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2551,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:19Z,"2551: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2552,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:21Z,"2552: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2553,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:24Z,"2553: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2554,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:26Z,"2554: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2555,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:28Z,"2555: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2556,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:30Z,"2556: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2557,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:32Z,"2557: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2558,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:35Z,"2558: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2559,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:38Z,"2559: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2560,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:40Z,"2560: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2561,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:42Z,"2561: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2562,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:44Z,"2562: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2563,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:46Z,"2563: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2564,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:48Z,"2564: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2565,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:50Z,"2565: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2566,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:52Z,"2566: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2567,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:54Z,"2567: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2568,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:56Z,"2568: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2569,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:32:58Z,"2569: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2570,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:01Z,"2570: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2571,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:03Z,"2571: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2572,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:05Z,"2572: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2573,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:07Z,"2573: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2574,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:09Z,"2574: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2575,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:11Z,"2575: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2576,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:13Z,"2576: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2577,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:15Z,"2577: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2578,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:18Z,"2578: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2579,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:20Z,"2579: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2580,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:22Z,"2580: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2581,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:24Z,"2581: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2582,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:26Z,"2582: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2583,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:28Z,"2583: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2584,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:30Z,"2584: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2585,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:32Z,"2585: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2586,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:34Z,"2586: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2587,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:36Z,"2587: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2588,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:38Z,"2588: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2589,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:40Z,"2589: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2590,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:42Z,"2590: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2591,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:44Z,"2591: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2592,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:46Z,"2592: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2593,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:48Z,"2593: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2594,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:50Z,"2594: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2595,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:33:52Z,"2595: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2596,py/redos,used in tests,2026-09-11T03:33:55Z,"2596: Deliberately catastrophic regex is an isolated-worker timeout regression. Test requires deadline, terminated/reaped child and closed pipes; it passes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2597,py/redos,used in tests,2026-09-11T03:33:57Z,"2597: Deliberately catastrophic substitution fixture verifies isolated-worker timeout, reaping and pipe cleanup. The unchanged adversarial regression passes.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2598,py/polynomial-redos,false positive,2026-09-11T03:34:00Z,"2598: MIME length is limited to255 before fullmatch; million-character input never reaches regex. The two token runs exclude their separating slash.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2600,py/xpath-injection,false positive,2026-09-11T03:34:03Z,"2600: Complete user-authored XPath is the intended selector language over one supplied document. Cached expressions do not retain documents; no external I/O extension.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2601,py/xpath-injection,false positive,2026-09-11T03:34:05Z,"2601: Compile-only validation intentionally checks complete selectors after syntax/complexity guards; it does not interpolate data into an authorization query.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2602,py/xpath-injection,false positive,2026-09-11T03:34:08Z,"2602: Intended XPath selector evaluates only supplied HTML; output is bounded and document(file_uri) fails. No credential DB query or external I/O extension exists.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2603,py/full-ssrf,false positive,2026-09-11T03:34:10Z,"2603: Bounded httpx stream uses vetted-IP transport with original Host/SNI and no automatic redirects. Private targets, hops and rebinding fail before dispatch.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2604,py/full-ssrf,false positive,2026-09-11T03:34:13Z,"2604: aiohttp receives the vetted-IP URL and original server_hostname, with redirects disabled. Both body modes pass private-target/hop/rebinding boundary tests.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2605,py/path-injection,false positive,2026-09-11T03:34:15Z,"2605: Audio paths are canonicalized and confined to allowed media/model roots before access. Main has containment; candidate additionally rejects symlinks.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2606,py/path-injection,false positive,2026-09-11T03:34:17Z,"2606: Audio paths are canonicalized and confined to allowed media/model roots before access. Main has containment; candidate additionally rejects symlinks.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2607,py/path-injection,false positive,2026-09-11T03:34:20Z,"2607: Owned note lookup and descriptor-relative O_NOFOLLOW directory/file opens reject symlinks; fstat identity is checked. The trace misses these guards.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2608,py/path-injection,false positive,2026-09-11T03:34:22Z,"2608: Owned note lookup and descriptor-relative O_NOFOLLOW directory/file opens reject symlinks; fstat identity is checked. The trace misses these guards.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2609,py/path-injection,false positive,2026-09-11T03:34:25Z,"2609: Validated user root plus sanitized note ID and resolved relative_to checks confine attachments. Flagged resolve belongs to the boundary check.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2610,py/path-injection,false positive,2026-09-11T03:34:27Z,"2610: Validated user root plus sanitized note ID and resolved relative_to checks confine attachments. Flagged resolve belongs to the boundary check.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2611,py/path-injection,false positive,2026-09-11T03:34:29Z,"2611: Validated user root plus sanitized note ID and resolved relative_to checks confine attachments. Flagged resolve belongs to the boundary check.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2612,py/path-injection,false positive,2026-09-11T03:34:32Z,"2612: Validated user root plus sanitized note ID and resolved relative_to checks confine attachments. Flagged resolve belongs to the boundary check.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2613,py/weak-sensitive-data-hashing,false positive,2026-09-11T03:34:34Z,"2613: High-entropy OAuth access-token digest identifies generation for refresh coalescing. It is not a human-password verifier; generation/rotation tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2614,py/weak-sensitive-data-hashing,false positive,2026-09-11T03:34:37Z,"2614: OAuth access_token/issued_at digest detects refreshed-token publication, not credential validity. Publication/coalescing tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2615,py/weak-sensitive-data-hashing,false positive,2026-09-11T03:34:39Z,"2615: Sensitive mapping keys are explicitly stripped before behavior-cache hashing. Tests prove nested and top-level credentials never affect the durable digest.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2616,js/clear-text-storage-of-sensitive-data,used in tests,2026-09-11T03:34:41Z,"2616: Release-gate config rejects all keys except the fixed disposable fake key before browser seeding; these writes establish synthetic runtime/reset test state.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2617,js/clear-text-storage-of-sensitive-data,used in tests,2026-09-11T03:34:43Z,"2617: Release-gate config rejects all keys except the fixed disposable fake key before browser seeding; these writes establish synthetic runtime/reset test state.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2618,js/clear-text-storage-of-sensitive-data,used in tests,2026-09-11T03:34:46Z,"2618: Release-gate config rejects all keys except the fixed disposable fake key before browser seeding; these writes establish synthetic runtime/reset test state.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2619,js/clear-text-storage-of-sensitive-data,used in tests,2026-09-11T03:34:48Z,"2619: Release-gate config rejects all keys except the fixed disposable fake key before browser seeding; these writes establish synthetic runtime/reset test state.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2623,js/insecure-randomness,false positive,2026-09-11T03:34:51Z,"2623: Random suffix names an evidence output/report/ledger directory, not a secret token. Creation rejects collisions; cleanup requires exact roots and markers.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2624,js/insecure-randomness,false positive,2026-09-11T03:34:53Z,"2624: Random suffix names an evidence output/report/ledger directory, not a secret token. Creation rejects collisions; cleanup requires exact roots and markers.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2625,js/insecure-randomness,false positive,2026-09-11T03:34:55Z,"2625: Random suffix names an evidence output/report/ledger directory, not a secret token. Creation rejects collisions; cleanup requires exact roots and markers.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2626,js/insecure-randomness,false positive,2026-09-11T03:34:58Z,"2626: Random suffix names an evidence output/report/ledger directory, not a secret token. Creation rejects collisions; cleanup requires exact roots and markers.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2627,js/insecure-randomness,false positive,2026-09-11T03:35:00Z,"2627: Random suffix names an evidence output/report/ledger directory, not a secret token. Creation rejects collisions; cleanup requires exact roots and markers.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2628,js/insecure-randomness,false positive,2026-09-11T03:35:02Z,"2628: Random suffix names an evidence output/report/ledger directory, not a secret token. Creation rejects collisions; cleanup requires exact roots and markers.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2629,js/insecure-randomness,false positive,2026-09-11T03:35:05Z,"2629: Random suffix names an evidence output/report/ledger directory, not a secret token. Creation rejects collisions; cleanup requires exact roots and markers.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2630,js/insecure-randomness,false positive,2026-09-11T03:35:07Z,"2630: Random value is a chat-history/IndexedDB session-files key, not an authentication session or bearer. Full saveHistory-to-IndexedDB trace reviewed.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2634,py/path-injection,false positive,2026-09-11T03:35:10Z,"2634: Input is canonicalized under per-request processing root before copy/transcription. Cleanup unlinks only after resolved is_relative_to(root); no outside file read/removal.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2635,py/path-injection,false positive,2026-09-11T03:35:12Z,"2635: Input is canonicalized under per-request processing root before copy/transcription. Cleanup unlinks only after resolved is_relative_to(root); no outside file read/removal.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2636,py/path-injection,false positive,2026-09-11T03:35:15Z,"2636: Input is canonicalized under per-request processing root before copy/transcription. Cleanup unlinks only after resolved is_relative_to(root); no outside file read/removal.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2637,py/path-injection,false positive,2026-09-11T03:35:17Z,"2637: Input is canonicalized under per-request processing root before copy/transcription. Cleanup unlinks only after resolved is_relative_to(root); no outside file read/removal.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2638,py/path-injection,false positive,2026-09-11T03:35:20Z,"2638: Input is canonicalized under per-request processing root before copy/transcription. Cleanup unlinks only after resolved is_relative_to(root); no outside file read/removal.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2639,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:35:22Z,"2639: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2640,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:35:24Z,"2640: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2641,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:35:27Z,"2641: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2642,js/clear-text-storage-of-sensitive-data,used in tests,2026-09-11T03:35:29Z,"2642: Presentation security fixture writes only TASK17-NONSECRET-TEST-KEY and deterministic fake principal tokens to test persistence/exfiltration behavior.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2643,js/clear-text-storage-of-sensitive-data,used in tests,2026-09-11T03:35:31Z,"2643: Presentation security fixture writes only TASK17-NONSECRET-TEST-KEY and deterministic fake principal tokens to test persistence/exfiltration behavior.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2644,js/clear-text-storage-of-sensitive-data,used in tests,2026-09-11T03:35:33Z,"2644: Presentation security fixture writes only TASK17-NONSECRET-TEST-KEY and deterministic fake principal tokens to test persistence/exfiltration behavior.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2645,js/clear-text-storage-of-sensitive-data,used in tests,2026-09-11T03:35:35Z,"2645: Presentation security fixture writes only TASK17-NONSECRET-TEST-KEY and deterministic fake principal tokens to test persistence/exfiltration behavior.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2654,js/clear-text-storage-of-sensitive-data,false positive,2026-09-11T03:35:37Z,"2654: Initializer overwrites apiKey with empty string after spreading config. Executed callback confirms no key sentinel persists; SARIF misses the overwrite.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-javascript.md"
+2656,py/path-injection,false positive,2026-09-11T03:35:40Z,"2656: Authenticated owner lookup plus32-hex IDs, fixed MIME extensions, root containment and size/SHA256 checks constrain artwork access.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2657,py/path-injection,false positive,2026-09-11T03:35:42Z,"2657: Authenticated owner lookup plus32-hex IDs, fixed MIME extensions, root containment and size/SHA256 checks constrain artwork access.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2658,py/path-injection,false positive,2026-09-11T03:35:45Z,"2658: Request input is a normalized authenticated user ID, not arbitrary root. safe_join confines user root; backend validates paths before access/deletion.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2659,py/path-injection,false positive,2026-09-11T03:35:48Z,"2659: Request input is a normalized authenticated user ID, not arbitrary root. safe_join confines user root; backend validates paths before access/deletion.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2660,py/path-injection,false positive,2026-09-11T03:35:50Z,"2660: Request input is a normalized authenticated user ID, not arbitrary root. safe_join confines user root; backend validates paths before access/deletion.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2661,py/path-injection,false positive,2026-09-11T03:35:52Z,"2661: Request input is a normalized authenticated user ID, not arbitrary root. safe_join confines user root; backend validates paths before access/deletion.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-paths.md"
+2663,py/weak-sensitive-data-hashing,false positive,2026-09-11T03:35:55Z,"2663: High-entropy provider API-key digest identifies credential revision for cache invalidation, not password verification. Rotation changes the opaque scope.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2664,py/weak-sensitive-data-hashing,false positive,2026-09-11T03:35:58Z,"2664: SHA256 produces a domain-separated salt consumed by100000-round PBKDF2; authentication key is the PBKDF2 output, not this digest.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2665,py/weak-sensitive-data-hashing,false positive,2026-09-11T03:36:00Z,"2665: Digest indexes bounded in-process KDF memoization; values are PBKDF2 keys. It is not a persisted password verifier. Cache/rotation tests pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2666,py/weak-sensitive-data-hashing,false positive,2026-09-11T03:36:02Z,"2666: Tainted field is allow_user_api_key, a boolean permission bit; actual API key is excluded. Rotating key leaves generation unchanged; changing permission changes it.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-python-boundaries.md"
+2667,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:36:04Z,"2667: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2669,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:36:07Z,"2669: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2670,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:36:09Z,"2670: PR fields are absent on dispatch/schedule; admission runs only on workflow_run, so checkout resolves github.sha. All52 event/checkout cases and negative controls pass.
+Evidence/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
+2671,actions/cache-poisoning/poisonable-step,false positive,2026-09-11T03:06:49Z,"2671: Dispatch has no PR/workflow_run payload; admission is workflow_run-only, so checkout at frontend-required.yml:596 is github.sha. Sink645 runs trusted ref code. Proof/tests: a4406278f5 Docs/Evidence/PR2761-codeql-actions.md"
