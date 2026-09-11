@@ -564,7 +564,7 @@ describe("prompt capability discovery", () => {
     mocks.apiSend.mockReset()
   })
 
-  it("keeps both advertised unsupported capabilities disabled", async () => {
+  it("treats a valid response with both capabilities advertised unsupported as known", async () => {
     mocks.apiSend.mockResolvedValue({
       ok: true,
       status: 200,
@@ -575,7 +575,7 @@ describe("prompt capability discovery", () => {
     })
 
     await expect(fetchPromptCapabilities()).resolves.toEqual({
-      availability: "unavailable",
+      availability: "available",
       prompt_improvement_v1: { supported: false, limits },
       single_text_recipe_v2: { supported: false },
       prompt_persistence: unknownPromptPersistence

@@ -1128,7 +1128,7 @@ describe("PromptAssistComposerAction entry and request contract", () => {
     ).toBe("")
   })
 
-  it("closes recipe mode on Escape from a recipe input and restores draft, runtime, and focus", async () => {
+  it("closes recipe mode on Escape from a recipe input and restores draft, runtime, and trigger focus", async () => {
     const user = userEvent.setup()
     const original = "  Exact draft 🧪\n\n"
     renderHarness({ initialDraft: original })
@@ -1148,7 +1148,7 @@ describe("PromptAssistComposerAction entry and request contract", () => {
       ).not.toBeInTheDocument()
     )
     expect(screen.getByLabelText("User draft")).toHaveValue(original)
-    expect(screen.getByLabelText("User draft")).toHaveFocus()
+    expect(screen.getByRole("button", { name: "Improve prompt" })).toHaveFocus()
 
     await openActions(user)
     await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
@@ -1835,7 +1835,7 @@ describe("PromptAssistComposerAction owner surface", () => {
 
   it.each([
     [false, "480"],
-    [true, "100%"]
+    [true, "100vw"]
   ] as const)(
     "owns one responsive Drawer when narrow=%s",
     async (narrow, expectedWidth) => {

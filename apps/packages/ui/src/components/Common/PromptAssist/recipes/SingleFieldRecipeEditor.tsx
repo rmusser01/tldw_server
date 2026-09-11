@@ -601,7 +601,7 @@ export function SingleFieldRecipeEditor({
       aria-label="Structured recipe builder"
       data-testid="single-field-recipe-editor"
       className="min-w-0 max-w-full space-y-4">
-      <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-surface1 p-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-end sm:justify-between">
         <label className="min-w-0 flex-1">
           <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
             Recipe source
@@ -610,7 +610,7 @@ export function SingleFieldRecipeEditor({
             aria-label="Recipe source"
             value={sourceValue(state.source)}
             onChange={(event) => selectSource(event.target.value)}
-            className="min-h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 py-2 text-sm text-text">
+            className="min-h-11 w-full min-w-0 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text">
             <optgroup label="Starters">
               {sources
                 .filter((source) => source.source_kind === "built_in")
@@ -662,7 +662,7 @@ export function SingleFieldRecipeEditor({
               renderFormat: event.target.value as RecipeRenderFormat,
             })
           }
-          className="min-h-11 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text">
+          className="min-h-11 w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text">
           <option value="xml">XML-style sections</option>
           <option value="markdown">Markdown sections</option>
           <option value="freeform">Free-form text</option>
@@ -745,7 +745,7 @@ export function SingleFieldRecipeEditor({
           showDeclarationFields
         />
 
-        <section className="min-w-0 rounded-xl border border-border bg-surface1 p-4">
+        <section className="min-w-0 rounded-xl border border-border bg-surface p-4">
           <div className="mb-3">
             <h3 className="text-sm font-semibold text-text">
               Compiled preview
@@ -760,7 +760,7 @@ export function SingleFieldRecipeEditor({
             aria-label="Compiled prompt preview"
             value={preview.renderedText ?? ""}
             rows={12}
-            className="w-full min-w-0 resize-y rounded-md border border-border bg-background p-3 font-mono text-sm leading-6 text-text"
+            className="w-full min-w-0 resize-y rounded-md border border-border bg-bg p-3 font-mono text-sm leading-6 text-text"
           />
           {preview.error && !currentSectionKeyError ? (
             <p role="alert" className="mt-2 text-sm text-danger">
@@ -772,7 +772,7 @@ export function SingleFieldRecipeEditor({
 
       {unknownId ? (
         <div className="space-y-2" aria-live="polite">
-          <p role="status" className="text-sm text-warn">
+          <p role="status" className="text-sm text-text">
             {t(
               "common:promptAssist.recipeOwnerUnknown",
               "The server outcome and responsible connection are unknown. Saving and updating are locked across connections. You can still edit, preview, and apply.",
@@ -819,7 +819,7 @@ export function SingleFieldRecipeEditor({
           ) : null}
         </div>
       ) : persistenceWriteLocked && !persistenceError ? (
-        <p role="status" className="text-sm text-warn">
+        <p role="status" className="text-sm text-text">
           {t(
             "common:promptAssist.recipePersistenceUnverified",
             "This recipe exists locally, but its server outcome is unverified. Reconcile it before saving or updating again.",
@@ -828,7 +828,7 @@ export function SingleFieldRecipeEditor({
       ) : savePersistenceAvailable !== true ||
         (state.source.source_kind === "saved" &&
           updatePersistenceAvailable !== true) ? (
-        <p role="status" className="text-sm text-warn">
+        <p role="status" className="text-sm text-text">
           {persistenceUnavailableReason}
         </p>
       ) : null}
@@ -854,6 +854,7 @@ export function SingleFieldRecipeEditor({
           variant="outline"
           size="lg"
           ref={saveButtonRef}
+          className="disabled:bg-surface2 disabled:text-text-muted disabled:opacity-100"
           disabled={!saveEnabled || persistenceAction !== null}
           onClick={() => {
             if (!onSaveAsNew) return;
@@ -865,6 +866,7 @@ export function SingleFieldRecipeEditor({
           <Button
             variant="outline"
             size="lg"
+            className="disabled:bg-surface2 disabled:text-text-muted disabled:opacity-100"
             disabled={!updateEnabled || persistenceAction !== null}
             onClick={() => {
               if (!onUpdate || state.source.source_kind !== "saved") return;
@@ -879,6 +881,7 @@ export function SingleFieldRecipeEditor({
         <Button
           variant="primary"
           size="lg"
+          className="!bg-text !text-bg hover:!bg-text active:!bg-text disabled:bg-surface2 disabled:text-text-muted disabled:opacity-100"
           disabled={preview.renderedText === null || !variableNamesReady}
           onClick={() => {
             if (preview.renderedText !== null) onApply(preview.renderedText);

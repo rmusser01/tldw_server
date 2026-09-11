@@ -103,7 +103,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
   }
 
   return (
-    <section className="rounded-xl border border-border bg-surface1 p-4">
+    <section className="rounded-xl border border-border bg-surface p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-semibold text-text">Variables</h3>
@@ -132,7 +132,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
         {variables.map((variable, index) => (
           <div
             key={`${variable.name}-${index}`}
-            className="rounded-lg border border-border bg-background p-3"
+            className="rounded-lg border border-border bg-bg p-3"
           >
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="text-xs font-medium uppercase tracking-wide text-text-muted">
@@ -175,7 +175,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                   }}
                   onBlur={() => onVariableNameCommit?.(variable.name)}
                   data-testid={`structured-variable-name-${index}`}
-                  className="w-full rounded-md border border-border bg-surface1 px-3 py-2 text-sm text-text aria-invalid:border-danger"
+                  className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text aria-invalid:border-danger"
                 />
                 {variableNameErrors?.[variable.name] ? (
                   <span
@@ -198,7 +198,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                   onChange={(event) =>
                     updateVariable(index, { input_type: event.target.value })
                   }
-                  className="w-full rounded-md border border-border bg-surface1 px-3 py-2 text-sm text-text"
+                  className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
                 >
                   <option value="text">Text</option>
                   <option value="textarea">Textarea</option>
@@ -225,7 +225,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                         label: event.target.value || null
                       })
                     }
-                    className="w-full rounded-md border border-border bg-surface1 px-3 py-2 text-sm text-text"
+                    className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
                   />
                 </label>
                 <label className="block">
@@ -244,7 +244,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                           : null
                       })
                     }
-                    className="w-full rounded-md border border-border bg-surface1 px-3 py-2 text-sm text-text"
+                    className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
                   />
                 </label>
                 <label className="block sm:col-span-2">
@@ -260,7 +260,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                         description: event.target.value || null
                       })
                     }
-                    className="w-full rounded-md border border-border bg-surface1 px-3 py-2 text-sm text-text"
+                    className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
                   />
                 </label>
                 <label className="block sm:col-span-2">
@@ -279,7 +279,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                           .filter(Boolean)
                       })
                     }
-                    className="w-full rounded-md border border-border bg-surface1 px-3 py-2 text-sm text-text"
+                    className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
                   />
                 </label>
                 <label className="flex items-center gap-2 text-sm text-text sm:col-span-2">
@@ -313,7 +313,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                           default_value: event.target.value
                         })
                       }
-                      className="w-full rounded-md border border-border bg-surface1 px-3 py-2 text-sm text-text"
+                      className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
                     />
                   </label>
                 ) : null}
@@ -361,7 +361,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                     updateCurrentValue(variable.name, event.target.value)
                   }
                   data-testid={`structured-preview-variable-${variable.name}`}
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
+                  className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text"
                 />
               ) : (
                 <input
@@ -376,7 +376,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                     updateCurrentValue(variable.name, event.target.value)
                   }
                   data-testid={`structured-preview-variable-${variable.name}`}
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
+                  className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text"
                 />
               )}
             </label>

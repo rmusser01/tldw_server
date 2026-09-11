@@ -43,7 +43,7 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
 }) => {
   if (!block) {
     return (
-      <section className="rounded-xl border border-border bg-surface1 p-4">
+      <section className="rounded-xl border border-border bg-surface p-4">
         <h3 className="text-sm font-semibold text-text">Block editor</h3>
         <p className="mt-2 text-sm text-text-muted">
           Select a block to edit its role, content, and template behavior.
@@ -53,7 +53,7 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
   }
 
   return (
-    <section className="rounded-xl border border-border bg-surface1 p-4">
+    <section className="rounded-xl border border-border bg-surface p-4">
       <div className="mb-3">
         <h3 className="text-sm font-semibold text-text">Block editor</h3>
         <p className="text-xs text-text-muted">
@@ -74,7 +74,7 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
             value={block.name}
             onChange={(event) => onChange({ name: event.target.value })}
             data-testid="structured-block-name"
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
+            className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text"
           />
         </label>
 
@@ -92,7 +92,7 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
                 })
               }
               data-testid="structured-block-role"
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
+              className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text"
             >
               {allowedRoles.map((role) => (
                 <option key={role} value={role}>
@@ -117,7 +117,7 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
               }
               value={sectionKey ?? ""}
               onChange={(event) => onSectionKeyChange(event.target.value)}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text aria-invalid:border-danger"
+              className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text aria-invalid:border-danger"
             />
             {sectionKeyError ? (
               <span
@@ -141,7 +141,7 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
             onChange={(event) => onChange({ content: event.target.value })}
             rows={8}
             data-testid="structured-block-content"
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
+            className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text"
           />
         </label>
 

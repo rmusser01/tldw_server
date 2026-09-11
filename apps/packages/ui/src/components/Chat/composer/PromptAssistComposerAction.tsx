@@ -87,6 +87,8 @@ export function PromptAssistComposerAction({
   const pendingResetAttemptRef = React.useRef<number | null>(null)
   const pendingUndoFocusRef = React.useRef(false)
   const pendingDrawerFocusRef = React.useRef(false)
+  const pendingRecipeTriggerFocusRef = React.useRef(false)
+  const promptAssistTriggerRef = React.useRef<HTMLButtonElement>(null)
   const message = form.values.message
   const setFieldValue = form.setFieldValue
   modelSelectionRef.current = modelSelection
@@ -205,11 +207,13 @@ export function PromptAssistComposerAction({
 
   React.useLayoutEffect(() => {
     pendingDrawerFocusRef.current = false
+    pendingRecipeTriggerFocusRef.current = false
     setRecipeOpen(false)
     setRecipeUndo(null)
 
     return () => {
       pendingDrawerFocusRef.current = false
+      pendingRecipeTriggerFocusRef.current = false
     }
   }, [lifecycleKey, surfaceOpen])
 
@@ -291,14 +295,20 @@ export function PromptAssistComposerAction({
       dismissPromptAssist()
     }
     pendingDrawerFocusRef.current = true
+    pendingRecipeTriggerFocusRef.current = recipeOpen
     setPanelOpen(false)
     setInspectionOpen(false)
     setRecipeOpen(false)
-  }, [dismissPromptAssist, promptAssistState.status])
+  }, [dismissPromptAssist, promptAssistState.status, recipeOpen])
   const handleDrawerAfterOpenChange = React.useCallback(
     (open: boolean) => {
       if (open || !pendingDrawerFocusRef.current) return
       pendingDrawerFocusRef.current = false
+      if (pendingRecipeTriggerFocusRef.current) {
+        pendingRecipeTriggerFocusRef.current = false
+        promptAssistTriggerRef.current?.focus()
+        return
+      }
       onReturnFocus?.()
     },
     [onReturnFocus]
@@ -316,10 +326,12 @@ export function PromptAssistComposerAction({
     dismissPromptAssist()
     setPanelOpen(false)
     setInspectionOpen(false)
+    pendingRecipeTriggerFocusRef.current = false
     setRecipeOpen(true)
   }, [dismissPromptAssist])
   const closeRecipeBuilder = React.useCallback(() => {
     pendingDrawerFocusRef.current = true
+    pendingRecipeTriggerFocusRef.current = true
     setRecipeOpen(false)
   }, [])
   const applyRecipe = React.useCallback(
@@ -371,6 +383,7 @@ export function PromptAssistComposerAction({
   return (
     <div className="min-w-0">
       <PromptAssistMenu
+        triggerRef={promptAssistTriggerRef}
         draft={form.values.message}
         capability={capability}
         modelSelection={modelSelection}
@@ -425,7 +438,7 @@ export function PromptAssistComposerAction({
         onClose={closeDrawer}
         afterOpenChange={handleDrawerAfterOpenChange}
         focusable={{ focusTriggerAfterClose: false }}
-        size={narrow ? "100%" : 480}
+        size={narrow ? "100vw" : 480}
         title={
           recipeOpen
             ? t("common:promptAssist.recipeTitle", "Build from recipe")

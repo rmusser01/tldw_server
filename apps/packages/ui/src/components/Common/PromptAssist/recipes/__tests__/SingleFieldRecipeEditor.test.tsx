@@ -106,6 +106,55 @@ const deferred = <Value,>() => {
 };
 
 describe("SingleFieldRecipeEditor", () => {
+  it("uses semantic high-contrast tokens for recipe actions in every state", () => {
+    renderEditor({
+      initialSource: savedRecipe(),
+      persistenceAvailable: false,
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" }),
+    ).toHaveClass(
+      "disabled:bg-surface2",
+      "disabled:text-text-muted",
+      "disabled:opacity-100",
+    );
+    expect(screen.getByRole("button", { name: "Update recipe" })).toHaveClass(
+      "disabled:bg-surface2",
+      "disabled:text-text-muted",
+      "disabled:opacity-100",
+    );
+    expect(
+      screen.getByRole("button", { name: "Apply to system prompt" }),
+    ).toHaveClass(
+      "!bg-text",
+      "!text-bg",
+      "disabled:bg-surface2",
+      "disabled:text-text-muted",
+      "disabled:opacity-100",
+    );
+    expect(
+      screen.getByText("Recipe saving requires a supported online server."),
+    ).toHaveClass("text-text");
+    expect(screen.getByRole("combobox", { name: "Recipe source" })).toHaveClass(
+      "bg-bg",
+    );
+    expect(screen.getByRole("textbox", { name: "Block name" })).toHaveClass(
+      "bg-bg",
+    );
+    expect(screen.getByRole("textbox", { name: "Variable label" })).toHaveClass(
+      "bg-surface",
+    );
+    expect(
+      screen.getByRole("textbox", {
+        name: "Current value for Audience (not saved)",
+      }),
+    ).toHaveClass("bg-bg");
+    expect(
+      screen.getByRole("textbox", { name: "Compiled prompt preview" }),
+    ).toHaveClass("bg-bg");
+  });
+
   it("focuses recovery status after Forget when an empty local source has no enabled Save or block editor", async () => {
     const user = userEvent.setup();
     renderEditor({

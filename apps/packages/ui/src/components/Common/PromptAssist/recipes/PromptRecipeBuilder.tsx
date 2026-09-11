@@ -371,7 +371,7 @@ export function PromptRecipeBuilder({
         onUpdate={updateSaved}
       />
       {syncPendingNotice ? (
-        <p role="status" className="text-sm text-warn">
+        <p role="status" className="text-sm text-text">
           {t(
             "common:promptAssist.recipeSavedPending",
             "Recipe saved locally and will sync when the server is available.",

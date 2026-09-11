@@ -39,7 +39,7 @@ export const BlockListPanel: React.FC<BlockListPanelProps> = ({
   const draggedBlockId = useRef<string | null>(null)
 
   return (
-    <section className="min-w-0 rounded-xl border border-border bg-surface1 p-3">
+    <section className="min-w-0 rounded-xl border border-border bg-surface p-3">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-semibold text-text">Blocks</h3>
@@ -93,7 +93,7 @@ export const BlockListPanel: React.FC<BlockListPanelProps> = ({
               className={`min-w-0 rounded-lg border p-2 ${
                 isSelected
                   ? "border-primary bg-primary/5"
-                  : "border-border bg-background"
+                  : "border-border bg-bg"
               } ${onReorderBlock ? "cursor-grab active:cursor-grabbing" : ""}`}
             >
               <button

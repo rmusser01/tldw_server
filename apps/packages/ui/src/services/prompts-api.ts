@@ -193,8 +193,7 @@ const parsePromptCapabilities = (value: unknown): PromptCapabilities | null => {
   const limits = parsePromptImprovementLimits(improvement.limits)
   if (!limits) return null
   return {
-    availability:
-      improvement.supported || recipe.supported ? "available" : "unavailable",
+    availability: "available",
     prompt_improvement_v1: {
       supported: improvement.supported,
       limits

@@ -1,7 +1,7 @@
 import { Button } from "@/components/Common/Button"
 import type { PromptImproveModelSelection } from "@/services/prompt-improvement"
 import { Sparkles } from "lucide-react"
-import { useEffect, useId, useRef, useState } from "react"
+import { type RefObject, useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 export type PromptAssistCapability = "supported" | "unsupported" | "unknown"
@@ -15,6 +15,7 @@ export type PromptAssistMenuProps = {
   onReviewChanges: () => void
   onBuildFromRecipe?: () => void
   onSelectModel?: () => void
+  triggerRef?: RefObject<HTMLButtonElement | null>
   disabled?: boolean
 }
 
@@ -27,11 +28,13 @@ export function PromptAssistMenu({
   onReviewChanges,
   onBuildFromRecipe,
   onSelectModel,
+  triggerRef: providedTriggerRef,
   disabled = false
 }: PromptAssistMenuProps) {
   const { t } = useTranslation(["common"])
   const [open, setOpen] = useState(false)
-  const triggerRef = useRef<HTMLButtonElement>(null)
+  const internalTriggerRef = useRef<HTMLButtonElement>(null)
+  const triggerRef = providedTriggerRef ?? internalTriggerRef
   const disclosureRef = useRef<HTMLDivElement>(null)
   const popupId = useId()
   const hasDraft = Boolean(draft.trim())
@@ -54,7 +57,7 @@ export function PromptAssistMenu({
     return () => {
       document.removeEventListener("mousedown", handlePointerDown)
     }
-  }, [open])
+  }, [open, triggerRef])
 
   const activeModel = !hasModel
     ? null
