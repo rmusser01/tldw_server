@@ -1,3 +1,4 @@
+import type { RecipeDeliveryReceipt } from "@/services/recipe-persistence-registry"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const harness = vi.hoisted(() => {
@@ -94,6 +95,69 @@ const ownerA = `recipe-owner:sha256:${"a".repeat(64)}`
 const ownerB = `recipe-owner:sha256:${"b".repeat(64)}`
 
 describe("background recipe authority protocol", () => {
+  it.each([
+    { id: "two" },
+    { ownerId: ownerB },
+    { operationId: "00000000-0000-4000-8000-000000000001" },
+    { operationId: "not-an-operation" },
+    { headers: { Authorization: "untrusted" } }
+  ])(
+    "does not release provisional quarantine for a forged receipt %#",
+    async (change) => {
+      const owner = (await send({ type: "tldw:recipe-owner:resolve" })) as {
+        ownerId: string
+      }
+      vi.stubGlobal("fetch", async () => json({ id: "remote" }))
+      const response = (await send({
+        type: "tldw:request",
+        payload: {
+          path: "/api/v1/prompts/",
+          method: "POST",
+          body: {},
+          recipePersistence: {
+            mode: "require",
+            expectedOwnerId: owner.ownerId,
+            localId: "one"
+          }
+        }
+      })) as { recipeDelivery: RecipeDeliveryReceipt }
+      expect(
+        await send({
+          type: "tldw:recipe-uncertainty:acknowledge",
+          ...response.recipeDelivery,
+          ...change
+        })
+      ).toMatchObject({ ok: false })
+      expect(
+        await send({
+          type: "tldw:recipe-uncertainty:read",
+          id: "one",
+          ownerId: ownerB
+        })
+      ).toBe("unknown_owner")
+      expect(
+        await send({
+          type: "tldw:recipe-uncertainty:acknowledge",
+          ...response.recipeDelivery
+        })
+      ).toEqual({ ok: true })
+      expect(
+        await send({
+          type: "tldw:recipe-uncertainty:read",
+          id: "one",
+          ownerId: owner.ownerId
+        })
+      ).toBe("scoped")
+      expect(
+        await send({
+          type: "tldw:recipe-uncertainty:read",
+          id: "one",
+          ownerId: ownerB
+        })
+      ).toBe("clear")
+    }
+  )
+
   beforeEach(async () => {
     vi.resetModules()
     harness.listeners.clear()
@@ -170,7 +234,7 @@ describe("background recipe authority protocol", () => {
     })
   })
 
-  it("returns only owner/revision and marks before create/update fetch without clearing success", async () => {
+  it("marks provisionally before create/update and retains scoped state after receipt acknowledgement", async () => {
     const owner = (await send({ type: "tldw:recipe-owner:resolve" })) as {
       ownerId: string
       authorizationRevision: string
@@ -196,24 +260,29 @@ describe("background recipe authority protocol", () => {
       ["/api/v1/prompts/", "POST"],
       ["/api/v1/prompts/123", "PATCH"]
     ]) {
-      expect(
-        await send({
-          type: "tldw:request",
-          payload: {
-            path,
-            method,
-            body: {},
-            recipePersistence: {
-              mode: "require",
-              expectedOwnerId: owner.ownerId,
-              localId: "one"
-            }
+      const response = (await send({
+        type: "tldw:request",
+        payload: {
+          path,
+          method,
+          body: {},
+          recipePersistence: {
+            mode: "require",
+            expectedOwnerId: owner.ownerId,
+            localId: "one"
           }
-        })
-      ).toMatchObject({
+        }
+      })) as { recipeDelivery: RecipeDeliveryReceipt }
+      expect(response).toMatchObject({
         ok: true,
         recipePersistence: { state: "dispatched", actualOwnerId: owner.ownerId }
       })
+      expect(
+        await send({
+          type: "tldw:recipe-uncertainty:acknowledge",
+          ...response.recipeDelivery
+        })
+      ).toEqual({ ok: true })
       if (method === "POST")
         await send({
           type: "tldw:recipe-uncertainty:clear-scoped",
@@ -222,10 +291,13 @@ describe("background recipe authority protocol", () => {
         })
     }
     expect(observations).toEqual([
-      { url: "https://api.example.test/base/api/v1/prompts/", state: "scoped" },
+      {
+        url: "https://api.example.test/base/api/v1/prompts/",
+        state: "unknown_owner"
+      },
       {
         url: "https://api.example.test/base/api/v1/prompts/123",
-        state: "scoped"
+        state: "unknown_owner"
       }
     ])
     expect(
@@ -279,21 +351,20 @@ describe("background recipe authority protocol", () => {
     }
     const id = "x".repeat(512)
     vi.stubGlobal("fetch", async () => json({ id: "remote" }))
-    expect(
-      await send({
-        type: "tldw:request",
-        payload: {
-          path: "/api/v1/prompts/",
-          method: "POST",
-          body: {},
-          recipePersistence: {
-            mode: "require",
-            expectedOwnerId: owner.ownerId,
-            localId: id
-          }
+    const response = (await send({
+      type: "tldw:request",
+      payload: {
+        path: "/api/v1/prompts/",
+        method: "POST",
+        body: {},
+        recipePersistence: {
+          mode: "require",
+          expectedOwnerId: owner.ownerId,
+          localId: id
         }
-      })
-    ).toMatchObject({
+      }
+    })) as { recipeDelivery: RecipeDeliveryReceipt }
+    expect(response).toMatchObject({
       ok: true,
       recipePersistence: { state: "dispatched", actualOwnerId: owner.ownerId }
     })
@@ -303,7 +374,13 @@ describe("background recipe authority protocol", () => {
         id,
         ownerId: owner.ownerId
       })
-    ).toBe("scoped")
+    ).toBe("unknown_owner")
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:acknowledge",
+        ...response.recipeDelivery
+      })
+    ).toEqual({ ok: true })
     expect(
       await send({
         type: "tldw:recipe-uncertainty:clear-scoped",

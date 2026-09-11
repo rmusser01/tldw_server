@@ -37,6 +37,32 @@ vi.mock("@/utils/safe-storage", () => ({
 const importApiSend = async () => import("@/services/api-send")
 
 describe("apiSend timeout fallback policy", () => {
+  it("does not acknowledge a receipt for an owner other than the requested owner", async () => {
+    const owner = "recipe-owner:sha256:" + "a".repeat(64)
+    const otherOwner = "recipe-owner:sha256:" + "b".repeat(64)
+    mocks.sendMessage.mockResolvedValue({
+      ok: false,
+      status: 0,
+      recipePersistence: { state: "dispatched", actualOwnerId: otherOwner },
+      recipeDelivery: {
+        id: "one",
+        ownerId: otherOwner,
+        operationId: "00000000-0000-4000-8000-000000000001"
+      }
+    })
+    const { apiSend } = await importApiSend()
+    await apiSend({
+      path: "/api/v1/prompts/",
+      method: "POST",
+      recipePersistence: {
+        mode: "require",
+        expectedOwnerId: owner,
+        localId: "one"
+      }
+    })
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+  })
+
   beforeEach(() => {
     vi.resetModules()
     vi.useRealTimers()

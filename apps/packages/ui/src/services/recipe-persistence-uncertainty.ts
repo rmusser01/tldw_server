@@ -1,5 +1,6 @@
 import type { RecipePersistenceOwnerView } from "@/services/recipe-persistence-owner"
 import {
+  type RecipeDeliveryReceipt,
   RecipePersistenceRegistry,
   type RecipeUncertaintyState
 } from "@/services/recipe-persistence-registry"
@@ -20,6 +21,24 @@ const isOwnerId = (value: unknown): value is string =>
   typeof value === "string" && /^recipe-owner:sha256:[0-9a-f]{64}$/.test(value)
 const isLocalId = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0 && value.length <= 512
+const isOperationId = (value: unknown): value is string =>
+  typeof value === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+    value
+  )
+
+export function isRecipeDeliveryReceipt(
+  value: unknown
+): value is RecipeDeliveryReceipt {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const receipt = value as Record<string, unknown>
+  return (
+    Object.keys(receipt).length === 3 &&
+    isLocalId(receipt.id) &&
+    isOwnerId(receipt.ownerId) &&
+    isOperationId(receipt.operationId)
+  )
+}
 
 /** Dispatch markers must remain addressable by the authority's read/clear protocol. */
 export function assertRecipeDispatchMarker(id: string, ownerId: string): void {
@@ -38,6 +57,7 @@ export type RecipePersistenceMessage =
       ownerId: string
     }
   | { type: "tldw:recipe-uncertainty:forget-unknown"; id: string }
+  | ({ type: "tldw:recipe-uncertainty:acknowledge" } & RecipeDeliveryReceipt)
 
 /** Reject extra fields too: page messages never supply credentials or owner material. */
 export function isRecipePersistenceMessage(
@@ -49,6 +69,12 @@ export function isRecipePersistenceMessage(
   if (message.type === "tldw:recipe-owner:resolve") return keys.length === 1
   if (!isLocalId(message.id)) return false
   switch (message.type) {
+    case "tldw:recipe-uncertainty:acknowledge":
+      return (
+        keys.length === 4 &&
+        isOwnerId(message.ownerId) &&
+        isOperationId(message.operationId)
+      )
     case "tldw:recipe-uncertainty:read":
       return (
         keys.length === 3 &&
@@ -244,6 +270,19 @@ export const markRecipePersistenceScoped = (
   mutate({ type: "tldw:recipe-uncertainty:mark-scoped", id, ownerId }, () =>
     directRegistry.markScoped(id, ownerId)
   )
+export const acknowledgeRecipePersistenceReceipt = (
+  receipt: RecipeDeliveryReceipt
+): Promise<void> =>
+  mutate({ type: "tldw:recipe-uncertainty:acknowledge", ...receipt }, () => {
+    if (
+      !directRegistry.acknowledge(
+        receipt.id,
+        receipt.ownerId,
+        receipt.operationId
+      )
+    )
+      throw new Error("Recipe delivery receipt does not match")
+  })
 export const clearRecipePersistenceScoped = (
   id: string,
   ownerId: string

@@ -2,6 +2,47 @@ import { RecipePersistenceRegistry } from "@/services/recipe-persistence-registr
 import { describe, expect, it } from "vitest"
 
 describe("recipe uncertainty registry", () => {
+  it("provisionally quarantines an exact ID until the matching receipt is acknowledged", () => {
+    const registry = new RecipePersistenceRegistry()
+    registry.reserve("one", "alice", "operation-1")
+    expect(registry.read("one", "bob")).toBe("unknown_owner")
+    registry.clearScoped("one", "alice")
+    expect(registry.read("one", "bob")).toBe("unknown_owner")
+    expect(registry.acknowledge("one", "alice", "operation-1")).toBe(true)
+    expect(registry.read("one", "bob")).toBe("clear")
+  })
+
+  it.each([
+    ["two", "alice", "op-1"],
+    ["one", "bob", "op-1"],
+    ["one", "alice", "op-old"]
+  ])(
+    "a mismatched receipt %s/%s/%s cannot acknowledge another operation",
+    (id, owner, operation) => {
+      const registry = new RecipePersistenceRegistry()
+      registry.reserve("one", "alice", "op-1")
+      expect(registry.acknowledge(id, owner, operation)).toBe(false)
+      expect(registry.read("one", "bob")).toBe("unknown_owner")
+    }
+  )
+
+  it("acknowledgement keeps scoped/unknown state and old receipts cannot clear a newer reservation", () => {
+    const registry = new RecipePersistenceRegistry()
+    registry.reserve("one", "alice", "op-1")
+    registry.markUnknown("one")
+    registry.acknowledge("one", "alice", "op-1")
+    expect(registry.read("one", "bob")).toBe("unknown_owner")
+    registry.forgetUnknown("one")
+    expect(registry.read("one", "alice")).toBe("scoped")
+    registry.reserve("one", "bob", "op-2")
+    expect(registry.acknowledge("one", "alice", "op-1")).toBe(false)
+    expect(registry.read("one", "alice")).toBe("unknown_owner")
+    registry.forgetUnknown("two")
+    expect(registry.read("one", "alice")).toBe("unknown_owner")
+    registry.forgetUnknown("one")
+    expect(registry.read("one", "alice")).toBe("scoped")
+  })
+
   it.each(["scoped", "unknown"])(
     "atomically refuses an exact-ID %s reservation without changing other state",
     (state) => {

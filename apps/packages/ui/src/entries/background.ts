@@ -7,7 +7,10 @@ import { tldwAuth } from "@/services/tldw/TldwAuth";
 import { tldwModels } from "@/services/tldw";
 import { apiSend } from "@/services/api-send";
 import { tldwRequest } from "@/services/tldw/request-core";
-import { RecipePersistenceRegistry } from "@/services/recipe-persistence-registry";
+import {
+  type RecipeDeliveryReceipt,
+  RecipePersistenceRegistry,
+} from "@/services/recipe-persistence-registry";
 import {
   assertRecipeDispatchMarker,
   getRecipeAuthenticatedPrincipal,
@@ -1705,13 +1708,16 @@ export default defineBackground({
       let originalScopedConfig: Awaited<
         ReturnType<typeof resolveCurrentServicePromptConfig>
       > | undefined;
+      let recipeDelivery: RecipeDeliveryReceipt | undefined;
       try {
-        return await tldwRequest(requestPayload, {
+        const response = await tldwRequest(requestPayload, {
           getAuthenticatedPrincipal: getRecipeAuthenticatedPrincipal,
           dispatchAuthority: {
             markDispatched: (id, ownerId) => {
               assertRecipeDispatchMarker(id, ownerId);
-              recipeRegistry.reserve(id, ownerId);
+              const operationId = crypto.randomUUID();
+              recipeRegistry.reserve(id, ownerId, operationId);
+              recipeDelivery = { id, ownerId, operationId };
             },
           },
           // IMPORTANT: getConfig must fetch fresh config each time it's called
@@ -1751,6 +1757,7 @@ export default defineBackground({
                 }
               },
         });
+        return recipeDelivery ? { ...response, recipeDelivery } : response;
       } catch (error) {
         if (servicePromptConfig && (error as { status?: unknown })?.status === 412) {
           const message =
@@ -3509,6 +3516,14 @@ export default defineBackground({
           return { ok: false, error: "Invalid recipe authority message" };
         }
         switch (message.type) {
+          case "tldw:recipe-uncertainty:acknowledge":
+            return {
+              ok: recipeRegistry.acknowledge(
+                message.id,
+                message.ownerId,
+                message.operationId,
+              ),
+            };
           case "tldw:recipe-owner:resolve":
             return await resolveRecipeOwnerWithConfig(getEffectiveConfig);
           case "tldw:recipe-uncertainty:read":

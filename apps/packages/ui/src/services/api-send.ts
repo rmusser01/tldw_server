@@ -1,6 +1,8 @@
 import {
+  acknowledgeRecipePersistenceReceipt,
   directRecipeRequestAuthority,
-  hasRecipeExtensionRuntime
+  hasRecipeExtensionRuntime,
+  isRecipeDeliveryReceipt
 } from "@/services/recipe-persistence-uncertainty"
 import { resolveDirectBrowserConfig as resolveDirectConfig } from "@/services/tldw/direct-browser-config"
 import type {
@@ -155,6 +157,25 @@ async function apiSendImpl<
       const resp = await Promise.race([extensionPromise, timeoutPromise])
 
       if (resp) {
+        if (payload.recipePersistence?.mode === "require") {
+          const received = resp as ApiSendResponse<T> & {
+            recipeDelivery?: unknown
+          }
+          const receipt = received.recipeDelivery
+          if (
+            isRecipeDeliveryReceipt(receipt) &&
+            receipt.id === payload.recipePersistence.localId &&
+            receipt.ownerId === payload.recipePersistence.expectedOwnerId &&
+            received.recipePersistence?.state === "dispatched" &&
+            receipt.ownerId === received.recipePersistence.actualOwnerId
+          ) {
+            // Receipt is known even if the ACK reply is lost. Never turn this
+            // into unknown dispatch; an undelivered ACK leaves quarantine in the worker.
+            await acknowledgeRecipePersistenceReceipt(receipt).catch(
+              () => undefined
+            )
+          }
+        }
         return resp as ApiSendResponse<T>
       }
       if (!methodIsSafeFallback || recipeExtension) {

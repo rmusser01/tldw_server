@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   rows: new Map<string, Record<string, unknown>>(),
   beforeRead: vi.fn(),
   markerFails: true,
+  failedDurableErrorWrite: vi.fn(),
   runtimeKey: null as string | null,
   listeners: new Set<BackgroundListener>(),
 }));
@@ -144,6 +145,7 @@ vi.mock("@/db/dexie/schema", () => ({
           fields.syncStatus === "error" &&
           mocks.markerFails
         ) {
+          mocks.failedDurableErrorWrite();
           throw new Error("durable sync-error storage unavailable");
         }
         if (!mocks.rows.has(id)) return 0;
@@ -330,6 +332,161 @@ const startBackground = async () => {
 };
 
 describe("builder through real sync, Prompt Studio, apiSend and request-core", () => {
+  it.each(["request", "reply"])(
+    "background preserves known dispatch when the acknowledgement %s is lost",
+    async (lost) => {
+      await startBackground();
+      seed("update");
+      delete mocks.rows.get("dispatch-id").serverId;
+      const deliver = mocks.sendMessage.getMockImplementation()!;
+      mocks.sendMessage.mockImplementation(async (message) => {
+        if (message.type === "tldw:recipe-uncertainty:acknowledge") {
+          if (lost === "reply") await deliver(message);
+          throw new Error("lost acknowledgement " + lost);
+        }
+        return deliver(message);
+      });
+      expect(
+        await pushToStudio("dispatch-id", 42, { expectedOwnerId: ownerScope }),
+      ).toMatchObject({
+        success: false,
+        recipeOwnership: {
+          dispatch: { state: "dispatched", actualOwnerId: ownerScope },
+        },
+      });
+      mocks.sendMessage.mockImplementation(deliver);
+      mocks.config = switchedOwners[1];
+      const nextOwner = (await resolveRecipePersistenceOwnerView())!.ownerId;
+      expect(
+        await readRecipePersistenceUncertainty("dispatch-id", nextOwner),
+      ).toBe(lost === "request" ? "unknown_owner" : "clear");
+      await pushToStudio("dispatch-id", 42, { expectedOwnerId: nextOwner });
+      expect(promptMutations()).toHaveLength(lost === "request" ? 1 : 2);
+    },
+  );
+
+  it.each(["success", "typed rejection"])(
+    "%s cannot clear an undelivered background receipt acknowledgement",
+    async (outcome) => {
+      await startBackground();
+      seed("update");
+      const deliver = mocks.sendMessage.getMockImplementation()!;
+      mocks.sendMessage.mockImplementation(async (message) => {
+        if (message.type === "tldw:recipe-uncertainty:acknowledge")
+          throw new Error("acknowledgement request unavailable");
+        return deliver(message);
+      });
+      mocks.fetch.mockImplementation(async (url, init) => {
+        if (new URL(String(url)).pathname === "/api/v1/auth/me")
+          return principalResponse(init);
+        return outcome === "success"
+          ? jsonResponse({ success: true, data: serverRecord() })
+          : jsonResponse(
+              {
+                detail: [
+                  {
+                    loc: ["body", "name"],
+                    msg: "Field required",
+                    type: "missing",
+                  },
+                ],
+              },
+              422,
+            );
+      });
+      await pushToStudio("dispatch-id", 42, { expectedOwnerId: ownerScope });
+      expect(
+        await readRecipePersistenceUncertainty(
+          "dispatch-id",
+          switchedScopes[1],
+        ),
+      ).toBe("unknown_owner");
+      await clearRecipePersistenceScoped("dispatch-id", ownerScope);
+      expect(
+        await readRecipePersistenceUncertainty(
+          "dispatch-id",
+          switchedScopes[1],
+        ),
+      ).toBe("unknown_owner");
+      const requests = mocks.fetch.mock.calls.length;
+      await forgetRecipePersistenceUnknown("dispatch-id");
+      expect(
+        await readRecipePersistenceUncertainty(
+          "dispatch-id",
+          switchedScopes[1],
+        ),
+      ).toBe("clear");
+      expect(mocks.fetch).toHaveBeenCalledTimes(requests);
+    },
+  );
+
+  it("live background quarantines an unacknowledged POST across owners when both recovery writes fail", async () => {
+    await startBackground();
+    seed("update");
+    delete mocks.rows.get("dispatch-id").serverId;
+    const deliver = mocks.sendMessage.getMockImplementation()!;
+    let lostResponse = false;
+    let lostUnknownMarker = false;
+    mocks.sendMessage.mockImplementation(async (message) => {
+      if (message.type === "tldw:request") {
+        await deliver(message);
+        lostResponse = true;
+        throw new Error("response channel closed after POST");
+      }
+      if (message.type === "tldw:recipe-uncertainty:mark-unknown") {
+        lostUnknownMarker = true;
+        throw new Error("follow-up channel unavailable");
+      }
+      return deliver(message);
+    });
+    expect(
+      await pushToStudio("dispatch-id", 42, { expectedOwnerId: ownerScope }),
+    ).toMatchObject({
+      success: false,
+      recipeOwnership: { dispatch: { state: "unknown" } },
+    });
+    expect(lostResponse && lostUnknownMarker).toBe(true);
+    expect(mocks.failedDurableErrorWrite).toHaveBeenCalledTimes(1);
+    expect(mocks.rows.get("dispatch-id").syncStatus).not.toBe("error");
+    expect(promptMutations()).toHaveLength(1);
+    expect(promptMutations()[0][1].method).toBe("POST");
+    mocks.sendMessage.mockImplementation(deliver);
+    mocks.config = switchedOwners[1];
+    const nextOwner = (await resolveRecipePersistenceOwnerView())!.ownerId;
+    expect(nextOwner).not.toBe(ownerScope);
+    expect
+      .soft(await readRecipePersistenceUncertainty("dispatch-id", nextOwner))
+      .toBe("unknown_owner");
+    expect(
+      await pushToStudio("dispatch-id", 42, { expectedOwnerId: nextOwner }),
+    ).toMatchObject({
+      success: false,
+      recipeWriteBlocked: true,
+      recipeOwnership: { dispatch: { state: "not_dispatched" } },
+    });
+    expect(promptMutations()).toHaveLength(1);
+  });
+
+  it.each(["direct", "background"])(
+    "%s received ambiguity stays scoped and does not block another owner after durable storage fails",
+    async (adapter) => {
+      if (adapter === "background") await startBackground();
+      seed("update");
+      delete mocks.rows.get("dispatch-id").serverId;
+      await pushToStudio("dispatch-id", 42, { expectedOwnerId: ownerScope });
+      expect(
+        await readRecipePersistenceUncertainty("dispatch-id", ownerScope),
+      ).toBe("scoped");
+      mocks.config = switchedOwners[1];
+      const nextOwner = (await resolveRecipePersistenceOwnerView())!.ownerId;
+      expect(
+        await readRecipePersistenceUncertainty("dispatch-id", nextOwner),
+      ).toBe("clear");
+      await pushToStudio("dispatch-id", 42, { expectedOwnerId: nextOwner });
+      expect(promptMutations()).toHaveLength(2);
+    },
+  );
+
   it.each([
     ["create", "scoped", false],
     ["update", "scoped", false],
