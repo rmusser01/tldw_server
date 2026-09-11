@@ -699,8 +699,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 66  # Schema v66 adds independent Buddy profiles and attachments
-    _POSTGRES_SCHEMA_VERSION = 66
+    _CURRENT_SCHEMA_VERSION = 67  # Schema v67 adds OSCE quiz activities and practice storage
+    _POSTGRES_SCHEMA_VERSION = 67
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -931,6 +931,8 @@ class CharactersRAGDB:
         ("quizzes", "id"),
         ("quiz_questions", "id"),
         ("quiz_attempts", "id"),
+        ("osce_stations", "id"),
+        ("osce_practice_attempts", "id"),
         ("study_packs", "id"),
         ("study_pack_cards", "id"),
         ("flashcard_citations", "id"),
@@ -7297,6 +7299,134 @@ UPDATE db_schema_version
    AND version = 64;
 """
 
+    _MIGRATION_SQL_V66_TO_V67 = """
+ALTER TABLE quizzes
+  ADD COLUMN activity_type TEXT NOT NULL DEFAULT 'questions'
+  CHECK (activity_type IN ('questions', 'osce'));
+ALTER TABLE quizzes
+  ADD COLUMN generation_profile TEXT;
+ALTER TABLE quizzes
+  ADD COLUMN total_stations INTEGER NOT NULL DEFAULT 0
+  CHECK (total_stations >= 0);
+
+CREATE TABLE osce_stations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  quiz_id INTEGER NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+  schema_version TEXT NOT NULL CHECK (schema_version = 'osce.station.v1'),
+  content_json TEXT NOT NULL,
+  order_index INTEGER NOT NULL CHECK (order_index >= 0),
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  origin TEXT NOT NULL CHECK (origin IN ('generated', 'manual')),
+  provenance_json TEXT,
+  source_bundle_json TEXT,
+  verification_state TEXT NOT NULL
+    CHECK (verification_state IN ('source_verified', 'modified_after_verification', 'manually_authored')),
+  verification_timestamp TEXT,
+  verification_summary TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE osce_practice_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  station_id INTEGER NOT NULL REFERENCES osce_stations(id) ON DELETE CASCADE,
+  quiz_id INTEGER NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+  client_attempt_id TEXT NOT NULL,
+  station_snapshot_json TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('in_progress', 'self_assessment', 'completed')),
+  candidate_notes TEXT NOT NULL DEFAULT '' CHECK (length(candidate_notes) <= 10000),
+  checklist_selections_json TEXT NOT NULL DEFAULT '{}',
+  rubric_selections_json TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT NOT NULL,
+  self_assessment_started_at TEXT,
+  completed_at TEXT,
+  frozen_elapsed_seconds INTEGER CHECK (frozen_elapsed_seconds IS NULL OR frozen_elapsed_seconds >= 0),
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  last_modified_at TEXT NOT NULL,
+  UNIQUE (station_id, client_attempt_id)
+);
+
+CREATE INDEX idx_osce_stations_quiz_active_order
+  ON osce_stations(quiz_id, deleted, order_index);
+CREATE INDEX idx_osce_attempts_station_state_modified
+  ON osce_practice_attempts(station_id, state, last_modified_at DESC);
+CREATE INDEX idx_osce_attempts_quiz_state_modified
+  ON osce_practice_attempts(quiz_id, state, last_modified_at DESC);
+CREATE UNIQUE INDEX idx_osce_attempts_station_client
+  ON osce_practice_attempts(station_id, client_attempt_id);
+
+UPDATE db_schema_version
+   SET version = 67
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version = 66;
+"""
+
+    _MIGRATION_SQL_V66_TO_V67_POSTGRES = """
+ALTER TABLE quizzes
+  ADD COLUMN IF NOT EXISTS activity_type TEXT NOT NULL DEFAULT 'questions';
+ALTER TABLE quizzes
+  ADD COLUMN IF NOT EXISTS generation_profile TEXT;
+ALTER TABLE quizzes
+  ADD COLUMN IF NOT EXISTS total_stations INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE quizzes
+  ADD CONSTRAINT quizzes_activity_type_check CHECK (activity_type IN ('questions', 'osce'));
+ALTER TABLE quizzes
+  ADD CONSTRAINT quizzes_total_stations_check CHECK (total_stations >= 0);
+
+CREATE TABLE osce_stations (
+  id BIGSERIAL PRIMARY KEY,
+  quiz_id BIGINT NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+  schema_version TEXT NOT NULL CHECK (schema_version = 'osce.station.v1'),
+  content_json TEXT NOT NULL,
+  order_index INTEGER NOT NULL CHECK (order_index >= 0),
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  origin TEXT NOT NULL CHECK (origin IN ('generated', 'manual')),
+  provenance_json TEXT,
+  source_bundle_json TEXT,
+  verification_state TEXT NOT NULL
+    CHECK (verification_state IN ('source_verified', 'modified_after_verification', 'manually_authored')),
+  verification_timestamp TIMESTAMPTZ,
+  verification_summary TEXT,
+  deleted BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE osce_practice_attempts (
+  id BIGSERIAL PRIMARY KEY,
+  station_id BIGINT NOT NULL REFERENCES osce_stations(id) ON DELETE CASCADE,
+  quiz_id BIGINT NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+  client_attempt_id TEXT NOT NULL,
+  station_snapshot_json TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('in_progress', 'self_assessment', 'completed')),
+  candidate_notes TEXT NOT NULL DEFAULT '' CHECK (char_length(candidate_notes) <= 10000),
+  checklist_selections_json TEXT NOT NULL DEFAULT '{}',
+  rubric_selections_json TEXT NOT NULL DEFAULT '{}',
+  started_at TIMESTAMPTZ NOT NULL,
+  self_assessment_started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  frozen_elapsed_seconds INTEGER CHECK (frozen_elapsed_seconds IS NULL OR frozen_elapsed_seconds >= 0),
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  last_modified_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (station_id, client_attempt_id)
+);
+
+CREATE INDEX idx_osce_stations_quiz_active_order
+  ON osce_stations(quiz_id, deleted, order_index);
+CREATE INDEX idx_osce_attempts_station_state_modified
+  ON osce_practice_attempts(station_id, state, last_modified_at DESC);
+CREATE INDEX idx_osce_attempts_quiz_state_modified
+  ON osce_practice_attempts(quiz_id, state, last_modified_at DESC);
+CREATE UNIQUE INDEX idx_osce_attempts_station_client
+  ON osce_practice_attempts(station_id, client_attempt_id);
+
+UPDATE db_schema_version
+   SET version = 67
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version = 66;
+"""
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -8381,6 +8511,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (63, "_migrate_from_v63_to_v64_sqlite"),
             (64, "_migrate_from_v64_to_v65"),
             (65, "_migrate_from_v65_to_v66"),
+            (66, "_migrate_from_v66_to_v67"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17461,6 +17592,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             connection=conn,
         )
 
+    def _migrate_from_v66_to_v67(self, conn: sqlite3.Connection) -> None:
+        """Add OSCE quiz activity metadata, stations, and practice attempts."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V66_TO_V67):
+            conn.execute(statement)
+        if self._get_db_version(conn) != 67:
+            raise SchemaError("OSCE schema migration V66->V67 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v66_to_v67_postgres(self, conn: Any) -> None:
+        """Add PostgreSQL OSCE quiz storage in the caller transaction."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V66_TO_V67_POSTGRES):
+            self.backend.execute(statement, connection=conn)
+        if self._get_schema_version_postgres(conn) != 67:
+            raise SchemaError("OSCE PostgreSQL migration V66->V67 failed version verification.")  # noqa: TRY003
+        self._sync_postgres_sequences(conn)
+
     def _migrate_from_v64_to_v65(self, conn: sqlite3.Connection) -> None:
         """Migrate schema from V64 to V65 (character resume snapshot state)."""
         logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V64 to V65 for DB: {self.db_path_str}...")
@@ -20289,6 +20435,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 66 and current_db_version == 65:
                         self._migrate_from_v65_to_v66(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 67 and current_db_version == 66:
+                        self._migrate_from_v66_to_v67(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -20735,6 +20884,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 66 and current_db_version == 65:
                     self._migrate_from_v65_to_v66(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 67 and current_db_version == 66:
+                    self._migrate_from_v66_to_v67(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -24744,6 +24896,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if target_version >= 66 and current_version < 66:
                 self._migrate_from_v65_to_v66_postgres(conn)
                 current_version = 66
+            if target_version >= 67 and current_version < 67:
+                self._migrate_from_v66_to_v67_postgres(conn)
+                current_version = 67
             self._runtime_schema_version = current_version
 
             if current_version > target_version:
@@ -39165,7 +39320,52 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             item["source_bundle_json"] = [source_bundle]
         else:
             item["source_bundle_json"] = None
+        activity_type = self._normalize_quiz_activity(item.get("activity_type"))
+        item["activity_type"] = activity_type
+        item["generation_profile"] = item.get("generation_profile") or None
+        item["total_questions"] = max(0, int(item.get("total_questions") or 0))
+        item["total_stations"] = max(0, int(item.get("total_stations") or 0))
+        if activity_type == "osce":
+            item["total_questions"] = 0
+        else:
+            item["total_stations"] = 0
         return item
+
+    @staticmethod
+    def _normalize_quiz_activity(activity_type: Any) -> str:
+        value = getattr(activity_type, "value", activity_type)
+        normalized = str(value or "questions").strip().lower()
+        if normalized not in {"questions", "osce"}:
+            raise InputError("activity_type must be 'questions' or 'osce'")
+        return normalized
+
+    @staticmethod
+    def _normalize_quiz_generation_profile(generation_profile: Any) -> str | None:
+        if generation_profile is None:
+            return None
+        value = getattr(generation_profile, "value", generation_profile)
+        normalized = str(value).strip()
+        return normalized or None
+
+    @staticmethod
+    def _quiz_not_found(quiz_id: int) -> ConflictError:
+        return ConflictError("Quiz not found", entity="quizzes", identifier=quiz_id)
+
+    def _require_quiz_activity(self, quiz_id: int, activity_type: str) -> dict[str, Any]:
+        quiz = self.get_quiz(quiz_id)
+        if quiz is None or quiz["activity_type"] != activity_type:
+            raise self._quiz_not_found(quiz_id)
+        return quiz
+
+    def _reject_question_for_osce_quiz(self, question_id: int) -> None:
+        row = self.execute_query(
+            "SELECT q.id AS quiz_id, q.activity_type "
+            "FROM quiz_questions AS qq JOIN quizzes AS q ON q.id = qq.quiz_id "
+            "WHERE qq.id = ?",
+            (question_id,),
+        ).fetchone()
+        if row and str(row["activity_type"]) != "questions":
+            raise self._quiz_not_found(int(row["quiz_id"]))
 
     def _deserialize_quiz_remediation_conversion_row(self, row: Any) -> dict[str, Any] | None:
         item = self._deserialize_row_fields(row, ["flashcard_uuids_json"])
@@ -39194,7 +39394,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         total = int(row["count"]) if row else 0
         now = self._get_current_utc_timestamp_iso()
         conn.execute(
-            "UPDATE quizzes SET total_questions = ?, last_modified = ?, version = version + 1, client_id = ? WHERE id = ?",
+            "UPDATE quizzes SET total_questions = ?, total_stations = 0, last_modified = ?, "
+            "version = version + 1, client_id = ? WHERE id = ?",
             (total, now, self.client_id, quiz_id),
         )
         return total
@@ -39209,17 +39410,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         source_bundle_json: list[dict[str, Any]] | None = None,
         time_limit_seconds: int | None = None,
         passing_score: int | None = None,
+        activity_type: Any = "questions",
+        generation_profile: Any = None,
         client_id: str = "unknown",
     ) -> int:
         """Create a new quiz and return its ID."""
         now = self._get_current_utc_timestamp_iso()
         source_bundle_payload = self._ensure_json_string(source_bundle_json)
+        normalized_activity = self._normalize_quiz_activity(activity_type)
+        normalized_profile = self._normalize_quiz_generation_profile(generation_profile)
+        if normalized_activity == "osce":
+            if passing_score is not None:
+                raise InputError("passing_score is not supported for OSCE quizzes")
+            if time_limit_seconds is not None:
+                raise InputError("time_limit_seconds is not supported for OSCE quizzes")
         try:
             with self.transaction() as conn:
                 insert_sql = (
-                    "INSERT INTO quizzes(name, description, workspace_tag, workspace_id, media_id, source_bundle_json, total_questions, "
-                    "time_limit_seconds, passing_score, deleted, client_id, version, created_at, last_modified) "
-                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    "INSERT INTO quizzes(name, description, workspace_tag, workspace_id, media_id, source_bundle_json, "
+                    "activity_type, generation_profile, total_questions, total_stations, time_limit_seconds, passing_score, "
+                    "deleted, client_id, version, created_at, last_modified) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 )
                 params = (
                     name,
@@ -39228,6 +39439,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     workspace_id,
                     media_id,
                     source_bundle_payload,
+                    normalized_activity,
+                    normalized_profile,
+                    0,
                     0,
                     time_limit_seconds,
                     passing_score,
@@ -39256,8 +39470,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Get quiz by ID, returns None if not found or deleted (unless include_deleted)."""
         deleted_clause = "" if include_deleted else "AND deleted = 0"
         query = (
-            "SELECT id, name, description, workspace_tag, workspace_id, media_id, source_bundle_json, total_questions, "  # nosec B608
-            "time_limit_seconds, passing_score, "
+            "SELECT id, name, description, workspace_tag, workspace_id, media_id, source_bundle_json, activity_type, "  # nosec B608
+            "generation_profile, total_questions, total_stations, time_limit_seconds, passing_score, "
             "deleted, client_id, version, created_at, last_modified "
             "FROM quizzes WHERE id = ? " + deleted_clause
         )
@@ -39273,8 +39487,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         q: str | None = None,
         media_id: int | None = None,
         workspace_id: str | None = None,
+        activity_type: Any = None,
         include_workspace_items: bool = False,
         include_deleted: bool = False,
+        sort_by: str = "last_modified",
+        sort_order: str = "desc",
         limit: int = 50,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -39291,17 +39508,32 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             params.append(workspace_id)
         elif not include_workspace_items:
             where_clauses.append("workspace_id IS NULL")
+        if activity_type is not None:
+            where_clauses.append("activity_type = ?")
+            params.append(self._normalize_quiz_activity(activity_type))
         if q:
             where_clauses.append("(LOWER(name) LIKE ? OR LOWER(description) LIKE ?)")
             q_like = f"%{q.lower()}%"
             params.extend([q_like, q_like])
 
         where_sql = " AND ".join(where_clauses)
+        normalized_sort = str(sort_by or "last_modified").strip().lower()
+        normalized_order = str(sort_order or "desc").strip().lower()
+        if normalized_sort not in {"last_modified", "name", "size"}:
+            raise InputError("sort_by must be 'last_modified', 'name', or 'size'")
+        if normalized_order not in {"asc", "desc"}:
+            raise InputError("sort_order must be 'asc' or 'desc'")
+        sort_expression = {
+            "last_modified": "last_modified",
+            "name": "LOWER(name)",
+            "size": "CASE WHEN activity_type = 'osce' THEN total_stations ELSE total_questions END",
+        }[normalized_sort]
+        order_sql = f"{sort_expression} {normalized_order.upper()}, id {normalized_order.upper()}"
         query = (
-            "SELECT id, name, description, workspace_tag, workspace_id, media_id, source_bundle_json, total_questions, "  # nosec B608
-            "time_limit_seconds, passing_score, "
+            "SELECT id, name, description, workspace_tag, workspace_id, media_id, source_bundle_json, activity_type, "  # nosec B608
+            "generation_profile, total_questions, total_stations, time_limit_seconds, passing_score, "
             "deleted, client_id, version, created_at, last_modified "
-            f"FROM quizzes WHERE {where_sql} ORDER BY last_modified DESC LIMIT ? OFFSET ?"
+            f"FROM quizzes WHERE {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?"
         )
         count_query = f"SELECT COUNT(*) AS count FROM quizzes WHERE {where_sql}"  # nosec B608
         try:
@@ -39317,6 +39549,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def update_quiz(self, quiz_id: int, updates: dict[str, Any], client_id: str = "unknown") -> bool:
         """Update quiz fields, returns True if successful."""
+        updates = dict(updates)
         expected_version = updates.pop("expected_version", None)
         allowed = {
             "name",
@@ -39327,16 +39560,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "source_bundle_json",
             "time_limit_seconds",
             "passing_score",
+            "activity_type",
+            "generation_profile",
         }
-        set_parts = []
-        params: list[Any] = []
-        for k, v in updates.items():
-            if k in allowed:
-                if k == "source_bundle_json":
-                    v = self._ensure_json_string_from_mixed(v)
-                set_parts.append(f"{k} = ?")
-                params.append(v)
-        if not set_parts:
+        requested_updates = {key: value for key, value in updates.items() if key in allowed}
+        if not requested_updates:
             if expected_version is None:
                 return True
             try:
@@ -39350,16 +39578,58 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             except sqlite3.Error as e:
                 raise CharactersRAGDBError(f"Failed to update quiz: {e}") from e  # noqa: TRY003
         now = self._get_current_utc_timestamp_iso()
-        set_parts.extend(["last_modified = ?", "version = version + 1", "client_id = ?"])
-        params.extend([now, client_id or self.client_id])
         try:
             with self.transaction() as conn:
-                row = conn.execute("SELECT version FROM quizzes WHERE id = ? AND deleted = 0", (quiz_id,)).fetchone()
+                row = conn.execute(
+                    "SELECT version, activity_type, total_questions, total_stations, "
+                    "time_limit_seconds, passing_score FROM quizzes WHERE id = ? AND deleted = 0",
+                    (quiz_id,),
+                ).fetchone()
                 if not row:
                     return False
                 current_version = int(row["version"])
                 if expected_version is not None and current_version != expected_version:
                     raise ConflictError("Version mismatch updating quiz", entity="quizzes", identifier=quiz_id)  # noqa: TRY003
+
+                current_activity = self._normalize_quiz_activity(row["activity_type"])
+                desired_activity = self._normalize_quiz_activity(
+                    requested_updates.get("activity_type", current_activity)
+                )
+                if desired_activity != current_activity and (
+                    int(row["total_questions"] or 0) > 0 or int(row["total_stations"] or 0) > 0
+                ):
+                    raise ConflictError(  # noqa: TRY003
+                        "Quiz activity type cannot change after content is added",
+                        entity="quizzes",
+                        identifier=quiz_id,
+                    )
+
+                future_passing_score = requested_updates.get("passing_score", row["passing_score"])
+                future_time_limit = requested_updates.get("time_limit_seconds", row["time_limit_seconds"])
+                if desired_activity == "osce":
+                    if future_passing_score is not None:
+                        raise InputError("passing_score is not supported for OSCE quizzes")
+                    if future_time_limit is not None:
+                        raise InputError("time_limit_seconds is not supported for OSCE quizzes")
+
+                normalized_updates = dict(requested_updates)
+                if "activity_type" in normalized_updates:
+                    normalized_updates["activity_type"] = desired_activity
+                if "generation_profile" in normalized_updates:
+                    normalized_updates["generation_profile"] = self._normalize_quiz_generation_profile(
+                        normalized_updates["generation_profile"]
+                    )
+                normalized_updates["total_questions" if desired_activity == "osce" else "total_stations"] = 0
+
+                set_parts: list[str] = []
+                params: list[Any] = []
+                for key, value in normalized_updates.items():
+                    if key == "source_bundle_json":
+                        value = self._ensure_json_string_from_mixed(value)
+                    set_parts.append(f"{key} = ?")
+                    params.append(value)
+                set_parts.extend(["last_modified = ?", "version = version + 1", "client_id = ?"])
+                params.extend([now, client_id or self.client_id])
                 params_final = params + [quiz_id]
                 query = f"UPDATE quizzes SET {', '.join(set_parts)} WHERE id = ? AND deleted = 0"  # nosec B608
                 rc = conn.execute(query, tuple(params_final)).rowcount
@@ -39394,6 +39664,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         "WHERE quiz_id = ? AND deleted = 0",
                         (now, self.client_id, quiz_id),
                     )
+                    conn.execute(
+                        "UPDATE osce_stations SET deleted = 1, updated_at = ?, version = version + 1 "
+                        "WHERE quiz_id = ? AND deleted = 0",
+                        (now, quiz_id),
+                    )
                 return rc > 0
         except sqlite3.Error as e:
             raise CharactersRAGDBError(f"Failed to delete quiz: {e}") from e  # noqa: TRY003
@@ -39426,9 +39701,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         normalized_hint_penalty = max(0, int(hint_penalty_points or 0))
         try:
             with self.transaction() as conn:
-                quiz_row = conn.execute("SELECT id FROM quizzes WHERE id = ? AND deleted = 0", (quiz_id,)).fetchone()
-                if not quiz_row:
-                    raise ConflictError("Quiz not found", entity="quizzes", identifier=quiz_id)  # noqa: TRY003
+                quiz_row = conn.execute(
+                    "SELECT id, activity_type FROM quizzes WHERE id = ? AND deleted = 0",
+                    (quiz_id,),
+                ).fetchone()
+                if not quiz_row or str(quiz_row["activity_type"]) != "questions":
+                    raise self._quiz_not_found(quiz_id)
                 insert_sql = (
                     "INSERT INTO quiz_questions(quiz_id, question_type, question_text, group_id, group_prompt, options, correct_answer, "
                     "explanation, hint, hint_penalty_points, source_citations_json, points, order_index, tags_json, deleted, client_id, "
@@ -39474,6 +39752,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_question(self, question_id: int, include_deleted: bool = False) -> dict[str, Any] | None:
         """Get question by ID."""
+        self._reject_question_for_osce_quiz(question_id)
         deleted_clause = "" if include_deleted else "AND deleted = 0"
         query = (
             "SELECT id, quiz_id, question_type, question_text, group_id, group_prompt, options, correct_answer, explanation, hint, "  # nosec B608
@@ -39497,6 +39776,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         offset: int = 0,
     ) -> dict[str, Any]:
         """List questions for a quiz with pagination."""
+        self._require_quiz_activity(quiz_id, "questions")
         where_clauses = ["quiz_id = ?"]
         params: list[Any] = [quiz_id]
         where_clauses.append("deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "deleted = 0")
@@ -39549,6 +39829,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def update_question(self, question_id: int, updates: dict[str, Any], client_id: str = "unknown") -> bool:
         """Update question fields."""
+        self._reject_question_for_osce_quiz(question_id)
         expected_version = updates.pop("expected_version", None)
         allowed = {
             "question_type",
@@ -39646,12 +39927,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         try:
             with self.transaction() as conn:
                 row = conn.execute(
-                    "SELECT id, quiz_id, version, deleted FROM quiz_questions WHERE id = ?",
+                    "SELECT qq.id, qq.quiz_id, qq.version, qq.deleted, q.activity_type "
+                    "FROM quiz_questions AS qq JOIN quizzes AS q ON q.id = qq.quiz_id WHERE qq.id = ?",
                     (question_id,),
                 ).fetchone()
                 if not row:
                     return False
                 quiz_id = int(row["quiz_id"])
+                if str(row["activity_type"]) != "questions":
+                    raise self._quiz_not_found(quiz_id)
                 cur_ver = int(row["version"])
                 deleted = int(row["deleted"])
                 if hard_delete:
@@ -39678,9 +39962,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
-                quiz_row = conn.execute("SELECT id FROM quizzes WHERE id = ? AND deleted = 0", (quiz_id,)).fetchone()
-                if not quiz_row:
-                    raise ConflictError("Quiz not found", entity="quizzes", identifier=quiz_id)  # noqa: TRY003
+                quiz_row = conn.execute(
+                    "SELECT id, activity_type FROM quizzes WHERE id = ? AND deleted = 0",
+                    (quiz_id,),
+                ).fetchone()
+                if not quiz_row or str(quiz_row["activity_type"]) != "questions":
+                    raise self._quiz_not_found(quiz_id)
                 questions_payload = self.list_questions(quiz_id, include_answers=True, limit=None, offset=0)
                 questions = questions_payload.get("items", [])
                 total_possible = sum(int(q.get("points") or 0) for q in questions)
@@ -39735,6 +40022,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     raise ConflictError("Attempt not found", entity="quiz_attempts", identifier=attempt_id)  # noqa: TRY003
                 row_data = dict(row)
                 quiz_id = int(row_data["quiz_id"])
+                quiz_row = conn.execute(
+                    "SELECT activity_type FROM quizzes WHERE id = ? AND deleted = 0",
+                    (quiz_id,),
+                ).fetchone()
+                if not quiz_row or str(quiz_row["activity_type"]) != "questions":
+                    raise self._quiz_not_found(quiz_id)
                 questions_snapshot = row_data.get("questions_snapshot") or "[]"
                 try:
                     questions = json.loads(questions_snapshot)
