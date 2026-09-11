@@ -34,6 +34,7 @@ Add the following persisted quiz fields:
 
 - `activity_type`: `questions` or `osce`; existing rows migrate to `questions`.
 - `generation_profile`: nullable profile identifier; existing rows remain null unless already recoverable from stored metadata.
+- `total_stations`: non-negative integer defaulting to `0`; existing rows migrate to `0`.
 
 Quiz responses add:
 
@@ -59,7 +60,7 @@ Add an `osce_stations` table owned by a quiz. A row contains:
 - Verification state
 - Soft-delete state and timestamps
 
-The station contract is versioned independently of the database schema. Create and update requests cannot set station IDs, nested IDs, edit versions, provenance, or verification state. The server assigns IDs to new nested objects and preserves IDs for existing objects included in a valid update.
+The station contract is versioned independently of the database schema. Requests cannot set station IDs, edit versions, provenance, or verification state. Create and generation requests omit nested IDs; any model-supplied IDs are discarded before validation. Update requests include the server-issued IDs of existing nested objects and omit IDs for new objects. The server preserves recognized IDs, assigns IDs to new objects, and rejects unknown IDs, duplicate IDs, or moving a rubric level to a different domain.
 
 Station content has this logical shape:
 
@@ -119,7 +120,7 @@ All contract models use strict validation and reject unknown fields. They also r
 
 OSCE citations use a strict, OSCE-specific model rather than weakening compatibility of the existing question citation model. Every citation identifies a source type and source ID. Optional labels are limited to 200 characters, quotes to 1,000 characters, source IDs to 512 characters, and URLs to 2,048 characters. Media citations validate non-negative timestamps and valid media/chunk locators. Empty citation objects and locators inconsistent with their source type are rejected.
 
-Citations are embedded directly on patient context, checklist rationales, and expected key points. There is no separate evidence-reference graph, so dangling citation references cannot occur.
+Citations are embedded directly on patient context, checklist rationales, and expected key points. There is no separate evidence-reference graph, so dangling citation references cannot occur. Manually authored stations may omit citations. Generated stations require at least one resolvable citation on patient context, every checklist rationale, and every expected key point; generated checklist rationales are therefore required even though they are optional for manual stations.
 
 Provenance is server-managed and stored outside editable content:
 
@@ -150,6 +151,8 @@ The unique key `(station_id, client_attempt_id)` makes attempt creation retry-sa
 Checklist state is tri-state: unanswered, `met`, or `not_met`. A rubric domain remains unanswered until one level is selected. Completion requires every checklist item and rubric domain to have a valid selection. Deterministic results report checklist `met` count and total plus the selected label for each rubric domain; they never derive an aggregate rubric score.
 
 The station snapshot is the source of truth for every attempt. Later station edits or deletion do not change an existing attempt. Completed attempts are immutable. Hard deletion during an authorized quiz purge cascades to stations and attempts; ordinary station deletion is soft deletion, and any station with attempts may only be soft-deleted.
+
+Indexes cover active station ordering by quiz, attempts by station and lifecycle state, attempts by quiz and lifecycle state, and the retry-safe attempt key. `total_stations` is updated in the same transaction as station creation or deletion and is also recoverable by recount during migration or repair.
 
 ## API Design
 
@@ -201,6 +204,7 @@ On PATCH, omitted top-level fields remain unchanged and supplied nested collecti
 ### Practice
 
 - `POST /api/v1/quizzes/osce-stations/{station_id}/attempts` creates or returns a retry-safe attempt.
+- `GET /api/v1/quizzes/osce-attempts` returns paginated attempt summaries and accepts optional `quiz_id`, `station_id`, and repeatable lifecycle `state` filters.
 - `GET /api/v1/quizzes/osce-attempts/{attempt_id}` returns the attempt appropriate to its lifecycle phase.
 - `PATCH /api/v1/quizzes/osce-attempts/{attempt_id}` updates allowed notes or assessment selections and requires `expected_version`.
 - `POST /api/v1/quizzes/osce-attempts/{attempt_id}/begin-self-assessment` reveals the snapshot marking guide and freezes elapsed time.
@@ -208,15 +212,19 @@ On PATCH, omitted top-level fields remain unchanged and supplied nested collecti
 
 Practice uses distinct candidate-phase and revealed response models. During `in_progress`, responses omit checklist items, rubric domains, expected key points, checklist rationales, citation quotes, and all other marking-guide content rather than returning redacted placeholders. The candidate-facing station context, source labels without quotes, attempt timestamps, server time, and notes remain available. Checklist and rubric updates are accepted only in `self_assessment`; notes may be updated in `in_progress` or `self_assessment`.
 
+Attempt summaries never include marking-guide content or candidate notes. They include snapshot title, quiz and station IDs, lifecycle state, version, timestamps, last-modified time, elapsed seconds when available, and deterministic completed-summary counts. Lists sort by most recently modified first. The Take view requests `in_progress` and `self_assessment` states and resumes the most recently modified matching attempt; other unfinished attempts remain selectable. Results requests completed summaries through its own pagination stream.
+
 Transition requests include `expected_version`. If the attempt has not reached the requested state, a stale version returns `409`; if it is already in that state or a later state, the repeated request returns the current representation successfully. Transitions never move state backward. Invalid forward transitions return `409`; incomplete completion or invalid selections return `422`.
 
 The timer is advisory. Elapsed time is derived from server timestamps, includes time away, and freezes at the first transition to self-assessment. It never submits, locks, or changes the attempt automatically.
 
+Starting a new attempt from a deleted station returns `404`. Listing or loading an attempt that began before station deletion remains available from its immutable snapshot and does not require the live station to remain active.
+
 ### Import And Export
 
-Introduce `tldw.quiz.export.v2` with an explicit activity type. OSCE entries include quiz metadata, station authoring content, citations, and provenance safe for informational export. They do not include attempts or candidate notes. Import treats all provenance and verification fields as untrusted: it validates an entire OSCE quiz, assigns new protected IDs, records imported stations as manually authored, and persists atomically. Invalid station content leaves no imported quiz shell. Export/import therefore round-trips editable authoring content, not trusted verification status or internal IDs.
+Introduce `tldw.quiz.export.v2` with an explicit activity type. V2 supports both question and OSCE entries so one bulk file may contain either activity. OSCE entries include quiz metadata, station authoring content, citations, and provenance safe for informational export. They do not include attempts or candidate notes. Import treats all provenance and verification fields as untrusted: it validates an entire OSCE quiz, assigns new protected IDs, records imported stations as manually authored, and persists that quiz entry atomically. Invalid station content leaves no imported quiz shell, while existing per-entry partial success for other quizzes in the same batch remains unchanged. Export/import therefore round-trips editable authoring content, not trusted verification status or internal IDs.
 
-The existing `tldw.quiz.export.v1` format and question-quiz import/export behavior remain unchanged. A v1 entry always imports as `activity_type: "questions"`.
+Manage continues to assemble downloadable JSON through the existing client-side export path; no new server export endpoint is added. Question-only exports may remain `tldw.quiz.export.v1`. Any export containing an OSCE entry uses v2. The existing v1 question-quiz import/export behavior remains unchanged, and a v1 entry always imports as `activity_type: "questions"`.
 
 ## WebUI Design
 
@@ -232,7 +240,7 @@ After generation, the user is routed to Manage to inspect and edit stations befo
 
 Create uses a `Quiz | OSCE` segmented activity control. The activity type becomes immutable once the quiz contains questions or stations.
 
-A shared `OsceStationEditor` supports both Create and Manage. It is a full-width inline editor, not a large modal. It edits candidate content, duration, checklist items, rubric domains and ordered levels, expected key points, and citations. Familiar arrow icon buttons reorder items and include accessible labels and tooltips. Dirty navigation guards protect unsaved work.
+A shared `OsceStationEditor` supports both Create and Manage. It is a full-width inline editor, not a large modal. It edits candidate content, duration, checklist items, rubric domains and ordered levels, expected key points, and citations. Familiar arrow icon buttons reorder items and include accessible labels and tooltips. Authoring uses an explicit Save action; dirty navigation guards protect unsaved work.
 
 Manage lists paginated station summaries with duration, checklist count, rubric-domain count, and one of these labels:
 
@@ -240,13 +248,13 @@ Manage lists paginated station summaries with duration, checklist count, rubric-
 - Modified after verification
 - Manually authored
 
-Updates use optimistic versioning. On conflict, autosave pauses and the user chooses Reload server version or Keep local draft; the UI never silently overwrites the server.
+Updates use optimistic versioning. On conflict, saving stops and the user chooses Reload server version or Keep local draft; the UI never silently overwrites the server. Keep local draft preserves the unsaved editor state while loading the latest server version for comparison, and a later overwrite requires a new explicit Save confirmation against that version.
 
 ### Take
 
 OSCE quizzes show Practice station instead of normal quiz-taking actions. Multi-station quizzes open a station picker. If the selected station has an active attempt, Resume is primary and Start new is secondary.
 
-A dedicated `OscePracticePanel` owns the flow instead of adding more state to the normal question-taking component. Candidate phase shows the task, candidate instructions, patient context, recommended duration, advisory elapsed time, source labels, and private notes. It does not show the marking guide.
+A dedicated `OscePracticePanel` owns the flow instead of adding more state to the normal question-taking component. Candidate phase shows the task, candidate instructions, patient context, recommended duration, advisory elapsed time, source labels, and private notes. It does not show the marking guide. A separate `OsceResultsPanel` owns OSCE filters, summaries, and result detail rather than adding OSCE state to the normal results implementation.
 
 Begin self-assessment requires confirmation, flushes pending notes, and stops if the save fails. The self-assessment phase keeps candidate context visible, reveals expected points and citations, presents each checklist item as `Met` or `Not met`, and renders rubric levels as labeled radio groups. Complete remains disabled until every required selection is made.
 
@@ -265,9 +273,11 @@ Results uses independent `Quiz attempts | OSCE practice` segments rather than co
 
 Results do not show percentage, pass/fail, remediation recommendations, or claims of clinical or professional competence.
 
+The existing results CSV export remains available only in the Quiz attempts segment. The OSCE practice segment does not expose attempt or candidate-note export in this task.
+
 ### Saving, Offline Behavior, And Timing
 
-The WebUI serializes server saves so later responses cannot overwrite newer local edits. It shows concise saving, saved, offline, and conflict status. A local draft fallback may contain candidate notes and unsent selections, expires after 24 hours, and clears after server acknowledgement or completion. Draft keys are scoped by user and attempt.
+OSCE practice serializes server saves so later responses cannot overwrite newer local edits. It shows concise saving, saved, offline, and conflict status. A local draft fallback may contain candidate notes and unsent selections, expires after 24 hours, and clears after server acknowledgement or completion. Draft keys are scoped by user and attempt. Station authoring remains explicit-save rather than adding a second autosave system.
 
 The local fallback stores only writable draft fields and never stores marking-guide content at any phase. Candidate notes are not sent to logging, analytics, generation, verification, or any LLM feature. The UI warns users not to enter real patient information.
 
@@ -304,13 +314,16 @@ Implementation follows test-driven development in reviewable stages.
 - Strict station and attempt validation: bounds, protected IDs, rubric ordering, citations, timing, unknown fields, and forbidden scoring/advisory fields.
 - Fresh-install and upgrade migrations on SQLite and PostgreSQL, including schema parity, indexes, defaults, and constraints.
 - CRUD, pagination, activity enforcement, optimistic conflicts, soft deletion, immutable snapshots, and cross-user `404` behavior.
+- Attempt-list filters and summaries support active-attempt discovery and independently paginated Results without exposing notes or marking guides.
 - Lifecycle and idempotency behavior: duplicate attempt creation, repeated transitions, stale updates, concurrent requests, and no state regression.
 - Candidate-phase response serialization proves marking-guide fields are absent.
 - Candidate notes are absent from mocked LLM calls, verification calls, logs, analytics payloads, and exports.
 - Failure injection proves generation and v2 import leave no partial quiz, station, or provenance records.
 - Evidence-bearing edits invalidate verification while presentation-only edits preserve it.
+- Generated stations reject missing, inaccessible, or source-inconsistent citations while manual stations may remain uncited.
 - Export v2 round-trips OSCE authoring data atomically, excludes attempts and notes, and leaves v1 question behavior unchanged.
 - Existing question generation, attempts, profiles, imports, exports, and grading retain regression coverage.
+- Existing MCP quiz tools reject or omit OSCE activities rather than treating them as empty question quizzes; new OSCE MCP tools are not introduced.
 
 ### Frontend
 
@@ -340,11 +353,11 @@ Stage-level checks use focused Pytest and Vitest suites plus compile and type ch
 5. Change the server catalog profile to `available` only in the compatible release.
 6. Leave generation metrics and operational dashboards to TASK-12102.3.7.
 
-Returning the profile to `planned` in a deployment is the operational rollback. It hides generation and new-practice entry points without deleting data; resume and results access for existing attempts remains available. The additive database schema remains in place, completed and in-progress attempts stay recoverable, and an application deployment may roll back without a destructive schema rollback. A separate runtime feature-flag subsystem is not introduced for this task.
+Returning the profile to `planned` in an OSCE-aware deployment is the operational rollback. It hides generation and new-practice entry points without deleting data; resume and results access for existing attempts remains available. The additive database schema remains in place and no destructive schema rollback is attempted. Once OSCE rows exist, the server must not roll back to a pre-OSCE version that would interpret an OSCE quiz as an empty question quiz; rollback builds must retain activity-type guards and snapshot read support. A separate runtime feature-flag subsystem is not introduced for this task.
 
 ## Implementation Boundaries
 
-Implementation should extend the existing quiz schemas, endpoints, generation service, database abstraction, frontend API service, and Quiz workspace components. New modules are appropriate for station contracts, station persistence methods, and `OscePracticePanel`; unrelated quiz refactors are not part of this work.
+Implementation should extend the existing quiz schemas, endpoints, generation service, database abstraction, and the canonical shared Quiz UI under `apps/packages/ui/src`. The Next.js app and browser extension continue to consume that shared package. New focused modules are appropriate for station contracts, OSCE query hooks, `OsceStationEditor`, `OscePracticePanel`, and `OsceResultsPanel`; the existing multi-thousand-line Manage, Take, and Results tabs should only receive routing and composition changes. Unrelated quiz refactors are not part of this work.
 
 The implementation plan should stage the work as:
 
@@ -364,4 +377,5 @@ The implementation plan should stage the work as:
 - Attempt or candidate-note export
 - OSCE analytics and observability, owned by TASK-12102.3.7
 - A separate browser-extension OSCE interface
+- New MCP tools for authoring or practicing OSCE stations
 - A new feature-flag framework or destructive migration rollback
