@@ -312,3 +312,32 @@ used. Additional repair transcripts: `/tmp/pr2761-uat-memory-browser-red.log`,
 `/tmp/pr2761-uat-memory-typecheck.log`, and `/tmp/pr2761-uat-memory-eslint.log`.
 The first non-escalated related-UAT run hit a sandbox loopback-bind restriction;
 the unchanged suites passed with their existing local fixture permissions.
+
+## 009505 rescan: synthetic regression alerts 2680 and 2681
+
+Analysis 1759271111 at `009505c4154ca5d4c8c58312cd6ad527a1b4d045` clears
+the real-key UAT sinks 2673/2674 and identifies two new test-only writes. Live
+instance reads confirm each new alert has exactly one open instance, at
+`refs/pull/2761/head` on that commit; no main/shared instance was returned.
+
+- **2680**, `scripts/__tests__/browser-uat-seed.test.ts:29`: the two SARIF
+  flows take `settings.apiKey` into JSON serialization of the `appConfig` test
+  value. The sole source is the literal `uat-regression-credential` at line 8;
+  it is not loaded from environment, user input, or a live credential store.
+- **2681**, the same test at line 30: the SARIF related location directly marks
+  `settings.apiKey` as the source of the `manual-session-key` write; there is no
+  separate code-flow array. It uses the same fixed synthetic literal.
+
+Both writes execute only after `seedManualUatBrowser(settings)` at line 28
+replaces local/session storage with Map-backed facades. The test captures native
+storage beforehand (25–26), verifies facade reads (31–32), and asserts both
+native stores remain empty (33–34). These application-shaped writes are the
+regression proof for the real persistence repair and must remain intact. They
+were individually resolved as **used in tests** after this independent review;
+no actual secret or native persistence occurs. No source change was needed. See
+the [verified disposition ledger](PR2761-codeql-dispositions.md).
+
+Current verification: **12 seed tests passed**, recorded in
+`/tmp/pr2761-009505-seed-tests.log`. Exact inputs are
+`/tmp/pr2761-js-009505.sarif.json` and the read-only live instance snapshots
+`/tmp/pr2761-2680-live-instances.json`, `/tmp/pr2761-2681-live-instances.json`.

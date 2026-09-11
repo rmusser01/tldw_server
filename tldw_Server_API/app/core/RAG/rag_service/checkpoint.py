@@ -226,7 +226,9 @@ class CheckpointManager:
         it (the main JSON may omit results to save space).
 
         Args:
-            checkpoint_path: Path to checkpoint file.
+            checkpoint_path: Path to checkpoint file. Absolute paths must use
+                the configured canonical root's spelling; relative paths are
+                resolved under that root without changing filename case.
 
         Returns:
             Loaded CheckpointData.
@@ -419,20 +421,25 @@ class CheckpointManager:
         return safe or fallback
 
     def _resolve_checkpoint_path(self, path_value: Path | str) -> Path:
-        """Resolve a checkpoint file path under the configured checkpoint directory."""
+        """Resolve a checkpoint path without probing outside the configured root.
+
+        Absolute paths must retain the configured canonical root's spelling.
+        Relative paths are joined to that root; filename case is preserved.
+        """
         raw_path = Path(path_value)
         candidate = os.path.abspath(
             raw_path if raw_path.is_absolute() else self.checkpoint_dir / raw_path
         )
-        root = os.path.normcase(str(self.checkpoint_dir))
-        candidate_compare = os.path.normcase(candidate)
-        if candidate_compare != root and not candidate_compare.startswith(os.path.join(root, "")):
+        root = str(self.checkpoint_dir)
+        if candidate == root:
+            path = self.checkpoint_dir.resolve(strict=False)
+        else:
+            if not candidate.startswith(os.path.join(root, "")):
+                raise ValueError("checkpoint path escapes checkpoint directory")
+            path = Path(candidate).resolve(strict=False)
+        canonical_path = str(path)
+        if canonical_path != root and not canonical_path.startswith(os.path.join(root, "")):
             raise ValueError("checkpoint path escapes checkpoint directory")
-        path = Path(candidate).resolve(strict=False)
-        try:
-            path.relative_to(self.checkpoint_dir)
-        except ValueError as exc:
-            raise ValueError("checkpoint path escapes checkpoint directory") from exc
         return path
 
     def _append_results(

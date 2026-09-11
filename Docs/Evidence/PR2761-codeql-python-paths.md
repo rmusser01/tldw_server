@@ -462,7 +462,7 @@ models a successful `startswith` call as a check on its receiver, and the
 requires normalization before such a check. No query, model pack or suppression
 was added.
 
-`safe_join` now expresses realpath containment with platform-case-normalized
+The intermediate 009505 source expressed realpath containment with platform-case-normalized
 comparison values, equality, and a separator-aware prefix built with
 `os.path.join(base, "")`. This preserves filesystem-root, drive-root and UNC-root
 handling, prevents sibling-prefix acceptance, and retains every lexical and
@@ -484,7 +484,7 @@ The endpoint's owner/admin checkpoint scope check is unchanged. Main still lacks
 that separate ownership guard; 2281/2282 must not be globally dismissed on the
 strength of branch-only authorization.
 
-Final combined validation passes **150 tests** across the shared boundary,
+That batch's combined validation passed **150 tests** across the shared boundary,
 checkpoint unit/API, snapshot security/quota and Research artifact suites
 (`/tmp/pr2761-standard-guard-final.log`). All four production files and four
 changed test files pass Ruff, and production Bandit reports **zero findings**
@@ -499,3 +499,76 @@ aliases back to the original-case returned/accessed paths. The source change
 preserves correct filesystem behavior; it does not claim guaranteed scanner
 closure or justify global dismissal of main instances. Exact final file hashes
 and test logs are in `/tmp/pr2761-path-final-batch.json`.
+
+
+## Windows canonical-case boundary repair
+
+Follow-up review found a real gap that also existed with the earlier
+`commonpath` guard: Windows directories can be case sensitive, but `normcase`,
+`ntpath.relpath` and pure Windows `relative_to` comparisons ignore case.
+Microsoft documents both per-directory case sensitivity and the risks of
+rewriting filename case. [Microsoft documentation](https://learn.microsoft.com/en-us/windows/wsl/case-sensitivity).
+
+With base `C:\Cache` and input `..\cache\secret`, the current Windows path
+calculations returned the distinct canonical sibling `C:\cache\secret`;
+`relpath` returned `secret`, and the earlier `commonpath` comparison also accepted
+it. The proof ran the actual helper with Windows path computations. It is an
+emulated path-calculation proof, not a native NTFS run:
+`/tmp/pr2761-windows-case-boundary-proof.log`.
+
+`safe_join` now compares the original canonical strings exactly. Equal-root
+success uses the checked base; descendant success requires the original
+canonical candidate's separator-aware prefix. All lexical and no-link checks
+remain, and actual path spelling is never case-normalized. Child paths that lexically escape the exact configured root spelling are
+rejected before probing, including case-only root aliases even when a
+case-insensitive filesystem might canonicalize them back. Ordinary mixed-case
+descendant filenames and caller-configured base spelling remain supported. CPython resolves existing Windows paths through the final-path API and
+appends unresolved tails in non-strict mode;
+[CPython implementation](https://github.com/python/cpython/blob/v3.11.11/Lib/ntpath.py#L625),
+[Python realpath documentation](https://docs.python.org/3.11/library/os.path.html#os.path.realpath).
+
+Checkpoint resolution now requires exact configured-root spelling before
+filesystem resolution. Relative paths still join the canonical configured root;
+mixed-case filenames and canonical absolute paths remain supported. Absolute
+paths using an alternative case spelling of the root are intentionally rejected
+even on a case-insensitive filesystem: accepting those aliases before probing
+would also permit a probe into a distinct case-sensitive sibling. The public
+load/helper docstrings state this compatibility restriction. Equal-root input
+resolves the trusted configured root, and every branch then receives an exact
+canonical containment check, preserving root-replacement protection.
+
+Five new attack regressions failed before the repair; one canonical-alias
+control already passed (`/tmp/pr2761-windows-case-red.log`). Together with three
+additional canonical Windows absolute/relative/equal-root controls and existing
+coverage, the combined shared-boundary, checkpoint unit/API, snapshot and
+Research artifact suite passes **162 tests**
+(`/tmp/pr2761-windows-case-final.log`). Source/tests pass Ruff and production
+Bandit reports zero findings (`/tmp/pr2761-windows-case-ruff.log`,
+`/tmp/pr2761-windows-case-bandit.json`). There is no native Windows filesystem
+verification in this environment; the simulated controls and authoritative OS
+semantics support the bounded repair without claiming full SMB/reparse coverage.
+
+This is a real canonical-identity repair, independent of scanner behavior.
+No query, model or alert state was changed. Hosted CodeQL must verify which
+instances close; global dismissal remains inappropriate where main lacks the
+source repair or checkpoint ownership guard. Final source/test hashes and logs
+are in `/tmp/pr2761-windows-case-final-batch.json`.
+
+
+The final shared-helper ordering also closes a metadata-probe gap: previously
+`islink(candidate)` ran before containment, and a child beneath a directory link
+could be probed before that link was rejected. Two regressions recorded these
+outside-candidate/linked-child probes before the reorder
+(`/tmp/pr2761-safe-join-probe-red.log`). Now an exact lexical guard assigns either
+the known base or a checked descendant before any candidate probe. The link walk
+checks parents before children, then candidate realpath and exact canonical
+containment run. The equality branch retains the original rejection of a symlink
+base when the name resolves to the root itself (`.`); an added root variant of
+the existing no-link test verifies that behavior. Final combined validation is
+162 passing tests, with source/test Ruff clean and production Bandit zero.
+
+This stricter no-outside-probe rule also supersedes the earlier canonical-alias
+positive control: a child request such as `..\CACHE\file` under `C:\Cache` is
+rejected before any realpath call, even if the OS would accept the alias. The
+regression now explicitly verifies that no such realpath call occurs. This is
+an intentional security boundary, not a claim of arbitrary path-alias support.

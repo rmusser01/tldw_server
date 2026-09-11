@@ -30,6 +30,14 @@ The ledger now totals **420 dispositions: 408 false positives and 12 synthetic
 test findings**. The accurate account-lookup finding 2678 was repaired, not
 dismissed.
 
+The `009505c415` JavaScript rescan then cleared real storage findings 2673/2674
+and identified regression-test writes **2680/2681**. Independent exact-flow and
+instance review confirmed fixed synthetic literals, installed memory facades,
+native-empty assertions and PR-only scope. Both were individually resolved as
+used in tests; 12 seed tests pass. The ledger now totals **422 dispositions:
+408 false positives and 14 synthetic-test findings**. See the final section of
+the [JavaScript evidence](PR2761-codeql-javascript.md).
+
 The [per-alert ledger](PR2761-codeql-dispositions.csv) records the actual GitHub
 rule, reason, timestamp and submitted explanation. Before each update, the
 executor checked the alert identity, rule, source path and effective state;

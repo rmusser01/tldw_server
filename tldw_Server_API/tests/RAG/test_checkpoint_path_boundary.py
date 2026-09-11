@@ -69,3 +69,59 @@ def test_checkpoint_equal_root_still_checks_current_canonical_path(tmp_path):
     manager.checkpoint_dir.symlink_to(outside, target_is_directory=True)
     with pytest.raises(ValueError, match="escapes checkpoint directory"):
         manager._resolve_checkpoint_path(".")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("case", ["outside-absolute", "outside-relative", "canonical-link"])
+def test_checkpoint_windows_case_sibling_never_passes_boundary(monkeypatch, case):
+    import ntpath
+    from pathlib import PureWindowsPath
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.RAG.rag_service import checkpoint
+
+    resolutions = []
+
+    class CanonicalWindowsPath(PureWindowsPath):
+        def resolve(self, *, strict=False):
+            resolutions.append(str(self))
+            if str(self) == r"C:\Cache\link.json":
+                return CanonicalWindowsPath(r"C:\cache\secret.json")
+            return self
+
+    manager = object.__new__(CheckpointManager)
+    manager.checkpoint_dir = CanonicalWindowsPath(r"C:\Cache")
+    monkeypatch.setattr(checkpoint, "Path", CanonicalWindowsPath)
+    monkeypatch.setattr(checkpoint, "os", SimpleNamespace(path=ntpath))
+    value = {
+        "outside-absolute": r"C:\cache\secret.json",
+        "outside-relative": r"..\cache\secret.json",
+        "canonical-link": "link.json",
+    }[case]
+    with pytest.raises(ValueError, match="escapes checkpoint directory"):
+        manager._resolve_checkpoint_path(value)
+    assert resolutions == ([r"C:\Cache\link.json"] if case == "canonical-link" else [])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value,expected", [
+    ("MixedCase.json", r"C:\Cache\MixedCase.json"),
+    (r"C:\Cache\MixedCase.json", r"C:\Cache\MixedCase.json"),
+    (".", r"C:\Cache"),
+])
+def test_checkpoint_preserves_canonical_windows_paths(monkeypatch, value, expected):
+    import ntpath
+    from pathlib import PureWindowsPath
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.RAG.rag_service import checkpoint
+
+    class CanonicalWindowsPath(PureWindowsPath):
+        def resolve(self, *, strict=False):
+            return self
+
+    manager = object.__new__(CheckpointManager)
+    manager.checkpoint_dir = CanonicalWindowsPath(r"C:\Cache")
+    monkeypatch.setattr(checkpoint, "Path", CanonicalWindowsPath)
+    monkeypatch.setattr(checkpoint, "os", SimpleNamespace(path=ntpath))
+    assert str(manager._resolve_checkpoint_path(value)) == expected

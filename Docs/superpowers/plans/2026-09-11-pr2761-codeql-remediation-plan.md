@@ -70,4 +70,14 @@ tests plus the real Chromium storage proof, 105 Whisper tests, 150 combined
 path tests, independent review and scoped lint/security checks; counts overlap.
 Final-source hosted analysis remains necessary before claiming alert closure.
 
+The `009505c415` JavaScript scan cleared real UAT storage findings. Two synthetic
+regression writes were independently resolved, bringing the ledger to 422.
+The final Python follow-up closes a Windows case-only sibling escape and
+preliminary filesystem probes: compare original canonical spelling, require
+exact lexical root spelling before candidate probes, check links parent-first,
+and retain canonical checks. Absolute/root case aliases fail closed by design.
+The combined suite passes 162 tests; Ruff and scoped Bandit pass. Native Windows
+execution remains unverified. This follow-up needs its own source/manifest
+binding and hosted scan; no query or model suppression is used.
+
 No main merge or publication until the separate release gates are satisfied.
