@@ -5666,7 +5666,7 @@ e4d2ef03268466257d041d061be3abbf0a7922f334cbd6a23ec0c27737d09056  apps/packages/
 275c147733be6fbbe1c86ffd9a05f9714bedd21a702a864ac9b3ad4958830739  apps/packages/ui/src/services/tldw/__tests__/reading-saved-searches.test.ts
 e211ef3fbb082e93cd0cbd58ea7d19a1cfaa4fe4c0e30959f9a9eeb6b4140a1c  apps/packages/ui/src/services/tldw/__tests__/request-core.hosted.test.ts
 464ad5ac0f0eca59d0e0b5055f87e01f2b5829b6664fe27cd6f32e45ce2faa63  apps/packages/ui/src/services/tldw/__tests__/request-core.quickstart.test.ts
-4a477d1aafab2d359e4100f554571e35457fe597ce71ead018175f9a0523b0ae  apps/packages/ui/src/services/tldw/__tests__/request-core.redirect-security.test.ts
+768e73ebea85340fdf9af0ebda547572800f16091cf2a6dd82c8f914144cfae3  apps/packages/ui/src/services/tldw/__tests__/request-core.redirect-security.test.ts
 dd84ff649d4c79e94408cf41bae2f36ef92f207b65b91e678f433e1ebe0793fc  apps/packages/ui/src/services/tldw/__tests__/request-core.refresh-timeout.test.ts
 c1fc633498d7738e3de34b1a9ffd7b24230d86126ffb329aeb0f4151c703a185  apps/packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts
 628518decd15b63e173cd39f50974be290e99e2c77aeb7a5c8038756c6f370b9  apps/packages/ui/src/services/tldw/__tests__/setup-onboarding.test.ts

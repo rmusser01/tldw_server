@@ -1,5 +1,15 @@
 # PR #2761 JavaScript CodeQL remediation and review
 
+Follow-up CI validation: the new redirect test originally forced a Node
+environment, but the owning UI package's setup requires jsdom. Removing only
+that override preserves native HTTP fixtures and all network guards. Both the
+UI and frontend configurations pass all 13 cases. The exact previously failing
+UI direct-changed shard 6/8 passes **545 tests across 42 files** with the workflow's
+deterministic configuration and timeout settings. Logs:
+`/tmp/pr2761-ui-redirect-jsdom.log`,
+`/tmp/pr2761-frontend-redirect-jsdom.log`, and
+`/tmp/pr2761-ui-shard6-jsdom.log`.
+
 Date: 2026-09-10. Tracking: TASK-13013.3.1 (parent TASK-13013.3).
 Reviewed candidate: `28797892b1`. Inventory: `/tmp/pr2761-codeql-current-alerts.json`;
 full JavaScript SARIF: `/tmp/pr2761-js-current.sarif.json`. The table covers all
