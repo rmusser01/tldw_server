@@ -58,6 +58,8 @@ export interface OsceStationEditorProps {
   ) => Promise<OsceStationAuthoringResponse>
   onSaved?: (station: OsceStationAuthoringResponse) => void
   onDirtyStateChange?: (dirty: boolean) => void
+  createStatusUncertain?: boolean
+  onCreateStatusUncertainChange?: (uncertain: boolean) => void
   saveBlocked?: boolean
   resetAfterCreate?: boolean
 }
@@ -132,15 +134,15 @@ const move = <T,>(items: T[], from: number, to: number): T[] => {
   return next
 }
 
-const unicodeCasefold = (value: string): string => value.toUpperCase().toLowerCase()
-
 const validateDraft = (draft: OsceStationDraft): string[] => {
   const errors: string[] = []
   if (!draft.title.trim()) errors.push("Station title is required.")
   if (!draft.candidate_instructions.trim()) errors.push("Candidate instructions are required.")
   if (!draft.candidate_task.trim()) errors.push("Candidate task is required.")
   if (!draft.patient_context.text.trim()) errors.push("Patient context is required.")
-  if (draft.recommended_duration_seconds < 60 || draft.recommended_duration_seconds > 7200) {
+  if (!Number.isInteger(draft.recommended_duration_seconds)) {
+    errors.push("Recommended duration must be a whole number of seconds.")
+  } else if (draft.recommended_duration_seconds < 60 || draft.recommended_duration_seconds > 7200) {
     errors.push("Recommended duration must be between 60 and 7200 seconds.")
   }
   if (draft.checklist_items.length < 1 || draft.checklist_items.some((item) => !item.label.trim())) {
@@ -157,12 +159,6 @@ const validateDraft = (draft: OsceStationDraft): string[] => {
   ) {
     errors.push("Each rubric domain needs a label and two to six complete ordered levels.")
   }
-  if (draft.rubric_domains.some((domain) => {
-    const labels = domain.levels.map((level) => unicodeCasefold(level.label.trim()))
-    return new Set(labels).size !== labels.length
-  })) {
-    errors.push("Rubric level labels must be unique within each domain.")
-  }
   if (draft.expected_key_points.length < 1 || draft.expected_key_points.some((point) => !point.text.trim())) {
     errors.push("At least one expected key point is required.")
   }
@@ -173,6 +169,13 @@ const validateDraft = (draft: OsceStationDraft): string[] => {
   ]
   if (citations.some((citation) => !citation.source_id.trim())) {
     errors.push("Every citation needs a source ID.")
+  }
+  if (citations.some((citation) =>
+    citation.source_type === "document" &&
+    citation.page_number != null &&
+    !Number.isInteger(citation.page_number)
+  )) {
+    errors.push("Document citation page numbers must be whole numbers.")
   }
   if (citations.some((citation) => {
     if (citation.source_type !== "url") return false
@@ -321,6 +324,8 @@ const CitationEditor: React.FC<CitationEditorProps> = ({ citations, label, onCha
                 <InputNumber
                   aria-label={`${label} ${index + 1} page number`}
                   min={1}
+                  step={1}
+                  precision={0}
                   className="w-full"
                   value={citation.page_number}
                   placeholder="Page number"
@@ -396,6 +401,8 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
   onCreate,
   onSaved,
   onDirtyStateChange,
+  createStatusUncertain: controlledCreateStatusUncertain,
+  onCreateStatusUncertainChange,
   saveBlocked = false,
   resetAfterCreate = false
 }) => {
@@ -412,7 +419,7 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
   const [conflictServer, setConflictServer] = React.useState<OsceStationAuthoringResponse | null>(null)
   const [overwriteVersion, setOverwriteVersion] = React.useState<number | null>(null)
   const [confirmOverwrite, setConfirmOverwrite] = React.useState(false)
-  const [createStatusUncertain, setCreateStatusUncertain] = React.useState(false)
+  const [localCreateStatusUncertain, setLocalCreateStatusUncertain] = React.useState(false)
   const [localSaveInFlight, setLocalSaveInFlight] = React.useState(false)
   const saveInFlightRef = React.useRef(false)
   const stationIdentityRef = React.useRef<number | null>(station?.id ?? null)
@@ -423,6 +430,7 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
   dirtyRef.current = dirty
   const validationErrors = React.useMemo(() => validateDraft(draft), [draft])
   const saving = localSaveInFlight || createMutation.isPending || updateMutation.isPending
+  const createStatusUncertain = controlledCreateStatusUncertain ?? localCreateStatusUncertain
 
   React.useEffect(() => {
     const nextStationIdentity = station?.id ?? null
@@ -438,7 +446,7 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
     setConflictServer(null)
     setOverwriteVersion(null)
     setConfirmOverwrite(false)
-    setCreateStatusUncertain(false)
+    setLocalCreateStatusUncertain(false)
   }, [initialContent, orderIndex, station?.content, station?.id, station?.order_index, station?.version])
 
   React.useEffect(() => {
@@ -502,7 +510,7 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
         setConflictServer(null)
         setOverwriteVersion(null)
         setConfirmOverwrite(false)
-        setCreateStatusUncertain(false)
+        setLocalCreateStatusUncertain(false)
         onSaved?.(saved)
       } else {
         acknowledge(saved)
@@ -527,7 +535,8 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
         !(error instanceof OsceQuizShellCreateError) &&
         isAmbiguousOsceMutationFailure(error)
       ) {
-        setCreateStatusUncertain(true)
+        setLocalCreateStatusUncertain(true)
+        onCreateStatusUncertainChange?.(true)
       }
       messageApi.error(errorMessage(error))
     } finally {
@@ -641,7 +650,7 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
         />
       ) : null}
 
-      {createStatusUncertain ? (
+      {createStatusUncertain && controlledCreateStatusUncertain === undefined ? (
         <Alert
           type="warning"
           showIcon
@@ -668,6 +677,7 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
               min={60}
               max={7200}
               step={30}
+              precision={0}
               className="min-w-0 flex-1"
               value={draft.recommended_duration_seconds}
               onChange={(value) => setDraft((current) => ({

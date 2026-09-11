@@ -542,6 +542,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const [selectedOsceStationId, setSelectedOsceStationId] = React.useState<number | null>(null)
   const [creatingOsceStation, setCreatingOsceStation] = React.useState(false)
   const [osceEditorDirty, setOsceEditorDirty] = React.useState(false)
+  const [osceCreateUncertainQuizIds, setOsceCreateUncertainQuizIds] = React.useState<Set<number>>(new Set())
+  const [reconcilingOsceCreateQuizId, setReconcilingOsceCreateQuizId] = React.useState<number | null>(null)
   const [deletingOsceStationId, setDeletingOsceStationId] = React.useState<number | null>(null)
   const [editModalOpen, setEditModalOpen] = React.useState(false)
   const [questionModalOpen, setQuestionModalOpen] = React.useState(false)
@@ -749,6 +751,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
       : Math.max(...sortedOsceStations.map((station) => station.order_index)) + 1,
     [sortedOsceStations]
   )
+  const managedOsceCreateUncertain = managingOsceQuiz != null &&
+    osceCreateUncertainQuizIds.has(managingOsceQuiz.id)
 
   React.useEffect(() => {
     onDirtyStateChange?.(osceEditorDirty)
@@ -876,6 +880,31 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     setCreatingOsceStation(false)
     setSelectedOsceStationId(stationId)
     setOsceEditorDirty(false)
+  }
+
+  const setOsceCreateUncertain = (quizId: number, uncertain: boolean) => {
+    setOsceCreateUncertainQuizIds((current) => {
+      const next = new Set(current)
+      if (uncertain) next.add(quizId)
+      else next.delete(quizId)
+      return next
+    })
+  }
+
+  const reconcileOsceCreate = async () => {
+    if (!managingOsceQuiz) return
+    const quizId = managingOsceQuiz.id
+    setReconcilingOsceCreateQuizId(quizId)
+    try {
+      await osceStationsQuery.refetch({ throwOnError: true })
+      setOsceCreateUncertain(quizId, false)
+      void refetch()
+      messageApi.success("Station list refreshed. Station creation is available again.")
+    } catch {
+      messageApi.error("Could not refresh stations. Creation remains blocked.")
+    } finally {
+      setReconcilingOsceCreateQuizId(null)
+    }
   }
 
   const prepareManagedOsceQuizDeletion = (quizIds: Set<number>): boolean => {
@@ -2048,6 +2077,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
             <Space wrap>
               <Button
                 icon={<PlusOutlined aria-hidden />}
+                disabled={managedOsceCreateUncertain}
                 onClick={() => {
                   if (!confirmDiscardOsceDraft()) return
                   setSelectedOsceStationId(null)
@@ -2060,6 +2090,25 @@ export const ManageTab: React.FC<ManageTabProps> = ({
               <Button onClick={closeOsceManager}>Close</Button>
             </Space>
           </div>
+
+          {managedOsceCreateUncertain ? (
+            <Alert
+              type="warning"
+              showIcon
+              title="Station creation status is unknown."
+              description="Refresh the station list before creating another station to avoid a duplicate."
+              action={(
+                <Button
+                  aria-label="Reload station list"
+                  loading={reconcilingOsceCreateQuizId === managingOsceQuiz.id}
+                  onClick={() => void reconcileOsceCreate()}
+                >
+                  Reload station list
+                </Button>
+              )}
+              className="mb-4"
+            />
+          ) : null}
 
           {osceStationsQuery.isLoading ? (
             <Skeleton active paragraph={{ rows: 3 }} />
@@ -2122,6 +2171,10 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                     key={`new-${managingOsceQuiz.id}`}
                     quizId={managingOsceQuiz.id}
                     orderIndex={nextOsceStationOrderIndex}
+                    createStatusUncertain={managedOsceCreateUncertain}
+                    onCreateStatusUncertainChange={(uncertain) =>
+                      setOsceCreateUncertain(managingOsceQuiz.id, uncertain)
+                    }
                     onDirtyStateChange={setOsceEditorDirty}
                     onSaved={(station) => {
                       setCreatingOsceStation(false)

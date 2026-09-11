@@ -33,10 +33,14 @@ vi.mock("../../hooks/useOsceQueries", () => ({
 }))
 vi.mock("../../osce/OsceStationEditor", () => ({
   OsceStationEditor: ({
+    createStatusUncertain,
+    onCreateStatusUncertainChange,
     orderIndex,
     onDirtyStateChange,
     station
   }: {
+    createStatusUncertain?: boolean
+    onCreateStatusUncertainChange?: (uncertain: boolean) => void
     orderIndex?: number
     onDirtyStateChange?: (dirty: boolean) => void
     station?: { content?: { title?: string } }
@@ -54,6 +58,12 @@ vi.mock("../../osce/OsceStationEditor", () => ({
           }}
         />
         <button type="button" onClick={() => onDirtyStateChange?.(true)}>Mark station dirty</button>
+        {!station ? (
+          <button type="button" onClick={() => onCreateStatusUncertainChange?.(true)}>
+            Simulate ambiguous station create
+          </button>
+        ) : null}
+        {createStatusUncertain ? <span>Managed create is blocked</span> : null}
       </div>
     )
   }
@@ -111,6 +121,9 @@ describe("ManageTab OSCE authoring", () => {
         verification_state: "source_verified", created_at: "2026-09-11", updated_at: "2026-09-11"
       }], isLoading: false, refetch: stationListRefetch
     } as never)
+    stationListRefetch.mockResolvedValue({ data: [] })
+    stationDetailRefetch.mockResolvedValue({ data: undefined })
+    quizRefetch.mockResolvedValue({ data: undefined })
     vi.mocked(useDeleteOsceStationMutation).mockReturnValue({
       mutateAsync: deleteStation,
       isPending: false
@@ -348,6 +361,49 @@ describe("ManageTab OSCE authoring", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add station" }))
 
     expect(await screen.findByTestId("osce-station-order-index")).toHaveTextContent("6")
+  })
+
+  it("keeps ambiguous create blocked for its quiz across editor selection and manager close", async () => {
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add station" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Simulate ambiguous station create" }))
+
+    expect(await screen.findByText("Station creation status is unknown.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Add station" })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit station Explain anticoagulant safety" }))
+    expect(screen.getByText("Station creation status is unknown.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Add station" })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+    fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
+
+    expect(screen.getByText("Station creation status is unknown.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Add station" })).toBeDisabled()
+  })
+
+  it("keeps create blocked after failed reconciliation and clears it after a fresh list succeeds", async () => {
+    stationListRefetch
+      .mockRejectedValueOnce(Object.assign(new Error("offline"), { status: 0 }))
+      .mockResolvedValueOnce({ data: [] })
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add station" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Simulate ambiguous station create" }))
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reload station list" }))
+
+    expect(await screen.findByText("Could not refresh stations. Creation remains blocked.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Add station" })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload station list" }))
+
+    await waitFor(() => expect(screen.queryByText("Station creation status is unknown.")).not.toBeInTheDocument())
+    expect(screen.getByRole("button", { name: "Add station" })).toBeEnabled()
+    expect(stationListRefetch).toHaveBeenNthCalledWith(1, { throwOnError: true })
+    expect(stationListRefetch).toHaveBeenNthCalledWith(2, { throwOnError: true })
+    expect(quizRefetch).toHaveBeenCalled()
   })
 
   it("does not remount a dirty station editor when the same station version refreshes", async () => {

@@ -295,7 +295,7 @@ describe("OsceStationEditor", () => {
     ))
   })
 
-  it("requires absolute HTTP(S) citation URLs and unique rubric labels", () => {
+  it("requires absolute HTTP(S) citation URLs", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={client}>
@@ -307,13 +307,6 @@ describe("OsceStationEditor", () => {
               ...station.content.patient_context,
               citations: [{ source_type: "url", source_id: "source-1", source_url: "/relative" }]
             },
-            rubric_domains: [{
-              ...station.content.rubric_domains[0],
-              levels: [
-                station.content.rubric_domains[0].levels[0],
-                { ...station.content.rubric_domains[0].levels[1], label: "needs DEVELOPMENT" }
-              ]
-            }]
           }}
         />
       </QueryClientProvider>
@@ -322,23 +315,25 @@ describe("OsceStationEditor", () => {
     fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Changed title" } })
 
     expect(screen.getByText("URL citations require an absolute HTTP(S) URL.")).toBeInTheDocument()
-    expect(screen.getByText("Rubric level labels must be unique within each domain.")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Save station" })).toBeDisabled()
   })
 
-  it("matches backend casefold behavior for rubric level labels", () => {
+  it("submits Python-casefold-equivalent rubric labels and displays the server 422", async () => {
+    const onCreate = vi.fn().mockRejectedValue(
+      Object.assign(new Error("duplicate rubric level label"), { status: 422 })
+    )
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={client}>
         <OsceStationEditor
-          quizId={7}
+          onCreate={onCreate}
           initialContent={{
             ...station.content,
             rubric_domains: [{
               ...station.content.rubric_domains[0],
               levels: [
-                { ...station.content.rubric_domains[0].levels[0], label: "Straße" },
-                { ...station.content.rubric_domains[0].levels[1], label: "STRASSE" }
+                { ...station.content.rubric_domains[0].levels[0], label: "ß" },
+                { ...station.content.rubric_domains[0].levels[1], label: "ẞ" }
               ]
             }]
           }}
@@ -347,8 +342,83 @@ describe("OsceStationEditor", () => {
     )
 
     fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Changed title" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
 
-    expect(screen.getByText("Rubric level labels must be unique within each domain.")).toBeInTheDocument()
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rubric_domains: [expect.objectContaining({
+          levels: [expect.objectContaining({ label: "ß" }), expect.objectContaining({ label: "ẞ" })]
+        })]
+      }),
+      0
+    ))
+    expect(await screen.findByText("duplicate rubric level label")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save station" })).toBeEnabled()
+  })
+
+  it("submits Unicode labels that upper-then-lower normalization conflates", async () => {
+    const content = {
+      ...station.content,
+      rubric_domains: [{
+        ...station.content.rubric_domains[0],
+        levels: [
+          { ...station.content.rubric_domains[0].levels[0], label: "i" },
+          { ...station.content.rubric_domains[0].levels[1], label: "ı" }
+        ]
+      }]
+    }
+    const onCreate = vi.fn().mockResolvedValue({ ...station, content })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <OsceStationEditor onCreate={onCreate} initialContent={content} />
+      </QueryClientProvider>
+    )
+
+    fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Changed title" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rubric_domains: [expect.objectContaining({
+          levels: [expect.objectContaining({ label: "i" }), expect.objectContaining({ label: "ı" })]
+        })]
+      }),
+      0
+    ))
+  })
+
+  it("rejects fractional duration and document page values before submission", () => {
+    const onCreate = vi.fn()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <OsceStationEditor
+          onCreate={onCreate}
+          initialContent={{
+            ...station.content,
+            recommended_duration_seconds: 480.5,
+            patient_context: {
+              ...station.content.patient_context,
+              citations: [{
+                source_type: "document",
+                source_id: "document-1",
+                chunk_id: "chunk-1",
+                page_number: 2.5
+              }]
+            }
+          }}
+        />
+      </QueryClientProvider>
+    )
+
+    fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Changed title" } })
+
+    expect(screen.getByText("Recommended duration must be a whole number of seconds.")).toBeInTheDocument()
+    expect(screen.getByText("Document citation page numbers must be whole numbers.")).toBeInTheDocument()
+    expect(screen.getByRole("spinbutton", { name: "Recommended duration in seconds" })).toHaveAttribute("step", "30")
+    expect(screen.getByRole("spinbutton", { name: "Patient context citation 1 page number" })).toHaveAttribute("step", "1")
     expect(screen.getByRole("button", { name: "Save station" })).toBeDisabled()
+    expect(onCreate).not.toHaveBeenCalled()
   })
 })

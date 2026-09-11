@@ -181,3 +181,42 @@ Concerns:
 - The OSCE generation profile remains planned/hidden unless the server catalog explicitly marks it available.
 - Task 9 practice, autosave, and results behavior was not started.
 - Exact full-Unicode Python casefold parity remains a documented JavaScript platform limitation beyond the tested backend-relevant fold cases.
+
+## Review Fix Round 5
+
+Status: complete from review-fix-round-4 head `03d223a890`; committed separately as `fix(webui): finalize OSCE authoring safeguards`.
+
+RED evidence:
+
+- Initial two-file regression run: 4 failed and 29 passed. The failures reproduced loss of ambiguous-create protection when the editor unmounted, the missing failed/successful list-reconciliation flow, the false duplicate result for `i`/`ı`, and missing fractional duration/page validation.
+- The `ß`/`ẞ` regression passed before implementation because the existing approximation happened not to conflate that pair; it still proves the editor submits the values and presents the authoritative server 422. After the first implementation pass, 32 tests passed and the reconciliation retry test exposed an unstable loading-prefixed accessible button name.
+
+GREEN evidence:
+
+- Focused editor and Manage suite: 2 files, 33 tests passed.
+- Expanded Task 8 suite: 6 files, 67 tests passed.
+- Dedicated Take suite: 7 files, 65 tests passed.
+- QuizPlayground navigation suite: 1 file, 23 tests passed.
+- Full Quiz component suite with `--maxWorkers=2`: 38 files, 290 tests passed.
+- Full frontend lint: exit 0 with the unchanged 169-warning baseline and no errors; `eslint --quiet` also exits 0.
+- Frontend typecheck remains blocked by the same 80 existing diagnostics across six unrelated files: 42 in skills-certification runner tests, 14 in lifecycle tests, 10 in profile tests, 3 in evidence tests, 10 in the Presentation Studio standalone HTML E2E test, and 1 in Presentation Studio. No diagnostic references a changed Task 8, Quiz, or OSCE path.
+- `git diff --check`: passed. Bandit remains not applicable because no Python changed.
+
+Fixes:
+
+- Lifted ambiguous station-create uncertainty into a per-quiz Manage state set. Selection changes and manager close/reopen no longer permit a second POST; Add remains disabled until an explicit station-list refetch with `throwOnError` succeeds. Failed/offline reconciliation remains blocked with a clear message, and the reload action has a stable accessible name while loading.
+- Removed client-side rubric-label equivalence checking. Required labels and descriptions remain validated locally, while exact duplicate equivalence is server-authoritative and a definitive 422 remains visible and retryable. Tests submit both Python-equivalent `ß`/`ẞ` and Python-distinct `i`/`ı` pairs.
+- Added integer precision and steps to duration/document-page inputs plus `Number.isInteger` validation before create or update submission.
+
+Final Task 8 range self-review:
+
+- Re-read the Task 8 brief and reviewed all 26 files changed since `60382f75f0`, covering wire types, repeated-state encoding, expected-version mutations, query invalidation, bounded pagination, portability redaction, Generate/Create/Manage composition, Take suppression, dirty guards, conflict recovery, and create/delete ambiguity handling.
+- Confirmed the OSCE generation profile remains planned, no OSCE practice/autosave/results behavior was introduced, and no backend file changed.
+- No additional Task 8 code defect was found in the final audit.
+
+Residual risk:
+
+- Station creation has no backend idempotency key or request-status lookup. The Manage guard is intentionally in-memory, so a hard page/app reload can lose the uncertainty marker, and a successful fresh list cannot prove which station corresponds to a lost POST response. Resolving that fully requires a backend contract change; the Task 8 UI now fails closed during the live Manage session and requires explicit fresh-list inspection.
+- Rubric duplicate equivalence now requires a server round trip by design because JavaScript has no native Python-compatible full Unicode casefold operation.
+- The repository-wide frontend typecheck baseline remains red in the unrelated files listed above.
+- The OSCE profile remains planned and Task 9 was not started.
