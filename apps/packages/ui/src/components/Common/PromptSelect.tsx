@@ -26,7 +26,10 @@ import {
   type PromptTargetAdapter
 } from "./PromptAssist/usePromptAssist"
 import type { PromptImproveModelSelection } from "@/services/prompt-improvement"
-import { fetchPromptCapabilities } from "@/services/prompts-api"
+import {
+  fetchPromptCapabilities,
+  revalidatePromptCapabilities
+} from "@/services/prompts-api"
 import { useRecipePersistenceOwner } from "@/hooks/useRecipePersistenceOwner"
 import {
   captureSystemPromptOverrideSnapshot,
@@ -170,7 +173,7 @@ export const PromptSelect: React.FC<Props> = ({
       recipeOwner?.ownerId ?? null,
       recipeOwner?.authorizationRevision ?? null
     ],
-    queryFn: fetchPromptCapabilities,
+    queryFn: revalidatePromptCapabilities,
     enabled: false,
     retry: false
   })

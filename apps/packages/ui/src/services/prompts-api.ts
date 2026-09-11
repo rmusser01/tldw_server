@@ -350,12 +350,21 @@ export async function previewStructuredPromptServer(
   return response.data
 }
 
-export async function fetchPromptCapabilities(): Promise<PromptCapabilities> {
+export const fetchPromptCapabilities = (): Promise<PromptCapabilities> =>
+  requestPromptCapabilities(true)
+
+/** Authorization revalidation must not reuse an earlier in-flight transport. */
+export const revalidatePromptCapabilities = (): Promise<PromptCapabilities> =>
+  requestPromptCapabilities(false)
+
+async function requestPromptCapabilities(
+  coalesce: boolean
+): Promise<PromptCapabilities> {
   try {
-    const response = await apiSend<unknown>({
-      path: toAllowedPath("/api/v1/prompts/capabilities"),
-      method: "GET"
-    })
+    const response = await apiSend<unknown>(
+      { path: toAllowedPath("/api/v1/prompts/capabilities"), method: "GET" },
+      { coalesce }
+    )
     if (!response.ok) return unavailablePromptCapabilities()
     return (
       parsePromptCapabilities(response.data) ?? unavailablePromptCapabilities()

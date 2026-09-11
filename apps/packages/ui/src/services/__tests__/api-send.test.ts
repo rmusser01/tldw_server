@@ -167,6 +167,57 @@ describe("apiSend timeout fallback policy", () => {
     expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
   })
 
+  it.each(["extension", "direct"])(
+    "bypasses GET coalescing only for client-local fresh calls via %s",
+    async (transport) => {
+      mocks.runtimeId = transport === "extension" ? "test-extension" : null
+      const requests: unknown[] = []
+      const finish: Array<(value: unknown) => void> = []
+      const boundary = vi.fn((request: unknown) => {
+        requests.push(request)
+        return new Promise((resolve) => {
+          finish.push(resolve)
+        })
+      })
+      if (transport === "extension")
+        mocks.sendMessage.mockImplementation(boundary)
+      else mocks.tldwRequest.mockImplementation(boundary)
+      const { apiSend } = await importApiSend()
+      const payload = {
+        path: "/api/v1/prompts/capabilities",
+        method: "GET"
+      } as const
+      const first = apiSend(payload)
+      const fresh = apiSend(payload, { coalesce: false })
+      const secondFresh = apiSend(payload, { coalesce: false })
+      const ordinary = apiSend(payload)
+      try {
+        expect(requests).toHaveLength(3)
+        expect(requests).toEqual(
+          Array.from({ length: 3 }, () =>
+            transport === "extension"
+              ? {
+                  type: "tldw:request",
+                  payload: {
+                    path: "/api/v1/prompts/capabilities",
+                    method: "GET"
+                  }
+                }
+              : { path: "/api/v1/prompts/capabilities", method: "GET" }
+          )
+        )
+      } finally {
+        finish.forEach((resolve, index) =>
+          resolve({ ok: true, status: 200, data: index })
+        )
+        await Promise.all([first, fresh, secondFresh, ordinary])
+      }
+      expect((await fresh).data).toBe(1)
+      expect((await secondFresh).data).toBe(2)
+      expect((await ordinary).data).toBe(0)
+    }
+  )
+
   it("does not fall back to direct request for POST timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))

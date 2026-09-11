@@ -8,7 +8,10 @@ import {
 import { useRecipePersistenceOwner } from "@/hooks/useRecipePersistenceOwner"
 import type { useSimpleForm } from "@/hooks/useSimpleForm"
 import type { PromptImproveModelSelection } from "@/services/prompt-improvement"
-import { fetchPromptCapabilities } from "@/services/prompts-api"
+import {
+  fetchPromptCapabilities,
+  revalidatePromptCapabilities
+} from "@/services/prompts-api"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Drawer } from "antd"
 import React from "react"
@@ -115,7 +118,7 @@ export function PromptAssistComposerAction({
       recipeOwner?.ownerId ?? null,
       recipeOwner?.authorizationRevision ?? null
     ],
-    queryFn: fetchPromptCapabilities,
+    queryFn: revalidatePromptCapabilities,
     enabled: false,
     retry: false
   })

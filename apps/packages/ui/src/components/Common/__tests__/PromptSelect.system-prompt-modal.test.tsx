@@ -23,6 +23,9 @@ const ownerB = "recipe-owner:sha256:" + "b".repeat(64)
 const revisionA = "recipe-authorization:sha256:" + "a".repeat(64)
 
 const mocks = vi.hoisted(() => ({
+  realCapabilities: false,
+  runtimeId: undefined as string | undefined,
+  sendMessage: vi.fn(),
   updatePrompt: vi.fn(),
   markPromptSyncError: vi.fn(),
   autoSyncPrompt: vi.fn(),
@@ -31,6 +34,17 @@ const mocks = vi.hoisted(() => ({
   getPromptById: vi.fn(async () => undefined),
   improvePrompt: vi.fn(),
   fetchPromptCapabilities: vi.fn()
+}))
+
+vi.mock("wxt/browser", () => ({
+  browser: {
+    runtime: {
+      get id() {
+        return mocks.runtimeId
+      },
+      sendMessage: (...args: unknown[]) => mocks.sendMessage(...args)
+    }
+  }
 }))
 
 const registryLabels = vi.hoisted(() => ({
@@ -85,7 +99,14 @@ vi.mock("@/services/prompts-api", async (importActual) => {
   const actual = await importActual<typeof import("@/services/prompts-api")>()
   return {
     ...actual,
-    fetchPromptCapabilities: () => mocks.fetchPromptCapabilities()
+    revalidatePromptCapabilities: () =>
+      mocks.realCapabilities
+        ? actual.revalidatePromptCapabilities()
+        : mocks.fetchPromptCapabilities(),
+    fetchPromptCapabilities: () =>
+      mocks.realCapabilities
+        ? actual.fetchPromptCapabilities()
+        : mocks.fetchPromptCapabilities()
   }
 })
 
@@ -298,6 +319,9 @@ describe("PromptSelect system prompt modal", () => {
   })
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.realCapabilities = false
+    mocks.runtimeId = undefined
+    mocks.sendMessage.mockReset()
     mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(false)
     vi.spyOn(
       recipeAuthority,
@@ -321,11 +345,177 @@ describe("PromptSelect system prompt modal", () => {
     )
   })
 
+  it("keeps local recipe work usable when the real extension owner facade rejects", async () => {
+    vi.spyOn(serverOnline, "useServerOnline").mockReturnValue(true)
+    vi.mocked(recipeAuthority.resolveRecipePersistenceOwnerView).mockRestore()
+    mocks.runtimeId = "adapter-extension"
+    const pending = createDeferred<void>()
+    mocks.sendMessage.mockImplementation(async () => {
+      await pending.promise
+      throw new Error("extension authority disconnected")
+    })
+    const user = userEvent.setup()
+    const view = renderPromptSelect({ promptAssistBackendKey: null })
+    await openEditor(user)
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await user.type(
+      await screen.findByLabelText("Current value for Task (not saved)"),
+      "Keep local work"
+    )
+    const preview = (
+      screen.getByLabelText("Compiled prompt preview") as HTMLTextAreaElement
+    ).value
+    expect(preview).toContain("Keep local work")
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Apply to system prompt" })
+    ).toBeEnabled()
+    await act(async () => {
+      pending.resolve()
+      await pending.promise
+    })
+    expect(mocks.sendMessage).toHaveBeenCalledExactlyOnceWith({
+      type: "tldw:recipe-owner:resolve"
+    })
+    expect(mocks.fetchPromptCapabilities).not.toHaveBeenCalled()
+    expect(
+      view.queryClient
+        .getQueryCache()
+        .getAll()
+        .some((query) => String(query.queryKey[1]).startsWith("recipe-owner:"))
+    ).toBe(false)
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+    await user.click(
+      screen.getByRole("button", { name: "Apply to system prompt" })
+    )
+    expect(view.props.setSystemPrompt).toHaveBeenCalledWith(preview)
+  })
+
+  it.each(["same-owner reopen", "owner replacement"])(
+    "revalidates through real prompts-api/api-send for %s",
+    async (scenario) => {
+      vi.spyOn(serverOnline, "useServerOnline").mockReturnValue(true)
+      mocks.realCapabilities = true
+      mocks.runtimeId = "adapter-extension"
+      const old = createDeferred<unknown>()
+      const fresh = createDeferred<unknown>()
+      const capabilities = (authorized: boolean) => ({
+        ok: true,
+        status: 200,
+        data: {
+          prompt_improvement_v1: {
+            supported: true,
+            limits: {
+              max_request_bytes: 100000,
+              max_draft_chars: 10000,
+              max_candidate_chars: 10000,
+              max_raw_output_chars: 10000,
+              max_findings: 10,
+              max_finding_text_chars: 1000,
+              max_provider_chars: 100,
+              max_model_chars: 100,
+              max_meta_prompt_version_chars: 100,
+              max_warning_chars: 1000,
+              max_warnings: 10,
+              max_protected_tokens: 100,
+              max_protected_token_kind_chars: 100,
+              max_protected_token_chars: 1000,
+              max_protected_token_occurrences: 100,
+              max_protected_token_total_chars: 10000
+            }
+          },
+          single_text_recipe_v2: { supported: true },
+          prompt_persistence: {
+            create_authorized: authorized,
+            update_authorized: authorized
+          }
+        }
+      })
+      mocks.sendMessage
+        .mockReturnValueOnce(old.promise)
+        .mockReturnValueOnce(fresh.promise)
+      const user = userEvent.setup()
+      const view = renderPromptSelect({ promptAssistBackendKey: null })
+      await openEditor(user)
+      await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+      await user.click(
+        screen.getByRole("button", { name: /Build from recipe/ })
+      )
+      await waitFor(() => expect(mocks.sendMessage).toHaveBeenCalledTimes(1))
+      await user.click(await screen.findByRole("button", { name: "Back" }))
+      const nextOwner = scenario === "owner replacement" ? ownerB : ownerA
+      vi.mocked(
+        recipeAuthority.resolveRecipePersistenceOwnerView
+      ).mockResolvedValue({
+        ownerId: nextOwner,
+        authorizationRevision: revisionA
+      })
+      await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+      await user.click(
+        screen.getByRole("button", { name: /Build from recipe/ })
+      )
+      try {
+        await waitFor(() => expect(mocks.sendMessage).toHaveBeenCalledTimes(2))
+        expect(
+          mocks.sendMessage.mock.calls.map(([message]) => message)
+        ).toEqual([
+          {
+            type: "tldw:request",
+            payload: { path: "/api/v1/prompts/capabilities", method: "GET" }
+          },
+          {
+            type: "tldw:request",
+            payload: { path: "/api/v1/prompts/capabilities", method: "GET" }
+          }
+        ])
+        await act(async () => {
+          old.resolve(capabilities(true))
+          await old.promise
+        })
+        expect(
+          screen.getByRole("button", { name: "Save as new recipe" })
+        ).toBeDisabled()
+        await act(async () => {
+          fresh.resolve(capabilities(false))
+          await fresh.promise
+        })
+        await waitFor(() => expect(view.queryClient.isFetching()).toBe(0))
+        expect(
+          view.queryClient.getQueryData([
+            "promptCapabilities",
+            nextOwner,
+            revisionA
+          ])
+        ).toMatchObject({
+          prompt_persistence: {
+            create_authorized: false,
+            update_authorized: false
+          }
+        })
+        expect(
+          screen.getByRole("button", { name: "Save as new recipe" })
+        ).toBeDisabled()
+      } finally {
+        await act(async () => {
+          old.resolve(capabilities(true))
+          fresh.resolve(capabilities(false))
+          await Promise.all([old.promise, fresh.promise])
+        })
+      }
+    }
+  )
+
   it.each([
     ["advanced normalized base", true],
     ["runtime-key override", false],
     ["manual/cookie source", false],
     ["same-sub bearer rotation", true],
+    ["principal replacement", false],
     ["missing cookie principal", false]
   ])("reopens with fresh authority for %s", async (scenario, sameOwner) => {
     vi.spyOn(serverOnline, "useServerOnline").mockReturnValue(true)
@@ -339,13 +529,17 @@ describe("PromptSelect system prompt modal", () => {
       authSource: "manual",
       apiKey: "manual-adapter-key"
     }
-    if (scenario === "same-sub bearer rotation") {
+    if (
+      scenario === "same-sub bearer rotation" ||
+      scenario === "principal replacement"
+    ) {
       config = { ...config, authMode: "multi-user", accessToken: "bearer-one" }
     }
+    let principal = "authoritative-user"
     vi.stubGlobal(
       "fetch",
       async () =>
-        new Response(JSON.stringify({ id: "authoritative-user" }), {
+        new Response(JSON.stringify({ id: principal }), {
           status: 200,
           headers: { "Content-Type": "application/json" }
         })
@@ -391,6 +585,7 @@ describe("PromptSelect system prompt modal", () => {
       setRuntimeSingleUserApiKeyOverride("runtime-adapter-key")
     if (scenario === "same-sub bearer rotation")
       config = { ...config, accessToken: "bearer-two" }
+    if (scenario === "principal replacement") principal = "replacement-user"
     if (
       scenario === "manual/cookie source" ||
       scenario === "missing cookie principal"
@@ -422,6 +617,25 @@ describe("PromptSelect system prompt modal", () => {
       await screen.findByRole("button", { name: "Save as new recipe" })
     ).toBeDisabled()
     expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(1)
+    if (scenario === "principal replacement") {
+      await user.type(
+        screen.getByLabelText("Current value for Task (not saved)"),
+        "Local during principal change"
+      )
+      expect(
+        (
+          screen.getByLabelText(
+            "Compiled prompt preview"
+          ) as HTMLTextAreaElement
+        ).value
+      ).toContain("Local during principal change")
+      expect(
+        screen.getByRole("button", { name: "Apply to system prompt" })
+      ).toBeEnabled()
+      expect(
+        screen.getByRole("button", { name: "Save as new recipe" })
+      ).toBeDisabled()
+    }
     await act(async () => {
       pending.resolve(resolved)
       await pending.promise

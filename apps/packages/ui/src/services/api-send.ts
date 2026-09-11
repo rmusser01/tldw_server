@@ -88,8 +88,13 @@ export async function apiSend<
   T = any,
   P extends PathOrUrl = PathOrUrl,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
->(payload: ApiSendPayload<P, M>): Promise<ApiSendResponse<T>> {
-  const coalescingKey = getCoalescingKey(payload)
+>(
+  payload: ApiSendPayload<P, M>,
+  // Client-local scheduling policy: never forwarded to a transport or server.
+  options: { coalesce?: boolean } = {}
+): Promise<ApiSendResponse<T>> {
+  const coalescingKey =
+    options.coalesce === false ? null : getCoalescingKey(payload)
   if (coalescingKey) {
     const existing = inFlightGetRequests.get(coalescingKey)
     if (existing) return existing as Promise<ApiSendResponse<T>>
