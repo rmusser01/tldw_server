@@ -8,9 +8,13 @@ from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import quizzes as quizzes_endpoint
 from tldw_Server_API.app.api.v1.schemas.quizzes import QuizGenerateRequest, QuizGenerateResponse
+from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
+    ArtifactUnitResult,
+    ArtifactVerificationResult,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
-from tldw_Server_API.app.services import quiz_generator
+from tldw_Server_API.app.services import osce_generator, quiz_generator
 from tldw_Server_API.app.services.osce_generator import (
     OsceCitationError,
     OsceGenerationError,
@@ -116,6 +120,107 @@ async def test_enabled_osce_generation_persists_exact_count_with_active_db_ident
     assert result["quiz"]["client_id"] == quizzes_db.client_id
     assert result["quiz"]["client_id"] != "unknown"
     assert all(station["verification_state"] == "source_verified" for station in result["osce_stations"])
+
+
+@pytest.mark.asyncio
+async def test_claim_supported_only_by_uncited_source_fails_without_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+    enabled_osce_profile: None,
+    quizzes_db: CharactersRAGDB,
+    media_db: MediaDatabase,
+) -> None:
+    source_a = quizzes_db.add_note(
+        title="Warfarin guide",
+        content="Warfarin requires regular INR monitoring.",
+    )
+    source_b = quizzes_db.add_note(
+        title="Aspirin guide",
+        content="Aspirin requires review of gastrointestinal bleeding risk.",
+    )
+    citation_b = {
+        "source_type": "note",
+        "source_id": source_b,
+        "chunk_id": source_b,
+        "quote": "Aspirin requires review of gastrointestinal bleeding risk.",
+    }
+    generated_station = {
+        "schema_version": "osce.station.v1",
+        "title": "Anticoagulation review",
+        "candidate_instructions": "Speak with a simulated patient.",
+        "candidate_task": "Explain appropriate monitoring.",
+        "patient_context": {
+            "text": "Warfarin requires regular INR monitoring.",
+            "citations": [citation_b],
+        },
+        "recommended_duration_seconds": 480,
+        "checklist_items": [
+            {
+                "label": "Explains monitoring",
+                "rationale": "Warfarin requires regular INR monitoring.",
+                "citations": [citation_b],
+            }
+        ],
+        "rubric_domains": [
+            {
+                "label": "Communication",
+                "levels": [
+                    {"label": "Needs development", "description": "Incomplete."},
+                    {"label": "Effective", "description": "Clear and complete."},
+                ],
+            }
+        ],
+        "expected_key_points": [
+            {
+                "text": "Warfarin requires regular INR monitoring.",
+                "citations": [citation_b],
+            }
+        ],
+    }
+
+    async def provider(**_: object) -> object:
+        return {"stations": [generated_station]}
+
+    async def verifier(**kwargs: object) -> ArtifactVerificationResult:
+        documents = kwargs["source_documents"]
+        source_text = "\n".join(document.content for document in documents)  # type: ignore[union-attr]
+        unit_results = []
+        for unit in kwargs["units"]:  # type: ignore[union-attr]
+            grounded = all(claim in source_text for claim in unit.claims or [])
+            unit_results.append(
+                ArtifactUnitResult(
+                    unit_id=unit.unit_id,
+                    verdict="grounded" if grounded else "needs_revision",
+                    statuses=["verified" if grounded else "unverified"],
+                )
+            )
+        verdict = (
+            "grounded"
+            if all(result.verdict == "grounded" for result in unit_results)
+            else "needs_revision"
+        )
+        return ArtifactVerificationResult(
+            verdict=verdict,
+            report={},
+            unit_results=unit_results,
+            metadata={},
+        )
+
+    monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", provider)
+    monkeypatch.setattr(osce_generator, "verify_generated_artifact_against_sources", verifier)
+
+    with pytest.raises(OsceVerificationError, match="^osce_verification_failure$"):
+        await quiz_generator.generate_quiz_from_sources(
+            db=quizzes_db,
+            media_db=media_db,
+            sources=[
+                {"source_type": "note", "source_id": source_a},
+                {"source_type": "note", "source_id": source_b},
+            ],
+            generation_profile="osce_scenario",
+            num_stations=1,
+        )
+
+    assert _row_counts(quizzes_db) == (0, 0)
 
 
 @pytest.mark.asyncio

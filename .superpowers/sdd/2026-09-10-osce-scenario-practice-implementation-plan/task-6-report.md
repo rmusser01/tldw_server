@@ -40,3 +40,35 @@ GREEN:
 
 - Pytest emitted four pre-existing environment warnings, including temporary-directory cleanup warnings; no tests skipped or failed.
 - OSCE generation remains intentionally unavailable in the production profile catalog until Task 10.
+
+## Review Fix Round 1
+
+Resolved the review finding that artifact verification received every selected source even when a verification unit cited only one source. OSCE verification now resolves each unit's canonical citations to exact source documents by `source_type`, `source_id`, and `chunk_id` when supplied, groups only identical cited-document sets, and invokes the verifier independently for each group.
+
+Additional hardening:
+
+- Aggregates group results into a complete `ArtifactVerificationResult` while requiring every expected unit exactly once, with a grounded verdict, non-empty aligned claim/status results, and only `verified` statuses.
+- Rejects missing, duplicate, capped, truncated, `needs_revision`, or failed verification results before persistence. Deterministic test mode now creates full unit results and passes through the same structural validation.
+- Selects citation evidence by exact quote containment instead of the first matching source. Ambiguous source/chunk matches fail closed.
+- Accepts media timestamps only when canonical evidence has a matching exact timestamp or inclusive range, and accepts document pages only when canonical evidence has the same page. Provider locators are never copied from or invented by evidence normalization.
+- Adds a two-source endpoint regression proving that a claim supported by source A but citing source B fails verification and leaves zero quiz/station rows.
+
+Review RED evidence:
+
+- Focused review tests initially produced `11 failed, 30 passed`: cross-source miscitation persisted, verification calls saw unrelated sources, incomplete verifier results were accepted, quote resolution selected the first candidate, ambiguous chunks passed, and unsupported locators passed.
+- The truthful aggregate-report assertion separately failed until cited document IDs and per-group verifier reports were included.
+
+Review GREEN evidence:
+
+- Final Task 6 generation/profile matrix: `163 passed`, `4 warnings`.
+- Neighboring question-generation regressions: `67 passed`, `4 warnings`.
+- OSCE schema/station/attempt services: `89 passed`, `4 warnings`.
+- OSCE endpoint/privacy tests: `15 passed`, `3 skipped`, `2 warnings`; skips are existing environment-gated privacy cases.
+- Total across the non-overlapping final test commands: `334 passed`, `3 skipped`.
+- Ruff passed on the touched Python files; `compileall` passed on the touched backend/test paths; Bandit analyzed 703 production lines with zero findings and zero skipped checks; `git diff --check` passed.
+- PostgreSQL was not required because this review changes no persistence or dialect-dependent path and continues to use Task 3 atomic persistence.
+
+Review concerns:
+
+- Verifier calls are now split by distinct cited-document sets, increasing provider calls for stations whose units cite different evidence sets. This is required to prevent unrelated selected sources from grounding mis-cited claims.
+- OSCE profile availability remains `planned` as required; import, UI, and release work remain out of scope.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from copy import deepcopy
 from uuid import UUID
 
@@ -7,7 +8,9 @@ import pytest
 from loguru import logger
 
 from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
+    ArtifactUnitResult,
     ArtifactVerificationResult,
+    ArtifactVerificationUnit,
 )
 from tldw_Server_API.app.services import osce_generator, quiz_generator
 from tldw_Server_API.app.services.osce_generator import (
@@ -101,6 +104,37 @@ def valid_generated_station() -> dict[str, object]:
     }
 
 
+def _station_citations(station: dict[str, object]) -> list[dict[str, object]]:
+    return [
+        *station["patient_context"]["citations"],  # type: ignore[index]
+        *station["checklist_items"][0]["citations"],  # type: ignore[index]
+        *station["expected_key_points"][0]["citations"],  # type: ignore[index]
+    ]
+
+
+def _grounded_result(
+    units: Sequence[ArtifactVerificationUnit],
+    *,
+    metadata: dict[str, object] | None = None,
+) -> ArtifactVerificationResult:
+    unit_results = [
+        ArtifactUnitResult(
+            unit_id=unit.unit_id,
+            verdict="grounded",
+            claim_ids=[f"{unit.unit_id}:c1"],
+            statuses=["verified"],
+            metadata=unit.metadata,
+        )
+        for unit in units
+    ]
+    return ArtifactVerificationResult(
+        verdict="grounded",
+        report={"verified_units": len(unit_results)},
+        unit_results=unit_results,
+        metadata=metadata or {},
+    )
+
+
 @pytest.mark.parametrize("evidence_unit", ["patient_context", "checklist", "key_point"])
 def test_generated_station_requires_citation_for_each_evidence_unit(
     evidence_unit: str,
@@ -178,6 +212,198 @@ def test_normalization_rejects_inaccessible_or_inconsistent_citations(
         normalize_generated_station(station, resolved_sources)
 
 
+def test_quote_selects_the_exact_matching_source_chunk(
+    valid_generated_station: dict[str, object],
+) -> None:
+    station = deepcopy(valid_generated_station)
+    for citation in _station_citations(station):
+        citation.pop("chunk_id")
+        citation["quote"] = "Second chunk contains the grounding sentence."
+    evidence = [
+        {
+            "source_type": "note",
+            "source_id": "note-1",
+            "chunk_id": "chunk-1",
+            "text": "First chunk contains unrelated material.",
+        },
+        {
+            "source_type": "note",
+            "source_id": "note-1",
+            "chunk_id": "chunk-2",
+            "text": "Second chunk contains the grounding sentence.",
+        },
+    ]
+
+    normalized = normalize_generated_station(station, evidence)
+
+    assert normalized.patient_context.citations[0].chunk_id == "chunk-2"
+
+
+@pytest.mark.parametrize("quote", [None, "Repeated grounding sentence."])
+def test_ambiguous_citation_without_chunk_fails_closed(
+    quote: str | None,
+    valid_generated_station: dict[str, object],
+) -> None:
+    station = deepcopy(valid_generated_station)
+    for citation in _station_citations(station):
+        citation.pop("chunk_id")
+        if quote is None:
+            citation.pop("quote")
+        else:
+            citation["quote"] = quote
+    evidence = [
+        {
+            "source_type": "note",
+            "source_id": "note-1",
+            "chunk_id": "chunk-1",
+            "text": "Repeated grounding sentence.",
+        },
+        {
+            "source_type": "note",
+            "source_id": "note-1",
+            "chunk_id": "chunk-2",
+            "text": "Repeated grounding sentence.",
+        },
+    ]
+
+    with pytest.raises(OsceCitationError, match="ambiguous"):
+        normalize_generated_station(station, evidence)
+
+
+@pytest.mark.parametrize(
+    ("source_type", "source_id", "evidence_locator", "citation_locator"),
+    [
+        (
+            "media",
+            "12",
+            {"timestamp_seconds": 15.0},
+            {"media_id": 12, "timestamp_seconds": 15.0},
+        ),
+        (
+            "media",
+            "12",
+            {"start_seconds": 10.0, "end_seconds": 20.0},
+            {"media_id": 12, "timestamp_seconds": 15.0},
+        ),
+        ("document", "doc-1", {"page_number": 3}, {"page_number": 3}),
+    ],
+)
+def test_citation_locator_is_preserved_only_when_canonical_metadata_matches(
+    source_type: str,
+    source_id: str,
+    evidence_locator: dict[str, object],
+    citation_locator: dict[str, object],
+    valid_generated_station: dict[str, object],
+) -> None:
+    station = deepcopy(valid_generated_station)
+    for citation in _station_citations(station):
+        citation.update(
+            {
+                "source_type": source_type,
+                "source_id": source_id,
+                "chunk_id": "chunk-1",
+                **citation_locator,
+            }
+        )
+        if source_type != "media":
+            citation.pop("media_id", None)
+        if source_type != "document":
+            citation.pop("page_number", None)
+    evidence = [
+        {
+            "source_type": source_type,
+            "source_id": source_id,
+            "chunk_id": "chunk-1",
+            "text": "Warfarin requires regular INR monitoring.",
+            **evidence_locator,
+        }
+    ]
+
+    normalized = normalize_generated_station(station, evidence)
+    citation = normalized.patient_context.citations[0]
+
+    assert citation.timestamp_seconds == citation_locator.get("timestamp_seconds")
+    assert citation.page_number == citation_locator.get("page_number")
+
+
+def test_canonical_locator_metadata_is_not_invented_in_persisted_citation(
+    valid_generated_station: dict[str, object],
+) -> None:
+    station = deepcopy(valid_generated_station)
+    for citation in _station_citations(station):
+        citation.update(
+            {
+                "source_type": "media",
+                "source_id": "12",
+                "chunk_id": "chunk-1",
+                "media_id": 12,
+            }
+        )
+        citation.pop("timestamp_seconds", None)
+    evidence = [
+        {
+            "source_type": "media",
+            "source_id": "12",
+            "chunk_id": "chunk-1",
+            "text": "Warfarin requires regular INR monitoring.",
+            "timestamp_seconds": 15.0,
+        }
+    ]
+
+    normalized = normalize_generated_station(station, evidence)
+
+    assert normalized.patient_context.citations[0].timestamp_seconds is None
+
+
+@pytest.mark.parametrize(
+    ("source_type", "source_id", "evidence_locator", "citation_locator"),
+    [
+        (
+            "media",
+            "12",
+            {"start_seconds": 10.0, "end_seconds": 20.0},
+            {"media_id": 12, "timestamp_seconds": 25.0},
+        ),
+        ("media", "12", {}, {"media_id": 12, "timestamp_seconds": 15.0}),
+        ("document", "doc-1", {"page_number": 3}, {"page_number": 4}),
+        ("document", "doc-1", {}, {"page_number": 3}),
+    ],
+)
+def test_citation_locator_rejects_mismatching_or_absent_canonical_metadata(
+    source_type: str,
+    source_id: str,
+    evidence_locator: dict[str, object],
+    citation_locator: dict[str, object],
+    valid_generated_station: dict[str, object],
+) -> None:
+    station = deepcopy(valid_generated_station)
+    for citation in _station_citations(station):
+        citation.update(
+            {
+                "source_type": source_type,
+                "source_id": source_id,
+                "chunk_id": "chunk-1",
+                **citation_locator,
+            }
+        )
+        if source_type != "media":
+            citation.pop("media_id", None)
+        if source_type != "document":
+            citation.pop("page_number", None)
+    evidence = [
+        {
+            "source_type": source_type,
+            "source_id": source_id,
+            "chunk_id": "chunk-1",
+            "text": "Warfarin requires regular INR monitoring.",
+            **evidence_locator,
+        }
+    ]
+
+    with pytest.raises(OsceCitationError, match="source-inconsistent"):
+        normalize_generated_station(station, evidence)
+
+
 def test_verification_units_exclude_candidate_facing_text_and_notes(
     valid_generated_station: dict[str, object],
     resolved_sources: list[dict[str, object]],
@@ -216,6 +442,7 @@ async def test_test_mode_generation_returns_exact_deterministic_station_count(
 
     assert len(bundle.stations) == 2
     assert bundle.verification_result.verdict == "grounded"
+    assert len(bundle.verification_result.unit_results) == 6
     assert bundle.provenance["origin"] == "generated"
 
 
@@ -347,6 +574,123 @@ async def test_non_grounded_verification_has_stable_error_and_receives_only_evid
     assert len(units) == 3  # type: ignore[arg-type]
     assert "candidate_instructions" not in repr(units)
     assert "candidate_notes" not in repr(captured)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure_mode",
+    ["missing", "duplicate", "capped", "needs_revision", "failed"],
+)
+async def test_verification_requires_complete_unique_grounded_unit_results(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_mode: str,
+    valid_generated_station: dict[str, object],
+    resolved_sources: list[dict[str, object]],
+    normalized_sources: list[dict[str, str]],
+) -> None:
+    async def provider(**_: object) -> object:
+        return {"stations": [valid_generated_station]}
+
+    async def verifier(**kwargs: object) -> ArtifactVerificationResult:
+        result = _grounded_result(kwargs["units"])
+        if failure_mode == "missing":
+            result.unit_results.pop()
+        elif failure_mode == "duplicate":
+            result.unit_results.append(result.unit_results[0])
+        elif failure_mode == "capped":
+            result.metadata["cap_hit"] = ["units"]
+        elif failure_mode == "needs_revision":
+            result.unit_results[0].verdict = "needs_revision"
+        else:
+            result.unit_results[0].verdict = "failed"
+        return result
+
+    monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", provider)
+    monkeypatch.setattr(osce_generator, "verify_generated_artifact_against_sources", verifier)
+
+    with pytest.raises(OsceVerificationError, match="^osce_verification_failure$"):
+        await generate_osce_stations_from_sources(
+            evidence=resolved_sources,
+            normalized_sources=normalized_sources,
+            num_stations=1,
+            difficulty="medium",
+            focus_topics=[],
+            model=None,
+            api_provider=None,
+            verification_provider=None,
+            verification_model=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_verification_groups_receive_only_their_exact_cited_documents(
+    monkeypatch: pytest.MonkeyPatch,
+    valid_generated_station: dict[str, object],
+    resolved_sources: list[dict[str, object]],
+) -> None:
+    station = deepcopy(valid_generated_station)
+    patient_citation = station["patient_context"]["citations"][0]  # type: ignore[index]
+    patient_citation.update(
+        {
+            "source_id": "note-2",
+            "chunk_id": "chunk-2",
+            "quote": "Aspirin requires review of gastrointestinal bleeding risk.",
+        }
+    )
+    evidence = [
+        *resolved_sources,
+        {
+            "source_type": "note",
+            "source_id": "note-2",
+            "chunk_id": "chunk-2",
+            "label": "Antiplatelet guide",
+            "text": "Aspirin requires review of gastrointestinal bleeding risk.",
+        },
+    ]
+    seen_document_sets: list[set[str]] = []
+
+    async def provider(**_: object) -> object:
+        return {"stations": [station]}
+
+    async def verifier(**kwargs: object) -> ArtifactVerificationResult:
+        seen_document_sets.append(
+            {document.id for document in kwargs["source_documents"]}  # type: ignore[union-attr]
+        )
+        return _grounded_result(kwargs["units"])
+
+    monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", provider)
+    monkeypatch.setattr(osce_generator, "verify_generated_artifact_against_sources", verifier)
+
+    bundle = await generate_osce_stations_from_sources(
+        evidence=evidence,
+        normalized_sources=[
+            {"source_type": "note", "source_id": "note-1"},
+            {"source_type": "note", "source_id": "note-2"},
+        ],
+        num_stations=1,
+        difficulty="medium",
+        focus_topics=[],
+        model=None,
+        api_provider=None,
+        verification_provider=None,
+        verification_model=None,
+    )
+
+    assert seen_document_sets == [{"note:note-2:chunk-2"}, {"note:note-1:chunk-1"}]
+    assert bundle.verification_result.verdict == "grounded"
+    assert len(bundle.verification_result.unit_results) == 3
+    assert bundle.verification_result.report["groups"] == [
+        {
+            "cited_document_ids": ["note:note-2:chunk-2"],
+            "verdict": "grounded",
+            "report": {"verified_units": 1},
+        },
+        {
+            "cited_document_ids": ["note:note-1:chunk-1"],
+            "verdict": "grounded",
+            "report": {"verified_units": 2},
+        },
+    ]
 
 
 @pytest.mark.asyncio

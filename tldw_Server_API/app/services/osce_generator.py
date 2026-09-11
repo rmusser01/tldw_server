@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -18,10 +19,12 @@ from tldw_Server_API.app.api.v1.schemas.osce import (
     OsceStationStoredContent,
 )
 from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
+    ArtifactUnitResult,
     ArtifactVerificationResult,
     ArtifactVerificationUnit,
     verify_generated_artifact_against_sources,
 )
+from tldw_Server_API.app.core.RAG.rag_service.types import Document
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.services.osce_practice import materialize_station_content
 
@@ -138,15 +141,21 @@ def _canonicalize_citation(
         if not candidates:
             raise OsceCitationError("inaccessible citation chunk")
 
+    quote = str(citation.quote or "").strip()
+    if quote:
+        candidates = [
+            item for item in candidates if quote in str(item.get("text") or "")
+        ]
+        if not candidates:
+            raise OsceCitationError("source-inconsistent citation quote")
+    if len(candidates) != 1:
+        raise OsceCitationError("ambiguous citation evidence")
+
     if citation.source_type is OsceCitationSourceType.MEDIA and citation.media_id is not None:
         if str(citation.media_id) != source_id:
             raise OsceCitationError("source-inconsistent media citation")
 
     candidate = candidates[0]
-    candidate_text = str(candidate.get("text") or "")
-    quote = str(citation.quote or "").strip()
-    if quote and quote not in candidate_text:
-        raise OsceCitationError("source-inconsistent citation quote")
 
     canonical: dict[str, Any] = {
         "source_type": source_type,
@@ -172,12 +181,14 @@ def _canonicalize_citation(
         except ValueError as exc:
             raise OsceCitationError("source-inconsistent media citation") from exc
         if citation.timestamp_seconds is not None:
+            if not _media_timestamp_is_supported(candidate, citation.timestamp_seconds):
+                raise OsceCitationError("source-inconsistent media timestamp")
             canonical["timestamp_seconds"] = citation.timestamp_seconds
     elif citation.source_type is OsceCitationSourceType.DOCUMENT:
         candidate_page = candidate.get("page_number")
-        if citation.page_number is not None and candidate_page not in {None, citation.page_number}:
-            raise OsceCitationError("source-inconsistent document citation")
         if citation.page_number is not None:
+            if not _document_page_matches(candidate_page, citation.page_number):
+                raise OsceCitationError("source-inconsistent document citation")
             canonical["page_number"] = citation.page_number
     elif citation.source_type is OsceCitationSourceType.URL:
         candidate_url = str(candidate.get("source_url") or "").strip()
@@ -189,6 +200,41 @@ def _canonicalize_citation(
         return OsceCitation.model_validate(canonical).model_dump(mode="json", exclude_none=True)
     except ValidationError as exc:
         raise OsceCitationError() from exc
+
+
+def _finite_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _media_timestamp_is_supported(candidate: Mapping[str, Any], timestamp: float) -> bool:
+    exact = _finite_float(candidate.get("timestamp_seconds"))
+    if exact is not None and math.isclose(exact, timestamp, abs_tol=0.001):
+        return True
+
+    for start_key, end_key in (
+        ("start_seconds", "end_seconds"),
+        ("start_time", "end_time"),
+    ):
+        start = _finite_float(candidate.get(start_key))
+        end = _finite_float(candidate.get(end_key))
+        if start is not None and end is not None and start <= timestamp <= end:
+            return True
+    return False
+
+
+def _document_page_matches(candidate_page: Any, citation_page: int) -> bool:
+    if candidate_page is None or isinstance(candidate_page, bool):
+        return False
+    try:
+        return int(candidate_page) == citation_page and float(candidate_page) == citation_page
+    except (TypeError, ValueError):
+        return False
 
 
 def _canonicalize_citations(
@@ -440,6 +486,101 @@ def _build_test_mode_station(
 _ORIGINAL_VERIFY_GENERATED_ARTIFACT = verify_generated_artifact_against_sources
 
 
+def _documents_for_unit(
+    unit: ArtifactVerificationUnit,
+    source_documents: Sequence[Document],
+) -> tuple[Document, ...]:
+    citations = unit.metadata.get("citations")
+    if not isinstance(citations, list) or not citations:
+        raise OsceVerificationError()
+
+    selected: dict[str, Document] = {}
+    for citation in citations:
+        if not isinstance(citation, Mapping):
+            raise OsceVerificationError()
+        source_type = str(citation.get("source_type") or "").strip()
+        source_id = str(citation.get("source_id") or "").strip()
+        chunk_id = str(citation.get("chunk_id") or "").strip()
+        matches = [
+            document
+            for document in source_documents
+            if str(document.metadata.get("source_type") or "").strip() == source_type
+            and str(document.metadata.get("source_id") or "").strip() == source_id
+            and (
+                not chunk_id
+                or str(document.metadata.get("chunk_id") or "").strip() == chunk_id
+            )
+        ]
+        if len(matches) != 1:
+            raise OsceVerificationError()
+        selected[matches[0].id] = matches[0]
+    if not selected:
+        raise OsceVerificationError()
+    return tuple(selected[document_id] for document_id in sorted(selected))
+
+
+def _group_units_by_cited_documents(
+    units: Sequence[ArtifactVerificationUnit],
+    source_documents: Sequence[Document],
+) -> list[tuple[list[ArtifactVerificationUnit], tuple[Document, ...]]]:
+    groups: dict[tuple[str, ...], tuple[list[ArtifactVerificationUnit], tuple[Document, ...]]] = {}
+    for unit in units:
+        documents = _documents_for_unit(unit, source_documents)
+        document_ids = tuple(document.id for document in documents)
+        if document_ids not in groups:
+            groups[document_ids] = ([], documents)
+        groups[document_ids][0].append(unit)
+    return list(groups.values())
+
+
+def _test_mode_verification_result(
+    units: Sequence[ArtifactVerificationUnit],
+) -> ArtifactVerificationResult:
+    unit_results = [
+        ArtifactUnitResult(
+            unit_id=unit.unit_id,
+            verdict="grounded",
+            claim_ids=[f"{unit.unit_id}:c1"],
+            statuses=["verified"],
+            metadata=dict(unit.metadata),
+        )
+        for unit in units
+    ]
+    return ArtifactVerificationResult(
+        verdict="grounded",
+        report={"verified_units": len(unit_results), "test_mode": True},
+        unit_results=unit_results,
+        metadata={"artifact_type": "quiz", "test_mode": True},
+    )
+
+
+def _require_complete_grounded_result(
+    result: ArtifactVerificationResult,
+    expected_units: Sequence[ArtifactVerificationUnit],
+) -> None:
+    expected_ids = [unit.unit_id for unit in expected_units]
+    actual_ids = [unit.unit_id for unit in result.unit_results]
+    if len(expected_ids) != len(set(expected_ids)):
+        raise OsceVerificationError()
+    if len(actual_ids) != len(set(actual_ids)) or set(actual_ids) != set(expected_ids):
+        raise OsceVerificationError()
+    if result.metadata.get("cap_hit"):
+        raise OsceVerificationError()
+    if result.verdict != "grounded":
+        raise OsceVerificationError()
+    for unit_result in result.unit_results:
+        if unit_result.verdict != "grounded":
+            raise OsceVerificationError()
+        if unit_result.metadata.get("text_truncated") or unit_result.metadata.get(
+            "claims_truncated"
+        ):
+            raise OsceVerificationError()
+        if not unit_result.claim_ids or len(unit_result.claim_ids) != len(unit_result.statuses):
+            raise OsceVerificationError()
+        if any(status != "verified" for status in unit_result.statuses):
+            raise OsceVerificationError()
+
+
 async def _verify_stations(
     *,
     stations: Sequence[OsceStationStoredContent],
@@ -450,32 +591,60 @@ async def _verify_stations(
     verification_model: str | None,
 ) -> ArtifactVerificationResult:
     units = build_osce_verification_units(stations)
-    if is_test_mode() and verify_generated_artifact_against_sources is _ORIGINAL_VERIFY_GENERATED_ARTIFACT:
-        return ArtifactVerificationResult(
-            verdict="grounded",
-            report={"total_claims": len(units), "claims": []},
-            unit_results=[],
-            metadata={
-                "artifact_type": "quiz",
-                "generation_provider": generation_provider,
-                "generation_model": generation_model,
-                "verification_provider": verification_provider or generation_provider,
-                "verification_model": verification_model or generation_model,
-                "test_mode": True,
-            },
-        )
-
     from tldw_Server_API.app.services import quiz_generator
 
-    return await verify_generated_artifact_against_sources(
-        artifact_type="quiz",
-        units=units,
-        source_documents=quiz_generator._build_quiz_source_documents(evidence),
-        generation_provider=generation_provider,
-        generation_model=generation_model,
-        verification_provider=verification_provider,
-        verification_model=verification_model,
-        generation_context={"query": "generated OSCE evidence claims"},
+    source_documents = quiz_generator._build_quiz_source_documents(evidence)
+    groups = _group_units_by_cited_documents(units, source_documents)
+    group_results: list[ArtifactVerificationResult] = []
+    group_reports: list[dict[str, Any]] = []
+    unit_results_by_id: dict[str, ArtifactUnitResult] = {}
+    for grouped_units, cited_documents in groups:
+        if (
+            is_test_mode()
+            and verify_generated_artifact_against_sources
+            is _ORIGINAL_VERIFY_GENERATED_ARTIFACT
+        ):
+            result = _test_mode_verification_result(grouped_units)
+        else:
+            result = await verify_generated_artifact_against_sources(
+                artifact_type="quiz",
+                units=grouped_units,
+                source_documents=list(cited_documents),
+                generation_provider=generation_provider,
+                generation_model=generation_model,
+                verification_provider=verification_provider,
+                verification_model=verification_model,
+                generation_context={"query": "generated OSCE evidence claims"},
+            )
+        _require_complete_grounded_result(result, grouped_units)
+        group_results.append(result)
+        group_reports.append(
+            {
+                "cited_document_ids": [document.id for document in cited_documents],
+                "verdict": result.verdict,
+                "report": result.report,
+            }
+        )
+        unit_results_by_id.update(
+            {unit_result.unit_id: unit_result for unit_result in result.unit_results}
+        )
+
+    if set(unit_results_by_id) != {unit.unit_id for unit in units}:
+        raise OsceVerificationError()
+    ordered_results = [unit_results_by_id[unit.unit_id] for unit in units]
+    return ArtifactVerificationResult(
+        verdict="grounded",
+        report={
+            "total_units": len(units),
+            "verified_units": len(ordered_results),
+            "groups": group_reports,
+        },
+        unit_results=ordered_results,
+        metadata={
+            "artifact_type": "quiz",
+            "verification_group_count": len(group_results),
+            "group_metadata": [result.metadata for result in group_results],
+        },
     )
 
 
