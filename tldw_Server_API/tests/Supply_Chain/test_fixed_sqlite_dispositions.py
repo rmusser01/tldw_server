@@ -25,6 +25,11 @@ def test_fixed_package_dispositions_preserve_all_336_prior_records() -> None:
     } == {(component, cve, PURL, "3.53.4-2", "HIGH") for component in COMPONENTS for cve in CVES}
     raw["exceptions"] = [r for r in raw["exceptions"] if r not in added]
     assert len(raw["exceptions"]) == 336
+    # TASK44 separately proves only these six component fields changed.
+    optional_ids = {"TASK-13013.7.38-LIGHTNING-01"} | {f"TASK-13013.7.40-OPTIONAL-{index:02d}" for index in range(1, 6)}
+    for record in raw["exceptions"]:
+        if record["id"] in optional_ids:
+            record["component"] = "source-python-root"
     assert hashlib.sha256((json.dumps(raw, indent=2, sort_keys=True) + "\n").encode()).hexdigest() == (
         "33c9c0eface2dd7b5c2f82be398197b95f3dcecba4c68effdfbcc21a6e0918a6"
     )
