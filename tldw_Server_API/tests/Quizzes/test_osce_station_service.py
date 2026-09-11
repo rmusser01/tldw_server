@@ -210,6 +210,33 @@ def test_presentation_only_edits_preserve_source_verification(
     assert result.verification_state == "source_verified"
 
 
+def test_identical_evidence_with_new_nested_ids_preserves_source_verification(
+    stored_station: OsceStationStoredContent,
+) -> None:
+    update = OsceStationUpdateContent.model_validate(
+        {
+            "checklist_items": [
+                item.model_dump(mode="json", exclude={"id"})
+                for item in stored_station.checklist_items
+            ],
+            "expected_key_points": [
+                point.model_dump(mode="json", exclude={"id"})
+                for point in stored_station.expected_key_points
+            ],
+        }
+    )
+
+    result = reconcile_station_update(stored_station, update, "source_verified")
+
+    assert {item.id for item in result.content.checklist_items}.isdisjoint(
+        item.id for item in stored_station.checklist_items
+    )
+    assert {point.id for point in result.content.expected_key_points}.isdisjoint(
+        point.id for point in stored_station.expected_key_points
+    )
+    assert result.verification_state == "source_verified"
+
+
 def test_evidence_fingerprint_excludes_presentation_fields(
     stored_station: OsceStationStoredContent,
 ) -> None:

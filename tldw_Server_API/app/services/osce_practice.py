@@ -180,17 +180,38 @@ def _reconcile_collection_ids(
 def evidence_fingerprint(content: OsceStationStoredContent) -> str:
     """Hash only evidence-bearing station content."""
 
+    def canonical_list(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(
+            values,
+            key=lambda value: json.dumps(value, sort_keys=True, separators=(",", ":")),
+        )
+
+    def citations(values: list[Any]) -> list[dict[str, Any]]:
+        return canonical_list([value.model_dump(mode="json") for value in values])
+
     evidence = {
-        "patient_context": content.patient_context.model_dump(mode="json"),
-        "checklist": [
-            {
-                "id": str(item.id),
-                "rationale": item.rationale,
-                "citations": [citation.model_dump(mode="json") for citation in item.citations],
-            }
-            for item in content.checklist_items
-        ],
-        "key_points": [point.model_dump(mode="json") for point in content.expected_key_points],
+        "patient_context": {
+            "text": content.patient_context.text,
+            "citations": citations(content.patient_context.citations),
+        },
+        "checklist": canonical_list(
+            [
+                {
+                    "rationale": item.rationale,
+                    "citations": citations(item.citations),
+                }
+                for item in content.checklist_items
+            ]
+        ),
+        "key_points": canonical_list(
+            [
+                {
+                    "text": point.text,
+                    "citations": citations(point.citations),
+                }
+                for point in content.expected_key_points
+            ]
+        ),
     }
     encoded = json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
