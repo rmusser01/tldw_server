@@ -316,3 +316,51 @@ def test_create_snapshot_rejects_symlink_workspace_root(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Refusing symlink workspace root"):
         manager.create_snapshot("sess-create-root-link", str(symlink_root))
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_restore_rejects_archive_symlink_before_clearing_workspace(tmp_path: Path, legacy: bool) -> None:
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "keep.txt").write_text("keep", encoding="utf-8")
+    outside_archive = tmp_path / "outside.tar.gz"
+    with tarfile.open(outside_archive, "w:gz"):
+        pass
+    path = (manager._legacy_snapshot_path if legacy else manager._snapshot_path)("session", "snapshot")
+    path.parent.mkdir(parents=True)
+    path.symlink_to(outside_archive)
+
+    with pytest.raises(ValueError, match="snapshot storage path"):
+        manager.restore_snapshot("session", "snapshot", str(workspace))
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_snapshot_info_rejects_metadata_symlink(tmp_path: Path, legacy: bool) -> None:
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    archive = (manager._legacy_snapshot_path if legacy else manager._snapshot_path)("session", "snapshot")
+    metadata = (manager._legacy_metadata_path if legacy else manager._metadata_path)("session", "snapshot")
+    archive.parent.mkdir(parents=True)
+    archive.write_bytes(b"archive")
+    outside_metadata = tmp_path / "secret.json"
+    outside_metadata.write_text('{"secret": "outside"}', encoding="utf-8")
+    metadata.symlink_to(outside_metadata)
+
+    with pytest.raises(ValueError, match="snapshot storage path"):
+        manager.get_snapshot_info("session", "snapshot")
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_snapshot_listing_ignores_metadata_symlink(tmp_path: Path, legacy: bool) -> None:
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    archive = (manager._legacy_snapshot_path if legacy else manager._snapshot_path)("session", "snapshot")
+    metadata = (manager._legacy_metadata_path if legacy else manager._metadata_path)("session", "snapshot")
+    archive.parent.mkdir(parents=True)
+    archive.write_bytes(b"archive")
+    outside_metadata = tmp_path / "secret.json"
+    outside_metadata.write_text('{"snapshot_id": "snapshot", "secret": "outside"}', encoding="utf-8")
+    metadata.symlink_to(outside_metadata)
+
+    assert manager.list_snapshots("session") == []

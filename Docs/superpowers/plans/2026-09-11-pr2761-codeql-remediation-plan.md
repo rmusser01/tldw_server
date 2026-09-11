@@ -18,7 +18,7 @@ the initial Python/JavaScript analyses cover preceding `43165c8c82`.
 **Goal:** Repair demonstrated security failures without changing unrelated behavior.
 **Success Criteria:** Failing behavior tests turn green; relevant neighboring tests and scoped lint/Bandit pass.
 **Tests:** Real loopback redirect tests, temporary-directory snapshot escape tests, and further source-specific boundary tests.
-**Status:** In Progress.
+**Status:** Complete for independently reviewed source batch; hosted rescan pending.
 
 Independent ownership: Python path/file boundaries; Python HTTP/XPath/hash/regex
 boundaries; frontend transport/storage/DOM boundaries; Actions event and checkout
@@ -39,6 +39,6 @@ must be repaired and rescanned. Unproven findings remain open.
 **Goal:** Commit verified batches, refresh the protected-source record, and obtain current-source analysis.
 **Success Criteria:** Every finding is repaired or individually resolved; all required checks refer to the final source; release PR accurately records remaining non-CodeQL gates.
 **Tests:** Focused suites, lint/Bandit, source/manifest equality, required CI and complete Python/JavaScript/Actions scans.
-**Status:** Not Started.
+**Status:** In Progress; source/evidence commits and protected manifest refresh underway.
 
 No main merge or publication until the separate release gates are satisfied.

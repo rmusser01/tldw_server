@@ -18,7 +18,12 @@ import {
   isSameOriginAbsoluteUrlForConfiguredServer as guardIsSameOriginAbsoluteUrlForConfiguredServer,
   type AllowlistWarnHooks
 } from "@/utils/absolute-url-guard"
-import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import {
+  createServicePromptScopeChangedError,
+  isRequestConfigScopeChangedError,
+  servicePromptTargetsMatch
+} from "@/services/tldw/service-prompt-scope-error"
+import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 
 export type TldwRequestPayload = {
   path: PathOrUrl
@@ -243,9 +248,16 @@ export const tldwRequest = async (
     abortSignal,
     responseType
   } = payload || {}
+  // Extension IPC payloads are runtime input despite the TypeScript signature.
+  // Coercing an array/object later would bypass the absolute-URL guard.
+  if (typeof path !== "string") {
+    return { ok: false, status: 400, error: "Request path must be a string" }
+  }
   const normalizedPath = normalizeKnownPathQuirks(path)
   const fetchFn = runtime.fetchFn || fetch
-  const cfg = await runtime.getConfig()
+  const loadedConfig = await runtime.getConfig()
+  // Preserve the dispatched scope even if refresh mutates the config in place.
+  const cfg = loadedConfig ? { ...loadedConfig } : loadedConfig
   const isAbsolute = typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath)
   const absolutePath = isAbsolute ? String(normalizedPath) : ""
   const transport =
@@ -306,6 +318,17 @@ export const tldwRequest = async (
   const url = isAbsolute
     ? normalizedPath
     : transport?.url || String(normalizedPath)
+  if (!isAbsolute && transport?.kind === "same-origin" && pageOrigin) {
+    try {
+      // Browsers interpret //host and /\host as cross-origin URLs, even
+      // though neither is classified as an absolute HTTP URL above.
+      if (new URL(url, pageOrigin).origin !== pageOrigin) {
+        return { ok: false, status: 400, error: ABSOLUTE_URL_BLOCK_ERROR }
+      }
+    } catch {
+      return { ok: false, status: 400, error: ABSOLUTE_URL_BLOCK_ERROR }
+    }
+  }
   const shouldSkipAuth = noAuth || (isAbsolute && !sameOriginAbsoluteUrl)
   const h: Record<string, string> = { ...(headers || {}) }
   const hasContentType = Object.keys(h).some(
@@ -429,8 +452,10 @@ export const tldwRequest = async (
           ? body
           : JSON.stringify(body)
 
-    // lgtm[js/request-forgery]: url is same-origin/configured-server transport or an allowlisted absolute URL checked above.
+    // A redirect would bypass the destination check above and can forward
+    // custom credentials such as X-API-KEY to another origin.
     let resp = await fetchFn(url, {
+      redirect: "error",
       method,
       headers: h,
       body: resolvedBody,
@@ -475,6 +500,13 @@ export const tldwRequest = async (
         throw abortError
       }
       const updated = await runtime.getConfig()
+      if (
+        !servicePromptTargetsMatch(cfg || {}, updated || {}) ||
+        deriveScopedUserId({ userId: null, authMode: cfg?.authMode, accessToken: cfg?.accessToken }) !==
+          deriveScopedUserId({ userId: null, authMode: updated?.authMode, accessToken: updated?.accessToken })
+      ) {
+        throw createServicePromptScopeChangedError()
+      }
       const retryHeaders = { ...h }
       for (const k of Object.keys(retryHeaders)) {
         const kl = k.toLowerCase()
@@ -489,8 +521,9 @@ export const tldwRequest = async (
         throw abortError
       }
       retryTimeoutId = setTimeout(() => activeRetryController.abort(), timeoutMs)
-      // lgtm[js/request-forgery]: retry reuses the same validated URL from the initial request.
+      // Keep the same destination boundary after refreshing credentials.
       resp = await fetchFn(url, {
+        redirect: "error",
         method,
         headers: retryHeaders,
         // Reuse the binary-aware serialization from the first attempt. A plain

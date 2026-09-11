@@ -6,6 +6,7 @@
  * Emits screenshots + observations JSON for heuristic evaluation.
  */
 import { chromium } from "@playwright/test"
+import { seedManualUatBrowser } from "./browser-uat-seed.mjs"
 import fs from "node:fs/promises"
 
 const WEB = process.env.WEB_URL || "http://localhost:8080"
@@ -94,22 +95,6 @@ async function visit(page, route, bucket, shotName) {
   console.log(`[done] ${route} -> ${bucket.finalUrl} (h1: ${bucket.probe?.h1s?.[0] || "-"})`)
 }
 
-function seedScript({ serverUrl, apiKey }) {
-  return ({ serverUrl, apiKey }) => {
-    const cfg = { serverUrl, authMode: "single-user", apiKey }
-    try { localStorage.setItem("tldwConfig", JSON.stringify(cfg)) } catch {}
-    try { localStorage.setItem("isMigrated", "true") } catch {}
-    try { localStorage.setItem("__tldw_first_run_complete", "true") } catch {}
-    try { localStorage.setItem("assistant_setup_dismissed", "true") } catch {}
-    try {
-      localStorage.setItem("serverUrl", serverUrl)
-      localStorage.setItem("tldwServerUrl", serverUrl)
-      localStorage.setItem("tldw-api-host", serverUrl)
-      localStorage.setItem("authMode", "single-user")
-      localStorage.setItem("apiKey", apiKey)
-    } catch {}
-  }
-}
 
 async function main() {
   await fs.mkdir(OUT, { recursive: true })
@@ -133,7 +118,7 @@ async function main() {
   // ---------- Pass B: configured power user ----------
   {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
-    await ctx.addInitScript(seedScript({}), { serverUrl: SERVER, apiKey: API_KEY })
+    await ctx.addInitScript(seedManualUatBrowser, { legacyBootstrap: true, webUrl: WEB, serverUrl: SERVER, apiKey: API_KEY })
     const page = await ctx.newPage()
 
     // Discoverability probe: from home, how many links point at /admin?
@@ -167,7 +152,7 @@ async function main() {
   // ---------- Pass C: mobile viewport spot-check ----------
   {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } })
-    await ctx.addInitScript(seedScript({}), { serverUrl: SERVER, apiKey: API_KEY })
+    await ctx.addInitScript(seedManualUatBrowser, { legacyBootstrap: true, webUrl: WEB, serverUrl: SERVER, apiKey: API_KEY })
     const page = await ctx.newPage()
     for (const route of MOBILE_ROUTES) {
       const bucket = { route: "mobile:" + route }

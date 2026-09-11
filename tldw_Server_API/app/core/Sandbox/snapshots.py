@@ -10,11 +10,13 @@ import shutil
 import tarfile
 import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, ContextManager
 
 from loguru import logger
+
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 _SNAPSHOTS_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -109,15 +111,24 @@ class SnapshotManager:
         legacy = self._legacy_snapshot_dir(session_id)
         return [current] if current == legacy else [current, legacy]
 
+    @staticmethod
+    def _storage_file(directory: Path, filename: str) -> Path:
+        """Reject links and escapes before accessing a snapshot storage file."""
+        return Path(safe_join(
+            str(directory),
+            filename,
+            error_factory=lambda _exc: ValueError("Invalid snapshot storage path"),
+        ))
+
     def _snapshot_path(self, session_id: str, snapshot_id: str) -> Path:
         """Get the full path for a specific snapshot archive."""
         safe_snapshot_id = self._safe_storage_component(snapshot_id, label="snapshot_id")
-        return self._snapshot_dir(session_id) / f"{safe_snapshot_id}.tar.gz"
+        return self._storage_file(self._snapshot_dir(session_id), f"{safe_snapshot_id}.tar.gz")
 
     def _legacy_snapshot_path(self, session_id: str, snapshot_id: str) -> Path:
         """Get the legacy raw-id path for a specific snapshot archive."""
         raw_snapshot_id = self._raw_storage_component(snapshot_id, label="snapshot_id")
-        return self._legacy_snapshot_dir(session_id) / f"{raw_snapshot_id}.tar.gz"
+        return self._storage_file(self._legacy_snapshot_dir(session_id), f"{raw_snapshot_id}.tar.gz")
 
     def _existing_snapshot_path(self, session_id: str, snapshot_id: str) -> Path:
         """Return the existing current or legacy archive path, preferring current."""
@@ -153,12 +164,12 @@ class SnapshotManager:
     def _metadata_path(self, session_id: str, snapshot_id: str) -> Path:
         """Get the path for a snapshot's metadata file."""
         safe_snapshot_id = self._safe_storage_component(snapshot_id, label="snapshot_id")
-        return self._snapshot_dir(session_id) / f"{safe_snapshot_id}.meta.json"
+        return self._storage_file(self._snapshot_dir(session_id), f"{safe_snapshot_id}.meta.json")
 
     def _legacy_metadata_path(self, session_id: str, snapshot_id: str) -> Path:
         """Get the legacy raw-id path for a snapshot's metadata file."""
         raw_snapshot_id = self._raw_storage_component(snapshot_id, label="snapshot_id")
-        return self._legacy_snapshot_dir(session_id) / f"{raw_snapshot_id}.meta.json"
+        return self._storage_file(self._legacy_snapshot_dir(session_id), f"{raw_snapshot_id}.meta.json")
 
     def _existing_metadata_path(self, session_id: str, snapshot_id: str) -> Path:
         """Return the existing current or legacy metadata path, preferring current."""
@@ -451,6 +462,7 @@ class SnapshotManager:
                 continue
             for meta_file in snapshot_dir.glob("*.meta.json"):
                 try:
+                    meta_file = self._storage_file(snapshot_dir, meta_file.name)
                     with open(meta_file) as f:
                         metadata = json.load(f)
                         # Verify the actual archive exists
@@ -648,8 +660,9 @@ class SnapshotManager:
         entries: list[tuple[dict, Path, Path]] = []
         for metadata_path in snapshot_dir.glob("*.meta.json"):
             try:
+                metadata_path = SnapshotManager._storage_file(snapshot_dir, metadata_path.name)
                 archive_stem = metadata_path.name.removesuffix(".meta.json")
-                archive_path = snapshot_dir / f"{archive_stem}.tar.gz"
+                archive_path = SnapshotManager._storage_file(snapshot_dir, f"{archive_stem}.tar.gz")
                 if not archive_path.is_file():
                     continue
                 with open(metadata_path) as metadata_file:
@@ -732,7 +745,7 @@ class SnapshotManager:
         *,
         max_snapshots: int = 10,
         max_size_mb: int = 256,
-        lock_session: Callable[[str], ContextManager[None]] | None = None,
+        lock_session: Callable[[str], contextlib.AbstractContextManager[None]] | None = None,
     ) -> dict[str, int]:
         """Enforce snapshot quotas for all session snapshot directories."""
         scanned_sessions = 0
