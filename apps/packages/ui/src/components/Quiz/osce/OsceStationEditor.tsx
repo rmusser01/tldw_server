@@ -23,6 +23,8 @@ import { QuizMarkdown } from "../components/QuizMarkdown"
 import { SourceCitations } from "../components/SourceCitations"
 import {
   getOsceStation,
+  isAmbiguousOsceMutationFailure,
+  osceRequestErrorStatus,
   type OsceCitation,
   type OsceChecklistItemUpdate,
   type OsceKeyPointUpdate,
@@ -57,6 +59,7 @@ export interface OsceStationEditorProps {
   onSaved?: (station: OsceStationAuthoringResponse) => void
   onDirtyStateChange?: (dirty: boolean) => void
   saveBlocked?: boolean
+  resetAfterCreate?: boolean
 }
 
 const newCitation = (): OsceCitation => ({
@@ -109,15 +112,16 @@ const cloneDraft = (content: OsceStationDraft): OsceStationDraft =>
 
 const serializeDraft = (content: OsceStationDraft): string => JSON.stringify(content)
 
-const errorStatus = (error: unknown): number | null => {
-  if (!error || typeof error !== "object") return null
-  const status = Number((error as { status?: unknown }).status)
-  return Number.isFinite(status) ? Math.trunc(status) : null
-}
-
 const errorMessage = (error: unknown): string => {
   if (error instanceof Error && error.message.trim()) return error.message
   return "Failed to save station."
+}
+
+export class OsceQuizShellCreateError extends Error {
+  constructor(readonly originalError: unknown) {
+    super(errorMessage(originalError))
+    this.name = "OsceQuizShellCreateError"
+  }
 }
 
 const move = <T,>(items: T[], from: number, to: number): T[] => {
@@ -127,6 +131,8 @@ const move = <T,>(items: T[], from: number, to: number): T[] => {
   next.splice(to, 0, item)
   return next
 }
+
+const unicodeCasefold = (value: string): string => value.toUpperCase().toLowerCase()
 
 const validateDraft = (draft: OsceStationDraft): string[] => {
   const errors: string[] = []
@@ -152,7 +158,7 @@ const validateDraft = (draft: OsceStationDraft): string[] => {
     errors.push("Each rubric domain needs a label and two to six complete ordered levels.")
   }
   if (draft.rubric_domains.some((domain) => {
-    const labels = domain.levels.map((level) => level.label.trim().toLocaleLowerCase())
+    const labels = domain.levels.map((level) => unicodeCasefold(level.label.trim()))
     return new Set(labels).size !== labels.length
   })) {
     errors.push("Rubric level labels must be unique within each domain.")
@@ -189,8 +195,30 @@ type CitationEditorProps = {
 }
 
 const CitationEditor: React.FC<CitationEditorProps> = ({ citations, label, onChange }) => {
+  const rowKeyPrefix = React.useId()
+  const nextRowKey = React.useRef(0)
+  const rowKeys = React.useRef<string[]>([])
+  while (rowKeys.current.length < citations.length) {
+    rowKeys.current.push(`${rowKeyPrefix}-${nextRowKey.current}`)
+    nextRowKey.current += 1
+  }
+  if (rowKeys.current.length > citations.length) {
+    rowKeys.current.length = citations.length
+  }
+
   const updateCitation = (index: number, patch: Partial<OsceCitation>) => {
     onChange(citations.map((citation, itemIndex) => itemIndex === index ? { ...citation, ...patch } : citation))
+  }
+
+  const addCitation = () => {
+    rowKeys.current.push(`${rowKeyPrefix}-${nextRowKey.current}`)
+    nextRowKey.current += 1
+    onChange([...citations, newCitation()])
+  }
+
+  const removeCitation = (index: number) => {
+    rowKeys.current.splice(index, 1)
+    onChange(citations.filter((_, itemIndex) => itemIndex !== index))
   }
 
   return (
@@ -201,14 +229,14 @@ const CitationEditor: React.FC<CitationEditorProps> = ({ citations, label, onCha
           size="small"
           type="text"
           icon={<PlusOutlined aria-hidden />}
-          onClick={() => onChange([...citations, newCitation()])}
+          onClick={addCitation}
         >
           Add citation
         </Button>
       </div>
       {citations.map((citation, index) => (
         <div
-          key={`${citation.source_type}-${citation.source_id}-${index}`}
+          key={rowKeys.current[index]}
           className="grid min-w-0 grid-cols-1 gap-2 border-t border-border-subtle pt-2 md:grid-cols-[10rem_minmax(0,1fr)_minmax(0,1fr)_2.75rem]"
         >
           <Select
@@ -249,7 +277,7 @@ const CitationEditor: React.FC<CitationEditorProps> = ({ citations, label, onCha
               danger
               icon={<DeleteOutlined aria-hidden />}
               aria-label={`Remove ${label.toLowerCase()} ${index + 1}`}
-              onClick={() => onChange(citations.filter((_, itemIndex) => itemIndex !== index))}
+              onClick={() => removeCitation(index)}
               className="h-10 w-11"
             />
           </Tooltip>
@@ -368,7 +396,8 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
   onCreate,
   onSaved,
   onDirtyStateChange,
-  saveBlocked = false
+  saveBlocked = false,
+  resetAfterCreate = false
 }) => {
   const { t } = useTranslation(["option", "common"])
   const [messageApi, contextHolder] = message.useMessage()
@@ -383,6 +412,7 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
   const [conflictServer, setConflictServer] = React.useState<OsceStationAuthoringResponse | null>(null)
   const [overwriteVersion, setOverwriteVersion] = React.useState<number | null>(null)
   const [confirmOverwrite, setConfirmOverwrite] = React.useState(false)
+  const [createStatusUncertain, setCreateStatusUncertain] = React.useState(false)
   const [localSaveInFlight, setLocalSaveInFlight] = React.useState(false)
   const saveInFlightRef = React.useRef(false)
   const stationIdentityRef = React.useRef<number | null>(station?.id ?? null)
@@ -408,6 +438,7 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
     setConflictServer(null)
     setOverwriteVersion(null)
     setConfirmOverwrite(false)
+    setCreateStatusUncertain(false)
   }, [initialContent, orderIndex, station?.content, station?.id, station?.order_index, station?.version])
 
   React.useEffect(() => {
@@ -462,10 +493,23 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
       } else {
         throw new Error("Quiz details must be saved with the station.")
       }
-      acknowledge(saved)
+      if (!station && resetAfterCreate) {
+        const next = createEmptyOsceStationDraft()
+        setDraft(next)
+        setAcknowledged(next)
+        setCurrentVersion(null)
+        setCurrentOrderIndex(orderIndex)
+        setConflictServer(null)
+        setOverwriteVersion(null)
+        setConfirmOverwrite(false)
+        setCreateStatusUncertain(false)
+        onSaved?.(saved)
+      } else {
+        acknowledge(saved)
+      }
       messageApi.success(t("option:quiz.osceStationSaved", { defaultValue: "Station saved." }))
     } catch (error) {
-      if (errorStatus(error) === 409 && station && quizId != null) {
+      if (osceRequestErrorStatus(error) === 409 && station && quizId != null) {
         try {
           const latest = await getOsceStation(quizId, station.id)
           setConflictServer(latest)
@@ -477,6 +521,13 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
           messageApi.error(errorMessage(latestError))
           return
         }
+      }
+      if (
+        !station &&
+        !(error instanceof OsceQuizShellCreateError) &&
+        isAmbiguousOsceMutationFailure(error)
+      ) {
+        setCreateStatusUncertain(true)
       }
       messageApi.error(errorMessage(error))
     } finally {
@@ -587,6 +638,15 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
               </Button>
             </div>
           )}
+        />
+      ) : null}
+
+      {createStatusUncertain ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="Station creation status is unknown."
+          description="Your draft is preserved. Inspect Manage or reload the station list before creating another station to avoid a duplicate."
         />
       ) : null}
 
@@ -921,7 +981,7 @@ export const OsceStationEditor: React.FC<OsceStationEditorProps> = ({
           icon={<SaveOutlined aria-hidden />}
           aria-label="Save station"
           loading={saving}
-          disabled={saveBlocked || !dirty || validationErrors.length > 0 || saving || conflictServer != null}
+          disabled={saveBlocked || createStatusUncertain || !dirty || validationErrors.length > 0 || saving || conflictServer != null}
           onClick={handleSave}
         >
           Save station

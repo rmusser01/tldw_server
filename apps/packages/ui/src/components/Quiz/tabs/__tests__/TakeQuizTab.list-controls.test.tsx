@@ -418,4 +418,58 @@ describe("TakeQuizTab list controls and default passing policy", () => {
       })
     )
   })
+
+  it("resolves an off-page ordinary start intent while another quiz attempt is active", async () => {
+    vi.mocked(useQuizQuery).mockImplementation((quizId: any, options: any) => ({
+      data: options?.enabled === false
+        ? undefined
+        : quizId === 42
+          ? {
+              id: 42,
+              name: "Off-page retake",
+              total_questions: 2,
+              time_limit_seconds: 600,
+              passing_score: 80
+            }
+          : {
+              id: 7,
+              name: "Biology Basics",
+              total_questions: 1,
+              time_limit_seconds: 900,
+              passing_score: null
+            }
+    } as any))
+    const onStartHandled = vi.fn()
+    const view = render(
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Start Quiz/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Begin Quiz" }))
+    expect(await screen.findByTestId("quiz-question-1")).toBeInTheDocument()
+
+    view.rerender(
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+          startQuizId={42}
+          onStartHandled={onStartHandled}
+        />
+      </MemoryRouter>
+    )
+
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("Off-page retake")).toBeInTheDocument()
+    expect(screen.getByTestId("quiz-question-1")).toBeInTheDocument()
+    expect(onStartHandled).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(useQuizQuery)).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({ enabled: true })
+    )
+  })
 })

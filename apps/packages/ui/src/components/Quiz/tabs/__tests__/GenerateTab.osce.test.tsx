@@ -182,6 +182,7 @@ describe("OSCE Generate and Create controls", () => {
       })
     ))
     expect(navigateManage).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(screen.getByLabelText("Station title")).toHaveValue(""))
   })
 
   it("reuses the created OSCE quiz shell after a definitive station rejection", async () => {
@@ -202,6 +203,7 @@ describe("OSCE Generate and Create controls", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Save station" }))
     await waitFor(() => expect(stationCreate).toHaveBeenCalledTimes(1))
+    expect(screen.getByLabelText("Station title")).toHaveValue("Anticoagulant counselling")
     expect(screen.getByRole("radio", { name: "OSCE" })).toBeDisabled()
     expect(screen.getByLabelText("Quiz Name")).toBeDisabled()
     fireEvent.click(screen.getByRole("button", { name: "Save station" }))
@@ -252,6 +254,7 @@ describe("OSCE Generate and Create controls", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Save station" }))
     expect(await screen.findByText(/Quiz creation status is unknown/i)).toBeInTheDocument()
+    expect(screen.queryByText("Station creation status is unknown.")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Save station" }))
 
     expect(useCreateQuizMutation().mutateAsync).toHaveBeenCalledTimes(1)

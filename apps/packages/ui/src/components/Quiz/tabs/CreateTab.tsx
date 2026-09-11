@@ -33,11 +33,13 @@ import {
 import type { QuestionType, QuestionCreate } from "@/services/quizzes"
 import type { TakeTabNavigationIntent } from "../navigation"
 import {
+  OsceQuizShellCreateError,
   OsceStationEditor
 } from "../osce/OsceStationEditor"
-import type {
-  OsceStationAuthoringResponse,
-  OsceStationCreateContent
+import {
+  isAmbiguousOsceMutationFailure,
+  type OsceStationAuthoringResponse,
+  type OsceStationCreateContent
 } from "@/services/osce"
 import { normalizeMatchingAnswerMap } from "../utils/matchingAnswer"
 import { checkStorageBeforeWrite, notifyStorageWrite } from "@/utils/storage-guard"
@@ -102,12 +104,6 @@ const isFormValidationError = (error: unknown): boolean => {
   return Array.isArray(maybeValidationError.errorFields)
 }
 
-const isAmbiguousCreateFailure = (error: unknown): boolean => {
-  if (!error || typeof error !== "object") return true
-  const status = Number((error as { status?: unknown }).status)
-  return !Number.isFinite(status) || status === 0 || status === 408 || status >= 500
-}
-
 const readCreateDraft = (): QuizCreateDraft | null => {
   if (typeof window === "undefined") return null
   try {
@@ -166,7 +162,6 @@ export const CreateTab: React.FC<CreateTabProps> = ({
   const [osceEditorDirty, setOsceEditorDirty] = React.useState(false)
   const [createdOsceQuizId, setCreatedOsceQuizId] = React.useState<number | null>(null)
   const [osceQuizCreationUncertain, setOsceQuizCreationUncertain] = React.useState(false)
-  const [osceStationCreationUncertain, setOsceStationCreationUncertain] = React.useState(false)
   const [messageApi, contextHolder] = message.useMessage()
   const [pendingDraft, setPendingDraft] = React.useState<QuizCreateDraft | null>(null)
   const [draftStorageUnavailable, setDraftStorageUnavailable] = React.useState(false)
@@ -644,10 +639,6 @@ export const CreateTab: React.FC<CreateTabProps> = ({
     if (osceQuizCreationUncertain) {
       throw new Error("Quiz creation status is unknown. Check Manage before trying again to avoid a duplicate quiz.")
     }
-    if (osceStationCreationUncertain) {
-      throw new Error("Station creation status is unknown. Inspect Manage before creating another station.")
-    }
-
     let quizId = createdOsceQuizId
     if (quizId == null) {
       try {
@@ -659,28 +650,21 @@ export const CreateTab: React.FC<CreateTabProps> = ({
         quizId = quiz.id
         setCreatedOsceQuizId(quiz.id)
       } catch (error) {
-        if (isAmbiguousCreateFailure(error)) setOsceQuizCreationUncertain(true)
+        if (isAmbiguousOsceMutationFailure(error)) {
+          setOsceQuizCreationUncertain(true)
+          throw new OsceQuizShellCreateError(error)
+        }
         throw error
       }
     }
 
-    let station: OsceStationAuthoringResponse
-    try {
-      station = await createOsceStationMutation.mutateAsync({
-        quizId,
-        request: { content, order_index: orderIndex }
-      })
-    } catch (error) {
-      if (isAmbiguousCreateFailure(error)) setOsceStationCreationUncertain(true)
-      throw error
-    }
-    messageApi.success(
-      t("option:quiz.createOsceSuccess", { defaultValue: "OSCE created successfully." })
-    )
+    const station = await createOsceStationMutation.mutateAsync({
+      quizId,
+      request: { content, order_index: orderIndex }
+    })
     form.resetFields()
     setCreatedOsceQuizId(null)
     setOsceQuizCreationUncertain(false)
-    setOsceStationCreationUncertain(false)
     setOsceEditorDirty(false)
     onDirtyStateChange?.(false)
     onNavigateToManage?.()
@@ -1282,17 +1266,11 @@ export const CreateTab: React.FC<CreateTabProps> = ({
               title="Quiz creation status is unknown. Check Manage before trying again to avoid a duplicate quiz."
             />
           ) : null}
-          {osceStationCreationUncertain ? (
-            <Alert
-              type="warning"
-              showIcon
-              title="Station creation status is unknown. Inspect Manage before creating another station to avoid a duplicate."
-            />
-          ) : null}
           <OsceStationEditor
             onCreate={handleCreateOsceStation}
             onDirtyStateChange={setOsceEditorDirty}
-            saveBlocked={osceQuizCreationUncertain || osceStationCreationUncertain}
+            saveBlocked={osceQuizCreationUncertain}
+            resetAfterCreate
           />
         </section>
       )}

@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { OsceStationEditor } from "../OsceStationEditor"
-import { getOsceStation, updateOsceStation } from "@/services/osce"
+import { createOsceStation, getOsceStation, updateOsceStation } from "@/services/osce"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -14,7 +15,12 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/services/osce", async () => {
   const actual = await vi.importActual<typeof import("@/services/osce")>("@/services/osce")
-  return { ...actual, getOsceStation: vi.fn(), updateOsceStation: vi.fn() }
+  return {
+    ...actual,
+    createOsceStation: vi.fn(),
+    getOsceStation: vi.fn(),
+    updateOsceStation: vi.fn()
+  }
 })
 
 const station = {
@@ -125,6 +131,68 @@ describe("OsceStationEditor", () => {
     await act(async () => {
       resolveCreate?.({ ...station, content: { ...station.content, title: "Local draft" } })
     })
+  })
+
+  it.each([
+    ["missing status", new TypeError("Failed to fetch")],
+    ["status zero", Object.assign(new Error("offline"), { status: 0 })],
+    ["timeout", Object.assign(new Error("timeout"), { status: 408 })],
+    ["server error", Object.assign(new Error("unavailable"), { status: 503 })]
+  ])("fails closed after ambiguous direct station creation: %s", async (_label, failure) => {
+    vi.mocked(createOsceStation).mockRejectedValue(failure)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <OsceStationEditor quizId={7} initialContent={station.content} />
+      </QueryClientProvider>
+    )
+    fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Preserved draft" } })
+
+    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+
+    expect(await screen.findByText("Station creation status is unknown.")).toBeInTheDocument()
+    expect(screen.getByText(/inspect Manage or reload the station list/i)).toBeInTheDocument()
+    expect(screen.getByLabelText("Station title")).toHaveValue("Preserved draft")
+    expect(screen.getByRole("button", { name: "Save station" })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+    expect(createOsceStation).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps a definitive direct station rejection retryable", async () => {
+    vi.mocked(createOsceStation)
+      .mockRejectedValueOnce(Object.assign(new Error("invalid station"), { status: 422 }))
+      .mockResolvedValueOnce({ ...station, content: { ...station.content, title: "Retried draft" } })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <OsceStationEditor quizId={7} initialContent={station.content} />
+      </QueryClientProvider>
+    )
+    fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Retried draft" } })
+
+    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+    await waitFor(() => expect(createOsceStation).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole("button", { name: "Save station" })).toBeEnabled()
+    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+
+    await waitFor(() => expect(createOsceStation).toHaveBeenCalledTimes(2))
+  })
+
+  it("keeps citation row identity and focus while the source ID is typed", async () => {
+    const user = userEvent.setup()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <OsceStationEditor quizId={7} station={station} />
+      </QueryClientProvider>
+    )
+    await user.click(screen.getAllByRole("button", { name: "Add citation" })[0])
+    const sourceId = screen.getByLabelText("Patient context citation 1 source ID")
+
+    await user.type(sourceId, "source-123")
+
+    expect(sourceId).toHaveValue("source-123")
+    expect(sourceId).toHaveFocus()
   })
 
   it("preserves a dirty draft across same-station prop refresh and reaches conflict recovery", async () => {
@@ -254,6 +322,32 @@ describe("OsceStationEditor", () => {
     fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Changed title" } })
 
     expect(screen.getByText("URL citations require an absolute HTTP(S) URL.")).toBeInTheDocument()
+    expect(screen.getByText("Rubric level labels must be unique within each domain.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save station" })).toBeDisabled()
+  })
+
+  it("matches backend casefold behavior for rubric level labels", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <OsceStationEditor
+          quizId={7}
+          initialContent={{
+            ...station.content,
+            rubric_domains: [{
+              ...station.content.rubric_domains[0],
+              levels: [
+                { ...station.content.rubric_domains[0].levels[0], label: "Straße" },
+                { ...station.content.rubric_domains[0].levels[1], label: "STRASSE" }
+              ]
+            }]
+          }}
+        />
+      </QueryClientProvider>
+    )
+
+    fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Changed title" } })
+
     expect(screen.getByText("Rubric level labels must be unique within each domain.")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Save station" })).toBeDisabled()
   })

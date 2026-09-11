@@ -142,3 +142,42 @@ Concerns:
 
 - The OSCE generation profile remains planned/hidden unless the server catalog explicitly marks it available.
 - Task 9 practice, autosave, and results behavior was not started.
+
+## Review Fix Round 4
+
+Status: complete from review-fix-round-3 head `7b496b41f3`; committed separately as `fix(webui): reconcile OSCE authoring operations`.
+
+RED evidence:
+
+- Initial four-file regression run: 10 failed and 39 passed. The failures reproduced retry exposure after every ambiguous direct station-create shape, value-derived citation row remounts, backend casefold mismatch, ambiguous-delete state drift, successful-create draft retention, and the stalled off-page ordinary start intent.
+- Complete-range self-review added a shell-composition regression that initially failed because a quiz-shell transport failure also produced the station-create ambiguity warning.
+
+GREEN evidence:
+
+- Expanded Task 8 suite: 6 files, 63 tests passed.
+- Dedicated Take suite: 7 files, 65 tests passed.
+- QuizPlayground navigation suite: 1 file, 23 tests passed.
+- Full Quiz component suite with `--maxWorkers=2`: 38 files, 286 tests passed.
+- Full frontend lint: exit 0 with the unchanged 169-warning baseline and no errors; `eslint --quiet` also exits 0.
+- Frontend typecheck remains blocked by 80 existing diagnostics across six unrelated files: 42 in skills-certification runner tests, 14 in lifecycle tests, 10 in profile tests, 3 in evidence tests, 10 in the Presentation Studio standalone HTML E2E test, and 1 in Presentation Studio. No diagnostic references a changed Task 8, Quiz, or OSCE path.
+- `git diff --check`: passed. Bandit remains not applicable because no Python changed.
+
+Fixes:
+
+- Centralized request-error status and ambiguity classification, then applied editor-level fail-closed handling to every station-create path. Missing status, status zero, 408, and 5xx preserve the draft, block another POST, and direct the author to Manage or reload; definitive 4xx remains retryable. A typed shell-create wrapper lets CreateTab compose with the editor without duplicate station warnings or retry logic.
+- Allowed a different direct ordinary quiz target to load while an existing attempt remains active, so off-page start or retake intent reaches its confirmation action and clears deterministically without replacing the active attempt first.
+- Added UI-only citation row identities that survive source ID edits and removals without entering API payloads.
+- Reconciled ambiguous station deletes against fresh list and detail reads, refreshed React Query state, treated confirmed 404 as deletion, and retained an actionable selected station when the server still reports it.
+- Reset the shared editor to a blank station only after successful manual OSCE creation. Failed saves continue to preserve the local draft.
+- Replaced locale lowercase comparison with dependency-free upper-then-lower Unicode normalization, matching backend casefold for `Straße` and `STRASSE` and other common special folds. JavaScript does not expose Python's complete Unicode casefold table, so exact parity for every code point is not guaranteed without shipping a mapping or dependency.
+
+Complete Task 8 range self-review:
+
+- Reviewed the Task 8 range from `60382f75f0` through the current changes for create/update/delete retry behavior, dirty-state identity/version handling, station pagination, OSCE action suppression, and query invalidation.
+- Added and fixed the shell-versus-station ambiguity composition regression found during that review. No Task 9 practice, autosave, or results paths were introduced, and the OSCE profile remains planned.
+
+Concerns:
+
+- The OSCE generation profile remains planned/hidden unless the server catalog explicitly marks it available.
+- Task 9 practice, autosave, and results behavior was not started.
+- Exact full-Unicode Python casefold parity remains a documented JavaScript platform limitation beyond the tested backend-relevant fold cases.

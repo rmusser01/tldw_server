@@ -65,7 +65,9 @@ import type {
 } from "@/services/quizzes"
 import {
   getOsceStation,
+  isAmbiguousOsceMutationFailure,
   listAllOsceStations,
+  osceRequestErrorStatus,
   type OsceStationSummary
 } from "@/services/osce"
 import {
@@ -891,22 +893,57 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     if (deletingSelectedStation && !confirmDiscardOsceDraft()) return
     if (!window.confirm(`Delete station "${station.title}"? This cannot be undone.`)) return
     if (!managingOsceQuiz) return
+    const quizId = managingOsceQuiz.id
 
-    setDeletingOsceStationId(station.id)
-    try {
-      await deleteOsceStationMutation.mutateAsync({
-        quizId: managingOsceQuiz.id,
-        stationId: station.id,
-        expectedVersion: station.version
-      })
+    const refreshStationState = async (includeDetail: boolean) => {
+      const refreshes: Array<PromiseLike<unknown> | unknown> = [
+        osceStationsQuery.refetch(),
+        refetch()
+      ]
+      if (includeDetail) refreshes.push(osceStationQuery.refetch())
+      await Promise.allSettled(refreshes)
+    }
+
+    const markStationDeleted = () => {
       if (deletingSelectedStation) {
         setSelectedOsceStationId(null)
         setOsceEditorDirty(false)
       }
-      await Promise.allSettled([osceStationsQuery.refetch(), refetch()])
       messageApi.success("Station deleted.")
-    } catch {
-      messageApi.error("Failed to delete station.")
+    }
+
+    setDeletingOsceStationId(station.id)
+    try {
+      await deleteOsceStationMutation.mutateAsync({
+        quizId,
+        stationId: station.id,
+        expectedVersion: station.version
+      })
+      markStationDeleted()
+      await refreshStationState(false)
+    } catch (error) {
+      const status = osceRequestErrorStatus(error)
+      if (status === 404) {
+        await refreshStationState(deletingSelectedStation)
+        markStationDeleted()
+      } else if (isAmbiguousOsceMutationFailure(error)) {
+        const [listResult, detailResult] = await Promise.allSettled([
+          listAllOsceStations(quizId),
+          getOsceStation(quizId, station.id)
+        ])
+        await refreshStationState(deletingSelectedStation)
+        const absentFromList = listResult.status === "fulfilled" &&
+          !listResult.value.some((candidate) => candidate.id === station.id)
+        const detailNotFound = detailResult.status === "rejected" &&
+          osceRequestErrorStatus(detailResult.reason) === 404
+        if (absentFromList || detailNotFound) {
+          markStationDeleted()
+        } else {
+          messageApi.error("Delete status could not be confirmed. Station remains available.")
+        }
+      } else {
+        messageApi.error("Failed to delete station.")
+      }
     } finally {
       setDeletingOsceStationId(null)
     }

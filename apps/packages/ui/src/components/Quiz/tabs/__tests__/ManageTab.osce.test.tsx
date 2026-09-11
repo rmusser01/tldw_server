@@ -257,7 +257,7 @@ describe("ManageTab OSCE authoring", () => {
   })
 
   it("preserves the selected station when deletion fails", async () => {
-    deleteStation.mockRejectedValueOnce(new Error("delete failed"))
+    deleteStation.mockRejectedValueOnce(Object.assign(new Error("delete failed"), { status: 422 }))
     vi.spyOn(window, "confirm").mockReturnValue(true)
     render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
     fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
@@ -268,6 +268,68 @@ describe("ManageTab OSCE authoring", () => {
     expect(await screen.findByText("Failed to delete station.")).toBeInTheDocument()
     expect(screen.getByTestId("osce-station-editor")).toBeInTheDocument()
     expect(stationListRefetch).not.toHaveBeenCalled()
+  })
+
+  it("reconciles an ambiguous station delete that committed on the server", async () => {
+    deleteStation.mockRejectedValueOnce(Object.assign(new Error("transport lost"), { status: 0 }))
+    vi.mocked(listAllOsceStations).mockResolvedValueOnce([])
+    vi.mocked(getOsceStation).mockRejectedValueOnce(Object.assign(new Error("not found"), { status: 404 }))
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit station Explain anticoagulant safety" }))
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete station Explain anticoagulant safety" }))
+
+    await waitFor(() => expect(listAllOsceStations).toHaveBeenCalledWith(8))
+    expect(getOsceStation).toHaveBeenCalledWith(8, 9)
+    await waitFor(() => expect(screen.queryByTestId("osce-station-editor")).not.toBeInTheDocument())
+    expect(stationListRefetch).toHaveBeenCalled()
+    expect(stationDetailRefetch).toHaveBeenCalled()
+    expect(quizRefetch).toHaveBeenCalled()
+  })
+
+  it("keeps a noncommitted ambiguous delete actionable and treats a 404 retry as deleted", async () => {
+    deleteStation
+      .mockRejectedValueOnce(Object.assign(new Error("transport lost"), { status: 0 }))
+      .mockRejectedValueOnce(Object.assign(new Error("already deleted"), { status: 404 }))
+    vi.mocked(listAllOsceStations).mockResolvedValueOnce([{
+      id: 9,
+      quiz_id: 8,
+      title: "Explain anticoagulant safety",
+      recommended_duration_seconds: 480,
+      order_index: 0,
+      version: 2,
+      checklist_count: 4,
+      rubric_domain_count: 2,
+      verification_state: "source_verified",
+      created_at: "2026-09-11",
+      updated_at: "2026-09-11"
+    }])
+    vi.mocked(getOsceStation).mockResolvedValueOnce({
+      id: 9,
+      quiz_id: 8,
+      content: { schema_version: "osce.station.v1", title: "Explain anticoagulant safety" },
+      order_index: 0,
+      version: 2
+    } as never)
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Manage stations" }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit station Explain anticoagulant safety" }))
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete station Explain anticoagulant safety" }))
+
+    expect(await screen.findByText("Delete status could not be confirmed. Station remains available.")).toBeInTheDocument()
+    expect(screen.getByTestId("osce-station-editor")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Delete station Explain anticoagulant safety" })).toBeEnabled()
+    expect(stationListRefetch).toHaveBeenCalled()
+    expect(stationDetailRefetch).toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete station Explain anticoagulant safety" }))
+
+    await waitFor(() => expect(deleteStation).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByTestId("osce-station-editor")).not.toBeInTheDocument())
   })
 
   it("uses max existing order index plus one for a new station", async () => {

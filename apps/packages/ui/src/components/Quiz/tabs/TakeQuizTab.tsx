@@ -379,7 +379,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
   const { data: quizDetails } = useQuizQuery(detailQuizId, { enabled: detailQuizId != null })
   const directPreviewQuizId = startQuizId ?? highlightQuizId ?? null
   const { data: directPreviewQuiz } = useQuizQuery(directPreviewQuizId, {
-    enabled: directPreviewQuizId != null && detailQuizId == null
+    enabled: directPreviewQuizId != null && directPreviewQuizId !== detailQuizId
   })
   const startAttemptMutation = useStartAttemptMutation()
   const submitAttemptMutation = useSubmitAttemptMutation()

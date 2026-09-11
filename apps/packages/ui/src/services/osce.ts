@@ -223,6 +223,17 @@ export type OsceAttemptPatch = {
   rubric_selections?: Record<string, string> | null
 }
 
+export const osceRequestErrorStatus = (error: unknown): number | null => {
+  if (!error || typeof error !== "object") return null
+  const status = Number((error as { status?: unknown }).status)
+  return Number.isFinite(status) ? Math.trunc(status) : null
+}
+
+export const isAmbiguousOsceMutationFailure = (error: unknown): boolean => {
+  const status = osceRequestErrorStatus(error)
+  return status == null || status === 0 || status === 408 || status >= 500
+}
+
 const request = <T, M extends "GET" | "POST" | "PATCH" | "DELETE">(
   path: string,
   method: M,
