@@ -163,11 +163,11 @@ type OwnerConfig = {
   orgId?: string
 }
 
-type Surface =
-  | "WebUI system"
-  | "WebUI composer"
-  | "extension sidepanel"
-  | "extension pop-out"
+type ContractCase =
+  | "manual API-key owner"
+  | "runtime API-key owner"
+  | "bearer principal owner"
+  | "normalized deployment owner"
 
 const localId = (label: string) =>
   `recipe-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
@@ -271,24 +271,22 @@ const resolveView = (
     cookieSessionRevision: options.cookieRevision
   }).view
 
-const expectLocalApply = (
-  surface: Surface,
-  target: "system" | "user_message" = surface.includes("system")
-    ? "system"
-    : "user_message"
+const expectCompiledLocalApply = (
+  label: string,
+  target: "system" | "user_message"
 ) => {
   const initial = createRecipeWorkingCopy(CLEAR_TASK_RECIPE, target)
   const ready = recipeEditorReducer(initial, {
     type: "runtime_value_changed",
     variableName: "task",
-    value: `Local work from ${surface}`
+    value: `Local work from ${label}`
   })
   expect(canApplyRecipe(ready)).toBe(true)
   const compiled = renderSingleTextRecipe(
     ready.definition,
     ready.runtimeValues
   ).rendered_text
-  expect(compiled).toContain(`Local work from ${surface}`)
+  expect(compiled).toContain(`Local work from ${label}`)
   expect(ready.definition.assembly_config.target_role).toBe(
     target === "system" ? "system" : "user"
   )
@@ -305,29 +303,34 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe("real-surface owner to dispatch contract", () => {
+describe("owner snapshot to immutable dispatch contract", () => {
   const cases: ReadonlyArray<{
-    surface: Surface
+    label: ContractCase
+    authority: "direct" | "extension"
     config: OwnerConfig
     principal?: string
     runtimeKey?: string
   }> = [
     {
-      surface: "WebUI system",
+      label: "manual API-key owner",
+      authority: "direct",
       config: manualConfig()
     },
     {
-      surface: "WebUI composer",
+      label: "runtime API-key owner",
+      authority: "direct",
       config: manualConfig({ apiKey: "configured-key" }),
       runtimeKey: "runtime-key"
     },
     {
-      surface: "extension sidepanel",
+      label: "bearer principal owner",
+      authority: "extension",
       config: bearerConfig(),
       principal: "alice"
     },
     {
-      surface: "extension pop-out",
+      label: "normalized deployment owner",
+      authority: "extension",
       config: manualConfig({
         serverUrl: "https://recipes.example.test/deploy/",
         apiKey: "extension-key"
@@ -336,8 +339,8 @@ describe("real-surface owner to dispatch contract", () => {
   ]
 
   it.each(cases)(
-    "$surface sends one opaque owner through the immutable request and locks duplicate writes",
-    async ({ surface, config, principal, runtimeKey }) => {
+    "$label sends one opaque owner through the immutable request and locks duplicate writes",
+    async ({ label, config, principal, runtimeKey }) => {
       if (runtimeKey) setRuntimeSingleUserApiKeyOverride(runtimeKey)
       const owner = resolveView(config, { principal, runtimeKey })
       expect(owner).toEqual({
@@ -350,7 +353,7 @@ describe("real-surface owner to dispatch contract", () => {
         /manual-key|configured-key|runtime-key|token-a|extension-key|recipes\.example/
       )
 
-      const id = localId(surface)
+      const id = localId(label)
       const registry = new RecipePersistenceRegistry()
       const fetchFn = vi.fn(async () => response())
       const runtime = {
@@ -443,12 +446,12 @@ describe("real-surface owner to dispatch contract", () => {
       actualOwnerId: null
     })
     expect(fetchFn).not.toHaveBeenCalled()
-    expectLocalApply("WebUI system")
+    expectCompiledLocalApply("cookie owner fallback", "system")
   })
 
   it.each(cases)(
-    "$surface masks a closed view and re-resolves only a sanitized owner on reopen",
-    async ({ surface, config, principal, runtimeKey }) => {
+    "$label masks a closed view and re-resolves only a sanitized owner on reopen",
+    async ({ authority, config, principal, runtimeKey }) => {
       const stored = {
         ...config,
         credentialSource: "manual",
@@ -460,7 +463,7 @@ describe("real-surface owner to dispatch contract", () => {
       if (principal) {
         vi.stubGlobal("fetch", async () => response(200, { id: principal }))
       }
-      if (surface.startsWith("extension")) {
+      if (authority === "extension") {
         extension.runtimeId = "extension-id"
         const view = resolveView(config, { principal, runtimeKey })
         extension.sendMessage.mockResolvedValue(view)
@@ -495,7 +498,7 @@ describe("real-surface owner to dispatch contract", () => {
           /^recipe-owner:sha256:/
         )
       )
-      if (surface.startsWith("extension")) {
+      if (authority === "extension") {
         expect(extension.sendMessage).toHaveBeenCalledTimes(2)
         expect(extension.sendMessage).toHaveBeenNthCalledWith(1, {
           type: "tldw:recipe-owner:resolve"
@@ -547,7 +550,7 @@ describe("identity drift before dispatch and refresh", () => {
         actualOwnerId: null
       })
       expect(fetchFn).not.toHaveBeenCalled()
-      expectLocalApply("WebUI composer")
+      expectCompiledLocalApply("identity drift", "user_message")
     }
   )
 
@@ -671,15 +674,18 @@ describe("identity drift before dispatch and refresh", () => {
       expect(changedResult).toMatchObject({ ok: false, status: 412 })
       expect(changedResult.recipePersistence?.state).toBe("dispatched")
       expect(changedFetch).toHaveBeenCalledOnce()
-      expectLocalApply("extension sidepanel")
+      expectCompiledLocalApply("refresh drift", "user_message")
     }
   )
 })
 
 describe("uncertain outcomes, reopen, reconciliation, and recovery", () => {
-  it.each(["WebUI system", "WebUI composer"] as const)(
+  it.each([
+    ["system-target direct owner", "system"],
+    ["user-target direct owner", "user_message"]
+  ] as const)(
     "%s keeps a scoped ambiguous mutation locked after close and reopen",
-    async (surface) => {
+    async (label, target) => {
       const config = manualConfig()
       const owner = resolveView(config)!
       const registry = new RecipePersistenceRegistry()
@@ -690,7 +696,7 @@ describe("uncertain outcomes, reopen, reconciliation, and recovery", () => {
         recipePersistence: {
           mode: "require" as const,
           expectedOwnerId: owner.ownerId,
-          localId: localId(`${surface}-ambiguous`)
+          localId: localId(`${label}-ambiguous`)
         }
       }
       const runtime = {
@@ -710,8 +716,8 @@ describe("uncertain outcomes, reopen, reconciliation, and recovery", () => {
         registry.read(payload.recipePersistence.localId, owner.ownerId)
       ).toBe("scoped")
 
-      // A new surface instance reads the application registry; component disposal
-      // never owns or clears this process-level state.
+      // A later caller reads the application registry; caller disposal never
+      // owns or clears this process-level state.
       const reopened = registry
       expect(
         reopened.read(payload.recipePersistence.localId, owner.ownerId)
@@ -719,7 +725,7 @@ describe("uncertain outcomes, reopen, reconciliation, and recovery", () => {
       const duplicate = await tldwRequest(payload, runtime)
       expect(duplicate.recipePersistence?.state).toBe("not_dispatched")
       expect(fetchFn).toHaveBeenCalledOnce()
-      expectLocalApply(surface)
+      expectCompiledLocalApply(label, target)
     }
   )
 
@@ -752,7 +758,7 @@ describe("uncertain outcomes, reopen, reconciliation, and recovery", () => {
       expect(registry.read("unknown-extension", owner)).toBe("unknown_owner")
     }
     expect(() => registry.reserve("unknown-extension", "owner-a")).toThrow()
-    expectLocalApply("extension pop-out")
+    expectCompiledLocalApply("lost extension response", "user_message")
   })
 
   it("clears only matching scoped reconciliation and Forget removes only exact unknown quarantine", () => {
@@ -789,18 +795,16 @@ describe("uncertain outcomes, reopen, reconciliation, and recovery", () => {
       available: false,
       reason: expect.stringContaining("edit, preview, and apply")
     })
-    expectLocalApply("WebUI system")
-    expectLocalApply("WebUI composer")
-    expectLocalApply("extension sidepanel")
-    expectLocalApply("extension pop-out")
+    expectCompiledLocalApply("unavailable system target", "system")
+    expectCompiledLocalApply("unavailable user target", "user_message")
   })
 })
 
 describe("real sync stack through direct and extension authorities", () => {
-  it.each(["WebUI system", "WebUI composer"] as const)(
+  it.each(["manual direct owner", "runtime-key direct owner"] as const)(
     "%s carries its resolved owner through sync, fetch, and exact reconciliation",
-    async (surface) => {
-      const id = localId(`${surface}-full-stack`)
+    async (label) => {
+      const id = localId(`${label}-full-stack`)
       const config = storedManualConfig(`${id}-key`)
       extension.values.set("tldwConfig", config)
       seedRecipe(id)
@@ -835,7 +839,7 @@ describe("real sync stack through direct and extension authorities", () => {
     }
   )
 
-  it("shares a scoped ambiguous sidepanel mutation with pop-out and clears it only after matching-owner pull", async () => {
+  it("shares one background-scoped ambiguous mutation across callers and clears it only after matching-owner pull", async () => {
     extension.values.set("tldwConfig", storedManualConfig("extension-key"))
     await startExtensionBackground()
     const id = "extension-scoped-full-stack"
@@ -851,10 +855,10 @@ describe("real sync stack through direct and extension authorities", () => {
       return successfulPromptResponse(101)
     })
 
-    const sidepanel = await pushToStudio(id, 42, {
+    const firstAttempt = await pushToStudio(id, 42, {
       expectedOwnerId: owner!.ownerId
     })
-    expect(sidepanel).toMatchObject({
+    expect(firstAttempt).toMatchObject({
       success: false,
       syncStatus: "error",
       recipeOwnership: {
@@ -865,17 +869,17 @@ describe("real sync stack through direct and extension authorities", () => {
       "scoped"
     )
 
-    // Closing the sidepanel drops no worker-owned state; the pop-out facade
-    // sees the same marker and its retry stops before another mutation.
-    const popout = await pushToStudio(id, 42, {
+    // Disposing one caller drops no worker-owned state; another caller sees the
+    // same marker and its retry stops before another mutation.
+    const retry = await pushToStudio(id, 42, {
       expectedOwnerId: owner!.ownerId
     })
-    expect(popout).toMatchObject({
+    expect(retry).toMatchObject({
       success: false,
       recipeOwnership: { dispatch: { state: "not_dispatched" } }
     })
     expect(mutationCount).toBe(1)
-    expectLocalApply("extension pop-out")
+    expectCompiledLocalApply("shared background caller", "user_message")
 
     const reconciliation = await pullFromStudio(101, id)
     expect(reconciliation).toMatchObject({
@@ -890,7 +894,7 @@ describe("real sync stack through direct and extension authorities", () => {
     expect(mutationCount).toBe(1)
   })
 
-  it("quarantines a lost pop-out response across owners without replay and Forget remains local", async () => {
+  it("quarantines a lost background response across owners without replay and Forget remains local", async () => {
     extension.values.set("tldwConfig", storedManualConfig("extension-key"))
     await startExtensionBackground()
     const id = "extension-unknown-full-stack"
@@ -954,6 +958,6 @@ describe("real sync stack through direct and extension authorities", () => {
       "clear"
     )
     expect(mutationCount).toBe(1)
-    expectLocalApply("extension pop-out")
+    expectCompiledLocalApply("unknown background caller", "user_message")
   })
 })

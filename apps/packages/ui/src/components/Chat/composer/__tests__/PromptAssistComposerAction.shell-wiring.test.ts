@@ -28,6 +28,13 @@ const currentChatModelSettingsSource = source(
 const modelBasicsTabSource = source(
   "src/components/Common/Settings/tabs/ModelBasicsTab.tsx"
 )
+const sidepanelEntrySource = source("src/entries/sidepanel/App.tsx")
+const sharedSidepanelAppSource = source("src/entries/shared/sidepanel-app.tsx")
+const sidepanelRouteRegistrySource = source(
+  "src/routes/sidepanel-route-registry.tsx"
+)
+const sidepanelChatSource = source("src/routes/sidepanel-chat.tsx")
+const quickChatPopoutSource = source("src/routes/option-quick-chat-popout.tsx")
 
 const occurrences = (value: string, fragment: string) =>
   value.split(fragment).length - 1
@@ -108,6 +115,27 @@ describe("PromptAssistComposerAction real shell wiring", () => {
     expect(
       occurrences(sidepanelFormSource, "<PromptAssistComposerAction")
     ).toBe(1)
+  })
+
+  it("wires the extension sidepanel to the shared composer adapter and does not mislabel the separate quick-chat pop-out", () => {
+    expect(sidepanelEntrySource).toContain(
+      'export { SidepanelApp as default } from "@/entries/shared/sidepanel-app"'
+    )
+    expect(sharedSidepanelAppSource).toContain("<SidepanelRouteShell />")
+    expect(sidepanelRouteRegistrySource).toMatch(
+      /path:\s*"\/chat"[\s\S]*element:\s*<SidepanelChat\s*\/>/
+    )
+    expect(sidepanelChatSource).toContain(
+      'import { SidepanelForm } from "~/components/Sidepanel/Chat/form"'
+    )
+    expect(
+      occurrences(sidepanelFormSource, "<PromptAssistComposerAction")
+    ).toBe(1)
+
+    // The product's pop-out entry is a separate Quick Chat surface, not a
+    // recipe-capable composer. Contract tests must not relabel it as one.
+    expect(quickChatPopoutSource).toContain("<QuickChatInput")
+    expect(quickChatPopoutSource).not.toContain("PromptAssistComposerAction")
   })
 
   it("routes Sidepanel model recovery to settings that contain model selection", () => {
