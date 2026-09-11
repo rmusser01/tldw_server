@@ -117,7 +117,7 @@ Current release line:
 - `0.1.42` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
 - Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
-- The `dev` branch carries work beyond `0.1.42`; the release covers the frozen train through PR #2939 plus the trusted license-gate bootstrap on `main`. See [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- The `dev` branch carries work beyond `0.1.42`; the release covers the frozen train through PR #2941 plus the trusted license-gate bootstrap on `main`. See [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -154,7 +154,7 @@ Current release line:
 <details>
 <summary>0.1.42 release</summary>
 
-Included in the `0.1.42` release candidate (frozen through PR #2939):
+Included in the `0.1.42` release candidate (frozen through PR #2941):
 - Chat macros and service prompts, notes/personal-context sync, Research Workspace improvements, and standalone HTML presentations.
 - Audio/persona and buddy workflows, MCP HTTP/SSE transports, durable webhooks, administration improvements, and production backup/rollback checks.
 - Provider credential resolution is shared across Chat, RAG, embeddings, and audio, with fail-closed BYOK handling and safer streaming.

@@ -330,3 +330,15 @@ resolver while replacing only credential/network/model-weight I/O. A retained
 async-generator reference also exposed error cleanup running after credential
 disposal; asserting cleanup order before returning catches what eventual-GC
 checks miss.
+
+
+## Native portability needs the destination importer (TASK-13242, 2026-09-10)
+
+A server-to-server Trenchcoat credit round trip passed while the export still
+contained an internal manifest extension that Chatbook rejects. Read-only review
+caught the strict-root mismatch; after moving credits back to the native carrier,
+the actual Chatbook importer accepted the same HTTP-exported archive with all
+18 states and exact notices. A source host's own re-import is insufficient evidence
+of cross-host portability. The same task's PostgreSQL run first exposed datetime
+export serialization and then the explicit SQLite-only import-job boundary;
+qualify supported storage paths separately instead of claiming backend parity.

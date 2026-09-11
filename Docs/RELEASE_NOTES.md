@@ -6,8 +6,8 @@ This page is the release notes index placeholder for published versions.
 
 ## 0.1.42 - 2026-09-10
 
-This candidate refreshes the frozen development train through PR #2939
-(`50c1f689575b1bc21ed3e78cdb193b03fe968cdd`). See `CHANGELOG.md` for the
+This candidate refreshes the frozen development train through PR #2941
+(`6c4bdcbc48f4fe4bab7019d59ad8cf962ab240da`). See `CHANGELOG.md` for the
 complete grouped rollup and the release-refresh plan for outstanding gates.
 
 ### Chat, notes, research, and personal context
@@ -21,6 +21,10 @@ complete grouped rollup and the release-refresh plan for outstanding gates.
   usability.
 - Added Migu/persona voice and buddy workflows, OpenRouter/generic and audio.cpp
   TTS support, realtime speech, and MCP Unified HTTP/SSE transports.
+
+- Preserve artwork credits across Buddy copies and native visual-pack
+  export/import, with lifecycle regression coverage for bounded pack loads
+  during route updates (#2940, #2941).
 
 ### Administration and upgrade preparation
 

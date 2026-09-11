@@ -14,7 +14,10 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from .AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
-from .exception_types import PromptCatalogError  # noqa: F401 - re-exported for compatibility.
+from .exception_types import (  # noqa: F401 - centralized compatibility exports.
+    PersonaArtworkValidationError,
+    PromptCatalogError,
+)
 
 if TYPE_CHECKING:
     from .Admin_Webhooks.domain import WebhookErrorCode

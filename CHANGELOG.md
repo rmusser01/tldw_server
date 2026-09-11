@@ -20,7 +20,7 @@ and this project adheres to Some kind of Versioning
 ## [0.1.42] - 2026-09-10
 
 > Rollup coverage: frozen `dev` commit
-> `50c1f689575b1bc21ed3e78cdb193b03fe968cdd`, through PR #2939, plus
+> `6c4bdcbc48f4fe4bab7019d59ad8cf962ab240da`, through PR #2941, plus
 > the trusted license-gate bootstrap on `main`. This refresh includes the
 > original July candidate and the subsequent merged development train.
 
@@ -75,6 +75,10 @@ and this project adheres to Some kind of Versioning
   MkDocs metadata to `0.1.42`.
 
 ### Fixed
+
+- **Buddy Artwork Credits** — Preserve and validate artwork attribution across
+  Buddy copies and native visual-pack exports/imports. Added lifecycle coverage
+  for bounded visual-pack loads across live route updates (#2940, #2941).
 
 - **Release Hardening** — Repaired worker package/configuration inputs and added
   backend image import checks. Enforced SQLite foreign keys during erasure and

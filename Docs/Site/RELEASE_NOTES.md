@@ -5,7 +5,7 @@ Published release notes entry point.
 ## 0.1.42 - 2026-09-10
 
 - See the repository `CHANGELOG.md` for the full `0.1.42` rollup through
-  PR #2939 plus the trusted license-gate bootstrap on `main`.
+  PR #2941 plus the trusted license-gate bootstrap on `main`.
 - This candidate includes chat/service prompts, notes and personal-context
   sync, research and presentations, audio/persona workflows, MCP transports,
   durable webhooks, production deployment checks, and reliability fixes.

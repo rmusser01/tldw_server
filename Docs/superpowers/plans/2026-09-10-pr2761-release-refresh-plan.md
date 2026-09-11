@@ -7,6 +7,43 @@
 
 ## Current release status
 
+### Current-dev continuation (2026-09-11 UTC)
+
+The requester confirmed promotion of current remote `dev` followed by a release.
+Reuse this candidate and TASK-13013.3. Freeze the additional dev input at
+`6c4bdcbc48f4fe4bab7019d59ad8cf962ab240da` (PRs #2940 and #2941), retaining
+all existing release fixes and the approved legal dates.
+
+1. Integrate the frozen dev input without rewriting history; verify the Buddy
+   portability and lifecycle tests. Status: Complete.
+2. Investigate current-head frontend failures, refresh source/manifest and
+   release notes, and run focused release/security checks. Status: In Progress.
+3. Push the complete source/metadata batch to PR #2761, obtain fresh CI, and
+   retain draft status until all recorded gates and human review are satisfied.
+   Status: Not Started.
+
+At `43165c8c82`, 72 checks pass, none remain pending, and Characters Harness,
+frontend unit shard 5, frontend-required and CodeQL fail. Characters Harness
+times out in the import-completion test; shard 5 fails to find the post-copy
+pack-refresh error in VisualPackEditor. CodeQL reports 7 critical and 414 high
+changed-code alerts. These findings are unresolved, not waived.
+
+The clean merge includes Buddy attribution validation/portability and the new
+route lifecycle regression. Current verification: 44 backend portability tests
+pass with one skip; the lifecycle test passes; all 65 VisualPackEditor tests
+pass; the isolated Characters import-completion test passes. Full Characters
+harness verification is running. Ruff is clean and Bandit reports zero findings
+on the integrated Python scope. The release/docs/CI helper selection passes 79
+tests; the strict docs test fails in the installed Git-revision plugin while
+creating a multiprocessing semaphore (`SemLock`, errno 28), both inside and
+outside the sandbox. This is the existing host limitation; the standard test and
+build remain unchanged and must pass remotely.
+
+The requester reports no existing deployment. An installed-version rollback
+baseline is therefore not applicable to this deployment; this does not waive
+fresh-install, candidate recovery, migration-compatibility documentation,
+security, lifecycle, supply-chain, capacity or human-review requirements.
+
 **Release is not ready to merge or publish.** The candidate same-image backup/restore smoke now passes; the published rollback baseline is broken. See [recovery evidence](../../Evidence/PR2761-candidate-recovery.md). This document is the active execution plan for [PR #2761](https://github.com/rmusser01/tldw_server/pull/2761), including unfinished work. The July design is historical; its source/date values are superseded here.
 
 | Item | Recorded state |
