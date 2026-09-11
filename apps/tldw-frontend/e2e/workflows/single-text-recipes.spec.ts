@@ -361,9 +361,14 @@ test.describe('WebUI single-text structured recipes', () => {
     await builder.getByRole('button', { name: 'Edit Output block' }).click();
     await builder.getByRole('checkbox', { name: 'Block enabled' }).check();
     await builder.getByRole('textbox', { name: 'Block content' }).fill('Final answer only.');
-    await builder.getByRole('button', { name: 'Move Output up' }).click();
+    await builder.getByRole('button', { name: 'Edit Constraints block' }).click();
+    await builder.getByRole('checkbox', { name: 'Block enabled' }).check();
     await expect(preview).toHaveValue(
-      'Complete this task:\n\nExact output task\n\nFinal answer only.'
+      'Complete this task:\n\nExact output task\n\nFollow every explicit constraint. Preserve supplied names, facts, code, and required formatting; do not invent requirements.\n\nFinal answer only.'
+    );
+    await builder.getByRole('button', { name: 'Move Output up' }).press('Enter');
+    await expect(preview).toHaveValue(
+      'Complete this task:\n\nExact output task\n\nFinal answer only.\n\nFollow every explicit constraint. Preserve supplied names, facts, code, and required formatting; do not invent requirements.'
     );
   });
 

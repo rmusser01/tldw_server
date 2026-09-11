@@ -314,12 +314,44 @@ async function fillTask(builder: Locator, value: string) {
     .fill(value)
 }
 
-function expectRuntimeExcluded(request: RecordedRequest) {
+function expectPersistedRecipe(
+  request: RecordedRequest,
+  expectedObjectiveContent: string
+) {
   expect(request.json).not.toBeNull()
   const body = request.json as JsonObject
   const serialized = JSON.stringify(body)
   expect(body.prompt_format).toBe("structured")
   expect(body.prompt_schema_version).toBe(2)
+  expect(body.prompt_definition).toMatchObject({
+    schema_version: 2,
+    format: "structured",
+    definition_kind: "single_text_recipe",
+    assembly_config: {
+      assembly_mode: "single_text",
+      target_role: "user",
+      render_format: "xml",
+      block_separator: "\n\n"
+    },
+    variables: [
+      expect.objectContaining({
+        name: "task",
+        label: "Task",
+        required: true,
+        default_value: "Extension saved default",
+        input_type: "textarea"
+      })
+    ],
+    blocks: expect.arrayContaining([
+      expect.objectContaining({
+        id: "objective",
+        role: "user",
+        content: expectedObjectiveContent,
+        enabled: true,
+        is_template: true
+      })
+    ])
+  })
   expect(serialized).not.toContain(RUNTIME_SENTINEL)
   expect(serialized).not.toMatch(
     /runtimeValues|runtime_values|variable_values|resolved_values/
@@ -461,7 +493,10 @@ test.describe("Packaged extension single-text structured recipes", () => {
       await expect(save).toBeEnabled()
       await save.click()
       await expect.poll(() => mock.creates().length).toBe(1)
-      expectRuntimeExcluded(mock.creates()[0])
+      expectPersistedRecipe(
+        mock.creates()[0],
+        "Complete this task:\n\n{{task}}"
+      )
 
       const source = builder.getByRole("combobox", { name: "Recipe source" })
       await source.selectOption({ label: "Untitled recipe" })
@@ -473,10 +508,10 @@ test.describe("Packaged extension single-text structured recipes", () => {
         .fill("Extension update: {{task}}")
       await builder.getByRole("button", { name: "Update recipe" }).click()
       await expect.poll(() => mock.updates().length).toBe(1)
-      expectRuntimeExcluded(mock.updates()[0])
+      expectPersistedRecipe(mock.updates()[0], "Extension update: {{task}}")
       await builder.getByRole("button", { name: "Save as new recipe" }).click()
       await expect.poll(() => mock.creates().length).toBe(2)
-      expectRuntimeExcluded(mock.creates()[1])
+      expectPersistedRecipe(mock.creates()[1], "Extension update: {{task}}")
 
       await source.selectOption({ label: "Clear task" })
       await fillTask(builder, RUNTIME_SENTINEL)
