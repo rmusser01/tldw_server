@@ -210,6 +210,34 @@ def test_quizzes_module_uses_user_id_as_database_and_mutation_owner(monkeypatch,
     assert legacy_created["quiz_id"] == 1
 
 
+def test_quizzes_module_fails_closed_without_owner_identity(tmp_path: Path):
+    mod = QuizzesModule(ModuleConfig(name="quizzes"))
+    db_paths = {"chacha": str(tmp_path / "chacha.db")}
+
+    for context in [
+        SimpleNamespace(db_paths=db_paths),
+        SimpleNamespace(user_id="", client_id="", db_paths=db_paths),
+    ]:
+        with pytest.raises(ValueError, match="owner identity"):
+            mod._open_db(context)
+
+
+def test_quizzes_module_fails_closed_when_owner_identity_access_raises(tmp_path: Path):
+    mod = QuizzesModule(ModuleConfig(name="quizzes"))
+
+    class BrokenOwnerContext:
+        db_paths = {"chacha": str(tmp_path / "chacha.db")}
+
+        @property
+        def user_id(self):
+            raise RuntimeError("identity unavailable")
+
+        client_id = None
+
+    with pytest.raises(ValueError, match="owner identity"):
+        mod._open_db(BrokenOwnerContext())
+
+
 def test_quizzes_module_get_media_content_uses_managed_media_database(monkeypatch, tmp_path: Path):
     mod = QuizzesModule(ModuleConfig(name="quizzes"))
     events = []

@@ -374,6 +374,11 @@ def list_questions(
                 count=len(items),
             ),
         )
+    except ConflictError as exc:
+        raise map_db_error_to_http(
+            exc,
+            conflict_status_code=404,
+        ) from exc
     except (InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to list questions") from exc
 
@@ -387,7 +392,7 @@ def create_question(
     """Add a question to a quiz."""
     try:
         question_id = db.create_question(quiz_id=quiz_id, **question.model_dump())
-        item = db.get_question(question_id)
+        item = db.get_question(question_id, quiz_id=quiz_id)
         if not item:
             raise HTTPException(status_code=500, detail="Failed to load created question")
         return item
@@ -409,10 +414,14 @@ def update_question(
 ):
     """Update a question."""
     try:
-        ok = db.update_question(question_id, updates.model_dump(exclude_unset=True))
+        ok = db.update_question(
+            question_id,
+            updates.model_dump(exclude_unset=True),
+            quiz_id=quiz_id,
+        )
         if not ok:
             raise HTTPException(status_code=404, detail="Question not found")
-        item = db.get_question(question_id)
+        item = db.get_question(question_id, quiz_id=quiz_id)
         if not item:
             raise HTTPException(status_code=404, detail="Question not found")
         return item
@@ -430,7 +439,12 @@ def delete_question(
 ):
     """Delete a question."""
     try:
-        ok = db.delete_question(question_id, expected_version=expected_version, hard_delete=hard)
+        ok = db.delete_question(
+            question_id,
+            expected_version=expected_version,
+            hard_delete=hard,
+            quiz_id=quiz_id,
+        )
         if not ok:
             raise HTTPException(status_code=404, detail="Question not found")
         return {"status": "deleted"}

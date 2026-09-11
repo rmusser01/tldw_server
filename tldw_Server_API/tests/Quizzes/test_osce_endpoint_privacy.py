@@ -508,3 +508,160 @@ def test_postgres_quiz_http_crud_is_owner_scoped_and_cascade_safe(
         TestConfig.reset_settings()
         attacker.close_all_connections()
         owner.close_all_connections()
+
+
+@pytest.mark.timeout(120)
+def test_postgres_question_and_attempt_http_routes_scope_children_to_owner(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    attacker_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    owner = CharactersRAGDB(Path(":memory:"), client_id="child-http-owner", backend=owner_backend)
+    attacker = CharactersRAGDB(
+        Path(":memory:"), client_id="child-http-attacker", backend=attacker_backend
+    )
+    active: dict[str, Any] = {
+        "db": owner,
+        "user": User(
+            id=301,
+            username="child-http-owner",
+            email="child-http-owner@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        ),
+    }
+
+    def override_active_db():
+        yield active["db"]
+
+    async def override_active_user():
+        return active["user"]
+
+    try:
+        quiz_id = owner.create_quiz(name="Private question quiz")
+        other_quiz_id = owner.create_quiz(name="Other private quiz")
+        foreign_update_id = owner.create_question(
+            quiz_id, "true_false", "Foreign update target?", "true"
+        )
+        foreign_delete_id = owner.create_question(
+            quiz_id, "true_false", "Foreign delete target?", "true"
+        )
+        mismatch_update_id = owner.create_question(
+            quiz_id, "true_false", "Mismatch update target?", "true"
+        )
+        mismatch_delete_id = owner.create_question(
+            quiz_id, "true_false", "Mismatch delete target?", "true"
+        )
+        attempt = owner.start_attempt(quiz_id)
+
+        TestConfig.setup_test_environment()
+        fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_active_db
+        fastapi_app.dependency_overrides[get_request_user] = override_active_user
+        with TestClient(fastapi_app, headers=AUTH_HEADERS) as test_client:
+            active["db"] = attacker
+            active["user"] = User(
+                id=302,
+                username="child-http-attacker",
+                email="child-http-attacker@example.com",
+                is_active=True,
+                roles=["admin"],
+                is_admin=True,
+            )
+            foreign_update = test_client.patch(
+                f"/api/v1/quizzes/{quiz_id}/questions/{foreign_update_id}",
+                json={"question_text": "Captured", "expected_version": 1},
+            )
+            foreign_delete = test_client.delete(
+                f"/api/v1/quizzes/{quiz_id}/questions/{foreign_delete_id}",
+                params={"expected_version": 1},
+            )
+            foreign_list_questions = test_client.get(
+                f"/api/v1/quizzes/{quiz_id}/questions"
+            )
+            foreign_start_attempt = test_client.post(
+                f"/api/v1/quizzes/{quiz_id}/attempts"
+            )
+            foreign_get_attempt = test_client.get(
+                f"/api/v1/quizzes/attempts/{attempt['id']}",
+                params={"include_answers": True},
+            )
+            foreign_list_attempts = test_client.get("/api/v1/quizzes/attempts")
+            foreign_submit_attempt = test_client.put(
+                f"/api/v1/quizzes/attempts/{attempt['id']}",
+                json={
+                    "answers": [
+                        {
+                            "question_id": foreign_update_id,
+                            "user_answer": "false",
+                        }
+                    ]
+                },
+            )
+
+            active["db"] = owner
+            active["user"] = User(
+                id=301,
+                username="child-http-owner",
+                email="child-http-owner@example.com",
+                is_active=True,
+                roles=["admin"],
+                is_admin=True,
+            )
+            mismatch_update = test_client.patch(
+                f"/api/v1/quizzes/{other_quiz_id}/questions/{mismatch_update_id}",
+                json={"question_text": "Wrong parent", "expected_version": 1},
+            )
+            mismatch_delete = test_client.delete(
+                f"/api/v1/quizzes/{other_quiz_id}/questions/{mismatch_delete_id}",
+                params={"expected_version": 1},
+            )
+
+        assert [
+            foreign_update.status_code,
+            foreign_delete.status_code,
+            foreign_list_questions.status_code,
+            foreign_start_attempt.status_code,
+            foreign_get_attempt.status_code,
+            foreign_submit_attempt.status_code,
+            mismatch_update.status_code,
+            mismatch_delete.status_code,
+        ] == [404] * 8
+        assert foreign_list_attempts.status_code == 200
+        assert foreign_list_attempts.json()["items"] == []
+        assert foreign_list_attempts.json()["count"] == 0
+
+        quiz_row = owner.execute_query(
+            "SELECT total_questions, client_id FROM quizzes WHERE id = ?",
+            (quiz_id,),
+        ).fetchone()
+        question_rows = owner.execute_query(
+            "SELECT id, question_text, deleted, client_id FROM quiz_questions "
+            "WHERE quiz_id = ? ORDER BY id",
+            (quiz_id,),
+        ).fetchall()
+        attempt_row = owner.execute_query(
+            "SELECT completed_at, score, answers, client_id FROM quiz_attempts WHERE id = ?",
+            (attempt["id"],),
+        ).fetchone()
+        assert quiz_row is not None
+        assert int(quiz_row["total_questions"]) == 4
+        assert quiz_row["client_id"] == owner.client_id
+        assert [row["question_text"] for row in question_rows] == [
+            "Foreign update target?",
+            "Foreign delete target?",
+            "Mismatch update target?",
+            "Mismatch delete target?",
+        ]
+        assert all(not bool(row["deleted"]) for row in question_rows)
+        assert all(row["client_id"] == owner.client_id for row in question_rows)
+        assert attempt_row is not None
+        assert attempt_row["completed_at"] is None
+        assert attempt_row["score"] is None
+        assert attempt_row["answers"] in ([], "[]")
+        assert attempt_row["client_id"] == owner.client_id
+    finally:
+        fastapi_app.dependency_overrides.clear()
+        TestConfig.reset_settings()
+        attacker.close_all_connections()
+        owner.close_all_connections()

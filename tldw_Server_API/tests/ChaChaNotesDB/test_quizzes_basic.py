@@ -876,3 +876,99 @@ def test_postgres_quiz_domain_operations_are_owner_scoped(
     finally:
         attacker.close_all_connections()
         owner.close_all_connections()
+
+
+@pytest.mark.timeout(90)
+def test_postgres_question_and_attempt_operations_are_parent_owner_scoped(
+    pg_database_config: DatabaseConfig,
+):
+    owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    attacker_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    owner = CharactersRAGDB(Path(":memory:"), client_id="child-owner", backend=owner_backend)
+    attacker = CharactersRAGDB(
+        Path(":memory:"), client_id="child-attacker", backend=attacker_backend
+    )
+    try:
+        quiz_id = owner.create_quiz(name="Owned questions")
+        other_quiz_id = owner.create_quiz(name="Other owned quiz")
+        update_id = owner.create_question(
+            quiz_id,
+            "true_false",
+            "Update target?",
+            "true",
+        )
+        delete_id = owner.create_question(
+            quiz_id,
+            "true_false",
+            "Delete target?",
+            "true",
+        )
+        attempt = owner.start_attempt(quiz_id)
+
+        assert attacker.get_question(update_id) is None
+        with pytest.raises(ConflictError, match="Quiz not found"):
+            attacker.list_questions(quiz_id)
+        assert not attacker.update_question(
+            update_id,
+            {"question_text": "Captured"},
+        )
+        assert not attacker.delete_question(delete_id, expected_version=1)
+        assert not owner.update_question(
+            update_id,
+            {"question_text": "Wrong parent"},
+            quiz_id=other_quiz_id,
+        )
+        assert not owner.delete_question(
+            delete_id,
+            expected_version=1,
+            quiz_id=other_quiz_id,
+        )
+
+        assert attacker.get_attempt(attempt["id"], include_answers=True) is None
+        assert attacker.list_attempts() == {"items": [], "count": 0}
+        assert attacker.list_attempts(quiz_id=quiz_id) == {"items": [], "count": 0}
+        with pytest.raises(ConflictError, match="Attempt not found"):
+            attacker.submit_attempt(
+                attempt["id"],
+                [{"question_id": update_id, "user_answer": "false"}],
+            )
+
+        assert not attacker.update_quiz(quiz_id, {})
+        assert owner.update_quiz(quiz_id, {})
+        assert owner.update_question(
+            update_id,
+            {"question_text": "Owner changed"},
+            quiz_id=quiz_id,
+        )
+        assert owner.delete_question(delete_id, expected_version=1, quiz_id=quiz_id)
+
+        quiz_row = owner.execute_query(
+            "SELECT total_questions, client_id FROM quizzes WHERE id = ?",
+            (quiz_id,),
+        ).fetchone()
+        question_rows = owner.execute_query(
+            "SELECT id, question_text, deleted, client_id FROM quiz_questions "
+            "WHERE id IN (?, ?) ORDER BY id",
+            (update_id, delete_id),
+        ).fetchall()
+        attempt_row = owner.execute_query(
+            "SELECT completed_at, score, answers, client_id FROM quiz_attempts WHERE id = ?",
+            (attempt["id"],),
+        ).fetchone()
+
+        assert quiz_row is not None
+        assert int(quiz_row["total_questions"]) == 1
+        assert quiz_row["client_id"] == owner.client_id
+        by_question_id = {int(row["id"]): row for row in question_rows}
+        assert by_question_id[update_id]["question_text"] == "Owner changed"
+        assert by_question_id[update_id]["client_id"] == owner.client_id
+        assert bool(by_question_id[delete_id]["deleted"])
+        assert by_question_id[delete_id]["client_id"] == owner.client_id
+        assert attempt_row is not None
+        assert attempt_row["completed_at"] is None
+        assert attempt_row["score"] is None
+        assert attempt_row["answers"] in ([], "[]")
+        assert attempt_row["client_id"] == owner.client_id
+    finally:
+        attacker.close_all_connections()
+        owner.close_all_connections()

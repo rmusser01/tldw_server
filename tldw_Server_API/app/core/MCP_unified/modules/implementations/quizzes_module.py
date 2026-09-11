@@ -539,9 +539,9 @@ class QuizzesModule(BaseModule):
             client_id = getattr(context, "client_id", None)
             if client_id is not None and str(client_id).strip():
                 return str(client_id)
-            return "mcp_quizzes"
-        except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
-            return "mcp_quizzes"
+        except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
+            raise ValueError("Missing quiz owner identity") from exc
+        raise ValueError("Missing quiz owner identity")
 
     def _log_db_close_failure(self) -> None:
         logger.debug("Failed to close DB")
