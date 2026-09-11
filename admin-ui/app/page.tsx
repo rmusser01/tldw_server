@@ -163,7 +163,6 @@ export default function DashboardPage() {
   );
   const previousJobsSnapshotRef = useRef<JobSnapshot | null>(null);
   const dashboardLoadInFlightRef = useRef(false);
-  const dashboardLoadRequestIdRef = useRef(0);
   const [recentActivity, setRecentActivity] = useState<AuditLog[]>([]);
   const [alerts, setAlerts] = useState<DashboardAlert[]>([]);
   const [systemHealth, setSystemHealth] = useState<DashboardSystemHealth>(
@@ -220,7 +219,6 @@ export default function DashboardPage() {
       return;
     }
 
-    const requestId = ++dashboardLoadRequestIdRef.current;
     dashboardLoadInFlightRef.current = true;
 
     try {
@@ -479,6 +477,7 @@ export default function DashboardPage() {
       setOperationalKpis(DEFAULT_DASHBOARD_OPERATIONAL_KPIS);
       setUptimeSummary(DEFAULT_DASHBOARD_UPTIME_SUMMARY);
     } finally {
+      dashboardLoadInFlightRef.current = false;
       loadingRef.current = false;
       setLoading(false);
       setLastRefreshed(new Date());

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import ByokDashboardPage from '../page';
 import { api } from '@/lib/api-client';
+import { ConfirmProvider } from '@/components/ui/confirm-dialog';
 
 const promptPrivilegedActionMock = vi.hoisted(() => vi.fn());
 const toastSuccessMock = vi.hoisted(() => vi.fn());
@@ -189,7 +190,7 @@ afterEach(() => {
 
 describe('ByokDashboardPage', () => {
   it('renders per-user BYOK usage with backend-backed validation history', async () => {
-    render(<ByokDashboardPage />);
+    render(<ByokDashboardPage />, { wrapper: ConfirmProvider });
 
     expect(await screen.findByText('Per-User BYOK Usage')).toBeInTheDocument();
 
@@ -227,7 +228,7 @@ describe('ByokDashboardPage', () => {
   it('starts OpenAI OAuth connect flow from the BYOK card', async () => {
     const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as Window);
 
-    render(<ByokDashboardPage />);
+    render(<ByokDashboardPage />, { wrapper: ConfirmProvider });
 
     const connectButton = await screen.findByRole('button', { name: 'Connect OpenAI' });
     fireEvent.click(connectButton);
@@ -281,7 +282,7 @@ describe('ByokDashboardPage', () => {
         job_id: 'job-2',
       });
 
-    render(<ByokDashboardPage />);
+    render(<ByokDashboardPage />, { wrapper: ConfirmProvider });
 
     expect(screen.getByText('BYOK Dashboards')).toBeInTheDocument();
     const runSweepButton = await screen.findByRole('button', { name: /run validation sweep/i });
@@ -318,7 +319,7 @@ describe('ByokDashboardPage', () => {
       ],
     });
 
-    render(<ByokDashboardPage />);
+    render(<ByokDashboardPage />, { wrapper: ConfirmProvider });
 
     const deleteButton = await screen.findByRole('button', { name: /delete/i });
     fireEvent.click(deleteButton);
@@ -343,7 +344,7 @@ describe('ByokDashboardPage', () => {
     });
     apiMock.createByokValidationRun.mockRejectedValue(new Error('sweep failed'));
 
-    render(<ByokDashboardPage />);
+    render(<ByokDashboardPage />, { wrapper: ConfirmProvider });
 
     expect(screen.getByText('BYOK Dashboards')).toBeInTheDocument();
     const runSweepButton = await screen.findByRole('button', { name: /run validation sweep/i });

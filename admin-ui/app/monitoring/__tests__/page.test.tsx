@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 import type { ReactNode } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import MonitoringPage from '../page';
 import { normalizeHealthStatus } from '../status-utils';
@@ -19,6 +19,14 @@ vi.mock('next/navigation', () => ({
     prefetch: vi.fn(),
   }),
 }));
+
+vi.mock('@/lib/use-url-state', async () => {
+  const React = await import('react');
+  return {
+    useUrlState: <T,>(_key: string, options?: { defaultValue?: T }) =>
+      React.useState<T | undefined>(options?.defaultValue),
+  };
+});
 
 vi.mock('@/components/PermissionGuard', () => ({
   PermissionGuard: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -492,10 +500,8 @@ describe('MonitoringPage', () => {
     const startInput = screen.getByLabelText('Custom Start');
     const endInput = screen.getByLabelText('Custom End');
 
-    await user.clear(startInput);
-    await user.type(startInput, '2026-02-17T12:00');
-    await user.clear(endInput);
-    await user.type(endInput, '2026-02-17T08:00');
+    fireEvent.change(startInput, { target: { value: '2026-02-17T12:00' } });
+    fireEvent.change(endInput, { target: { value: '2026-02-17T08:00' } });
     await user.click(screen.getByTestId('monitoring-time-range-apply-custom'));
 
     expect(await screen.findByText('Custom range start must be before end.')).toBeTruthy();
