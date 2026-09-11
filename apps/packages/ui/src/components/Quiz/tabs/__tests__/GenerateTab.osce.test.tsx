@@ -28,6 +28,7 @@ vi.mock("../../hooks", () => ({
   useGenerateQuizMutation: vi.fn(),
   useCreateQuizMutation: vi.fn(),
   useCreateOsceStationMutation: vi.fn(),
+  useUpdateOsceStationMutation: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
   useCreateQuestionMutation: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false }))
 }))
 vi.mock("@/services/quizzes", async () => ({

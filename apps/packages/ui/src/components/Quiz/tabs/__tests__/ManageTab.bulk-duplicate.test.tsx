@@ -52,10 +52,7 @@ vi.mock("../../hooks", () => ({
   useUpdateQuizMutation: vi.fn(),
   useCreateQuestionMutation: vi.fn(),
   useUpdateQuestionMutation: vi.fn(),
-  useDeleteQuestionMutation: vi.fn()
-}))
-
-vi.mock("../../hooks/useOsceQueries", () => ({
+  useDeleteQuestionMutation: vi.fn(),
   useAllOsceStationsQuery: vi.fn(() => ({
     data: [],
     error: null,

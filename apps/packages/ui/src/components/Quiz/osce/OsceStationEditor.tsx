@@ -37,7 +37,7 @@ import {
 import {
   useCreateOsceStationMutation,
   useUpdateOsceStationMutation
-} from "../hooks/useOsceQueries"
+} from "../hooks"
 
 export type OsceStationDraft = Omit<
   OsceStationCreateContent,

@@ -49,7 +49,16 @@ class FakeQuizzesDB:
             return None
         return dict(quiz)
 
-    def list_quizzes(self, q=None, media_id=None, workspace_tag=None, include_deleted=False, limit=50, offset=0):
+    def list_quizzes(
+        self,
+        q=None,
+        media_id=None,
+        workspace_tag=None,
+        activity_type="questions",
+        include_deleted=False,
+        limit=50,
+        offset=0,
+    ) -> dict[str, Any]:
         items = [v for v in self.quizzes.values() if include_deleted or not v.get("deleted")]
         return {"items": items[offset: offset + limit], "count": len(items)}
 

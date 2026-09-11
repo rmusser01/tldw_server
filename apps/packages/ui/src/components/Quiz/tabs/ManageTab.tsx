@@ -48,6 +48,9 @@ import {
   useCreateQuestionMutation,
   useDeleteQuestionMutation,
   useDeleteQuizMutation,
+  useDeleteOsceStationMutation,
+  useAllOsceStationsQuery,
+  useOsceStationQuery,
   useQuestionsQuery,
   useQuizzesQuery,
   useUpdateQuestionMutation,
@@ -70,11 +73,6 @@ import {
   osceRequestErrorStatus,
   type OsceStationSummary
 } from "@/services/osce"
-import {
-  useAllOsceStationsQuery,
-  useDeleteOsceStationMutation,
-  useOsceStationQuery,
-} from "../hooks/useOsceQueries"
 import { OsceStationEditor } from "../osce/OsceStationEditor"
 import {
   buildQuizExport,
@@ -209,7 +207,13 @@ const mapWithConcurrency = async <T, R>(
     }
   }
   const workerCount = Math.min(items.length, Math.max(1, Math.trunc(concurrency)))
-  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  const workerResults = await Promise.allSettled(
+    Array.from({ length: workerCount }, () => worker())
+  )
+  const failedWorker = workerResults.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected"
+  )
+  if (failedWorker) throw failedWorker.reason
   return results
 }
 const ASSIGNMENT_PRIVILEGED_ROLES = new Set(["owner", "admin", "lead"])

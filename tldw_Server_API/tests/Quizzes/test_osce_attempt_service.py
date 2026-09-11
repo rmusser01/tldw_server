@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from hypothesis import given
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 pytestmark = pytest.mark.unit
@@ -200,6 +200,7 @@ def test_completion_validation_requires_every_checklist_item_and_rubric_domain()
         )
 
 
+@settings(suppress_health_check=[HealthCheck.too_slow])
 @given(checklist_states=st.lists(st.sampled_from(["met", "not_met"]), min_size=1, max_size=20))
 def test_complete_summary_accepts_domain_valid_selections_without_deriving_score(
     checklist_states: list[str],

@@ -6,13 +6,11 @@ import { ManageTab } from "../ManageTab"
 import {
   useCreateQuestionMutation, useCreateQuizMutation, useDeleteQuestionMutation,
   useDeleteQuizMutation, useQuestionsQuery, useQuizzesQuery,
-  useUpdateQuestionMutation, useUpdateQuizMutation
-} from "../../hooks"
-import {
+  useUpdateQuestionMutation, useUpdateQuizMutation,
   useAllOsceStationsQuery,
   useDeleteOsceStationMutation,
   useOsceStationQuery
-} from "../../hooks/useOsceQueries"
+} from "../../hooks"
 import { importQuizzesJson } from "@/services/quizzes"
 import { getOsceStation, listAllOsceStations } from "@/services/osce"
 
@@ -22,9 +20,7 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({
 vi.mock("../../hooks", () => ({
   useCreateQuestionMutation: vi.fn(), useCreateQuizMutation: vi.fn(), useDeleteQuestionMutation: vi.fn(),
   useDeleteQuizMutation: vi.fn(), useQuestionsQuery: vi.fn(), useQuizzesQuery: vi.fn(),
-  useUpdateQuestionMutation: vi.fn(), useUpdateQuizMutation: vi.fn()
-}))
-vi.mock("../../hooks/useOsceQueries", () => ({
+  useUpdateQuestionMutation: vi.fn(), useUpdateQuizMutation: vi.fn(),
   useAllOsceStationsQuery: vi.fn(),
   useOsceStationQuery: vi.fn(),
   useCreateOsceStationMutation: vi.fn(),
@@ -269,6 +265,63 @@ describe("ManageTab OSCE authoring", () => {
     await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1))
     expect(getOsceStation).toHaveBeenCalledTimes(12)
     expect(maxActiveRequests).toBeGreaterThan(1)
+    expect(maxActiveRequests).toBeLessThanOrEqual(4)
+  })
+
+  it("waits for failed export workers before starting the next quiz", async () => {
+    const makeQuiz = (id: number, name: string) => ({
+      id, name, description: "Practice", activity_type: "osce" as const,
+      total_questions: 0, total_stations: 8, passing_score: null,
+      time_limit_seconds: null, media_id: null, deleted: false,
+      client_id: "test", version: 2
+    })
+    vi.mocked(useQuizzesQuery).mockReturnValue({
+      data: { items: [makeQuiz(8, "OSCE A"), makeQuiz(9, "OSCE B")], count: 2 },
+      isLoading: false,
+      refetch: quizRefetch
+    } as never)
+    vi.mocked(listAllOsceStations).mockImplementation(async (quizId) => (
+      Array.from({ length: 8 }, (_, index) => ({
+        id: index + 1,
+        quiz_id: quizId,
+        title: `Station ${index + 1}`,
+        recommended_duration_seconds: 480,
+        order_index: index,
+        version: 1,
+        checklist_count: 1,
+        rubric_domain_count: 1,
+        verification_state: "manually_authored" as const,
+        created_at: "2026-09-11",
+        updated_at: "2026-09-11"
+      }))
+    ))
+    let activeRequests = 0
+    let maxActiveRequests = 0
+    vi.mocked(getOsceStation).mockImplementation(async (quizId, stationId) => {
+      activeRequests += 1
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests)
+      if (quizId === 8 && stationId === 1) {
+        activeRequests -= 1
+        throw new Error("station export failed")
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 15))
+      activeRequests -= 1
+      return {
+        id: stationId,
+        quiz_id: quizId,
+        content: { schema_version: "osce.station.v1", title: `Station ${stationId}` },
+        order_index: stationId - 1,
+        version: 1
+      } as never
+    })
+    render(<ManageTab onNavigateToCreate={() => {}} onNavigateToGenerate={() => {}} onStartQuiz={() => {}} />)
+
+    const quizCheckboxes = screen.getAllByRole("checkbox", { name: "Select quiz {{name}}" })
+    fireEvent.click(quizCheckboxes[0])
+    fireEvent.click(quizCheckboxes[1])
+    fireEvent.click(screen.getByTestId("manage-bulk-export"))
+
+    await waitFor(() => expect(getOsceStation).toHaveBeenCalledTimes(16))
     expect(maxActiveRequests).toBeLessThanOrEqual(4)
   })
 

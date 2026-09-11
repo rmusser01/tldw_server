@@ -13,16 +13,15 @@ import {
   useOsceAttemptQuery
 } from "../hooks/useOsceQueries"
 
-const toSourceCitations = (citations: OsceCitation[]): SourceCitation[] => citations.map((citation) => ({
-  source_type: citation.source_type === "media" || citation.source_type === "note"
-    ? citation.source_type
-    : null,
+export const toSourceCitations = (citations: OsceCitation[]): SourceCitation[] => citations.map((citation) => ({
+  source_type: citation.source_type,
   source_id: citation.source_id,
   label: citation.label,
   quote: citation.quote,
   media_id: citation.media_id,
   chunk_id: citation.chunk_id,
   timestamp_seconds: citation.timestamp_seconds,
+  page_number: citation.page_number,
   source_url: citation.source_url
 }))
 

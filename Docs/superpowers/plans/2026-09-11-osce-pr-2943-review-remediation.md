@@ -34,12 +34,12 @@
 - Consumes: shared quiz source resolver types and OSCE attempt `version` tokens.
 - Produces: complete source-type acceptance, truthful MCP schema, conflict-safe drafts, and immutable completed-attempt controls.
 
-- [ ] Add regression tests for every high-severity Qodo scenario and run each test to confirm the current failure.
-- [ ] Extend OSCE citation/source validation to the source types already accepted by shared quiz generation.
-- [ ] Remove unsupported OSCE activity advertising from the MCP quiz tool schema.
-- [ ] Preserve dirty local text across conflict refetches until it is explicitly saved or discarded.
-- [ ] Disable notes and self-assessment editing after attempt completion and discard stale completed drafts.
-- [ ] Run the focused backend and frontend tests until green.
+- [x] Add regression tests for every high-severity Qodo scenario and run each test to confirm the current failure.
+- [x] Extend OSCE citation/source validation to the source types already accepted by shared quiz generation.
+- [x] Remove unsupported OSCE activity advertising from the MCP quiz tool schema.
+- [x] Preserve dirty local text across conflict refetches until it is explicitly saved or discarded.
+- [x] Disable notes and self-assessment editing after attempt completion and discard stale completed drafts.
+- [x] Run the focused backend and frontend tests until green.
 
 ### Task 2: Restore Client Compatibility And Frontend Test Isolation
 
@@ -54,12 +54,12 @@
 - Consumes: quiz `activity_type` discriminator.
 - Produces: a legacy-safe default list contract plus an explicit all-activities request for current shared clients.
 
-- [ ] Add API and client tests proving legacy callers receive question quizzes while the shared UI explicitly requests all supported activities.
-- [ ] Add the activity filter to the list endpoint and persistence query using parameterized DB helpers.
-- [ ] Update the shared WebUI/extension service to request all activity types where OSCE cards are supported.
-- [ ] Remove accidental QueryClient requirements from legacy component test paths or provide the established shared test wrapper.
-- [ ] Stabilize the definitive station-rejection retry test around observable settled state.
-- [ ] Run all affected quiz component suites with the CI timeout settings.
+- [x] Add API and client tests proving legacy callers receive question quizzes while the shared UI explicitly requests all supported activities.
+- [x] Add the activity filter to the list endpoint and persistence query using parameterized DB helpers.
+- [x] Update the shared WebUI/extension service to request all activity types where OSCE cards are supported.
+- [x] Remove accidental QueryClient requirements from legacy component test paths or provide the established shared test wrapper.
+- [x] Stabilize the definitive station-rejection retry test around observable settled state.
+- [x] Run all affected quiz component suites with the CI timeout settings.
 
 ### Task 3: Address Contract And Quality Findings
 
@@ -75,13 +75,13 @@
 - Consumes: central exception conventions and public Pydantic schema module.
 - Produces: reusable endpoint contracts, project-standard exceptions/docstrings/typing/markers, bounded export requests, and complete CI shard coverage.
 
-- [ ] Move public request/page contracts to the OSCE schema module and add concise module/class documentation.
-- [ ] Move OSCE domain exceptions to the central exception module and update imports/tests.
-- [ ] Add missing return annotations and pytest markers in touched OSCE test support.
-- [ ] Bound OSCE detail fetch concurrency in JSON export and test that the limit is respected.
-- [ ] Add both OSCE database test modules to the appropriate backend CI shard.
-- [ ] Validate the PostgreSQL fixture claim; change it only if it bypasses the canonical isolated environment.
-- [ ] Compare endpoint orchestration with three neighboring quiz endpoints and refactor only if the finding identifies a real ownership violation.
+- [x] Move public request/page contracts to the OSCE schema module and add concise module/class documentation.
+- [x] Move OSCE domain exceptions to the central exception module and update imports/tests.
+- [x] Add missing return annotations and pytest markers in touched OSCE test support.
+- [x] Bound OSCE detail fetch concurrency in JSON export and test that the limit is respected.
+- [x] Add both OSCE database test modules to the appropriate backend CI shard.
+- [x] Validate the PostgreSQL fixture claim; change it only if it bypasses the canonical isolated environment.
+- [x] Compare endpoint orchestration with three neighboring quiz endpoints and refactor only if the finding identifies a real ownership violation.
 
 ### Task 4: Regenerate Contracts And Verify The Pull Request
 
@@ -94,9 +94,8 @@
 - Consumes: final FastAPI OpenAPI document and touched-file inventory.
 - Produces: synchronized contract fingerprint, review evidence, and merge-ready PR state.
 
-- [ ] Regenerate the checked-in OpenAPI fingerprint using the repository command and verify the contract gate.
-- [ ] Run focused backend/frontend tests, TypeScript checks, `git diff --check`, and Bandit on touched Python paths.
-- [ ] Review the complete diff for regressions and update the Backlog task with commands and results.
+- [x] Regenerate the checked-in OpenAPI fingerprint using the repository command and verify the contract gate.
+- [x] Run focused backend/frontend tests, TypeScript checks, `git diff --check`, and Bandit on touched Python paths.
+- [x] Review the complete diff for regressions and update the Backlog task with commands and results.
 - [ ] Commit and push the remediation, then reply to and resolve every Qodo thread with specific evidence.
 - [ ] Wait for required checks, fix any branch-caused failure, and merge PR #2943 only when all merge gates pass.
-

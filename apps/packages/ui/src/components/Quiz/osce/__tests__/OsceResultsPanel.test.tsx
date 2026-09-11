@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { OsceResultsPanel } from "../OsceResultsPanel"
+import { OsceResultsPanel, toSourceCitations } from "../OsceResultsPanel"
 import {
   useCompletedOsceAttemptsQuery,
   useOsceAttemptQuery
@@ -121,6 +121,19 @@ describe("OsceResultsPanel", () => {
       isLoading: false,
       isFetching: false
     } as any)
+  })
+
+  it("preserves supported source types and document page locators", () => {
+    expect(toSourceCitations([{
+      source_type: "flashcard_card",
+      source_id: "card-42",
+      label: "Medication card",
+      page_number: 7
+    }])).toEqual([expect.objectContaining({
+      source_type: "flashcard_card",
+      source_id: "card-42",
+      page_number: 7
+    })])
   })
 
   it("owns completed filters and server pagination without score language", () => {
