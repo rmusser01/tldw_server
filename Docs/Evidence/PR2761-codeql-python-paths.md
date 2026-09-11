@@ -104,7 +104,7 @@ Coverage: `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_safe_paths.p
 
 ### audio: Guarded transcription input/model
 
-Provider input/conversion helpers use resolve_safe_local_path and/or _resolve_safe_input_path against their allowed base before using output paths; local model identifiers are checked against WHISPER_MODEL_BASE_DIR and no-link policy. validate_whisper_model_identifier checks required artifact files only for validated local directories. Existing CWD-directory detection intentionally performs is_dir before distinguishing Hub IDs/aliases from local directories, then rejects local directories outside the model root. That metadata probe is distinguished below from guarded content access.
+Provider input/conversion helpers use resolve_safe_local_path and/or _resolve_safe_input_path against their allowed base before using output paths; local model identifiers are checked against WHISPER_MODEL_BASE_DIR and no-link policy. validate_whisper_model_identifier checks required artifact files only for validated local directories. Whisper now checks lexical containment before probing a CWD-local candidate, and explicitly resolves remote aliases/Hub IDs into the managed cache before invoking the loader. The alert 2672 repair below removes the former outside-directory existence distinction.
 
 Coverage: `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_transcription.py (outside-base input/model, absolute/relative symlink, CWD local precedence, remote-ID/alias preservation); /tmp/pr2761-path-audio-research.log`.
 
@@ -265,13 +265,13 @@ Each source and sink below is from the exact SARIF analysis, before the new repa
 | [2659](https://github.com/rmusser01/tldw_server/security/code-scanning/2659) | `api/v1/endpoints/media/add.py:63` | `core/Storage/filesystem_storage.py:242` | storage | guarded |
 | [2660](https://github.com/rmusser01/tldw_server/security/code-scanning/2660) | `api/v1/endpoints/media/add.py:63` | `core/Storage/filesystem_storage.py:272` | storage | guarded |
 | [2661](https://github.com/rmusser01/tldw_server/security/code-scanning/2661) | `api/v1/endpoints/media/add.py:63` | `core/Storage/filesystem_storage.py:275` | storage | guarded |
-| [2672](https://github.com/rmusser01/tldw_server/security/code-scanning/2672) | `api/v1/endpoints/media/add.py:57` | `core/Ingestion_Media_Processing/Audio/Audio_Transcription_Lib.py:702` | audio | probe review |
+| [2672](https://github.com/rmusser01/tldw_server/security/code-scanning/2672) | `api/v1/endpoints/media/add.py:57` | `core/Ingestion_Media_Processing/Audio/Audio_Transcription_Lib.py:702` | audio | repaired boundary |
 
 The machine-readable file `/tmp/pr2761-python-path-dispositions.json` includes every exact source/sink, full ordered SARIF trace, boundary proof, regression references, analysis and inspected file hashes, and per-trace SHA-256. The temporary file is local review evidence; this document retains the complete alert mapping.
 
 ## Limits requiring reviewer attention
 
-Alert 2672 is the intentional `Path(raw).is_dir()` probe needed to distinguish existing local directories from Hub IDs/Whisper aliases. A valid local directory outside the allowed root is rejected before loading; removing the probe would reintroduce the earlier loader/validator mismatch. Directory-existence classification can be observable, so this is explicitly separated from guarded file reads.
+Alert 2672 originally reported a real outside-directory existence probe. The bounded repair below removes that probe and closes loader CWD precedence through explicit managed-cache resolution; it remains a source-fix disposition pending fresh hosted analysis.
 
 Audio cleanup findings include preliminary exists/is_file/resolve probes. Deletion remains behind canonical temporary-root containment. The Python compatibility `startswith` fallback is not executed on the supported Python runtime.
 
@@ -290,44 +290,50 @@ production-only Bandit runs also report zero findings without that exclusion.
 `git diff --check` passes. The supported runtime is Python >=3.11, confirming
 that Audio cleanup's older-Python compatibility fallback is unreachable.
 
-The exact disposition counts are **141 guarded candidates**, **10 repaired
-boundary paths** (2149, 2150, 2151, 2152, 2277, 2278, 2279, 2280, 2334, 2335),
-and **one intentional metadata probe requiring review** (2672). These are
+The exact disposition counts are **141 guarded candidates** and **11 repaired
+boundary paths** (2149, 2150, 2151, 2152, 2277, 2278, 2279, 2280, 2334, 2335,
+2672). These are
 source-review dispositions, not a claim that GitHub has closed the alerts.
 
-## Alert 2672 follow-up: loader precedence and observable behavior
+## Alert 2672 follow-up: managed model resolution repair
 
-A focused, isolated probe (`/tmp/pr2761-model-probe-proof.py`, executed with
-`PYTHONPATH=.` against this worktree) confirms the distinction precisely:
-`tiny.en`, `organization/remote-model`, and `organization/qwen-model` are accepted
-as alias/Hub identifiers when absent from the working directory. Creating a
-directory with the same name outside the approved model root makes normalization
-reject the identifier before loading. The transcription endpoint maps Whisper
-validation failures to HTTP 400 at `audio/audio_transcriptions.py:967–973`; an
-accepted identifier proceeds to normal cache/loading behavior. This is a
-potential directory-existence distinction for these ambiguous identifier shapes,
-not arbitrary outside file reading. The probe also verifies that the Whisper
-wrapper never invokes its delegate for the existing outside alias, whereas the
-absent alias still reaches normal loading. Output is in
-`/tmp/pr2761-model-probe-proof.log`.
+The original isolated probe (`/tmp/pr2761-model-probe-proof.py`, run with
+`PYTHONPATH=.`) demonstrated that an outside CWD directory named `tiny.en` or
+`organization/remote-model` changed normalization from an accepted remote
+identifier to a validation error. The endpoint can expose that distinction as
+HTTP 400. Simply removing the probe would let faster-whisper's own `isdir`
+precedence load the outside directory instead.
 
-Simply moving `is_dir` after root validation or returning remote-shaped strings
-without checking their working-directory interpretation would weaken the current
-boundary. The installed faster-whisper loader checks
-`os.path.isdir(model_size_or_path)` before its remote `download_model` branch;
-Transformers likewise treats an existing path as local in `from_pretrained`.
-The wrapper currently passes valid Hub IDs/aliases through those APIs. Eliminating
-the existence distinction while keeping those identifiers requires a separate
-explicit remote-resolution boundary that first downloads/resolves a Hub snapshot
-and then supplies an approved absolute snapshot path to the loader, including
-cache, revision, authentication, offline and in-memory-model compatibility. It is
-not a safe conditional reorder. No such architectural rewrite was introduced to
-force analyzer closure.
+The repair uses the existing `faster_whisper.utils.download_model` helper:
 
-The existing absolute/relative outside-root, symlink, allowed-root, artifact
-completeness, Hub ID and alias regressions remain applicable. Alert 2672 remains
-an explicitly identified intentional validation probe for maintainer disposition;
-this review does not call it fixed or hide its observable behavior.
+- `_normalize_whisper_model_identifier` considers CWD-local models only after
+  lexical containment under the approved root; outside alias/Hub-shaped names
+  stay opaque regardless of whether an outside directory exists.
+- `_resolve_whisper_model_path` rejects lexical root escapes before filesystem
+  probes, inspects directory components for links from parent to child, and
+  retains canonical containment validation through `resolve_safe_local_path`.
+- The wrapper resolves remote names explicitly with the same cache directory,
+  `local_files_only`, revision and authentication token as upstream. It checks
+  the resulting directory and passes the verified absolute managed path to the
+  delegate. Delegate errors do not trigger duplicate resolution attempts.
+- Local absolute, base-relative, CWD-under-root and managed alias directories
+  continue to bypass downloading. `check_model_exists` remains network-free,
+  confines each candidate before probing, and rejects directory symlinks.
+- Hugging Face snapshot **artifact-file** links to cache blobs remain supported;
+  directory/ancestor links are rejected. This preserves the existing managed
+  model directory policy and does not claim protection against concurrent
+  filesystem replacement. The wrapper's pre-existing ignored `files` argument
+  is outside this repair; Qwen behavior is unchanged.
+
+The new focused suite initially produced **14 failures and 4 passing controls**
+(`/tmp/pr2761-whisper-red.log`). With the repair and six additional compatibility
+controls, **336 tests pass** across transcription, model resolution, local STT
+plans, provider adapters, streaming cleanup and Persona transcription
+(`/tmp/pr2761-whisper-broader.log`). Ruff passes for the production file and both
+touched test files. Production Bandit reports the same six pre-existing low
+findings (one B404 and five B603) before/after; no new findings
+(`/tmp/pr2761-whisper-bandit-before.json`, `/tmp/pr2761-whisper-bandit.json`).
+No local CodeQL scan was run, and alert-state changes remain with the parent.
 
 ## Research read-boundary follow-up
 

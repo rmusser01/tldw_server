@@ -687,6 +687,30 @@ def _resolve_audio_input_path_for_provider(
     return _resolve_safe_input_path(Path(audio_file_path), base_dir=base_dir, label=label)
 
 
+def _resolve_whisper_model_path(path: Path, base_dir: Path) -> Path:
+    """Constrain model directories before probing them or following links."""
+    root = base_dir.resolve(strict=False)
+    candidate = path.expanduser()
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    candidate = Path(os.path.abspath(candidate))
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"Whisper model path must resolve under {root}") from exc
+    current = root
+    # Inspect parents first so a linked directory is never traversed to probe
+    # its children. HF snapshot artifact links are handled by the model loader.
+    for component in relative.parts:
+        current = current / component
+        if current.is_symlink():
+            raise ValueError(f"Whisper model path may not traverse symlinks: {current}")
+    safe_path = resolve_safe_local_path(candidate, root)
+    if safe_path is None:
+        raise ValueError(f"Whisper model path must resolve under {root}")
+    return safe_path
+
+
 def _normalize_whisper_model_identifier(
     model_name: str,
     *,
@@ -696,12 +720,14 @@ def _normalize_whisper_model_identifier(
     if not raw:
         raise ValueError("Whisper model identifier cannot be empty")
 
-    # The model loader gives existing CWD directories precedence over Hub IDs
-    # and aliases. Apply the local-root policy to that same directory first.
-    local_path = Path(raw)
-    if local_path.is_dir():
-        _assert_no_symlink(local_path, label="Whisper model path")
-        raw = str(local_path.absolute())
+    base_root = Path(base_dir if base_dir is not None else WHISPER_MODEL_BASE_DIR).resolve(strict=False)
+    # Preserve CWD-relative local models only when the CWD candidate is inside
+    # the managed root. Outside directories cannot shadow aliases or Hub IDs.
+    cwd_candidate = Path(os.path.abspath(raw))
+    if _path_is_within(cwd_candidate, base_root):
+        local_path = _resolve_whisper_model_path(cwd_candidate, base_root)
+        if local_path.is_dir():
+            return str(local_path)
 
     # If this looks like a Hugging Face Hub model id and *not* a local path,
     # return it directly. We avoid interpreting it as a filesystem path.
@@ -726,18 +752,9 @@ def _normalize_whisper_model_identifier(
             raise ValueError("Whisper model identifier contains invalid characters")
         return raw
 
-    base_root = base_dir if base_dir is not None else WHISPER_MODEL_BASE_DIR
-    safe_path = resolve_safe_local_path(Path(raw), Path(base_root))
-    if safe_path is None:
-        raise ValueError(
-            f"Whisper model path must resolve under {Path(base_root).resolve(strict=False)}"
-        )
-    if not safe_path.exists():
-        raise ValueError(f"Whisper model path does not exist: {safe_path}")
-    try:
-        _assert_no_symlink(safe_path, label="Whisper model path")
-    except ValueError as exc:
-        raise ValueError(str(exc)) from exc
+    safe_path = _resolve_whisper_model_path(Path(raw), base_root)
+    if not safe_path.is_dir():
+        raise ValueError(f"Whisper model path does not exist or is not a directory: {safe_path}")
     return str(safe_path)
 
 
@@ -863,13 +880,7 @@ def _check_standard_model_under_download_root(
         )
         return None
 
-    candidate = download_root / identifier
-    try:
-        root_resolved = download_root.resolve()
-        candidate_resolved = candidate.resolve()
-        candidate_resolved.relative_to(root_resolved)
-    except (ValueError, OSError):
-        return None
+    candidate_resolved = _resolve_whisper_model_path(Path(identifier), download_root)
 
     if candidate_resolved.is_dir():
         logging.info(
@@ -2535,17 +2546,16 @@ def check_model_exists(model_name: str) -> bool:
         # The path has already been validated; just check existence.
         return normalized_path.exists()
 
-    # Check in default download directory for relative identifiers
-    model_path = default_root_path / normalized
-    if model_path.is_dir():
-        return True
-
-    # Check if it's a Hub ID that might be cached under our managed root.
+    # Confine each managed-cache candidate before any directory probe.
+    candidates = [normalized]
     if _is_hf_model_id(normalized):
-        # Convert Hub ID to potential cache path
-        cache_name = normalized.replace('/', '_')
-        cache_path = default_root_path / cache_name
-        if cache_path.is_dir():
+        candidates.append(normalized.replace('/', '_'))
+    for identifier in candidates:
+        try:
+            candidate = _resolve_whisper_model_path(Path(identifier), default_root_path)
+        except ValueError:
+            continue
+        if candidate.is_dir():
             return True
 
     # Do not probe global HuggingFace cache directories based on user-controlled
@@ -2683,12 +2693,11 @@ class WhisperModel:
             logging.info(f"Treating '{resolved_identifier}' as an existing local path.")
             resolved_identifier = str(resolved_path)
         elif _is_hf_model_id(resolved_identifier):
-            # Assume it's a Hub ID - pass it directly to faster-whisper.
-            # faster-whisper will handle downloading it (potentially respecting download_root if configured).
+            # Resolve Hub IDs through the managed cache below.
             logging.info(f"Treating '{resolved_identifier}' as a Hugging Face Hub ID.")
         else:
             # Assume it's a standard model size name (e.g., "large-v3").
-            # Let faster-whisper handle finding/downloading this standard model.
+            # Prefer a managed local model before resolving the remote alias.
             logging.info(f"Treating '{resolved_identifier}' as a standard model size name.")
             local_path = _check_standard_model_under_download_root(
                 resolved_identifier,
@@ -2706,6 +2715,22 @@ class WhisperModel:
         )
 
         try:
+            if not Path(resolved_identifier).is_absolute():
+                # Resolve names explicitly: passing an opaque name to WhisperModel
+                # would let an unrelated existing CWD directory shadow the Hub ID.
+                download_model = importlib.import_module("faster_whisper.utils").download_model
+                snapshot = download_model(
+                    resolved_identifier,
+                    cache_dir=str(download_root_path),
+                    local_files_only=local_files_only,
+                    revision=model_kwargs.get("revision"),
+                    use_auth_token=model_kwargs.get("use_auth_token"),
+                )
+                snapshot_path = _resolve_whisper_model_path(Path(snapshot), download_root_path)
+                if not snapshot_path.is_dir():
+                    raise ValueError(f"Whisper model path does not exist or is not a directory: {snapshot_path}")
+                resolved_identifier = str(snapshot_path)
+
             self._delegate = original_model_cls(
                 model_size_or_path=resolved_identifier, # Use the corrected identifier
                 device=device,

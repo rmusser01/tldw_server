@@ -555,7 +555,7 @@ def test_validate_qwen2audio_model_identifier_allows_local_path_under_base(monke
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("provider", ["whisper", "qwen2audio"])
+@pytest.mark.parametrize("provider", ["qwen2audio"])
 @pytest.mark.parametrize("identifier", ["local-model", "organization/local-model"])
 def test_model_identifier_rejects_existing_relative_directory_outside_root(
     monkeypatch, tmp_path, provider, identifier
