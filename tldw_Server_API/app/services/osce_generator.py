@@ -29,6 +29,10 @@ from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.services.osce_practice import materialize_station_content
 
 MAX_OSCE_STATIONS = 10
+# Match the shared verifier's quiz artifact budget before splitting units by citation set.
+MAX_OSCE_VERIFICATION_UNITS = 80
+# Bound sequential verifier fan-out to one fifth of the full artifact unit budget.
+MAX_OSCE_VERIFICATION_GROUPS = 16
 _SUPPORTED_SOURCE_TYPES = {member.value for member in OsceCitationSourceType}
 
 
@@ -214,7 +218,12 @@ def _finite_float(value: Any) -> float | None:
 
 def _media_timestamp_is_supported(candidate: Mapping[str, Any], timestamp: float) -> bool:
     exact = _finite_float(candidate.get("timestamp_seconds"))
-    if exact is not None and math.isclose(exact, timestamp, abs_tol=0.001):
+    if exact is not None and math.isclose(
+        exact,
+        timestamp,
+        rel_tol=0.0,
+        abs_tol=0.001,
+    ):
         return True
 
     for start_key, end_key in (
@@ -591,10 +600,16 @@ async def _verify_stations(
     verification_model: str | None,
 ) -> ArtifactVerificationResult:
     units = build_osce_verification_units(stations)
+    if len(units) > MAX_OSCE_VERIFICATION_UNITS:
+        raise OsceVerificationError()
+
     from tldw_Server_API.app.services import quiz_generator
 
     source_documents = quiz_generator._build_quiz_source_documents(evidence)
     groups = _group_units_by_cited_documents(units, source_documents)
+    if len(groups) > MAX_OSCE_VERIFICATION_GROUPS:
+        raise OsceVerificationError()
+
     group_results: list[ArtifactVerificationResult] = []
     group_reports: list[dict[str, Any]] = []
     unit_results_by_id: dict[str, ArtifactUnitResult] = {}

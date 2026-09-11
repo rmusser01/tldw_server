@@ -364,6 +364,12 @@ def test_canonical_locator_metadata_is_not_invented_in_persisted_citation(
             {"start_seconds": 10.0, "end_seconds": 20.0},
             {"media_id": 12, "timestamp_seconds": 25.0},
         ),
+        (
+            "media",
+            "12",
+            {"timestamp_seconds": 1_000_000_000_000.0},
+            {"media_id": 12, "timestamp_seconds": 1_000_000_000_100.0},
+        ),
         ("media", "12", {}, {"media_id": 12, "timestamp_seconds": 15.0}),
         ("document", "doc-1", {"page_number": 3}, {"page_number": 4}),
         ("document", "doc-1", {}, {"page_number": 3}),
@@ -691,6 +697,90 @@ async def test_verification_groups_receive_only_their_exact_cited_documents(
             "report": {"verified_units": 2},
         },
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("group_count", "expect_failure"), [(16, False), (17, True)])
+async def test_verification_group_fanout_has_hard_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    group_count: int,
+    expect_failure: bool,
+    valid_generated_station: dict[str, object],
+) -> None:
+    station = deepcopy(valid_generated_station)
+    evidence: list[dict[str, object]] = []
+    citations: list[dict[str, object]] = []
+    for index in range(group_count):
+        source_id = f"note-{index}"
+        chunk_id = f"chunk-{index}"
+        quote = f"Canonical evidence statement {index}."
+        evidence.append(
+            {
+                "source_type": "note",
+                "source_id": source_id,
+                "chunk_id": chunk_id,
+                "text": quote,
+            }
+        )
+        citations.append(
+            {
+                "source_type": "note",
+                "source_id": source_id,
+                "chunk_id": chunk_id,
+                "quote": quote,
+            }
+        )
+
+    station["patient_context"] = {
+        "text": evidence[0]["text"],
+        "citations": [citations[0]],
+    }
+    station["expected_key_points"] = [
+        {"text": evidence[1]["text"], "citations": [citations[1]]}
+    ]
+    station["checklist_items"] = [
+        {
+            "label": f"Checks evidence {index}",
+            "rationale": evidence[index]["text"],
+            "citations": [citations[index]],
+        }
+        for index in range(2, group_count)
+    ]
+    verifier_calls = 0
+
+    async def provider(**_: object) -> object:
+        return {"stations": [station]}
+
+    async def verifier(**kwargs: object) -> ArtifactVerificationResult:
+        nonlocal verifier_calls
+        verifier_calls += 1
+        return _grounded_result(kwargs["units"])
+
+    monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", provider)
+    monkeypatch.setattr(osce_generator, "verify_generated_artifact_against_sources", verifier)
+
+    generation = generate_osce_stations_from_sources(
+        evidence=evidence,
+        normalized_sources=[
+            {"source_type": "note", "source_id": str(item["source_id"])}
+            for item in evidence
+        ],
+        num_stations=1,
+        difficulty="medium",
+        focus_topics=[],
+        model=None,
+        api_provider=None,
+        verification_provider=None,
+        verification_model=None,
+    )
+    if expect_failure:
+        with pytest.raises(OsceVerificationError, match="^osce_verification_failure$"):
+            await generation
+        assert verifier_calls == 0
+    else:
+        bundle = await generation
+        assert bundle.verification_result.metadata["verification_group_count"] == group_count
+        assert verifier_calls == group_count
 
 
 @pytest.mark.asyncio
