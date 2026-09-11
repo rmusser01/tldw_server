@@ -1,8 +1,10 @@
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import type { RecipePersistenceOwnerView } from "@/services/recipe-persistence-owner"
 import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 
 const uncertainRecipes = new Set<string>()
 const unknownOwnerRecipes = new Set<string>()
+type RecipePersistenceOwnerId = RecipePersistenceOwnerView["ownerId"]
 
 export const recipePersistenceScopeFromConfig = (
   config: Parameters<typeof buildChatSurfaceScopeKeyFromConfig>[0]
@@ -32,12 +34,12 @@ export const getRecipePersistenceScope = async (): Promise<string | null> => {
   }
 }
 
-const uncertaintyKey = (id: string, scope: string) =>
+const uncertaintyKey = (id: string, scope: RecipePersistenceOwnerId) =>
   JSON.stringify([scope, id])
 
 export const markRecipePersistenceUncertain = (
   id: string,
-  scope: string | null
+  scope: RecipePersistenceOwnerId | null
 ) => {
   if (scope) uncertainRecipes.add(uncertaintyKey(id, scope))
 }
@@ -50,14 +52,14 @@ export const markRecipePersistenceOwnerUnknown = (id: string) => {
 
 export const clearRecipePersistenceUncertainty = (
   id: string,
-  scope: string | null
+  scope: RecipePersistenceOwnerId | null
 ) => {
   if (scope) uncertainRecipes.delete(uncertaintyKey(id, scope))
 }
 
 export const isRecipePersistenceUncertain = (
   id: string,
-  scope: string | null
+  scope: RecipePersistenceOwnerId | null
 ) =>
   !scope ||
   unknownOwnerRecipes.has(id) ||
