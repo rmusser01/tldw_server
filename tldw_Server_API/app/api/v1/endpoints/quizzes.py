@@ -736,3 +736,10 @@ async def generate_quiz(
         raise map_db_error_to_http(exc, default_detail="Failed to generate quiz") from exc
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+# Keep the OSCE API slice beneath the established quizzes router so router
+# registry ownership and the public /api/v1/quizzes prefix remain unchanged.
+from tldw_Server_API.app.api.v1.endpoints import quizzes_osce  # noqa: E402
+
+router.include_router(quizzes_osce.router)
