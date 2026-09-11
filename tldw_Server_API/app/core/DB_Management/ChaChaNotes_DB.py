@@ -39351,11 +39351,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Read an active quiz, locking it on PostgreSQL for content mutations."""
         deleted_clause = "deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "deleted = 0"
         lock_clause = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        owner_clause = " AND client_id = ?" if self.backend_type == BackendType.POSTGRESQL else ""
+        params = (quiz_id, self.client_id) if owner_clause else (quiz_id,)
         return conn.execute(
             "SELECT id, version, activity_type, total_questions, total_stations, "
             "time_limit_seconds, passing_score FROM quizzes "
-            f"WHERE id = ? AND {deleted_clause}{lock_clause}",  # nosec B608
-            (quiz_id,),
+            f"WHERE id = ? AND {deleted_clause}{owner_clause}{lock_clause}",  # nosec B608
+            params,
         ).fetchone()
 
     def _require_quiz_activity(self, quiz_id: int, activity_type: str) -> dict[str, Any]:
@@ -39474,6 +39476,28 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             item[field] = self._osce_timestamp(item.get(field))
         return item
 
+    @staticmethod
+    def _osce_station_columns(table_alias: str | None = None) -> str:
+        prefix = f"{table_alias}." if table_alias else ""
+        columns = (
+            "id",
+            "quiz_id",
+            "schema_version",
+            "content_json",
+            "order_index",
+            "version",
+            "origin",
+            "provenance_json",
+            "source_bundle_json",
+            "verification_state",
+            "verification_timestamp",
+            "verification_summary",
+            "deleted",
+            "created_at",
+            "updated_at",
+        )
+        return ", ".join(f"{prefix}{column}" for column in columns)
+
     def _get_osce_station_row(
         self,
         conn: Any,
@@ -39487,10 +39511,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "AND deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "AND deleted = 0"
         )
         lock_clause = " FOR UPDATE" if lock and self.backend_type == BackendType.POSTGRESQL else ""
+        if self.backend_type == BackendType.POSTGRESQL:
+            station_deleted_clause = "" if include_deleted else "AND s.deleted = FALSE"
+            return conn.execute(
+                f"SELECT {self._osce_station_columns('s')} "  # nosec B608
+                "FROM osce_stations AS s JOIN quizzes AS q ON q.id = s.quiz_id "
+                f"WHERE s.id = ? AND s.quiz_id = ? {station_deleted_clause} "  # nosec B608
+                f"AND q.client_id = ?{lock_clause}",  # nosec B608
+                (station_id, quiz_id, self.client_id),
+            ).fetchone()
         return conn.execute(
-            "SELECT id, quiz_id, schema_version, content_json, order_index, version, origin, "
-            "provenance_json, source_bundle_json, verification_state, verification_timestamp, "
-            "verification_summary, deleted, created_at, updated_at FROM osce_stations "
+            f"SELECT {self._osce_station_columns()} FROM osce_stations "  # nosec B608
             f"WHERE id = ? AND quiz_id = ? {deleted_clause}{lock_clause}",  # nosec B608
             (station_id, quiz_id),
         ).fetchone()
@@ -39550,6 +39581,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _recount_quiz_stations(self, conn: Any, quiz_id: int) -> int:
         deleted_clause = "deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "deleted = 0"
+        if self.backend_type == BackendType.POSTGRESQL:
+            row = conn.execute(
+                "SELECT COUNT(*) AS count FROM osce_stations AS s "
+                "JOIN quizzes AS q ON q.id = s.quiz_id "
+                "WHERE s.quiz_id = ? AND s.deleted = FALSE AND q.client_id = ?",
+                (quiz_id, self.client_id),
+            ).fetchone()
+            total = int(row["count"]) if row else 0
+            conn.execute(
+                "UPDATE quizzes SET total_questions = 0, total_stations = ?, last_modified = ?, "
+                "version = version + 1 WHERE id = ? AND client_id = ?",
+                (total, self._get_current_utc_timestamp_iso(), quiz_id, self.client_id),
+            )
+            return total
         row = conn.execute(
             f"SELECT COUNT(*) AS count FROM osce_stations WHERE quiz_id = ? AND {deleted_clause}",  # nosec B608
             (quiz_id,),
@@ -39561,6 +39606,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (total, self._get_current_utc_timestamp_iso(), self.client_id, quiz_id),
         )
         return total
+
+    def _osce_station_owner_update_clause(self) -> tuple[str, tuple[Any, ...]]:
+        if self.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        return (
+            " AND EXISTS (SELECT 1 FROM quizzes AS q "
+            "WHERE q.id = osce_stations.quiz_id AND q.client_id = ?)",
+            (self.client_id,),
+        )
 
     def create_osce_station(
         self,
@@ -39640,10 +39694,29 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         deleted_clause = "" if include_deleted else (
             "AND deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "AND deleted = 0"
         )
+        if self.backend_type == BackendType.POSTGRESQL:
+            station_deleted_clause = "" if include_deleted else "AND s.deleted = FALSE"
+            query = (
+                f"SELECT {self._osce_station_columns('s')} "  # nosec B608
+                "FROM osce_stations AS s JOIN quizzes AS q ON q.id = s.quiz_id "
+                f"WHERE s.quiz_id = ? {station_deleted_clause} AND q.client_id = ? "  # nosec B608
+                "ORDER BY s.order_index ASC, s.id ASC LIMIT ? OFFSET ?"
+            )
+            count_query = (
+                "SELECT COUNT(*) AS count FROM osce_stations AS s "
+                "JOIN quizzes AS q ON q.id = s.quiz_id "
+                f"WHERE s.quiz_id = ? {station_deleted_clause} AND q.client_id = ?"  # nosec B608
+            )
+            params = (quiz_id, self.client_id)
+            rows = self.execute_query(query, (*params, limit, offset)).fetchall()
+            items = [self._deserialize_osce_station_row(row) for row in rows]
+            count_row = self.execute_query(count_query, params).fetchone()
+            return {
+                "items": [item for item in items if item is not None],
+                "count": int(count_row["count"]) if count_row else 0,
+            }
         query = (
-            "SELECT id, quiz_id, schema_version, content_json, order_index, version, origin, "
-            "provenance_json, source_bundle_json, verification_state, verification_timestamp, "
-            "verification_summary, deleted, created_at, updated_at FROM osce_stations "
+            f"SELECT {self._osce_station_columns()} FROM osce_stations "  # nosec B608
             f"WHERE quiz_id = ? {deleted_clause} ORDER BY order_index ASC, id ASC LIMIT ? OFFSET ?"  # nosec B608
         )
         count_query = f"SELECT COUNT(*) AS count FROM osce_stations WHERE quiz_id = ? {deleted_clause}"  # nosec B608
@@ -39711,11 +39784,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if self.backend_type == BackendType.POSTGRESQL
                     else "deleted = 0"
                 )
+                owner_clause, owner_params = self._osce_station_owner_update_clause()
                 conn.execute(
                     "UPDATE osce_stations SET schema_version = ?, content_json = ?, order_index = ?, "
                     "verification_state = ?, verification_timestamp = ?, verification_summary = ?, "
                     "version = version + 1, updated_at = ? WHERE id = ? AND quiz_id = ? "
-                    f"AND {deleted_clause}",  # nosec B608
+                    f"AND {deleted_clause}{owner_clause}",  # nosec B608
                     (
                         content_payload["schema_version"],
                         self._osce_json_string(content_payload),
@@ -39726,6 +39800,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         now,
                         station_id,
                         quiz_id,
+                        *owner_params,
                     ),
                 )
                 updated_row = self._get_osce_station_row(conn, quiz_id, station_id)
@@ -39768,10 +39843,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         identifier=station_id,
                     )
                 deleted_clause = "deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "deleted = 0"
+                owner_clause, owner_params = self._osce_station_owner_update_clause()
                 result = conn.execute(
                     "UPDATE osce_stations SET deleted = ?, version = version + 1, updated_at = ? "
-                    f"WHERE id = ? AND quiz_id = ? AND {deleted_clause}",  # nosec B608
-                    (True, now, station_id, quiz_id),
+                    f"WHERE id = ? AND quiz_id = ? AND {deleted_clause}{owner_clause}",  # nosec B608
+                    (
+                        True,
+                        now,
+                        station_id,
+                        quiz_id,
+                        *owner_params,
+                    ),
                 )
                 if result.rowcount:
                     self._recount_quiz_stations(conn, quiz_id)
@@ -40294,7 +40376,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     None,
                     None,
                     False,
-                    data.get("client_id") or self.client_id,
+                    self.client_id
+                    if self.backend_type == BackendType.POSTGRESQL
+                    else data.get("client_id") or self.client_id,
                     1,
                     now,
                     now,
@@ -40313,11 +40397,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ]
                 self._recount_quiz_stations(conn, quiz_id)
                 persisted_quiz_row = conn.execute(
-                    "SELECT id, name, description, workspace_tag, workspace_id, media_id, source_bundle_json, "
+                    "SELECT id, name, description, workspace_tag, workspace_id, media_id, source_bundle_json, "  # nosec B608
                     "activity_type, generation_profile, total_questions, total_stations, time_limit_seconds, "
                     "passing_score, deleted, client_id, version, created_at, last_modified "
-                    "FROM quizzes WHERE id = ?",
-                    (quiz_id,),
+                    "FROM quizzes WHERE id = ?"
+                    + (
+                        " AND client_id = ?"
+                        if self.backend_type == BackendType.POSTGRESQL
+                        else ""
+                    ),
+                    (
+                        quiz_id,
+                        *(
+                            (self.client_id,)
+                            if self.backend_type == BackendType.POSTGRESQL
+                            else ()
+                        ),
+                    ),
                 ).fetchone()
                 quiz = self._deserialize_quiz_row(persisted_quiz_row)
                 if quiz is None:
@@ -40381,7 +40477,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     time_limit_seconds,
                     passing_score,
                     False,
-                    client_id or self.client_id,
+                    self.client_id
+                    if self.backend_type == BackendType.POSTGRESQL
+                    else client_id or self.client_id,
                     1,
                     now,
                     now,
@@ -40403,15 +40501,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_quiz(self, quiz_id: int, include_deleted: bool = False) -> dict[str, Any] | None:
         """Get quiz by ID, returns None if not found or deleted (unless include_deleted)."""
-        deleted_clause = "" if include_deleted else "AND deleted = 0"
+        deleted_clause = "" if include_deleted else (
+            "AND deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "AND deleted = 0"
+        )
+        owner_clause = " AND client_id = ?" if self.backend_type == BackendType.POSTGRESQL else ""
         query = (
             "SELECT id, name, description, workspace_tag, workspace_id, media_id, source_bundle_json, activity_type, "  # nosec B608
             "generation_profile, total_questions, total_stations, time_limit_seconds, passing_score, "
             "deleted, client_id, version, created_at, last_modified "
-            "FROM quizzes WHERE id = ? " + deleted_clause
+            f"FROM quizzes WHERE id = ? {deleted_clause}{owner_clause}"  # nosec B608
         )
         try:
-            cursor = self.execute_query(query, (quiz_id,))
+            params = (
+                (quiz_id, self.client_id)
+                if self.backend_type == BackendType.POSTGRESQL
+                else (quiz_id,)
+            )
+            cursor = self.execute_query(query, params)
             row = cursor.fetchone()
             return self._deserialize_quiz_row(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203

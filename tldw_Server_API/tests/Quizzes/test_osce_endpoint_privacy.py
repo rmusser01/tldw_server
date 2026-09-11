@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -23,6 +24,12 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (  # noqa: 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (  # noqa: E402
     User,
     get_request_user,
+)
+from tldw_Server_API.app.core.DB_Management.backends.base import (  # noqa: E402
+    DatabaseConfig,
+)
+from tldw_Server_API.app.core.DB_Management.backends.factory import (  # noqa: E402
+    DatabaseBackendFactory,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (  # noqa: E402
     CharactersRAGDB,
@@ -262,3 +269,81 @@ def test_candidate_notes_are_not_logged(
 
     assert response.status_code == 200
     assert note_secret not in "".join(messages)
+
+
+@pytest.mark.timeout(90)
+def test_postgres_station_routes_hide_every_foreign_owner_path(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    attacker_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    owner = CharactersRAGDB(Path(":memory:"), client_id="route-owner", backend=owner_backend)
+    attacker = CharactersRAGDB(
+        Path(":memory:"), client_id="route-other-user", backend=attacker_backend
+    )
+    try:
+        quiz_id = owner.create_quiz(
+            name="Private PostgreSQL OSCE",
+            activity_type="osce",
+            client_id=owner.client_id,
+        )
+        detail_station = owner.create_osce_station(
+            quiz_id, materialize_station_content(station_content("Detail")), origin="manual"
+        )
+        update_station = owner.create_osce_station(
+            quiz_id, materialize_station_content(station_content("Update")), origin="manual"
+        )
+        delete_station = owner.create_osce_station(
+            quiz_id, materialize_station_content(station_content("Delete")), origin="manual"
+        )
+
+        def override_attacker_db():
+            yield attacker
+
+        async def override_attacker_user():
+            return User(
+                id=2,
+                username="other-user",
+                email="other@example.com",
+                is_active=True,
+                roles=["admin"],
+                is_admin=True,
+            )
+
+        TestConfig.setup_test_environment()
+        fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_attacker_db
+        fastapi_app.dependency_overrides[get_request_user] = override_attacker_user
+        with TestClient(fastapi_app, headers=AUTH_HEADERS) as test_client:
+            responses = [
+                test_client.post(
+                    f"/api/v1/quizzes/{quiz_id}/osce-stations",
+                    json={"content": station_content("Injected")},
+                ),
+                test_client.get(f"/api/v1/quizzes/{quiz_id}/osce-stations"),
+                test_client.get(
+                    f"/api/v1/quizzes/{quiz_id}/osce-stations/{detail_station['id']}"
+                ),
+                test_client.patch(
+                    f"/api/v1/quizzes/{quiz_id}/osce-stations/{update_station['id']}",
+                    json={
+                        "expected_version": update_station["version"],
+                        "content": {"title": "Captured"},
+                    },
+                ),
+                test_client.delete(
+                    f"/api/v1/quizzes/{quiz_id}/osce-stations/{delete_station['id']}",
+                    params={"expected_version": delete_station["version"]},
+                ),
+            ]
+
+        assert [response.status_code for response in responses] == [404] * 5
+        assert owner.list_osce_stations(quiz_id)["count"] == 3
+        assert owner.get_osce_station(quiz_id, update_station["id"])["content"]["title"] == (
+            "Update"
+        )
+        assert owner.get_osce_station(quiz_id, delete_station["id"]) is not None
+    finally:
+        fastapi_app.dependency_overrides.clear()
+        TestConfig.reset_settings()
+        attacker.close_all_connections()
+        owner.close_all_connections()

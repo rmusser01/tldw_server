@@ -288,7 +288,11 @@ def test_postgres_station_crud_and_atomic_bundle(
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(Path(":memory:"), client_id="osce-postgres", backend=backend)
     try:
-        quiz_id = db.create_quiz(name="Postgres OSCE", activity_type="osce")
+        quiz_id = db.create_quiz(
+            name="Postgres OSCE",
+            activity_type="osce",
+            client_id=db.client_id,
+        )
         station = db.create_osce_station(quiz_id, stored_content(), origin="manual")
         assert db.get_osce_station(quiz_id, station["id"])["content"]["title"] == "Warfarin counselling"
         updated = db.update_osce_station(
@@ -337,3 +341,70 @@ def test_postgres_station_crud_and_atomic_bundle(
         assert rolled_back["count"] == 0
     finally:
         db.close_all_connections()
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(90)
+def test_postgres_station_operations_are_scoped_to_the_parent_quiz_owner(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    attacker_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    owner = CharactersRAGDB(Path(":memory:"), client_id="station-owner", backend=owner_backend)
+    attacker = CharactersRAGDB(
+        Path(":memory:"), client_id="station-other-user", backend=attacker_backend
+    )
+    try:
+        quiz_id = owner.create_quiz(
+            name="Owner OSCE",
+            activity_type="osce",
+            client_id=owner.client_id,
+        )
+        readable = owner.create_osce_station(
+            quiz_id, stored_content("Readable"), origin="manual"
+        )
+        updateable = owner.create_osce_station(
+            quiz_id, stored_content("Updateable"), origin="manual"
+        )
+        deletable = owner.create_osce_station(
+            quiz_id, stored_content("Deletable"), origin="manual"
+        )
+
+        operations = (
+            lambda: attacker.create_osce_station(
+                quiz_id, stored_content("Injected"), origin="manual"
+            ),
+            lambda: attacker.list_osce_stations(quiz_id),
+            lambda: attacker.get_osce_station(quiz_id, readable["id"]),
+            lambda: attacker.update_osce_station(
+                quiz_id,
+                updateable["id"],
+                stored_content("Captured"),
+                expected_version=updateable["version"],
+            ),
+            lambda: attacker.delete_osce_station(
+                quiz_id,
+                deletable["id"],
+                expected_version=deletable["version"],
+            ),
+        )
+        outcomes: list[ConflictError | None] = []
+        for operation in operations:
+            try:
+                operation()
+            except ConflictError as exc:
+                outcomes.append(exc)
+            else:
+                outcomes.append(None)
+
+        assert attacker.get_quiz(quiz_id) is None
+        assert all(isinstance(outcome, ConflictError) for outcome in outcomes)
+        assert all("Quiz not found" in str(outcome) for outcome in outcomes)
+        assert owner.list_osce_stations(quiz_id)["count"] == 3
+        assert owner.get_osce_station(quiz_id, updateable["id"])["content"]["title"] == (
+            "Updateable"
+        )
+        assert owner.get_osce_station(quiz_id, deletable["id"]) is not None
+    finally:
+        attacker.close_all_connections()
+        owner.close_all_connections()
