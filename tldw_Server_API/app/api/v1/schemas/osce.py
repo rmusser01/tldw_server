@@ -273,8 +273,8 @@ class OsceStationSummary(StrictModel):
     recommended_duration_seconds: int = Field(ge=60, le=7200)
     order_index: int = Field(ge=0)
     version: int = Field(ge=1)
-    checklist_count: int = Field(ge=0, le=50)
-    rubric_domain_count: int = Field(ge=0, le=12)
+    checklist_count: int = Field(ge=1, le=50)
+    rubric_domain_count: int = Field(ge=1, le=12)
     verification_state: OsceVerificationStatus
     created_at: BoundedTimestamp
     updated_at: BoundedTimestamp
@@ -389,5 +389,5 @@ class OsceAttemptSummary(StrictModel):
     last_modified_at: BoundedTimestamp
     elapsed_seconds: int | None = Field(default=None, ge=0)
     checklist_met_count: int | None = Field(default=None, ge=0, le=50)
-    checklist_total: int | None = Field(default=None, ge=0, le=50)
+    checklist_total: int | None = Field(default=None, ge=1, le=50)
     rubric_results: list[OsceRubricResult] = Field(default_factory=list, max_length=12)

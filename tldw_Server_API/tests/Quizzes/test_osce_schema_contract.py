@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from tldw_Server_API.app.api.v1.schemas.osce import (
     OsceAttemptCreate,
     OsceAttemptPatch,
+    OsceAttemptSummary,
     OsceChecklistItemStored,
     OsceCitation,
     OsceCitationSourceType,
@@ -16,6 +17,7 @@ from tldw_Server_API.app.api.v1.schemas.osce import (
     OsceRubricLevelStored,
     OsceStationCreateContent,
     OsceStationStoredContent,
+    OsceStationSummary,
     OsceStationUpdateContent,
 )
 from tldw_Server_API.app.api.v1.schemas.quizzes import (
@@ -285,6 +287,56 @@ def test_station_create_strictly_rejects_numeric_string_duration(valid_station_p
 
     with pytest.raises(ValidationError):
         OsceStationCreateContent.model_validate(payload)
+
+
+@pytest.mark.parametrize("field", ["checklist_count", "rubric_domain_count"])
+def test_station_summary_counts_accept_one_and_reject_zero(field):
+    payload = {
+        "id": 1,
+        "quiz_id": 2,
+        "title": "Discuss safe anticoagulant use",
+        "recommended_duration_seconds": 480,
+        "order_index": 0,
+        "version": 1,
+        "checklist_count": 1,
+        "rubric_domain_count": 1,
+        "verification_state": "manually_authored",
+        "created_at": "2026-09-10T12:00:00Z",
+        "updated_at": "2026-09-10T12:00:00Z",
+    }
+
+    summary = OsceStationSummary.model_validate(payload)
+    assert getattr(summary, field) == 1
+
+    payload[field] = 0
+    with pytest.raises(ValidationError):
+        OsceStationSummary.model_validate(payload)
+
+
+def test_attempt_summary_checklist_total_accepts_one_and_rejects_zero():
+    payload = {
+        "id": 1,
+        "quiz_id": 2,
+        "station_id": 3,
+        "client_attempt_id": str(CHECKLIST_ID),
+        "station_title": "Discuss safe anticoagulant use",
+        "state": "completed",
+        "version": 2,
+        "started_at": "2026-09-10T12:00:00Z",
+        "self_assessment_started_at": "2026-09-10T12:05:00Z",
+        "completed_at": "2026-09-10T12:10:00Z",
+        "last_modified_at": "2026-09-10T12:10:00Z",
+        "elapsed_seconds": 300,
+        "checklist_met_count": 0,
+        "checklist_total": 1,
+    }
+
+    summary = OsceAttemptSummary.model_validate(payload)
+    assert summary.checklist_total == 1
+
+    payload["checklist_total"] = 0
+    with pytest.raises(ValidationError):
+        OsceAttemptSummary.model_validate(payload)
 
 
 @pytest.mark.parametrize(
