@@ -1,6 +1,6 @@
 # PR2761: Whisper alerts from the F7 Python rescan
 
-Scope: alerts **2678** and **2679**, CodeQL Python analysis **1759185673**, scanned commit `f7c8af3af397a0eeec355a1cea333996d2e8287c`. The exact SARIF was downloaded from the analysis API to `/tmp/pr2761-python-f7.sarif.json`; extracted results are `/tmp/pr2761-2678-trace.json` and `/tmp/pr2761-2679-trace.json`. Both fresh instance lists contain only `refs/pull/2761/head` at that commit. No alert state changes are part of this work.
+Scope: alerts **2678** and **2679**, CodeQL Python analysis **1759185673**, scanned commit `f7c8af3af397a0eeec355a1cea333996d2e8287c`. The exact SARIF was downloaded from the analysis API to `/tmp/pr2761-python-f7.sarif.json`; extracted results are `/tmp/pr2761-2678-trace.json` and `/tmp/pr2761-2679-trace.json`. Both fresh instance lists contain only `refs/pull/2761/head` at that commit. After this proof was committed in `6b671f22bc`, alert 2679 was independently dismissed as a false positive; alert 2678 remains a source repair awaiting analysis. See the [disposition ledger](PR2761-codeql-dispositions.md).
 
 ## 2678: remove unintended home-account lookup
 

@@ -39,9 +39,15 @@ def safe_join(
         return _fail()
     base_real = os.path.realpath(base_dir_abs)
     candidate_real = os.path.realpath(candidate)
+    # Compare using platform case rules, but preserve canonical spelling for
+    # filesystem access (Windows also supports case-sensitive directories).
+    base_compare = os.path.normcase(base_real)
+    candidate_compare = os.path.normcase(candidate_real)
+    # The separator keeps sibling names from matching; join also handles
+    # filesystem, drive and UNC roots that already end with a separator.
+    if candidate_compare != base_compare and not candidate_compare.startswith(os.path.join(base_compare, "")):
+        return _fail()
     try:
-        if os.path.commonpath([base_real, candidate_real]) != base_real:
-            return _fail()
         relative = os.path.relpath(candidate, base_dir_abs)
     except ValueError as exc:
         return _fail(exc)

@@ -421,10 +421,14 @@ class CheckpointManager:
     def _resolve_checkpoint_path(self, path_value: Path | str) -> Path:
         """Resolve a checkpoint file path under the configured checkpoint directory."""
         raw_path = Path(path_value)
-        if raw_path.is_absolute():
-            path = raw_path.resolve(strict=False)
-        else:
-            path = (self.checkpoint_dir / raw_path).resolve(strict=False)
+        candidate = os.path.abspath(
+            raw_path if raw_path.is_absolute() else self.checkpoint_dir / raw_path
+        )
+        root = os.path.normcase(str(self.checkpoint_dir))
+        candidate_compare = os.path.normcase(candidate)
+        if candidate_compare != root and not candidate_compare.startswith(os.path.join(root, "")):
+            raise ValueError("checkpoint path escapes checkpoint directory")
+        path = Path(candidate).resolve(strict=False)
         try:
             path.relative_to(self.checkpoint_dir)
         except ValueError as exc:

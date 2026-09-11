@@ -22,6 +22,14 @@ Both GitHub instance lists contain only PR2761. The ledger therefore now has
 **419** dispositions, including these two additional false positives. These
 were separate verified actions, not additions to the original approval list.
 
+Whisper alert **2679** was then independently resolved after proof and regression
+tests were committed in `6b671f22bc`. Its four reported relative-Hub-ID flows
+cannot pass the absolute-path guard before the existence probe. Its only active
+instance is PR2761. See [Whisper rescan evidence](PR2761-codeql-whisper-rescan.md).
+The ledger now totals **420 dispositions: 408 false positives and 12 synthetic
+test findings**. The accurate account-lookup finding 2678 was repaired, not
+dismissed.
+
 The [per-alert ledger](PR2761-codeql-dispositions.csv) records the actual GitHub
 rule, reason, timestamp and submitted explanation. Before each update, the
 executor checked the alert identity, rule, source path and effective state;

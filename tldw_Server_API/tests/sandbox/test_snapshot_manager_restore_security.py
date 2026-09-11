@@ -364,3 +364,33 @@ def test_snapshot_listing_ignores_metadata_symlink(tmp_path: Path, legacy: bool)
     metadata.symlink_to(outside_metadata)
 
     assert manager.list_snapshots("session") == []
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("operation", ["list", "quota"])
+def test_snapshot_session_directory_cannot_alias_another_session(
+    tmp_path: Path, legacy: bool, operation: str
+) -> None:
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    archive_path = manager._legacy_snapshot_path if legacy else manager._snapshot_path
+    metadata_path = manager._legacy_metadata_path if legacy else manager._metadata_path
+    victim_archive = archive_path("victim", "snapshot")
+    victim_metadata = metadata_path("victim", "snapshot")
+    victim_archive.parent.mkdir(parents=True)
+    victim_archive.write_bytes(b"victim archive")
+    victim_metadata.write_text(
+        '{"snapshot_id": "snapshot", "session_id": "victim", "secret": "private"}',
+        encoding="utf-8",
+    )
+    attacker_component = (
+        "attacker" if legacy else manager._safe_storage_component("attacker", label="session_id")
+    )
+    (manager.storage_path / attacker_component).symlink_to(victim_archive.parent, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="Invalid session_id"):
+        if operation == "list":
+            manager.list_snapshots("attacker")
+        else:
+            manager.enforce_quota("attacker", max_snapshots=0, max_size_mb=0)
+
+    assert victim_archive.read_bytes() == b"victim archive"

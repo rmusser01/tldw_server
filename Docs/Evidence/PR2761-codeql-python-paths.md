@@ -391,3 +391,111 @@ diff changes administrator configuration/environment precedence, not user-ID
 validation or `safe_join` confinement. Sandbox ownership/workspace guards,
 Skills bundle lifecycle guards, export filename containment and temporary file
 artifact path checks remain equivalent for the shared findings.
+
+
+## New analysis finding 2677: preserve snapshot session-directory identity
+
+Python analysis `1759155749`, revision
+`a4406278f5481ed0c85c14fd40f58551f528f80b`, introduced alert
+[2677](https://github.com/rmusser01/tldw_server/security/code-scanning/2677)
+at `Sandbox/snapshots.py:466` (`open(meta_file)`). This finding is additional
+to the original 152-alert inventory above. All four SARIF paths use the legacy
+session directory: two flow from `sandbox.py:929` through create snapshot and
+quota enforcement; two flow from `sandbox.py:1044` through direct listing.
+The paths pass `_raw_storage_component`, `_legacy_snapshot_dir`, `_snapshot_dirs`,
+`_storage_file` and `Utils/path_utils.safe_join`. All four involved source files
+are byte-identical between the scan revision and inspected HEAD `f7c8af3a`.
+
+The metadata leaf guard is effective, but an earlier directory-resolution gap
+is real: both session-directory constructors resolved a session-directory link
+before checking storage-root containment. A link to another session **inside**
+the same storage root passed that check, and the leaf helper then trusted the
+victim directory as its root. An isolated pre-fix probe demonstrated both victim
+metadata returned by attacker-session listing and victim archive deletion by
+attacker-session quota enforcement, in current hashed and legacy raw layouts
+(`/tmp/pr2761-snapshot2677-impact.log`). This requires a pre-existing filesystem
+link; no HTTP route creating such a link is asserted.
+
+Both `_snapshot_dir` and `_legacy_snapshot_dir` now call existing `safe_join`
+with the original single session component before canonicalization. This rejects
+session-directory links while preserving ordinary current/legacy layouts and
+the existing leaf check. Four regressions (two layouts by list/quota operation)
+failed before the repair, then the security and quota suites passed **35 tests**
+(`/tmp/pr2761-snapshot2677-red.log`, `/tmp/pr2761-snapshot2677-green.log`).
+Production Bandit reports zero findings and source/test Ruff passes.
+
+The exact alert and all four ordered SARIF paths, source/current/repair hashes,
+and all-ref instance inventory are retained in
+`/tmp/pr2761-alert2677-disposition.json`. GitHub reported only
+`refs/pull/2761/head` at a440 for this alert; no main or other PR instance was
+returned. This is a source fix, not a false-positive dismissal recommendation.
+No alert state was changed by this worker.
+
+## Research session-directory write identity follow-up
+
+The snapshot review exposed the same canonicalization-order issue in Research
+writes: `_resolve_artifact_path` resolved the hashed session directory before
+checking containment under `research`. Existing tests covered links outside that
+root but not a link into another session inside it. Three new public-writer
+regressions (JSON, JSONL and text) showed that such aliases were accepted before
+the repair, allowing writes and manifest paths to enter the victim session.
+
+The session directory now uses `safe_join(base, hashed_session_component)` before
+canonicalization. This preserves session identity, rejects directory links, and
+leaves ordinary storage layout, versioning, artifact filename handling and the
+previously repaired read boundary unchanged. The regressions assert rejection,
+unchanged victim file bytes and directory contents, and no attacker manifest row.
+They failed **3/3** before the repair; artifact, core hardening, jobs service and
+jobs worker suites then passed **96 tests**. Logs:
+`/tmp/pr2761-research-session-red.log`, `/tmp/pr2761-research-session-green.log`.
+Production Bandit reports zero findings and source/test Ruff passes. This is
+additional boundary evidence for the existing Research source-fix group; no
+CodeQL query or alert state was changed.
+
+## Shared containment guard and checkpoint pre-resolution check
+
+The a440 analysis still traced the guarded snapshot/Research paths through
+`safe_join`, whose `commonpath` comparison was not recognized as a path guard.
+The [CodeQL standard-library model](https://github.com/github/codeql/blob/main/python/ql/lib/semmle/python/frameworks/Stdlib.qll)
+models a successful `startswith` call as a check on its receiver, and the
+[path-injection query](https://github.com/github/codeql/blob/main/python/ql/lib/semmle/python/security/dataflow/PathInjectionQuery.qll)
+requires normalization before such a check. No query, model pack or suppression
+was added.
+
+`safe_join` now expresses realpath containment with platform-case-normalized
+comparison values, equality, and a separator-aware prefix built with
+`os.path.join(base, "")`. This preserves filesystem-root, drive-root and UNC-root
+handling, prevents sibling-prefix acceptance, and retains every lexical and
+no-link guard. Canonical path spelling is preserved for the returned path and
+filesystem operations; case normalization applies only to comparisons. Tests
+cover exact Windows return spelling as well as containment. The old comparison
+also rejected the valid bare UNC-share root when its candidate representation
+included a trailing separator; the new root-aware check accepts it.
+
+The exact residual 2281/2282 paths end at `Path.resolve` in
+`CheckpointManager._resolve_checkpoint_path`, before its existing canonical
+postcheck. The helper now checks a lexically normalized candidate against its
+configured root before filesystem resolution. The canonical postcheck still
+runs afterward, including equal-root input. New controls reject absolute and
+relative outside paths before `resolve`, retain ordinary absolute/relative and
+equal-root inputs, reject outside-target links, preserve MixedCase file access,
+and reject an equal-root path if the configured root has since become a link.
+The endpoint's owner/admin checkpoint scope check is unchanged. Main still lacks
+that separate ownership guard; 2281/2282 must not be globally dismissed on the
+strength of branch-only authorization.
+
+Final combined validation passes **150 tests** across the shared boundary,
+checkpoint unit/API, snapshot security/quota and Research artifact suites
+(`/tmp/pr2761-standard-guard-final.log`). All four production files and four
+changed test files pass Ruff, and production Bandit reports **zero findings**
+(`/tmp/pr2761-path-final-batch-ruff.log`,
+`/tmp/pr2761-path-final-batch-bandit.json`). Checkpoint tests were placed in a new
+focused file rather than changing unrelated existing test lint issues.
+The wider Research service/worker run also passed 96 tests before the equivalent
+shared-helper comparison change.
+
+Fresh hosted analysis must determine whether CodeQL follows the comparison
+aliases back to the original-case returned/accessed paths. The source change
+preserves correct filesystem behavior; it does not claim guaranteed scanner
+closure or justify global dismissal of main instances. Exact final file hashes
+and test logs are in `/tmp/pr2761-path-final-batch.json`.

@@ -36,11 +36,11 @@ class ResearchArtifactStore:
             "research",
             error_factory=lambda _exc: ValueError("artifact research path escapes output directory"),
         ))
-        session_dir = (base / self._safe_session_component(session_id)).resolve(strict=False)
-        try:
-            session_dir.relative_to(base)
-        except ValueError as exc:
-            raise ValueError("artifact session path escapes research directory") from exc
+        session_dir = Path(safe_join(
+            str(base),
+            self._safe_session_component(session_id),
+            error_factory=lambda _exc: ValueError("artifact session path escapes research directory"),
+        ))
         session_dir.mkdir(parents=True, exist_ok=True)
         path = (session_dir / safe_name).resolve(strict=False)
         try:

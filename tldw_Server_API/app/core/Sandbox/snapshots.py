@@ -91,19 +91,21 @@ class SnapshotManager:
         """Get the directory for a session's snapshots."""
         safe_session_id = self._safe_storage_component(session_id, label="session_id")
         base = Path(self.storage_path).resolve(strict=False)
-        path = (base / safe_session_id).resolve(strict=False)
-        if path != base and base not in path.parents:
-            raise ValueError("Invalid session_id")
-        return path
+        return Path(safe_join(
+            str(base),
+            safe_session_id,
+            error_factory=lambda _exc: ValueError("Invalid session_id"),
+        ))
 
     def _legacy_snapshot_dir(self, session_id: str) -> Path:
         """Get the legacy raw-id directory for a session's snapshots."""
         raw_session_id = self._raw_storage_component(session_id, label="session_id")
         base = Path(self.storage_path).resolve(strict=False)
-        path = (base / raw_session_id).resolve(strict=False)
-        if path != base and base not in path.parents:
-            raise ValueError("Invalid session_id")
-        return path
+        return Path(safe_join(
+            str(base),
+            raw_session_id,
+            error_factory=lambda _exc: ValueError("Invalid session_id"),
+        ))
 
     def _snapshot_dirs(self, session_id: str) -> list[Path]:
         """Return current and legacy snapshot directories for lookup."""

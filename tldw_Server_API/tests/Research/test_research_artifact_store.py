@@ -176,3 +176,34 @@ def test_artifact_readers_preserve_missing_recorded_file_behavior(stored_artifac
     Path(artifact.storage_path).unlink()
 
     assert getattr(store, reader)(session_id=session_id, artifact_name=artifact.artifact_name) is None
+
+
+@pytest.mark.parametrize("writer", ["write_json", "write_jsonl", "write_text"])
+def test_artifact_writers_reject_cross_session_directory_alias(stored_artifact, writer):
+    store, victim_id, victim_artifact = stored_artifact
+    attacker = store.db.create_session(
+        owner_user_id="1", query="attacker", source_policy="balanced",
+        autonomy_mode="autonomous", limits_json={},
+    )
+    victim_path = store._artifact_path(victim_id, victim_artifact.artifact_name)
+    previous_content = victim_path.read_bytes()
+    previous_files = set(victim_path.parent.iterdir())
+    attacker_dir = store._artifact_path(attacker.id, victim_artifact.artifact_name).parent
+    attacker_dir.rmdir()
+    attacker_dir.symlink_to(victim_path.parent, target_is_directory=True)
+    content = {
+        "write_json": {"payload": {"attacker": True}},
+        "write_jsonl": {"records": [{"attacker": True}]},
+        "write_text": {"content": "attacker overwrite"},
+    }[writer]
+
+    with pytest.raises(ValueError, match="artifact session path escapes"):
+        getattr(store, writer)(
+            owner_user_id="1", session_id=attacker.id,
+            artifact_name=victim_artifact.artifact_name, phase="test", job_id=None,
+            **content,
+        )
+
+    assert victim_path.read_bytes() == previous_content
+    assert set(victim_path.parent.iterdir()) == previous_files
+    assert store.db.list_artifacts(attacker.id) == []
