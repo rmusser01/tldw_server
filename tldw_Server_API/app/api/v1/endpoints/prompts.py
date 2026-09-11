@@ -756,7 +756,7 @@ async def get_prompt_capabilities(
                 **asdict(PROMPT_IMPROVEMENT_LIMITS)
             ),
         ),
-        single_text_recipe_v2=schemas.PromptRecipeCapability(supported=False, limits=dict(SINGLE_TEXT_RECIPE_LIMITS)),
+        single_text_recipe_v2=schemas.PromptRecipeCapability(supported=True, limits=dict(SINGLE_TEXT_RECIPE_LIMITS)),
         prompt_persistence=schemas.PromptPersistenceAuthorization(
             create_authorized=_is_prompt_persistence_authorized(principal),
             update_authorized=_is_prompt_persistence_authorized(principal),

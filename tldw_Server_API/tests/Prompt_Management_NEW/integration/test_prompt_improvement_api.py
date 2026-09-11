@@ -956,7 +956,7 @@ def test_stable_error_mapping_never_exposes_internal_exception_text(
         assert "retry_after_seconds" not in body
 
 
-def test_capabilities_enable_track_a_with_centralized_limits_and_keep_recipe_disabled(monkeypatch):
+def test_capabilities_enable_both_tracks_with_centralized_limits(monkeypatch):
     monkeypatch.delenv("PROMPTS_REQUIRE_ADMIN", raising=False)
     with _isolated_prompt_client() as (client, _app, _route):
         response = client.get("/api/v1/prompts/capabilities")
@@ -993,7 +993,7 @@ def test_capabilities_enable_track_a_with_centralized_limits_and_keep_recipe_dis
             },
         },
         "single_text_recipe_v2": {
-            "supported": False,
+            "supported": True,
             "limits": dict(prompts.SINGLE_TEXT_RECIPE_LIMITS),
         },
         "prompt_persistence": {
