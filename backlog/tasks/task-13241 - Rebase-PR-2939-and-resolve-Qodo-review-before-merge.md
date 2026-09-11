@@ -1,10 +1,10 @@
 ---
 id: TASK-13241
 title: Rebase PR 2939 and resolve Qodo review before merge
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-10 06:30'
-updated_date: '2026-09-10 07:22'
+updated_date: '2026-09-10 13:29'
 labels: []
 dependencies: []
 references:
@@ -24,8 +24,8 @@ User requests rebasing PR2939 onto latest dev, addressing all Qodo issues/commen
 <!-- AC:BEGIN -->
 - [x] #1 PR branch is rebased onto current dev with original regression fixes preserved
 - [x] #2 Every Qodo finding has a verified fix or evidence-based disposition and regression coverage where behavior changes
-- [ ] #3 Fresh affected tests, lint, Bandit, review, and required CI checks pass on the final head
-- [ ] #4 Merge into dev only after review requirements and repository human-authored Change summary are satisfied
+- [x] #3 Fresh affected tests, lint, Bandit, review, and required CI checks pass on the final head
+- [x] #4 PR is merged into dev after required checks and reviews pass, with the requester explicitly overriding the separate summary requirement
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -50,20 +50,24 @@ Published rebased review repairs as 475a4900356b17a651d0430cd00e029b3577ab63 wit
 Browser reproduction identified an inherited webhook status mismatch: backend adds delivery metadata, while admin client exact-key validation permits only the seven older fields. Existing mocks lacked delivery. A minimal API-client compatibility fix with real-response-shaped regressions is in progress; the real-backend acceptance test stays unchanged. Effective dev rules allow only a merge commit. Scheduled same-task follow-up finish-pr-2939-review-and-merge checks every 15 minutes, continues repairs, and merges only after all checks and the pending human Change summary are satisfied.
 
 Webhook compatibility follow-up complete: only admin-ui/lib/api-client.ts and its webhook client test changed. The response is copied and only unused delivery metadata is removed before existing strict validation; UI-consumed fields and unrelated-extra-key rejection remain intact. New canonical/legacy regressions failed before the fix (2 failed, 21 passed); after repair all 73 webhook client/page/URL cases pass. Scoped ESLint, full admin typecheck, and the production real-backend build pass on Node 20.19.5. The unchanged real-backend Chromium JWT webhook spec passes all 3 tests with no retries. Independent review found no issues; temporary services stopped. Latest remote dev remains 9da94ebcb4, and PR head before publishing this follow-up is 475a490035. Current-head CI and Qodo must re-run after push; the human Change summary is still pending.
+
+Verified merge into dev as 50c1f689575b1bc21ed3e78cdb193b03fe968cdd at 2026-09-10 13:19 UTC, using exact reviewed head c26b30c5cb652cf47e139231923eabdb465fbac5 and the allowed merge-commit method without admin bypass. All seven required checks passed and Qodo reported zero bugs/rule violations with all threads resolved. The requester explicitly overrode the separate human-written-summary blocker and directed immediate merge; that override is recorded in the PR.
+
+Post-merge cleanup requested by the user: local dev fast-forwarded to the verified merge; the clean PR worktree and its generated dependencies/builds were removed; the merged local/remote feature branch and temporary pre-rebase backup were removed. All eight backup patches were verified equivalent to merged patches before deleting the backup. The completed follow-up automation was deleted. Original UAT and review evidence remain tracked; PR evidence links use the immutable reviewed commit. This closeout touches documentation/tracking only, so Python tests and Bandit need no repeat; whitespace and state checks verify the cleanup.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR2939 onto current dev with original patches preserved, resolved all seven Qodo findings with behavioral regressions and individual review responses, repaired CI shard assignments and the inherited admin webhook delivery-metadata contract failure, and recorded fresh local verification. Qodo independently cleared the rebased backend head. Remaining work is final-head remote checks/review plus the required human-owned Change summary, followed by an authorized merge commit into dev. The thread follow-up continues those steps.
+Merged PR2939 into dev as 50c1f689575b1bc21ed3e78cdb193b03fe968cdd after rebasing, resolving all seven Qodo findings, repairing CI shard coverage and the inherited webhook contract, and passing every required check. The requester explicitly waived the separate summary requirement. Regression/UAT evidence is preserved, temporary PR branches/worktree and the completed follow-up are removed, and the task is closed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
