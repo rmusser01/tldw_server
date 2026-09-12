@@ -1,0 +1,358 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "standard_recall": {
+      "catalog": {
+        "id": "standard_recall",
+        "label": "Standard Recall",
+        "description": "Balanced source-grounded recall and application questions.",
+        "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": null,
+        "default_num_questions": 10,
+        "default_difficulty": "mixed",
+        "default_question_types": ["multiple_choice", "true_false", "fill_blank"]
+      },
+      "request": {
+        "sources": [{"source_type": "note", "source_id": "note-advanced-quiz"}],
+        "generation_profile": "standard_recall",
+        "num_questions": 1,
+        "question_types": ["multiple_choice"],
+        "difficulty": "mixed"
+      },
+      "output": {
+        "output_kind": "questions",
+        "questions": [
+          {
+            "question_type": "multiple_choice",
+            "question_text": "Which process converts light energy into stored chemical energy?",
+            "options": ["Respiration", "Photosynthesis", "Fermentation", "Transpiration"],
+            "correct_answer": 1,
+            "explanation": "Photosynthesis stores captured light energy in chemical bonds.",
+            "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz", "quote": "Photosynthesis converts light energy into chemical energy."}],
+            "tags": ["biology"],
+            "points": 1
+          }
+        ]
+      }
+    },
+    "mixed_assessment": {
+      "catalog": {
+        "id": "mixed_assessment",
+        "label": "Mixed Assessment",
+        "description": "A broader mix of recall, interpretation, and applied understanding.",
+        "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": null,
+        "default_num_questions": 10,
+        "default_difficulty": "mixed",
+        "default_question_types": ["multiple_choice", "true_false", "fill_blank"]
+      },
+      "request": {
+        "sources": [{"source_type": "note", "source_id": "note-advanced-quiz"}],
+        "generation_profile": "mixed_assessment",
+        "num_questions": 1,
+        "question_types": ["true_false"],
+        "difficulty": "mixed"
+      },
+      "output": {
+        "output_kind": "questions",
+        "questions": [
+          {
+            "question_type": "true_false",
+            "question_text": "A catalyst lowers activation energy without being consumed.",
+            "correct_answer": "true",
+            "explanation": "Catalysts provide a lower-energy reaction pathway and are regenerated.",
+            "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz", "quote": "Catalysts lower activation energy and are not consumed."}],
+            "tags": ["chemistry"],
+            "points": 1
+          }
+        ]
+      }
+    },
+    "best_of_five": {
+      "catalog": {
+        "id": "best_of_five",
+        "label": "Best of Five",
+        "description": "Single-best-answer questions with five plausible options.",
+        "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": null,
+        "default_num_questions": 5,
+        "default_difficulty": "mixed",
+        "default_question_types": ["multiple_choice"]
+      },
+      "request": {
+        "sources": [{"source_type": "note", "source_id": "note-advanced-quiz"}],
+        "generation_profile": "best_of_five",
+        "num_questions": 1,
+        "question_types": ["multiple_choice"],
+        "difficulty": "mixed"
+      },
+      "output": {
+        "output_kind": "questions",
+        "questions": [
+          {
+            "question_type": "multiple_choice",
+            "question_text": "Which finding is most consistent with iron deficiency anaemia?",
+            "options": ["High ferritin", "Low ferritin", "High vitamin B12", "Raised haptoglobin", "Low transferrin"],
+            "correct_answer": 1,
+            "explanation": "Low ferritin reflects depleted iron stores and is the best answer.",
+            "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz", "quote": "Iron deficiency is associated with reduced serum ferritin."}],
+            "tags": ["haematology", "best_of_five"],
+            "points": 1
+          }
+        ]
+      }
+    },
+    "emq": {
+      "catalog": {
+        "id": "emq",
+        "label": "EMQ",
+        "description": "Extended matching questions with shared option banks.",
+        "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": null,
+        "default_num_questions": 5,
+        "default_difficulty": "mixed",
+        "default_question_types": ["multiple_choice"]
+      },
+      "request": {
+        "sources": [{"source_type": "note", "source_id": "note-advanced-quiz"}],
+        "generation_profile": "emq",
+        "num_questions": 2,
+        "question_types": ["multiple_choice"],
+        "difficulty": "mixed"
+      },
+      "output": {
+        "output_kind": "questions",
+        "questions": [
+          {
+            "question_type": "multiple_choice",
+            "question_text": "A patient has episodic wheeze that improves with a bronchodilator.",
+            "group_id": "respiratory-diagnosis",
+            "group_prompt": "For each presentation, choose the single most likely diagnosis.",
+            "options": ["Asthma", "Pneumonia", "Pulmonary embolism"],
+            "correct_answer": 0,
+            "explanation": "Variable reversible airflow obstruction is characteristic of asthma.",
+            "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz", "quote": "Asthma causes episodic reversible airflow obstruction."}],
+            "points": 1
+          },
+          {
+            "question_type": "multiple_choice",
+            "question_text": "A patient has fever, productive cough, and focal consolidation.",
+            "group_id": "respiratory-diagnosis",
+            "group_prompt": "For each presentation, choose the single most likely diagnosis.",
+            "options": ["Asthma", "Pneumonia", "Pulmonary embolism"],
+            "correct_answer": 1,
+            "explanation": "Fever and focal consolidation are most consistent with pneumonia.",
+            "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz", "quote": "Pneumonia commonly presents with fever, cough, and focal consolidation."}],
+            "points": 1
+          }
+        ]
+      }
+    },
+    "assertion_reasoning": {
+      "catalog": {
+        "id": "assertion_reasoning",
+        "label": "Assertion / Reasoning",
+        "description": "Assertion and reason pairs with concise evidence-backed rationales.",
+        "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": null,
+        "default_num_questions": 5,
+        "default_difficulty": "mixed",
+        "default_question_types": ["multiple_choice"]
+      },
+      "request": {
+        "sources": [{"source_type": "note", "source_id": "note-advanced-quiz"}],
+        "generation_profile": "assertion_reasoning",
+        "num_questions": 1,
+        "question_types": ["multiple_choice"],
+        "difficulty": "mixed"
+      },
+      "output": {
+        "output_kind": "questions",
+        "questions": [
+          {
+            "question_type": "multiple_choice",
+            "question_text": "**Assertion:** Insulin lowers blood glucose.\n\n**Reason:** Insulin promotes cellular glucose uptake.",
+            "assertion": "Insulin lowers blood glucose.",
+            "reason": "Insulin promotes cellular glucose uptake.",
+            "options": [
+              "Both the assertion and reason are true, and the reason correctly explains the assertion.",
+              "Both the assertion and reason are true, but the reason does not explain the assertion.",
+              "The assertion is true, but the reason is false.",
+              "The assertion is false, but the reason is true.",
+              "Both the assertion and reason are false."
+            ],
+            "correct_answer": 0,
+            "explanation": "Increased cellular uptake is one mechanism by which insulin lowers blood glucose.",
+            "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz", "label": "Endocrinology source", "quote": "Insulin promotes glucose uptake and lowers blood glucose."}],
+            "tags": ["endocrinology", "assertion_reasoning"],
+            "points": 1
+          }
+        ]
+      }
+    },
+    "osce_scenario": {
+      "catalog": {
+        "id": "osce_scenario",
+        "label": "OSCE Scenario",
+        "description": "Scenario practice with checklist and rubric feedback.",
+        "status": "available",
+        "output_kind": "osce_stations",
+        "default_num_stations": 1,
+        "default_num_questions": 1,
+        "default_difficulty": "mixed",
+        "default_question_types": ["fill_blank"]
+      },
+      "request": {
+        "sources": [{"source_type": "note", "source_id": "note-advanced-quiz"}],
+        "generation_profile": "osce_scenario",
+        "num_stations": 1,
+        "difficulty": "mixed"
+      },
+      "output": {
+        "output_kind": "osce_stations",
+        "questions": [],
+        "osce_stations": [
+          {
+            "schema_version": "osce.station.v1",
+            "title": "Explain safe anticoagulant use",
+            "candidate_instructions": "You are speaking with a fictional patient who recently started warfarin.",
+            "candidate_task": "Explain the key safety advice and respond to the patient's concerns.",
+            "patient_context": {"text": "A fictional adult has recently started warfarin.", "citations": [{"source_type": "note", "source_id": "note-advanced-quiz", "chunk_id": "chunk-anticoagulation", "quote": "Warfarin is used for anticoagulation"}]},
+            "recommended_duration_seconds": 480,
+            "checklist_items": [{"label": "Explains the purpose of treatment", "rationale": "Understanding the indication supports safe use.", "citations": [{"source_type": "note", "source_id": "note-advanced-quiz", "chunk_id": "chunk-anticoagulation", "quote": "Warfarin is used for anticoagulation"}]}],
+            "rubric_domains": [{"label": "Communication", "levels": [{"label": "Needs development", "description": "The explanation is incomplete or unclear."}, {"label": "Effective", "description": "The explanation is clear and checks understanding."}]}],
+            "expected_key_points": [{"text": "Discuss monitoring and important warning signs.", "citations": [{"source_type": "note", "source_id": "note-advanced-quiz", "chunk_id": "chunk-anticoagulation", "quote": "requires regular monitoring, and patients should seek help for important bleeding warning signs"}]}]
+          }
+        ]
+      }
+    }
+  },
+  "malformed_output_cases": [
+    {
+      "id": "question_count_mismatch",
+      "profile": "standard_recall",
+      "mode": "planned_reject",
+      "error": "count mismatch",
+      "question_plan": [{"question_type": "multiple_choice", "count": 2, "option_count": 4}],
+      "output": {"questions": [{"question_type": "multiple_choice", "question_text": "Only one question was returned.", "options": ["A", "B", "C", "D"], "correct_answer": 0, "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
+      "id": "invalid_citation",
+      "profile": "mixed_assessment",
+      "mode": "provenance_reject",
+      "error": "do not map to selected sources",
+      "selected_sources": [{"source_type": "note", "source_id": "note-advanced-quiz"}],
+      "output": {"questions": [{"question_type": "true_false", "question_text": "A source-backed statement.", "correct_answer": "true", "source_citations": [{"source_type": "note", "source_id": "different-note"}]}]}
+    },
+    {
+      "id": "best_of_five_wrong_option_count",
+      "profile": "best_of_five",
+      "mode": "normalize_reject",
+      "error": "exactly 5 options",
+      "output": {"questions": [{"question_type": "multiple_choice", "question_text": "Choose the best answer.", "options": ["A", "B", "C", "D"], "correct_answer": 0, "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
+      "id": "best_of_five_too_many_options",
+      "profile": "best_of_five",
+      "mode": "normalize_reject",
+      "error": "exactly 5 options",
+      "output": {"questions": [{"question_type": "multiple_choice", "question_text": "Choose the best answer.", "options": ["A", "B", "C", "D", "E", "F"], "correct_answer": 0, "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
+      "id": "best_of_five_invalid_answer",
+      "profile": "best_of_five",
+      "mode": "normalize_reject",
+      "error": "Best-of-Five correct_answer",
+      "output": {"questions": [{"question_type": "multiple_choice", "question_text": "Choose the best answer.", "options": ["A", "B", "C", "D", "E"], "correct_answer": 9, "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
+      "id": "best_of_five_ambiguous_answer",
+      "profile": "best_of_five",
+      "mode": "normalize_reject",
+      "error": "ambiguous",
+      "output": {"questions": [{"question_type": "multiple_choice", "question_text": "Choose the best answer.", "options": ["B", "A", "C", "D", "E"], "correct_answer": "B", "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
+      "id": "best_of_five_duplicate_answer_label",
+      "profile": "best_of_five",
+      "mode": "normalize_reject",
+      "error": "duplicate option labels",
+      "output": {"questions": [{"question_type": "multiple_choice", "question_text": "Choose the best answer.", "options": ["Same", "Same", "C", "D", "E"], "correct_answer": "Same", "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
+      "id": "best_of_five_duplicate_options_numeric_answer",
+      "profile": "best_of_five",
+      "mode": "normalize_reject",
+      "error": "duplicate option labels",
+      "output": {"questions": [{"question_type": "multiple_choice", "question_text": "Choose the best answer.", "options": ["Same", "same", "C", "D", "E"], "correct_answer": 0, "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
+      "id": "best_of_five_non_multiple_choice",
+      "profile": "best_of_five",
+      "mode": "normalize_reject",
+      "error": "multiple_choice",
+      "output": {"questions": [{"question_type": "true_false", "question_text": "This profile must reject non-MCQ output.", "correct_answer": "true", "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
+      "id": "emq_incomplete_group",
+      "profile": "emq",
+      "mode": "normalize_reject",
+      "error": "at least two stems",
+      "output": {"questions": [{"question_type": "multiple_choice", "question_text": "A single stem.", "group_id": "group-1", "group_prompt": "Choose one option.", "options": ["A", "B"], "correct_answer": 0, "explanation": "A is supported.", "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
+      "id": "emq_inconsistent_option_bank",
+      "profile": "emq",
+      "mode": "normalize_reject",
+      "error": "same option bank",
+      "output": {"questions": [{"question_type": "multiple_choice", "question_text": "First stem.", "group_id": "group-1", "group_prompt": "Choose one option.", "options": ["A", "B"], "correct_answer": 0, "explanation": "A is supported.", "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}, {"question_type": "multiple_choice", "question_text": "Second stem.", "group_id": "group-1", "group_prompt": "Choose one option.", "options": ["A", "C"], "correct_answer": 1, "explanation": "C is supported.", "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
+      "id": "assertion_reasoning_missing_reason",
+      "profile": "assertion_reasoning",
+      "mode": "normalize_reject",
+      "error": "reason must contain",
+      "output": {"questions": [{"question_type": "multiple_choice", "assertion": "The assertion is present.", "correct_answer": "A", "explanation": "A concise rationale.", "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
+      "id": "assertion_reasoning_invalid_answer",
+      "profile": "assertion_reasoning",
+      "mode": "normalize_reject",
+      "error": "correct_answer",
+      "output": {"questions": [{"question_type": "multiple_choice", "assertion": "The assertion is present.", "reason": "The reason is present.", "correct_answer": "F", "explanation": "A concise rationale.", "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
+      "id": "assertion_reasoning_noncanonical_options",
+      "profile": "assertion_reasoning",
+      "mode": "normalize_expect",
+      "expected": {"options": ["Both the assertion and reason are true, and the reason correctly explains the assertion.", "Both the assertion and reason are true, but the reason does not explain the assertion.", "The assertion is true, but the reason is false.", "The assertion is false, but the reason is true.", "Both the assertion and reason are false."]},
+      "output": {"questions": [{"question_type": "multiple_choice", "assertion": "The assertion is present.", "reason": "The reason is present.", "options": ["Yes", "No"], "correct_answer": "A", "explanation": "A concise rationale.", "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
+      "id": "assertion_reasoning_unlabeled_question_text",
+      "profile": "assertion_reasoning",
+      "mode": "assertion_schema_reject",
+      "error": "labeled assertion and reason",
+      "output": {"questions": [{"question_type": "multiple_choice", "question_text": "The assertion and reason labels are missing.", "group_id": null, "group_prompt": null, "options": ["Both the assertion and reason are true, and the reason correctly explains the assertion.", "Both the assertion and reason are true, but the reason does not explain the assertion.", "The assertion is true, but the reason is false.", "The assertion is false, but the reason is true.", "Both the assertion and reason are false."], "correct_answer": 0, "explanation": "A concise rationale.", "tags": ["assertion_reasoning"]}]}
+    },
+    {
+      "id": "reserved_tag_leakage",
+      "profile": "standard_recall",
+      "mode": "normalize_expect",
+      "expected": {"tags": ["biology"]},
+      "output": {"questions": [{"question_type": "multiple_choice", "question_text": "A standard question.", "options": ["A", "B", "C", "D"], "correct_answer": 0, "tags": ["biology", "best of five", "assertion/reasoning"], "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
+      "id": "osce_missing_rubric",
+      "profile": "osce_scenario",
+      "mode": "osce_schema_reject",
+      "error": "rubric",
+      "output": {"osce_stations": [{"schema_version": "osce.station.v1", "title": "Incomplete station", "candidate_instructions": "Read the task.", "candidate_task": "Explain the topic.", "patient_context": {"text": "A fictional context.", "citations": []}, "recommended_duration_seconds": 300, "checklist_items": [{"label": "Covers the topic", "citations": []}], "rubric_domains": [], "expected_key_points": [{"text": "Key point", "citations": []}]}]}
+    }
+  ]
+}
