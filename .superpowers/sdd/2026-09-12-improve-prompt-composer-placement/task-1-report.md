@@ -125,3 +125,70 @@ Independent review at `5ae32a3049` found that the nominally upward disclosure an
 During fix-round verification, an extension test still scoped the applied status to its former `chat-messages` ancestor and a Web test scoped it to the former send-cluster ancestor. Those stale locators failed after the intentional body portal; they were changed to select the visible exact status globally while retaining layout and pointer assertions. One painted-center check sampled during drawer motion once; the same production artifact passed unchanged after the helper waited for stable hit-testing. No third production layout approach was attempted.
 
 The main checkout was not touched during fix round 1. An accidental formatter invocation with the wrong discovered config caused semicolon-only churn in four task-owned isolated-worktree files; those exact paths were restored and the semantic changes reapplied with absolute `apply_patch` paths. A subsequent check used the extension's explicit `.prettierrc.cjs`; remaining normal-versus-whitespace-ignored diff differences are localized to the body-portal JSX nesting rather than repository-wide formatting.
+
+## Fix round 2 — overlay ownership and viewport mutation safety
+
+Independent re-review at `182d3d323e` verified the original clipping and 640 px drawer fixes but reproduced two follow-on defects: persistent feedback at `z-[1100]` intercepted reopened menu and inspection-drawer controls, and the feedback position formula did not bound its bottom edge or avoid a draft moved near the visual viewport top.
+
+### Fix-round 2 RED evidence
+
+Production was unchanged while each real packaged-browser behavior failed:
+
+1. V5 feedback versus reopened menu:
+
+   ```text
+   TLDW_E2E_SKIP_EXTENSION_BUILD=1 bunx playwright test tests/e2e/prompt-improvement.spec.ts --reporter=line --workers=1 --grep "V5 applied feedback yields"
+   ```
+
+   Result: **1 failed**. After Improve now left feedback active, the painted center of Review changes resolved to feedback rather than the menu button; `clickThroughPaintedCenter` timed out with `matches: false`.
+
+2. V3 feedback versus inspection drawer:
+
+   ```text
+   TLDW_E2E_SKIP_EXTENSION_BUILD=1 bunx playwright test tests/e2e/prompt-improvement.spec.ts --reporter=line --workers=1 --grep "V3 applied feedback yields"
+   ```
+
+   Result: **1 failed**. After View changes opened and the drawer settled, the Changes control's center remained covered by feedback and failed real pointer hit-testing.
+
+3. Improvement feedback after viewport shrink and real composer scroll:
+
+   ```text
+   TLDW_E2E_SKIP_EXTENSION_BUILD=1 bunx playwright test tests/e2e/prompt-improvement.spec.ts --reporter=line --workers=1 --grep "improvement feedback stays usable after viewport shrink"
+   ```
+
+   Result: **1 failed** at 360 x 240 because the fixed feedback intersected the real draft after `scrollIntoView` moved the composer near the viewport top.
+
+4. Recipe feedback after the same mutation:
+
+   ```text
+   TLDW_E2E_SKIP_EXTENSION_BUILD=1 bunx playwright test tests/e2e/prompt-improvement.spec.ts --reporter=line --workers=1 --grep "recipe feedback stays usable after viewport shrink"
+   ```
+
+   After correcting a test-only missing `scrollIntoViewIfNeeded` for the drawer Apply button, the production RED was **1 failed** because recipe feedback also intersected the real draft.
+
+### Fix-round 2 implementation
+
+- `PromptAssistMenu` reports its actual open state to its composer owner. The owner suppresses persistent feedback while the menu owns pointer/focus interaction, without clearing improvement or recipe Undo state.
+- Feedback is also suppressed from drawer open intent through Ant Drawer `afterOpenChange(false)`, so it neither covers opening/active drawers nor remounts during their closing animation. Same-operation inspection feedback returns after the drawer fully closes; beginning a new Review changes operation retains the existing new-operation lifecycle.
+- Removed the global `z-[1100]` escalation; feedback uses the normal transient-overlay layer and active menu/drawer visibility is coordinated explicitly.
+- Feedback geometry now measures the real textarea/contenteditable draft and the owning send-action cluster. It tries deterministic above/below candidates with an 8 px gap, requires full visual-viewport containment, and hides rather than painting over required content if no collision-free rectangle exists.
+- Horizontal and vertical bounds use `visualViewport` offsets/dimensions when available. The overlay width is constrained before measurement, and window resize, capture-phase scroll, plus visual-viewport resize/scroll all share the existing single-RAF scheduler and cleanup.
+
+### Fix-round 2 GREEN verification
+
+- Exact new packaged-browser cases: **4 passed** together. V5 Review changes, V3 Edit/Changes, improvement Undo, and recipe Undo all center-hit-test to themselves and activate through real mouse input after the required transitions and 360 x 240 scroll/resize mutations.
+- Focused Vitest: **4 files, 121 tests passed**.
+- Complete self-contained packaged-extension prompt-improvement Playwright: **20 passed**; the final production refinement was rebuilt and the exact four geometry/ownership cases passed again. The external real-local-server smoke remains excluded because its server/API-key configuration was not supplied; fail-closed harness coverage passed.
+- Complete WebUI prompt-improvement Playwright: **13 passed**. After the final shared-component refinement, the desktop/mobile feedback geometry subset also passed **2/2**.
+- Extension TypeScript compile and production Chrome build: **passed**. Build emitted only existing duplicate-import and stale Browserslist warnings.
+- Explicit extension Prettier config check for all three changed source/test files: **passed**. Normal and whitespace-ignored diff stats are identical; no legacy file or main checkout path was formatted or changed.
+- Scoped ESLint through the available WebUI flat config: **exit 0**, with two expected outside-base warnings and no errors; extension/shared UI has no local ESLint config.
+- `git diff --check`: **passed**.
+- Bandit: **N/A** — fix-round files are TypeScript/TSX only.
+
+### Fix-round 2 self-review
+
+- Menu visibility is reported in a layout effect, so feedback is removed before the open menu is painted. Drawer visibility covers both logical open intent and the animation-backed presented state.
+- Same-operation inspection close returns feedback and exact Undo; the V3 test proves both. A reopened V5 Review changes starts a new operation, so the prior feedback correctly does not reappear after cancel.
+- Draft discovery is limited to actual editor surfaces rather than generic auxiliary inputs. Collision candidates are conservative across the draft and required send cluster, remain layout-neutral, and use a non-painting fallback if the viewport cannot physically fit the feedback.
+- Window and visual-viewport listeners are paired in cleanup, and pending animation frames remain cancelled on teardown. No prompt action, backend/capability contract, dependency, placement, persistence, system-prompt behavior, or Quick Chat scope changed.

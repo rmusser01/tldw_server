@@ -24,6 +24,7 @@ export type PromptAssistMenuProps = {
   onReviewChanges: () => void
   onBuildFromRecipe?: () => void
   onSelectModel?: () => void
+  onOpenChange?: (open: boolean) => void
   triggerRef?: RefObject<HTMLButtonElement | null>
   disabled?: boolean
   compact?: boolean
@@ -58,6 +59,7 @@ export function PromptAssistMenu({
   onReviewChanges,
   onBuildFromRecipe,
   onSelectModel,
+  onOpenChange,
   triggerRef: providedTriggerRef,
   disabled = false,
   compact = false,
@@ -79,6 +81,10 @@ export function PromptAssistMenu({
   const hasModel = Boolean(modelSelection?.selected_model.trim())
   const actionsEnabled =
     !disabled && capability === "supported" && hasDraft && hasModel
+
+  useLayoutEffect(() => {
+    onOpenChange?.(open)
+  }, [onOpenChange, open])
 
   useEffect(() => {
     if (!open) return

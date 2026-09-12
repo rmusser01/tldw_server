@@ -39,6 +39,7 @@ type ControllerMutation = {
 type FeedbackPosition = {
   left: number
   top: number
+  visible: boolean
 }
 
 function PromptAssistFeedbackOverlay({
@@ -68,13 +69,21 @@ function PromptAssistFeedbackOverlay({
       const overlay = overlayRef.current
       if (!anchor || !overlay) return
       const inset = 8
+      const gap = 8
+      const visualViewport = window.visualViewport
+      const viewportLeft = visualViewport?.offsetLeft ?? 0
+      const viewportTop = visualViewport?.offsetTop ?? 0
+      const viewportRight =
+        viewportLeft + (visualViewport?.width ?? window.innerWidth)
+      const viewportBottom =
+        viewportTop + (visualViewport?.height ?? window.innerHeight)
       const anchorRect = anchor.getBoundingClientRect()
-      let composerTop = anchorRect.top
+      let draftRect: DOMRect | null = null
       let ancestor = anchor.parentElement
       while (ancestor && ancestor !== document.body) {
         const draft = Array.from(
           ancestor.querySelectorAll<HTMLElement>(
-            "textarea, [contenteditable='true'], input:not([type='hidden']):not([type='button']):not([type='submit'])"
+            'textarea, [contenteditable="true"]'
           )
         ).find((candidate) => {
           const rect = candidate.getBoundingClientRect()
@@ -87,18 +96,54 @@ function PromptAssistFeedbackOverlay({
           )
         })
         if (draft) {
-          composerTop = Math.min(composerTop, draft.getBoundingClientRect().top)
+          draftRect = draft.getBoundingClientRect()
           break
         }
         ancestor = ancestor.parentElement
       }
+      const controlsRect = anchor
+        .closest<HTMLElement>(
+          '[data-testid="sidepanel-send-action-cluster"], [data-testid="composer-inline-send-control"]'
+        )
+        ?.getBoundingClientRect()
+      overlay.style.maxWidth = `${Math.max(
+        0,
+        viewportRight - viewportLeft - inset * 2
+      )}px`
       const overlayRect = overlay.getBoundingClientRect()
+      const minimumTop = viewportTop + inset
+      const maximumBottom = viewportBottom - inset
+      const blockedRects = [draftRect, controlsRect].filter(
+        (rect): rect is DOMRect =>
+          Boolean(rect && rect.bottom > minimumTop && rect.top < maximumBottom)
+      )
+      const fitsAt = (top: number) =>
+        top >= minimumTop &&
+        top + overlayRect.height <= maximumBottom &&
+        blockedRects.every(
+          (rect) =>
+            top + overlayRect.height <= rect.top - gap ||
+            top >= rect.bottom + gap
+        )
+      const candidates = [
+        draftRect ? draftRect.top - gap - overlayRect.height : null,
+        controlsRect ? controlsRect.top - gap - overlayRect.height : null,
+        draftRect ? draftRect.bottom + gap : null,
+        controlsRect ? controlsRect.bottom + gap : null,
+        minimumTop,
+        maximumBottom - overlayRect.height
+      ].filter((top): top is number => top !== null)
+      const top = candidates.find(fitsAt)
       setPosition({
         left: Math.min(
-          Math.max(inset, anchorRect.right - overlayRect.width),
-          Math.max(inset, window.innerWidth - inset - overlayRect.width)
+          Math.max(viewportLeft + inset, anchorRect.right - overlayRect.width),
+          Math.max(
+            viewportLeft + inset,
+            viewportRight - inset - overlayRect.width
+          )
         ),
-        top: Math.max(inset, composerTop - inset - overlayRect.height)
+        top: top ?? minimumTop,
+        visible: top !== undefined
       })
     }
 
@@ -113,9 +158,13 @@ function PromptAssistFeedbackOverlay({
     updatePosition()
     window.addEventListener("resize", schedulePosition)
     window.addEventListener("scroll", schedulePosition, true)
+    window.visualViewport?.addEventListener("resize", schedulePosition)
+    window.visualViewport?.addEventListener("scroll", schedulePosition)
     return () => {
       window.removeEventListener("resize", schedulePosition)
       window.removeEventListener("scroll", schedulePosition, true)
+      window.visualViewport?.removeEventListener("resize", schedulePosition)
+      window.visualViewport?.removeEventListener("scroll", schedulePosition)
       if (animationFrame !== null) cancelAnimationFrame(animationFrame)
     }
   }, [anchorRef, portalTarget])
@@ -127,9 +176,9 @@ function PromptAssistFeedbackOverlay({
       style={{
         left: position?.left ?? 0,
         top: position?.top ?? 0,
-        visibility: position ? undefined : "hidden"
+        visibility: position?.visible ? undefined : "hidden"
       }}
-      className="fixed z-[1100] flex w-max max-w-[calc(100vw-1rem)] flex-wrap items-center gap-2 rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-lg">
+      className="fixed z-50 flex w-max max-w-[calc(100vw-1rem)] flex-wrap items-center gap-2 rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-lg">
       {children}
     </div>,
     portalTarget
@@ -171,6 +220,8 @@ export function PromptAssistComposerAction({
   const [panelOpen, setPanelOpen] = React.useState(false)
   const [inspectionOpen, setInspectionOpen] = React.useState(false)
   const [recipeOpen, setRecipeOpen] = React.useState(false)
+  const [promptActionsOpen, setPromptActionsOpen] = React.useState(false)
+  const [drawerPresented, setDrawerPresented] = React.useState(false)
   const { owner: recipeOwner, loading: recipeOwnerLoading } =
     useRecipePersistenceOwner(recipeOpen && surfaceOpen)
   const [authorizedRecipeOwner, setAuthorizedRecipeOwner] =
@@ -309,6 +360,7 @@ export function PromptAssistComposerAction({
   React.useLayoutEffect(() => {
     pendingDrawerFocusRef.current = false
     pendingRecipeTriggerFocusRef.current = false
+    setDrawerPresented(false)
     setRecipeOpen(false)
     setRecipeUndo(null)
 
@@ -403,6 +455,7 @@ export function PromptAssistComposerAction({
   }, [dismissPromptAssist, promptAssistState.status, recipeOpen])
   const handleDrawerAfterOpenChange = React.useCallback(
     (open: boolean) => {
+      setDrawerPresented(open)
       if (open || !pendingDrawerFocusRef.current) return
       pendingDrawerFocusRef.current = false
       if (pendingRecipeTriggerFocusRef.current) {
@@ -481,6 +534,13 @@ export function PromptAssistComposerAction({
 
   if (!surfaceOpen) return null
 
+  const drawerOpen =
+    recipeOpen ||
+    (panelOpen &&
+      promptAssist.state.status !== "idle" &&
+      (promptAssist.state.status !== "applied" || inspectionOpen))
+  const feedbackVisible = !promptActionsOpen && !drawerOpen && !drawerPresented
+
   return (
     <div className="relative min-w-0">
       <PromptAssistMenu
@@ -492,12 +552,13 @@ export function PromptAssistComposerAction({
         onReviewChanges={() => start(promptAssist.reviewChanges)}
         onBuildFromRecipe={openRecipeBuilder}
         onSelectModel={onSelectModel}
+        onOpenChange={setPromptActionsOpen}
         disabled={sending || promptAssist.state.status === "analyzing"}
         compact
         placement="top"
       />
 
-      {promptAssist.state.status === "applied" ? (
+      {promptAssist.state.status === "applied" && feedbackVisible ? (
         <PromptAssistFeedbackOverlay anchorRef={promptAssistTriggerRef}>
           <span role="status" className="text-xs text-muted-foreground">
             {t("common:promptAssist.applied", "Improvement applied.")}
@@ -519,7 +580,7 @@ export function PromptAssistComposerAction({
         </PromptAssistFeedbackOverlay>
       ) : null}
 
-      {recipeUndo ? (
+      {recipeUndo && feedbackVisible ? (
         <PromptAssistFeedbackOverlay anchorRef={promptAssistTriggerRef}>
           <span role="status" className="text-xs text-muted-foreground">
             {t("common:promptAssist.recipeApplied", "Recipe applied.")}
@@ -532,12 +593,7 @@ export function PromptAssistComposerAction({
 
       <Drawer
         placement="right"
-        open={
-          recipeOpen ||
-          (panelOpen &&
-            promptAssist.state.status !== "idle" &&
-            (promptAssist.state.status !== "applied" || inspectionOpen))
-        }
+        open={drawerOpen}
         onClose={closeDrawer}
         afterOpenChange={handleDrawerAfterOpenChange}
         focusable={{ focusTriggerAfterClose: false }}
