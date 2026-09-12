@@ -14,35 +14,27 @@ const mockDraftState = {
   lastSaved: null
 }
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (
-      key: string,
-      fallbackOrOptions?: string | { defaultValue?: string; [k: string]: unknown }
-    ) => {
-      if (key === "managePrompts.recipe.unavailableTitle") {
-        return "Localized recipe unavailable"
-      }
-      if (key === "managePrompts.recipe.unavailableDescription") {
-        return "Localized unsafe recipe description"
-      }
-      if (typeof fallbackOrOptions === "string") return fallbackOrOptions
-      if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
-        if (fallbackOrOptions.defaultValue) {
-          return Object.entries(fallbackOrOptions).reduce(
-            (acc, [name, value]) =>
-              name === "defaultValue"
-                ? acc
-                : acc.replace(new RegExp(`{{${name}}}`, "g"), String(value)),
-            fallbackOrOptions.defaultValue
-          )
+vi.mock("react-i18next", async () => {
+  const { createInstance } = await import("i18next")
+  const i18n = createInstance()
+  await i18n.init({
+    lng: "en",
+    interpolation: { escapeValue: false },
+    resources: {
+      en: {
+        translation: {
+          managePrompts: {
+            recipe: {
+              unavailableTitle: "Localized recipe unavailable",
+              unavailableDescription: "Localized unsafe recipe description"
+            }
+          }
         }
-        return key
       }
-      return key
     }
   })
-}))
+  return { useTranslation: () => ({ t: i18n.t.bind(i18n) }) }
+})
 
 vi.mock("@/hooks/useFormDraft", () => ({
   useFormDraft: () => mockDraftState,

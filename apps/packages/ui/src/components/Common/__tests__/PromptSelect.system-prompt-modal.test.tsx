@@ -57,15 +57,20 @@ const commonLoadingResource = vi.hoisted(() => ({
   content: "Loading content from common"
 }))
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, fallback?: string) => {
-      if (key === "common:loading") return commonLoadingResource
-      if (key === "common:loading.title") return commonLoadingResource.title
-      return fallback || key
-    }
-  })
-}))
+vi.mock("react-i18next", async () => {
+  const { createInstance } = await import("i18next")
+  const i18n = createInstance()
+  await i18n.init({ lng: "en", resources: {}, interpolation: { escapeValue: false } })
+  return {
+    useTranslation: () => ({
+      t: (...args: Parameters<typeof i18n.t>) => {
+        if (args[0] === "common:loading") return commonLoadingResource
+        if (args[0] === "common:loading.title") return commonLoadingResource.title
+        return i18n.t(...args)
+      }
+    })
+  }
+})
 
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (_key: string, defaultValue: unknown) =>

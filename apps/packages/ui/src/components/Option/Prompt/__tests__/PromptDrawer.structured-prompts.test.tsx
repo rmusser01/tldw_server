@@ -3,29 +3,12 @@ import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { PromptDrawer } from "../PromptDrawer"
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (
-      key: string,
-      fallbackOrOptions?: string | { defaultValue?: string; [k: string]: unknown }
-    ) => {
-      if (typeof fallbackOrOptions === "string") return fallbackOrOptions
-      if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
-        if (fallbackOrOptions.defaultValue) {
-          return Object.entries(fallbackOrOptions).reduce(
-            (acc, [name, value]) =>
-              name === "defaultValue"
-                ? acc
-                : acc.replace(new RegExp(`{{${name}}}`, "g"), String(value)),
-            fallbackOrOptions.defaultValue
-          )
-        }
-        return key
-      }
-      return key
-    }
-  })
-}))
+vi.mock("react-i18next", async () => {
+  const { createInstance } = await import("i18next")
+  const i18n = createInstance()
+  await i18n.init({ lng: "en", resources: {}, interpolation: { escapeValue: false } })
+  return { useTranslation: () => ({ t: i18n.t.bind(i18n) }) }
+})
 
 vi.mock("@/hooks/useFormDraft", () => ({
   useFormDraft: () => ({

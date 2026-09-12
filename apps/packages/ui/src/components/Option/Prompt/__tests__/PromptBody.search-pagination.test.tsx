@@ -107,20 +107,12 @@ vi.mock("@/services/recipe-persistence-uncertainty", async (importOriginal) => (
     mocks.resolveRecipePersistenceOwnerView()
 }))
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (
-      key: string,
-      fallbackOrOptions?: string | { defaultValue?: string; [k: string]: unknown }
-    ) => {
-      if (typeof fallbackOrOptions === "string") return fallbackOrOptions
-      if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
-        return fallbackOrOptions.defaultValue || key
-      }
-      return key
-    }
-  })
-}))
+vi.mock("react-i18next", async () => {
+  const { createInstance } = await import("i18next")
+  const i18n = createInstance()
+  await i18n.init({ lng: "en", resources: {}, interpolation: { escapeValue: false } })
+  return { useTranslation: () => ({ t: i18n.t.bind(i18n) }) }
+})
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>(
