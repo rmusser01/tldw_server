@@ -78,7 +78,13 @@ it.each([1, 2])(
       </MemoryRouter>
     )
     await user.type(
-      await screen.findByRole("textbox", { name: "Change description" }),
+      // Capability, project, list, and detail queries settle in sequence. Give
+      // the real Ant Design form time to mount on shared CI runners.
+      await screen.findByRole(
+        "textbox",
+        { name: "Change description" },
+        { timeout: 10_000 }
+      ),
       "Rename"
     )
     await user.click(screen.getByRole("button", { name: "Save new version" }))
