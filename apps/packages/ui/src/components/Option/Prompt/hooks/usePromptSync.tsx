@@ -164,10 +164,13 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
 
   const { mutate: pullFromStudioMutation, isPending: isPulling } = useMutation({
     mutationFn: async ({ serverId, localId }: { serverId: number; localId?: string }) => {
-      return await pullFromStudio(serverId, localId)
+      const result = await pullFromStudio(serverId, localId)
+      if (!result.success) {
+        throw new Error(result.error || t("managePrompts.notification.someError"))
+      }
+      return result
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
       notification.success({
         message: t("managePrompts.sync.pullSuccess", { defaultValue: "Pulled from server" }),
         description: t("managePrompts.sync.pullSuccessDesc", { defaultValue: "Prompt has been updated from Prompt Studio." })
@@ -178,13 +181,21 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         message: t("managePrompts.sync.pullError", { defaultValue: "Failed to pull" }),
         description: error?.message || t("managePrompts.notification.someError")
       })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
     }
   })
 
   const { mutate: unlinkPromptMutation } = useMutation({
-    mutationFn: unlinkPromptFromServer,
+    mutationFn: async (localId: string) => {
+      const result = await unlinkPromptFromServer(localId)
+      if (!result.success) {
+        throw new Error(result.error || t("managePrompts.notification.someError"))
+      }
+      return result
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
       notification.success({
         message: t("managePrompts.sync.unlinkSuccess", { defaultValue: "Unlinked from server" }),
         description: t("managePrompts.sync.unlinkSuccessDesc", { defaultValue: "Prompt is now local-only." })
@@ -195,6 +206,9 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         message: t("managePrompts.sync.unlinkError", { defaultValue: "Failed to unlink" }),
         description: error?.message || t("managePrompts.notification.someError")
       })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
     }
   })
 
@@ -263,7 +277,6 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         return
       }
 
-      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
       setConflictModalOpen(false)
       setConflictPromptId(null)
       setConflictInfo(null)
@@ -297,6 +310,9 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         }),
         description: error?.message || t("managePrompts.notification.someError")
       })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
     }
   })
 

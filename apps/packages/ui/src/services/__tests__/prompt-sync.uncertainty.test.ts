@@ -250,11 +250,11 @@ describe("owner-aware sync and exact reconciliation", () => {
     "pull new"
   ])("%s clears only the reconciled owner and ID", async (operation) => {
     const id = operation === "pull new" ? "new-id" : "exact-id"
+    const isPull = operation.startsWith("pull") || operation === "keep_server"
     if (operation !== "pull new") seed(!operation.includes("create"))
-    await registry.markRecipePersistenceScoped(id, ownerA)
-    if (operation.startsWith("pull") || operation === "keep_server")
-      await registry.markRecipePersistenceScoped(id, ownerB)
+    if (isPull) await registry.markRecipePersistenceScoped(id, ownerB)
     else {
+      await registry.markRecipePersistenceScoped(id, ownerA)
       const dispatch = async () => {
         await registry.markRecipePersistenceScoped(id, ownerB)
         return response()
@@ -287,7 +287,7 @@ describe("owner-aware sync and exact reconciliation", () => {
       }
     })
     expect(await registry.readRecipePersistenceUncertainty(id, ownerA)).toBe(
-      "scoped"
+      isPull ? "clear" : "scoped"
     )
     expect(await registry.readRecipePersistenceUncertainty(id, ownerB)).toBe(
       "clear"
@@ -467,7 +467,11 @@ describe("owner-aware sync and exact reconciliation", () => {
   })
   it.each([
     { ok: true, status: 200, data: { data: server } },
-    { ok: false, status: 403, data: { detail: "Access denied to this prompt" } }
+    {
+      ok: false,
+      status: 403,
+      data: { detail: "Access denied to this prompt" }
+    }
   ])(
     "unknown dispatch quarantines even an apparently conclusive body",
     async (body) => {
@@ -486,6 +490,7 @@ describe("owner-aware sync and exact reconciliation", () => {
   )
   it("pull with no reported owner cannot clear scoped or unknown markers", async () => {
     seed(true)
+    mocks.rows.get("exact-id").syncStatus = "error"
     await registry.markRecipePersistenceScoped("exact-id", ownerA)
     await registry.markRecipePersistenceUnknown("exact-id")
     mocks.get.mockResolvedValue({
@@ -493,7 +498,15 @@ describe("owner-aware sync and exact reconciliation", () => {
       recipePersistence: { state: "dispatched", actualOwnerId: null }
     })
     expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({
-      success: true
+      success: false,
+      syncStatus: "error",
+      recipeWriteBlocked: true
+    })
+    expect(mocks.rows.get("exact-id")).toMatchObject({
+      name: "Reconciled",
+      syncStatus: "error",
+      serverId: 101,
+      studioProjectId: 42
     })
     expect(
       await registry.readRecipePersistenceUncertainty("exact-id", ownerA)
@@ -502,5 +515,227 @@ describe("owner-aware sync and exact reconciliation", () => {
     expect(
       await registry.readRecipePersistenceUncertainty("exact-id", ownerA)
     ).toBe("scoped")
+  })
+
+  it("a different pull owner cannot erase another owner's durable lock", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "error"
+    await registry.markRecipePersistenceScoped("exact-id", ownerA)
+
+    expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({
+      success: false,
+      syncStatus: "error",
+      recipeWriteBlocked: true
+    })
+    expect(mocks.rows.get("exact-id")).toMatchObject({
+      name: "Reconciled",
+      syncStatus: "error",
+      serverId: 101,
+      studioProjectId: 42
+    })
+    expect(
+      await registry.readRecipePersistenceUncertainty("exact-id", ownerA)
+    ).toBe("scoped")
+  })
+
+  it("same-owner pull cannot erase a coexisting unknown quarantine", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "error"
+    await registry.markRecipePersistenceScoped("exact-id", ownerB)
+    await registry.markRecipePersistenceUnknown("exact-id")
+
+    expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({
+      success: false,
+      syncStatus: "error",
+      recipeWriteBlocked: true
+    })
+    expect(mocks.rows.get("exact-id").syncStatus).toBe("error")
+    await registry.forgetRecipePersistenceUnknown("exact-id")
+    expect(
+      await registry.readRecipePersistenceUncertainty("exact-id", ownerB)
+    ).toBe("scoped")
+  })
+
+  it("keep-server preserves the durable lock when exact reconciliation is blocked", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "error"
+    await registry.markRecipePersistenceScoped("exact-id", ownerA)
+
+    expect(
+      await sync.resolveConflict("exact-id", "keep_server", {
+        expectedOwnerId: ownerB
+      })
+    ).toMatchObject({
+      success: false,
+      syncStatus: "error",
+      recipeWriteBlocked: true
+    })
+    expect(mocks.rows.get("exact-id")).toMatchObject({
+      name: "Reconciled",
+      syncStatus: "error",
+      serverId: 101
+    })
+  })
+
+  it("pull preserves copied content and durable error when reconciliation authority fails", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "error"
+    const reconcile = vi
+      .spyOn(registry, "reconcileRecipePersistenceExact")
+      .mockRejectedValueOnce(new Error("background unavailable"))
+    try {
+      expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({
+        success: false,
+        syncStatus: "error",
+        recipeWriteBlocked: true
+      })
+      expect(mocks.rows.get("exact-id")).toMatchObject({
+        name: "Reconciled",
+        syncStatus: "error",
+        serverId: 101
+      })
+    } finally {
+      reconcile.mockRestore()
+    }
+  })
+
+  it("pull reports the retained durable error when its final local reconciliation write fails", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "error"
+    await registry.markRecipePersistenceScoped("exact-id", ownerB)
+    mocks.reconcile
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("disk unavailable"))
+
+    expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({
+      success: false,
+      syncStatus: "error",
+      serverId: 101,
+      recipeWriteBlocked: true
+    })
+    expect(mocks.rows.get("exact-id")).toMatchObject({
+      name: "Reconciled",
+      syncStatus: "error",
+      serverId: 101
+    })
+  })
+
+  it("a trustworthy pull reconciles a restarted durable-only lock", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "error"
+
+    expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({
+      success: true,
+      syncStatus: "synced"
+    })
+    expect(mocks.rows.get("exact-id").syncStatus).toBe("synced")
+  })
+
+  it.each(["scoped", "unknown_owner"])(
+    "unlink preserves a linked v2 row while %s uncertainty exists",
+    async (state) => {
+      seed(true)
+      if (state === "scoped")
+        await registry.markRecipePersistenceScoped("exact-id", ownerA)
+      else await registry.markRecipePersistenceUnknown("exact-id")
+
+      expect(await sync.unlinkPrompt("exact-id")).toMatchObject({
+        success: false,
+        syncStatus: "conflict",
+        serverId: 101,
+        recipeWriteBlocked: true
+      })
+      expect(mocks.rows.get("exact-id")).toMatchObject({
+        syncStatus: "conflict",
+        serverId: 101,
+        studioProjectId: 42
+      })
+    }
+  )
+
+  it("unlink preserves a restarted durable-only v2 lock and linkage", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "error"
+
+    expect(await sync.unlinkPrompt("exact-id")).toMatchObject({
+      success: false,
+      syncStatus: "error",
+      serverId: 101,
+      recipeWriteBlocked: true
+    })
+    expect(mocks.rows.get("exact-id")).toMatchObject({
+      syncStatus: "error",
+      serverId: 101,
+      studioProjectId: 42
+    })
+  })
+
+  it("unlink preserves v2 linkage when its authority is unavailable", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "synced"
+    const begin = vi
+      .spyOn(registry, "beginRecipePersistenceUnlink")
+      .mockRejectedValueOnce(new Error("background unavailable"))
+    try {
+      expect(await sync.unlinkPrompt("exact-id")).toMatchObject({
+        success: false,
+        syncStatus: "synced",
+        serverId: 101,
+        recipeWriteBlocked: true
+      })
+      expect(mocks.rows.get("exact-id")).toMatchObject({
+        syncStatus: "synced",
+        serverId: 101,
+        studioProjectId: 42
+      })
+    } finally {
+      begin.mockRestore()
+    }
+  })
+
+  it("a clean v2 unlink lease blocks a mutation until the linkage write finishes", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "synced"
+    mocks.reconcile.mockImplementationOnce(() => {
+      expect(() =>
+        registry.directRecipeRequestAuthority.dispatchAuthority.markDispatched(
+          "exact-id",
+          ownerB
+        )
+      ).toThrow("Recipe has an unresolved operation")
+    })
+
+    expect(await sync.unlinkPrompt("exact-id")).toMatchObject({
+      success: true,
+      syncStatus: "local"
+    })
+    expect(mocks.rows.get("exact-id")).toMatchObject({
+      syncStatus: "local",
+      serverId: null,
+      studioProjectId: null
+    })
+    expect(
+      await registry.readRecipePersistenceUncertainty("exact-id", ownerB)
+    ).toBe("clear")
+  })
+
+  it("retains v1 unlink behavior even from an error status", async () => {
+    seed(true)
+    Object.assign(mocks.rows.get("exact-id"), {
+      syncStatus: "error",
+      promptFormat: "legacy",
+      promptSchemaVersion: null,
+      structuredPromptDefinition: null
+    })
+
+    expect(await sync.unlinkPrompt("exact-id")).toMatchObject({
+      success: true,
+      syncStatus: "local"
+    })
+    expect(mocks.rows.get("exact-id")).toMatchObject({
+      syncStatus: "local",
+      serverId: null,
+      studioProjectId: null
+    })
   })
 })

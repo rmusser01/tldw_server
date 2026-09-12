@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
   auto: vi.fn(),
   push: vi.fn(),
   conflict: vi.fn(),
+  pull: vi.fn(),
+  unlink: vi.fn(),
+  info: vi.fn(),
   all: vi.fn()
 }))
 vi.mock("@/services/recipe-persistence-uncertainty", () => ({
@@ -23,9 +26,9 @@ vi.mock("@/services/prompt-sync", () => ({
   resolveConflict: mocks.conflict,
   shouldAutoSyncWorkspacePrompts: async () => true,
   getAllPromptsWithSyncStatus: mocks.all,
-  pullFromStudio: vi.fn(),
-  unlinkPrompt: vi.fn(),
-  getConflictInfo: vi.fn()
+  pullFromStudio: mocks.pull,
+  unlinkPrompt: mocks.unlink,
+  getConflictInfo: mocks.info
 }))
 vi.mock("@/db/dexie/helpers", () => ({
   deletePromptById: vi.fn(),
@@ -59,6 +62,22 @@ beforeEach(() => {
     localId: id,
     syncStatus: "synced"
   }))
+  mocks.pull.mockImplementation(async (_serverId, localId) => ({
+    success: true,
+    localId: localId || "pulled",
+    syncStatus: "synced"
+  }))
+  mocks.unlink.mockImplementation(async (id) => ({
+    success: true,
+    localId: id,
+    syncStatus: "local"
+  }))
+  mocks.info.mockResolvedValue({
+    localPrompt: { id: "recipe" },
+    serverPrompt: { id: 101 },
+    localUpdatedAt: 1,
+    serverUpdatedAt: "2026-09-11T00:00:00Z"
+  })
 })
 function setup() {
   const queryClient = new QueryClient({
@@ -177,4 +196,74 @@ it("freezes one opaque owner for parallel bulk pushes", async () => {
     ["one", undefined, { expectedOwnerId: ownerA }],
     ["two", undefined, { expectedOwnerId: ownerA }]
   ])
+})
+
+it.each([
+  ["pull", "pullFromStudioMutation"],
+  ["unlink", "unlinkPromptMutation"]
+] as const)(
+  "reports a false %s result as an error instead of success",
+  async (operation, mutationName) => {
+    const { wrapper, deps, queryClient } = setup()
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries")
+    const failure = {
+      success: false,
+      localId: "recipe",
+      serverId: 101,
+      syncStatus: "error",
+      error: "Recipe has an unresolved operation"
+    }
+    mocks[operation].mockResolvedValue(failure)
+    const { result } = renderHook(() => usePromptSync(deps), { wrapper })
+
+    act(() => {
+      if (mutationName === "pullFromStudioMutation")
+        result.current.pullFromStudioMutation({
+          serverId: 101,
+          localId: "recipe"
+        })
+      else result.current.unlinkPromptMutation("recipe")
+    })
+
+    await waitFor(() =>
+      expect(notification.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: "Recipe has an unresolved operation"
+        })
+      )
+    )
+    expect(notification.success).not.toHaveBeenCalled()
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["fetchAllPrompts"]
+    })
+  }
+)
+
+it("keeps failed keep-server recovery visible and refreshes its copied error row", async () => {
+  const { wrapper, deps, queryClient } = setup()
+  const invalidate = vi.spyOn(queryClient, "invalidateQueries")
+  mocks.conflict.mockResolvedValue({
+    success: false,
+    localId: "recipe",
+    serverId: 101,
+    syncStatus: "error",
+    error: "Recipe has an unresolved operation"
+  })
+  const { result } = renderHook(() => usePromptSync(deps), { wrapper })
+  act(() => result.current.openConflictResolution("recipe"))
+  await waitFor(() => expect(result.current.conflictPromptId).toBe("recipe"))
+  act(() => result.current.handleResolveConflict("keep_server"))
+
+  await waitFor(() =>
+    expect(notification.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "Recipe has an unresolved operation"
+      })
+    )
+  )
+  expect(result.current.conflictModalOpen).toBe(true)
+  expect(notification.success).not.toHaveBeenCalled()
+  expect(invalidate).toHaveBeenCalledWith({
+    queryKey: ["fetchAllPrompts"]
+  })
 })

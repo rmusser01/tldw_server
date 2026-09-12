@@ -32,9 +32,12 @@ import {
   setPromptStudioDefaults
 } from "@/services/prompt-studio-settings"
 import {
+  beginRecipePersistenceUnlink,
   clearRecipePersistenceScoped,
+  endRecipePersistenceUnlink,
   markRecipePersistenceUnknown,
-  readRecipePersistenceUncertainty
+  readRecipePersistenceUncertainty,
+  reconcileRecipePersistenceExact
 } from "@/services/recipe-persistence-uncertainty"
 import { unwrapApiResponseData } from "@/services/response-envelope"
 import {
@@ -490,6 +493,76 @@ function serverToNewLocalPrompt(server: ServerPrompt): LocalPrompt {
   }
 }
 
+type ExistingPullReconciliation =
+  | { safe: true }
+  | { safe: false; error: string }
+
+/** Copy server content first, but keep the durable recipe lock until the
+ * application-wide authority proves that every exact-ID marker is reconciled.
+ */
+async function updateExistingFromServer(
+  local: LocalPrompt,
+  serverPrompt: ServerPrompt,
+  ownership: RecipeSyncOwnership | null
+): Promise<ExistingPullReconciliation> {
+  const updateFields = serverToLocalFields(serverPrompt)
+  const localIdentity = parsePromptIdentity(
+    local.structuredPromptDefinition,
+    local.promptFormat,
+    local.promptSchemaVersion
+  )
+  const isRecipe =
+    localIdentity.promptSchemaVersion === 2 ||
+    updateFields.promptSchemaVersion === 2
+
+  if (!isRecipe) {
+    if ((await db.prompts.update(local.id, updateFields)) === 0)
+      throw new Error("Local prompt disappeared during reconciliation")
+    await clearReconciledOwner(ownership)
+    return { safe: true }
+  }
+
+  const reconciledAt = updateFields.lastSyncedAt
+  const copiedFields = { ...updateFields }
+  delete copiedFields.syncStatus
+  delete copiedFields.lastSyncedAt
+  if (
+    (await db.prompts.update(local.id, {
+      ...copiedFields,
+      syncStatus: "error"
+    })) === 0
+  )
+    throw new Error("Local prompt disappeared during reconciliation")
+
+  const ownerId =
+    ownership?.dispatch.state === "dispatched"
+      ? ownership.dispatch.actualOwnerId
+      : null
+  if (!ownerId)
+    return { safe: false, error: "Recipe pull owner is unavailable" }
+
+  let reconciled = false
+  try {
+    reconciled = await reconcileRecipePersistenceExact(local.id, ownerId)
+  } catch {
+    return {
+      safe: false,
+      error: "Recipe uncertainty authority is unavailable"
+    }
+  }
+  if (!reconciled)
+    return { safe: false, error: "Recipe has an unresolved operation" }
+
+  if (
+    (await db.prompts.update(local.id, {
+      syncStatus: "synced",
+      lastSyncedAt: reconciledAt
+    })) === 0
+  )
+    throw new Error("Local prompt disappeared during reconciliation")
+  return { safe: true }
+}
+
 async function persistServerPrompt(
   localId: string,
   local: LocalPrompt,
@@ -885,14 +958,25 @@ export async function pullFromStudio(
     if (existingLocalId) {
       const local = await db.prompts.get(existingLocalId)
       if (local) {
-        const updateFields = serverToLocalFields(serverPrompt)
-        if ((await db.prompts.update(existingLocalId, updateFields)) === 0) {
-          throw new Error("Local prompt disappeared during reconciliation")
-        }
         recipeOwnership = dispatch
           ? { localId: existingLocalId, dispatch }
           : null
-        await clearReconciledOwner(recipeOwnership)
+        const reconciliation = await updateExistingFromServer(
+          local,
+          serverPrompt,
+          recipeOwnership
+        )
+        if (!reconciliation.safe)
+          return {
+            success: false,
+            localId: existingLocalId,
+            recipeOwnership,
+            serverId,
+            error: reconciliation.error,
+            syncStatus: "error",
+            failureKind: "validation",
+            recipeWriteBlocked: true
+          }
 
         return {
           success: true,
@@ -907,12 +991,23 @@ export async function pullFromStudio(
     // Check if we already have this prompt locally by serverId
     const existing = await db.prompts.where("serverId").equals(serverId).first()
     if (existing) {
-      const updateFields = serverToLocalFields(serverPrompt)
-      if ((await db.prompts.update(existing.id, updateFields)) === 0) {
-        throw new Error("Local prompt disappeared during reconciliation")
-      }
       recipeOwnership = dispatch ? { localId: existing.id, dispatch } : null
-      await clearReconciledOwner(recipeOwnership)
+      const reconciliation = await updateExistingFromServer(
+        existing,
+        serverPrompt,
+        recipeOwnership
+      )
+      if (!reconciliation.safe)
+        return {
+          success: false,
+          localId: existing.id,
+          recipeOwnership,
+          serverId,
+          error: reconciliation.error,
+          syncStatus: "error",
+          failureKind: "validation",
+          recipeWriteBlocked: true
+        }
 
       return {
         success: true,
@@ -937,13 +1032,27 @@ export async function pullFromStudio(
       syncStatus: "synced"
     }
   } catch (error: unknown) {
+    const reconciledLocalId = recipeOwnership?.localId || existingLocalId || ""
+    const current = reconciledLocalId
+      ? await db.prompts.get(reconciledLocalId).catch(() => undefined)
+      : undefined
+    const durableRecipeError =
+      current?.syncStatus === "error" &&
+      current.promptFormat === "structured" &&
+      current.promptSchemaVersion === 2
     return {
       success: false,
-      localId: existingLocalId || "",
+      localId: reconciledLocalId,
       recipeOwnership,
-      serverId,
+      serverId: current?.serverId || serverId,
       error: error instanceof Error ? error.message : "Pull failed",
-      syncStatus: "local"
+      syncStatus: current?.syncStatus || "local",
+      ...(durableRecipeError
+        ? {
+            failureKind: "transient" as const,
+            recipeWriteBlocked: true as const
+          }
+        : {})
     }
   }
 }
@@ -1027,6 +1136,7 @@ export async function linkPrompts(
 export async function unlinkPrompt(localId: string): Promise<SyncResult> {
   const recipeOwnership = null
   let local: LocalPrompt | undefined
+  let unlinkOperationId: string | null = null
   try {
     local = await db.prompts.get(localId)
     if (!local) {
@@ -1039,15 +1149,49 @@ export async function unlinkPrompt(localId: string): Promise<SyncResult> {
       }
     }
 
-    await db.prompts.update(localId, {
-      serverId: null,
-      studioProjectId: null,
-      studioPromptId: null,
-      serverUpdatedAt: null,
-      syncStatus: "local",
-      sourceSystem: "workspace",
-      lastSyncedAt: null
-    })
+    const identity = parsePromptIdentity(
+      local.structuredPromptDefinition,
+      local.promptFormat,
+      local.promptSchemaVersion
+    )
+    if (identity.promptSchemaVersion === 2) {
+      const blocked = (error: string): SyncResult => ({
+        success: false,
+        localId,
+        recipeOwnership,
+        ...(local?.serverId ? { serverId: local.serverId } : {}),
+        error,
+        syncStatus: local?.syncStatus || "local",
+        failureKind: "validation",
+        recipeWriteBlocked: true
+      })
+      if (local.syncStatus === "error")
+        return blocked("Recipe has an unresolved durable error")
+      unlinkOperationId = globalThis.crypto.randomUUID()
+      let acquired = false
+      try {
+        acquired = await beginRecipePersistenceUnlink(
+          localId,
+          unlinkOperationId
+        )
+      } catch {
+        return blocked("Recipe uncertainty authority is unavailable")
+      }
+      if (!acquired) return blocked("Recipe has an unresolved operation")
+    }
+
+    if (
+      (await db.prompts.update(localId, {
+        serverId: null,
+        studioProjectId: null,
+        studioPromptId: null,
+        serverUpdatedAt: null,
+        syncStatus: "local",
+        sourceSystem: "workspace",
+        lastSyncedAt: null
+      })) === 0
+    )
+      throw new Error("Local prompt disappeared during unlink")
 
     return {
       success: true,
@@ -1062,6 +1206,13 @@ export async function unlinkPrompt(localId: string): Promise<SyncResult> {
       recipeOwnership,
       error: error instanceof Error ? error.message : "Unlink failed",
       syncStatus: local?.syncStatus || "local"
+    }
+  } finally {
+    if (unlinkOperationId) {
+      // A failed release leaves a safe process-local block until restart.
+      await endRecipePersistenceUnlink(localId, unlinkOperationId).catch(
+        () => undefined
+      )
     }
   }
 }

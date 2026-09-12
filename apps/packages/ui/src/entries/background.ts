@@ -3534,6 +3534,21 @@ export default defineBackground({
           case "tldw:recipe-uncertainty:clear-scoped":
             recipeRegistry.clearScoped(message.id, message.ownerId);
             break;
+          case "tldw:recipe-uncertainty:reconcile-exact":
+            return {
+              safe: recipeRegistry.reconcileExact(message.id, message.ownerId),
+            };
+          case "tldw:recipe-uncertainty:begin-unlink":
+            return {
+              safe: recipeRegistry.beginExclusive(
+                message.id,
+                message.operationId,
+              ),
+            };
+          case "tldw:recipe-uncertainty:end-unlink":
+            return {
+              ok: recipeRegistry.endExclusive(message.id, message.operationId),
+            };
           case "tldw:recipe-uncertainty:mark-unknown":
             recipeRegistry.markUnknown(message.id);
             break;

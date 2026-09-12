@@ -56,6 +56,21 @@ export type RecipePersistenceMessage =
       id: string
       ownerId: string
     }
+  | {
+      type: "tldw:recipe-uncertainty:reconcile-exact"
+      id: string
+      ownerId: string
+    }
+  | {
+      type: "tldw:recipe-uncertainty:begin-unlink"
+      id: string
+      operationId: string
+    }
+  | {
+      type: "tldw:recipe-uncertainty:end-unlink"
+      id: string
+      operationId: string
+    }
   | { type: "tldw:recipe-uncertainty:forget-unknown"; id: string }
   | ({ type: "tldw:recipe-uncertainty:acknowledge" } & RecipeDeliveryReceipt)
 
@@ -82,7 +97,11 @@ export function isRecipePersistenceMessage(
       )
     case "tldw:recipe-uncertainty:mark-scoped":
     case "tldw:recipe-uncertainty:clear-scoped":
+    case "tldw:recipe-uncertainty:reconcile-exact":
       return keys.length === 3 && isOwnerId(message.ownerId)
+    case "tldw:recipe-uncertainty:begin-unlink":
+    case "tldw:recipe-uncertainty:end-unlink":
+      return keys.length === 3 && isOperationId(message.operationId)
     case "tldw:recipe-uncertainty:mark-unknown":
     case "tldw:recipe-uncertainty:forget-unknown":
       return keys.length === 2
@@ -289,6 +308,56 @@ export const clearRecipePersistenceScoped = (
 ): Promise<void> =>
   mutate({ type: "tldw:recipe-uncertainty:clear-scoped", id, ownerId }, () =>
     directRegistry.clearScoped(id, ownerId)
+  )
+
+async function requestSafeResult(
+  message: RecipePersistenceMessage,
+  direct: () => boolean
+): Promise<boolean> {
+  if (!isRecipePersistenceMessage(message))
+    throw new Error("Invalid recipe authority message")
+  if (!hasRecipeExtensionRuntime()) return direct()
+  const response = await sendRecipeMessage(message)
+  if (
+    !response ||
+    typeof response !== "object" ||
+    Object.keys(response).length !== 1 ||
+    typeof (response as { safe?: unknown }).safe !== "boolean"
+  )
+    throw new Error("Recipe background authority unavailable")
+  return (response as { safe: boolean }).safe
+}
+
+/** Atomically reconcile only an exact ID whose scoped state matches one owner. */
+export const reconcileRecipePersistenceExact = (
+  id: string,
+  ownerId: string
+): Promise<boolean> =>
+  requestSafeResult(
+    { type: "tldw:recipe-uncertainty:reconcile-exact", id, ownerId },
+    () => directRegistry.reconcileExact(id, ownerId)
+  )
+
+/** Acquire an all-owner exact-ID guard before discarding a server linkage. */
+export const beginRecipePersistenceUnlink = (
+  id: string,
+  operationId: string
+): Promise<boolean> =>
+  requestSafeResult(
+    { type: "tldw:recipe-uncertainty:begin-unlink", id, operationId },
+    () => directRegistry.beginExclusive(id, operationId)
+  )
+
+export const endRecipePersistenceUnlink = (
+  id: string,
+  operationId: string
+): Promise<void> =>
+  mutate(
+    { type: "tldw:recipe-uncertainty:end-unlink", id, operationId },
+    () => {
+      if (!directRegistry.endExclusive(id, operationId))
+        throw new Error("Recipe unlink lease does not match")
+    }
   )
 export const markRecipePersistenceUnknown = (id: string): Promise<void> =>
   mutate({ type: "tldw:recipe-uncertainty:mark-unknown", id }, () =>

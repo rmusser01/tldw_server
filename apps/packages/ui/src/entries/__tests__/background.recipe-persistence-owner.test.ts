@@ -212,6 +212,108 @@ describe("background recipe authority protocol", () => {
     )
   })
 
+  it("reconciles and leases exact IDs without returning another owner's identity", async () => {
+    await send({
+      type: "tldw:recipe-uncertainty:mark-scoped",
+      id: "one",
+      ownerId: ownerA
+    })
+    await send({
+      type: "tldw:recipe-uncertainty:mark-scoped",
+      id: "one",
+      ownerId: ownerB
+    })
+    const blocked = await send({
+      type: "tldw:recipe-uncertainty:reconcile-exact",
+      id: "one",
+      ownerId: ownerA
+    })
+    expect(blocked).toEqual({ safe: false })
+    expect(JSON.stringify(blocked)).not.toContain(ownerB)
+
+    await send({
+      type: "tldw:recipe-uncertainty:clear-scoped",
+      id: "one",
+      ownerId: ownerB
+    })
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:reconcile-exact",
+        id: "one",
+        ownerId: ownerA
+      })
+    ).toEqual({ safe: true })
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:begin-unlink",
+        id: "one",
+        operationId: "00000000-0000-4000-8000-000000000001"
+      })
+    ).toEqual({ safe: true })
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:read",
+        id: "one",
+        ownerId: ownerA
+      })
+    ).toBe("unknown_owner")
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:end-unlink",
+        id: "one",
+        operationId: "00000000-0000-4000-8000-000000000001"
+      })
+    ).toEqual({ ok: true })
+  })
+
+  it("refuses an unlink lease while an exact background dispatch is provisional", async () => {
+    const owner = (await send({ type: "tldw:recipe-owner:resolve" })) as {
+      ownerId: string
+    }
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const started = vi.fn()
+    vi.stubGlobal("fetch", async () => {
+      started()
+      await gate
+      return json({ id: "remote" })
+    })
+    const request = send({
+      type: "tldw:request",
+      payload: {
+        path: "/api/v1/prompts/",
+        method: "POST",
+        body: {},
+        recipePersistence: {
+          mode: "require",
+          expectedOwnerId: owner.ownerId,
+          localId: "one"
+        }
+      }
+    })
+    await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1))
+
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:begin-unlink",
+        id: "one",
+        operationId: "00000000-0000-4000-8000-000000000001"
+      })
+    ).toEqual({ safe: false })
+    release()
+    const response = (await request) as {
+      recipeDelivery: RecipeDeliveryReceipt
+    }
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:acknowledge",
+        ...response.recipeDelivery
+      })
+    ).toEqual({ ok: true })
+  })
+
   it("restarts with a clean registry without erasing durable sync error", async () => {
     harness.values.set("saved-recipe", { id: "one", syncStatus: "error" })
     await send({
@@ -275,7 +377,10 @@ describe("background recipe authority protocol", () => {
       })) as { recipeDelivery: RecipeDeliveryReceipt }
       expect(response).toMatchObject({
         ok: true,
-        recipePersistence: { state: "dispatched", actualOwnerId: owner.ownerId }
+        recipePersistence: {
+          state: "dispatched",
+          actualOwnerId: owner.ownerId
+        }
       })
       expect(
         await send({
@@ -455,7 +560,23 @@ describe("background recipe authority protocol", () => {
     },
     { type: "tldw:recipe-uncertainty:read", id: "one", ownerId: 42 },
     { type: "tldw:recipe-owner:resolve", headers: { Authorization: "evil" } },
-    { type: "tldw:recipe-uncertainty:mark-unknown", id: "one", snapshot: {} }
+    { type: "tldw:recipe-uncertainty:mark-unknown", id: "one", snapshot: {} },
+    {
+      type: "tldw:recipe-uncertainty:reconcile-exact",
+      id: "one",
+      ownerId: ownerA,
+      headers: { Authorization: "evil" }
+    },
+    {
+      type: "tldw:recipe-uncertainty:begin-unlink",
+      id: "one",
+      operationId: "not-an-operation"
+    },
+    {
+      type: "tldw:recipe-uncertainty:end-unlink",
+      id: "one",
+      operationId: "not-an-operation"
+    }
   ])(
     "rejects malformed or credential-bearing protocol input %#",
     async (message) => {

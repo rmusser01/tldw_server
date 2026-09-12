@@ -63,6 +63,7 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
 
   const isSynced = !!serverId || syncStatus === "synced"
   const isConflict = syncStatus === "conflict"
+  const isRecipeRecoveryLocked = isRecipe && syncStatus === "error"
   const canSync = !disabled && (onPushToServer || onPullFromServer)
 
   const syncItems: MenuProps["items"] = canSync ? [
@@ -104,7 +105,7 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
       onClick: onPullFromServer
     }] : []),
     // Unlink option (for synced prompts)
-    ...(onUnlink && isSynced ? [{
+    ...(onUnlink && isSynced && !isRecipeRecoveryLocked ? [{
       key: "unlink",
       label: t("managePrompts.sync.unlink", { defaultValue: "Unlink from Server" }),
       icon: <Unlink className="size-4" />,
