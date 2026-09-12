@@ -4,6 +4,53 @@ The Quiz API supports ordinary scored question quizzes and OSCE scenario
 practice. OSCE practice is self-marked study guidance. It does not calculate a
 score, percentage, passing threshold, or pass/fail result.
 
+## Generation Metrics
+
+The shared generation service records the following metric families in the
+existing metrics registry, available through the configured `/metrics`
+Prometheus scrape and `/api/v1/metrics` JSON endpoints:
+
+| Metric | Type | Labels |
+| --- | --- | --- |
+| `quiz_generation_requests_total` | Counter | `profile`, `source_type` |
+| `quiz_generation_outcomes_total` | Counter | `profile`, `source_type`, `outcome` |
+| `quiz_generation_duration_seconds` | Histogram | `profile`, `source_type`, `outcome` |
+
+One invocation counts once, regardless of the number of questions or stations.
+All six profiles and the legacy media-only delegate share this boundary.
+Requests are counted before source resolution; attempts rejected during initial
+normalization are counted when rejected. HTTP/auth/schema rejections that never
+enter the service are covered by HTTP metrics, not these generation counters.
+
+- `profile`: one of the six profile IDs below, or `unknown` when profile
+  normalization fails. Accepted aliases use the canonical profile ID.
+- `source_type`: `media`, `note`, `flashcard_deck`, `flashcard_card`,
+  `quiz_attempt`, or `quiz_attempt_question`; `mixed` for multiple recognized
+  types; `unknown` for unsupported types or incomplete source normalization.
+  Multiple sources of the same type do not become `mixed`.
+- `outcome`: `success`, `validation_error`, `provider_error`, `runtime_error`,
+  or `cancelled`. Invalid, missing, or empty sources, rejected output, provenance,
+  and source-grounding verdicts count as validation errors. Provider/verifier
+  invocation failures (including OSCE's wrapped verifier failures) are separate
+  from database and persistence runtime failures.
+
+Latency measures monotonic elapsed seconds from service entry through response
+construction, including source resolution, generation, verification, and
+persistence. Failed and cancelled attempts are included. Histogram boundaries
+are 0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, and 600 seconds, plus `+Inf`.
+
+For example, validation failures per profile over five minutes:
+
+```promql
+sum by (profile) (rate(quiz_generation_outcomes_total{outcome="validation_error"}[5m]))
+```
+
+Metrics are best-effort: telemetry outages cannot change a quiz response or
+exception, but can leave gaps in counters or latency samples. They contain no
+source content, IDs, user/workspace identifiers, model/provider names, or error
+messages. Existing metrics/export configuration applies; no new external
+telemetry destination is introduced.
+
 ## Generation Profiles
 
 `GET /api/v1/quizzes/generation-profiles` is the source of truth for profile
