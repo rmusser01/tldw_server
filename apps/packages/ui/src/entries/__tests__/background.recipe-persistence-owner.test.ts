@@ -213,6 +213,7 @@ describe("background recipe authority protocol", () => {
   })
 
   it("reconciles and leases exact IDs without returning another owner's identity", async () => {
+    const reconcileOperation = "00000000-0000-4000-8000-000000000001"
     await send({
       type: "tldw:recipe-uncertainty:mark-scoped",
       id: "one",
@@ -226,7 +227,8 @@ describe("background recipe authority protocol", () => {
     const blocked = await send({
       type: "tldw:recipe-uncertainty:reconcile-exact",
       id: "one",
-      ownerId: ownerA
+      ownerId: ownerA,
+      operationId: reconcileOperation
     })
     expect(blocked).toEqual({ safe: false })
     expect(JSON.stringify(blocked)).not.toContain(ownerB)
@@ -240,9 +242,49 @@ describe("background recipe authority protocol", () => {
       await send({
         type: "tldw:recipe-uncertainty:reconcile-exact",
         id: "one",
-        ownerId: ownerA
+        ownerId: ownerA,
+        operationId: reconcileOperation
       })
     ).toEqual({ safe: true })
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:read",
+        id: "one",
+        ownerId: ownerA
+      })
+    ).toBe("unknown_owner")
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:finish-reconcile",
+        id: "one",
+        ownerId: ownerA,
+        operationId: "00000000-0000-4000-8000-000000000002",
+        committed: true
+      })
+    ).toEqual({ ok: false })
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:read",
+        id: "one",
+        ownerId: ownerA
+      })
+    ).toBe("unknown_owner")
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:finish-reconcile",
+        id: "one",
+        ownerId: ownerA,
+        operationId: reconcileOperation,
+        committed: true
+      })
+    ).toEqual({ ok: true })
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:read",
+        id: "one",
+        ownerId: ownerA
+      })
+    ).toBe("clear")
     expect(
       await send({
         type: "tldw:recipe-uncertainty:begin-unlink",
@@ -264,6 +306,65 @@ describe("background recipe authority protocol", () => {
         operationId: "00000000-0000-4000-8000-000000000001"
       })
     ).toEqual({ ok: true })
+  })
+
+  it("blocks a background reservation until exact reconciliation is released", async () => {
+    const owner = (await send({ type: "tldw:recipe-owner:resolve" })) as {
+      ownerId: string
+    }
+    const operationId = "00000000-0000-4000-8000-000000000001"
+    await send({
+      type: "tldw:recipe-uncertainty:mark-scoped",
+      id: "one",
+      ownerId: owner.ownerId
+    })
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:reconcile-exact",
+        id: "one",
+        ownerId: owner.ownerId,
+        operationId
+      })
+    ).toEqual({ safe: true })
+
+    const fetchSpy = vi.fn(async () => json({ id: "remote" }))
+    vi.stubGlobal("fetch", fetchSpy)
+    expect(
+      await send({
+        type: "tldw:request",
+        payload: {
+          path: "/api/v1/prompts/",
+          method: "POST",
+          body: {},
+          recipePersistence: {
+            mode: "require",
+            expectedOwnerId: owner.ownerId,
+            localId: "one"
+          }
+        }
+      })
+    ).toMatchObject({
+      ok: false,
+      recipePersistence: { state: "not_dispatched", actualOwnerId: null }
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:finish-reconcile",
+        id: "one",
+        ownerId: owner.ownerId,
+        operationId,
+        committed: false
+      })
+    ).toEqual({ ok: true })
+    expect(
+      await send({
+        type: "tldw:recipe-uncertainty:read",
+        id: "one",
+        ownerId: owner.ownerId
+      })
+    ).toBe("scoped")
   })
 
   it("refuses an unlink lease while an exact background dispatch is provisional", async () => {
@@ -566,6 +667,19 @@ describe("background recipe authority protocol", () => {
       id: "one",
       ownerId: ownerA,
       headers: { Authorization: "evil" }
+    },
+    {
+      type: "tldw:recipe-uncertainty:reconcile-exact",
+      id: "one",
+      ownerId: ownerA,
+      operationId: "not-an-operation"
+    },
+    {
+      type: "tldw:recipe-uncertainty:finish-reconcile",
+      id: "one",
+      ownerId: ownerA,
+      operationId: "00000000-0000-4000-8000-000000000001",
+      committed: "yes"
     },
     {
       type: "tldw:recipe-uncertainty:begin-unlink",

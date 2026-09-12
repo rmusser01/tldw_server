@@ -267,3 +267,30 @@ it("keeps failed keep-server recovery visible and refreshes its copied error row
     queryKey: ["fetchAllPrompts"]
   })
 })
+
+it("reports a false Prompt Studio import as an error and refreshes on settlement", async () => {
+  const { wrapper, deps, queryClient } = setup()
+  const invalidate = vi.spyOn(queryClient, "invalidateQueries")
+  mocks.pull.mockResolvedValue({
+    success: false,
+    localId: "recipe",
+    serverId: 101,
+    syncStatus: "error",
+    error: "Recipe has an unresolved operation"
+  })
+  const { result } = renderHook(() => usePromptSync(deps), { wrapper })
+
+  act(() => result.current.importFromStudioMutation({ serverId: 101 }))
+
+  await waitFor(() =>
+    expect(notification.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "Recipe has an unresolved operation"
+      })
+    )
+  )
+  expect(notification.success).not.toHaveBeenCalled()
+  expect(invalidate).toHaveBeenCalledWith({
+    queryKey: ["fetchAllPrompts"]
+  })
+})

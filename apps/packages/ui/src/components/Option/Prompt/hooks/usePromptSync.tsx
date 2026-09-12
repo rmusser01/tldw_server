@@ -318,10 +318,12 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
 
   const { mutate: importFromStudioMutation, isPending: isImporting } = useMutation({
     mutationFn: async ({ serverId }: { serverId: number }) => {
-      return await pullFromStudio(serverId)
+      const result = await pullFromStudio(serverId)
+      if (!result.success)
+        throw new Error(result.error || "Prompt Studio import failed")
+      return result
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
       notification.success({
         message: t("managePrompts.studio.importSuccess", { defaultValue: "Prompt imported" }),
         description: t("managePrompts.studio.importSuccessDesc", { defaultValue: "The prompt has been saved to your local prompts." })
@@ -332,6 +334,9 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         message: t("managePrompts.studio.importError", { defaultValue: "Failed to import" }),
         description: error?.message || t("managePrompts.notification.someError")
       })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
     }
   })
 

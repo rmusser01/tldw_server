@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   get: vi.fn(),
   reconcile: vi.fn(),
+  transaction: vi.fn(),
   rows: new Map<string, Record<string, unknown>>()
 }))
 vi.mock("@/services/prompt-studio", () => ({
@@ -31,6 +32,7 @@ vi.mock("@/db/dexie/helpers", () => ({ generateID: () => "new-id" }))
 vi.mock("@/db/dexie/chat", () => ({ PageAssistDatabase: class {} }))
 vi.mock("@/db/dexie/schema", () => ({
   db: {
+    transaction: (...args: unknown[]) => mocks.transaction(...args),
     prompts: {
       get: async (id: string) => mocks.rows.get(id),
       update: async (
@@ -218,6 +220,10 @@ describe("owner-aware sync and exact reconciliation", () => {
     })
     mocks.projects.mockResolvedValue({ data: { data: [{ id: 42 }] } })
     mocks.reconcile.mockResolvedValue(undefined)
+    mocks.transaction.mockImplementation(
+      async (_mode, _table, callback: () => Promise<unknown>) =>
+        await callback()
+    )
     for (const id of ["exact-id", "other-id", "new-id"]) {
       await registry.forgetRecipePersistenceUnknown(id)
       for (const owner of [ownerA, ownerB])
@@ -618,6 +624,76 @@ describe("owner-aware sync and exact reconciliation", () => {
       syncStatus: "error",
       serverId: 101
     })
+    expect(
+      await registry.readRecipePersistenceUncertainty("exact-id", ownerB)
+    ).toBe("scoped")
+  })
+
+  it("pull blocks a same-ID reservation through the final synced commit", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "error"
+    await registry.markRecipePersistenceScoped("exact-id", ownerB)
+    mocks.reconcile
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(() => {
+        expect(() =>
+          registry.directRecipeRequestAuthority.dispatchAuthority.markDispatched(
+            "exact-id",
+            ownerB
+          )
+        ).toThrow("Recipe has an unresolved operation")
+      })
+
+    expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({
+      success: true,
+      syncStatus: "synced"
+    })
+    expect(mocks.rows.get("exact-id").syncStatus).toBe("synced")
+    expect(
+      await registry.readRecipePersistenceUncertainty("exact-id", ownerB)
+    ).toBe("clear")
+  })
+
+  it("pull restores durable and scoped error evidence when reconciliation release fails", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "error"
+    await registry.markRecipePersistenceScoped("exact-id", ownerB)
+    const finish = vi
+      .spyOn(registry, "finishRecipePersistenceReconciliation")
+      .mockRejectedValueOnce(new Error("authority disconnected"))
+
+    try {
+      expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({
+        success: false,
+        syncStatus: "error",
+        serverId: 101,
+        recipeWriteBlocked: true
+      })
+      expect(mocks.rows.get("exact-id")).toMatchObject({
+        name: "Reconciled",
+        syncStatus: "error",
+        serverId: 101
+      })
+      expect(
+        await registry.readRecipePersistenceUncertainty("exact-id", ownerB)
+      ).toBe("scoped")
+      expect(finish).toHaveBeenNthCalledWith(
+        1,
+        "exact-id",
+        ownerB,
+        expect.any(String),
+        true
+      )
+      expect(finish).toHaveBeenNthCalledWith(
+        2,
+        "exact-id",
+        ownerB,
+        expect.any(String),
+        false
+      )
+    } finally {
+      finish.mockRestore()
+    }
   })
 
   it("a trustworthy pull reconciles a restarted durable-only lock", async () => {
@@ -691,6 +767,120 @@ describe("owner-aware sync and exact reconciliation", () => {
     } finally {
       begin.mockRestore()
     }
+  })
+
+  it("unlink rechecks inside its lease after an ownerless pull writes durable error", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "synced"
+    let releaseLease!: () => void
+    let leaseStarted!: () => void
+    const leaseGate = new Promise<void>((resolve) => {
+      releaseLease = resolve
+    })
+    const leaseObserved = new Promise<void>((resolve) => {
+      leaseStarted = resolve
+    })
+    const begin = registry.beginRecipePersistenceUnlink
+    const delayedBegin = vi
+      .spyOn(registry, "beginRecipePersistenceUnlink")
+      .mockImplementationOnce(async (...args) => {
+        leaseStarted()
+        await leaseGate
+        return await begin(...args)
+      })
+    try {
+      const unlinking = sync.unlinkPrompt("exact-id")
+      await leaseObserved
+      mocks.get.mockResolvedValueOnce({
+        ...response(),
+        recipePersistence: { state: "dispatched", actualOwnerId: null }
+      })
+      expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({
+        success: false,
+        syncStatus: "error",
+        recipeWriteBlocked: true
+      })
+      releaseLease()
+
+      expect(await unlinking).toMatchObject({
+        success: false,
+        syncStatus: "error",
+        serverId: 101,
+        recipeWriteBlocked: true
+      })
+      expect(mocks.rows.get("exact-id")).toMatchObject({
+        syncStatus: "error",
+        serverId: 101,
+        studioProjectId: 42
+      })
+    } finally {
+      delayedBegin.mockRestore()
+    }
+  })
+
+  it("unlink preserves fresh linkage that changed before lease acquisition", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "synced"
+    let releaseLease!: () => void
+    let leaseStarted!: () => void
+    const leaseGate = new Promise<void>((resolve) => {
+      releaseLease = resolve
+    })
+    const leaseObserved = new Promise<void>((resolve) => {
+      leaseStarted = resolve
+    })
+    const begin = registry.beginRecipePersistenceUnlink
+    const delayedBegin = vi
+      .spyOn(registry, "beginRecipePersistenceUnlink")
+      .mockImplementationOnce(async (...args) => {
+        leaseStarted()
+        await leaseGate
+        return await begin(...args)
+      })
+    try {
+      const unlinking = sync.unlinkPrompt("exact-id")
+      await leaseObserved
+      Object.assign(mocks.rows.get("exact-id"), {
+        serverId: 202,
+        studioProjectId: 77,
+        studioPromptId: 202
+      })
+      releaseLease()
+
+      expect(await unlinking).toMatchObject({
+        success: false,
+        syncStatus: "synced",
+        serverId: 202,
+        recipeWriteBlocked: true
+      })
+      expect(mocks.rows.get("exact-id")).toMatchObject({
+        syncStatus: "synced",
+        serverId: 202,
+        studioProjectId: 77,
+        studioPromptId: 202
+      })
+    } finally {
+      delayedBegin.mockRestore()
+    }
+  })
+
+  it("unlink releases its lease and preserves linkage when its local write fails", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "synced"
+    mocks.reconcile.mockRejectedValueOnce(new Error("disk unavailable"))
+
+    expect(await sync.unlinkPrompt("exact-id")).toMatchObject({
+      success: false,
+      syncStatus: "synced"
+    })
+    expect(mocks.rows.get("exact-id")).toMatchObject({
+      syncStatus: "synced",
+      serverId: 101,
+      studioProjectId: 42
+    })
+    expect(
+      await registry.readRecipePersistenceUncertainty("exact-id", ownerB)
+    ).toBe("clear")
   })
 
   it("a clean v2 unlink lease blocks a mutation until the linkage write finishes", async () => {

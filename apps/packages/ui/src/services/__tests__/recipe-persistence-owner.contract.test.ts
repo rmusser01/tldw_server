@@ -947,13 +947,20 @@ describe("real sync stack through direct and extension authorities", () => {
     expect(retry.recipeOwnership?.dispatch.state).toBe("not_dispatched")
     expect(mutationCount).toBe(1)
 
-    // A successful owner-capturing pull may reconcile its scoped marker, but
-    // it cannot silently claim the unknown response became known.
-    expect(await pullFromStudio(202, id)).toMatchObject({ success: true })
+    // Even an owner-capturing pull cannot clear an independent unknown result.
+    expect(await pullFromStudio(202, id)).toMatchObject({
+      success: false,
+      syncStatus: "error",
+      recipeWriteBlocked: true
+    })
     expect(await readRecipePersistenceUncertainty(id, owner!.ownerId)).toBe(
       "unknown_owner"
     )
     await forgetRecipePersistenceUnknown(id)
+    expect(await readRecipePersistenceUncertainty(id, owner!.ownerId)).toBe(
+      "scoped"
+    )
+    expect(await pullFromStudio(202, id)).toMatchObject({ success: true })
     expect(await readRecipePersistenceUncertainty(id, owner!.ownerId)).toBe(
       "clear"
     )

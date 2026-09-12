@@ -59,15 +59,20 @@ describe("async recipe uncertainty authority", () => {
     ).toBe("clear")
   })
 
-  it("reports only a boolean while refusing cross-owner exact reconciliation", async () => {
+  it("reports only booleans while holding exact reconciliation through release", async () => {
     const registry = await import("../recipe-persistence-uncertainty")
     const owner = view("https://a.test", "alice").ownerId
     const other = view("https://a.test", "bob").ownerId
+    const operationId = "00000000-0000-4000-8000-000000000001"
     await registry.markRecipePersistenceScoped("same-id", owner)
     await registry.markRecipePersistenceScoped("same-id", other)
 
     expect(
-      await registry.reconcileRecipePersistenceExact("same-id", owner)
+      await registry.reconcileRecipePersistenceExact(
+        "same-id",
+        owner,
+        operationId
+      )
     ).toBe(false)
     expect(
       await registry.readRecipePersistenceUncertainty("same-id", owner)
@@ -75,6 +80,26 @@ describe("async recipe uncertainty authority", () => {
     expect(
       await registry.readRecipePersistenceUncertainty("same-id", other)
     ).toBe("scoped")
+    await registry.clearRecipePersistenceScoped("same-id", other)
+    expect(
+      await registry.reconcileRecipePersistenceExact(
+        "same-id",
+        owner,
+        operationId
+      )
+    ).toBe(true)
+    expect(
+      await registry.readRecipePersistenceUncertainty("same-id", owner)
+    ).toBe("unknown_owner")
+    await registry.finishRecipePersistenceReconciliation(
+      "same-id",
+      owner,
+      operationId,
+      true
+    )
+    expect(
+      await registry.readRecipePersistenceUncertainty("same-id", owner)
+    ).toBe("clear")
   })
 
   it("holds and releases an exact unlink lease without clearing uncertainty", async () => {

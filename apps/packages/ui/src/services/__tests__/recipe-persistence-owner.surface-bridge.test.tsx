@@ -740,7 +740,9 @@ describe("actual recipe surface adapter bridges", () => {
 
     const ownerBPull = await pullFromStudio(101, boundary.nextId)
     expect(ownerBPull).toMatchObject({
-      success: true,
+      success: false,
+      syncStatus: "error",
+      recipeWriteBlocked: true,
       recipeOwnership: {
         dispatch: { state: "dispatched", actualOwnerId: ownerB!.ownerId }
       }

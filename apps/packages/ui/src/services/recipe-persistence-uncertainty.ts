@@ -60,6 +60,14 @@ export type RecipePersistenceMessage =
       type: "tldw:recipe-uncertainty:reconcile-exact"
       id: string
       ownerId: string
+      operationId: string
+    }
+  | {
+      type: "tldw:recipe-uncertainty:finish-reconcile"
+      id: string
+      ownerId: string
+      operationId: string
+      committed: boolean
     }
   | {
       type: "tldw:recipe-uncertainty:begin-unlink"
@@ -97,8 +105,20 @@ export function isRecipePersistenceMessage(
       )
     case "tldw:recipe-uncertainty:mark-scoped":
     case "tldw:recipe-uncertainty:clear-scoped":
-    case "tldw:recipe-uncertainty:reconcile-exact":
       return keys.length === 3 && isOwnerId(message.ownerId)
+    case "tldw:recipe-uncertainty:reconcile-exact":
+      return (
+        keys.length === 4 &&
+        isOwnerId(message.ownerId) &&
+        isOperationId(message.operationId)
+      )
+    case "tldw:recipe-uncertainty:finish-reconcile":
+      return (
+        keys.length === 5 &&
+        isOwnerId(message.ownerId) &&
+        isOperationId(message.operationId) &&
+        typeof message.committed === "boolean"
+      )
     case "tldw:recipe-uncertainty:begin-unlink":
     case "tldw:recipe-uncertainty:end-unlink":
       return keys.length === 3 && isOperationId(message.operationId)
@@ -328,14 +348,48 @@ async function requestSafeResult(
   return (response as { safe: boolean }).safe
 }
 
-/** Atomically reconcile only an exact ID whose scoped state matches one owner. */
+/** Acquire only when every exact-ID scoped marker matches one owner. */
 export const reconcileRecipePersistenceExact = (
   id: string,
-  ownerId: string
+  ownerId: string,
+  operationId: string
 ): Promise<boolean> =>
   requestSafeResult(
-    { type: "tldw:recipe-uncertainty:reconcile-exact", id, ownerId },
-    () => directRegistry.reconcileExact(id, ownerId)
+    {
+      type: "tldw:recipe-uncertainty:reconcile-exact",
+      id,
+      ownerId,
+      operationId
+    },
+    () => directRegistry.reconcileExact(id, ownerId, operationId)
+  )
+
+/** Finish only the matching token-bound reconciliation lease. */
+export const finishRecipePersistenceReconciliation = (
+  id: string,
+  ownerId: string,
+  operationId: string,
+  committed: boolean
+): Promise<void> =>
+  mutate(
+    {
+      type: "tldw:recipe-uncertainty:finish-reconcile",
+      id,
+      ownerId,
+      operationId,
+      committed
+    },
+    () => {
+      if (
+        !directRegistry.finishReconcileExact(
+          id,
+          ownerId,
+          operationId,
+          committed
+        )
+      )
+        throw new Error("Recipe reconciliation lease does not match")
+    }
   )
 
 /** Acquire an all-owner exact-ID guard before discarding a server linkage. */

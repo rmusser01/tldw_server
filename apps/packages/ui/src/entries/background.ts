@@ -3536,7 +3536,20 @@ export default defineBackground({
             break;
           case "tldw:recipe-uncertainty:reconcile-exact":
             return {
-              safe: recipeRegistry.reconcileExact(message.id, message.ownerId),
+              safe: recipeRegistry.reconcileExact(
+                message.id,
+                message.ownerId,
+                message.operationId,
+              ),
+            };
+          case "tldw:recipe-uncertainty:finish-reconcile":
+            return {
+              ok: recipeRegistry.finishReconcileExact(
+                message.id,
+                message.ownerId,
+                message.operationId,
+                message.committed,
+              ),
             };
           case "tldw:recipe-uncertainty:begin-unlink":
             return {

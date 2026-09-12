@@ -35,6 +35,8 @@ import {
   beginRecipePersistenceUnlink,
   clearRecipePersistenceScoped,
   endRecipePersistenceUnlink,
+  finishRecipePersistenceReconciliation,
+  markRecipePersistenceScoped,
   markRecipePersistenceUnknown,
   readRecipePersistenceUncertainty,
   reconcileRecipePersistenceExact
@@ -541,9 +543,14 @@ async function updateExistingFromServer(
   if (!ownerId)
     return { safe: false, error: "Recipe pull owner is unavailable" }
 
+  const reconciliationOperationId = globalThis.crypto.randomUUID()
   let reconciled = false
   try {
-    reconciled = await reconcileRecipePersistenceExact(local.id, ownerId)
+    reconciled = await reconcileRecipePersistenceExact(
+      local.id,
+      ownerId,
+      reconciliationOperationId
+    )
   } catch {
     return {
       safe: false,
@@ -553,13 +560,51 @@ async function updateExistingFromServer(
   if (!reconciled)
     return { safe: false, error: "Recipe has an unresolved operation" }
 
-  if (
-    (await db.prompts.update(local.id, {
-      syncStatus: "synced",
-      lastSyncedAt: reconciledAt
-    })) === 0
-  )
-    throw new Error("Local prompt disappeared during reconciliation")
+  try {
+    if (
+      (await db.prompts.update(local.id, {
+        syncStatus: "synced",
+        lastSyncedAt: reconciledAt
+      })) === 0
+    )
+      throw new Error("Local prompt disappeared during reconciliation")
+  } catch (error) {
+    await finishRecipePersistenceReconciliation(
+      local.id,
+      ownerId,
+      reconciliationOperationId,
+      false
+    ).catch(() => undefined)
+    throw error
+  }
+
+  try {
+    await finishRecipePersistenceReconciliation(
+      local.id,
+      ownerId,
+      reconciliationOperationId,
+      true
+    )
+  } catch {
+    // A missing release acknowledgement is ambiguous. Restore the durable
+    // lock first, then abort the token before reasserting scoped evidence so a
+    // late committed finish cannot erase the compensation marker.
+    await db.prompts.update(local.id, {
+      syncStatus: "error",
+      lastSyncedAt: null
+    })
+    await finishRecipePersistenceReconciliation(
+      local.id,
+      ownerId,
+      reconciliationOperationId,
+      false
+    ).catch(() => undefined)
+    await markRecipePersistenceScoped(local.id, ownerId).catch(() => undefined)
+    return {
+      safe: false,
+      error: "Recipe uncertainty authority is unavailable"
+    }
+  }
   return { safe: true }
 }
 
@@ -1167,6 +1212,11 @@ export async function unlinkPrompt(localId: string): Promise<SyncResult> {
       })
       if (local.syncStatus === "error")
         return blocked("Recipe has an unresolved durable error")
+      const expectedLinkage = {
+        serverId: local.serverId,
+        studioProjectId: local.studioProjectId,
+        studioPromptId: local.studioPromptId
+      }
       unlinkOperationId = globalThis.crypto.randomUUID()
       let acquired = false
       try {
@@ -1178,9 +1228,41 @@ export async function unlinkPrompt(localId: string): Promise<SyncResult> {
         return blocked("Recipe uncertainty authority is unavailable")
       }
       if (!acquired) return blocked("Recipe has an unresolved operation")
-    }
 
-    if (
+      let blockedAfterLease: SyncResult | null = null
+      await db.transaction("rw", db.prompts, async () => {
+        const fresh = await db.prompts.get(localId)
+        if (!fresh) throw new Error("Local prompt disappeared during unlink")
+        local = fresh
+        if (fresh.syncStatus === "error") {
+          blockedAfterLease = blocked("Recipe has an unresolved durable error")
+          return
+        }
+        if (
+          fresh.serverId !== expectedLinkage.serverId ||
+          fresh.studioProjectId !== expectedLinkage.studioProjectId ||
+          fresh.studioPromptId !== expectedLinkage.studioPromptId
+        ) {
+          blockedAfterLease = blocked(
+            "Recipe linkage changed before unlink could commit"
+          )
+          return
+        }
+        if (
+          (await db.prompts.update(localId, {
+            serverId: null,
+            studioProjectId: null,
+            studioPromptId: null,
+            serverUpdatedAt: null,
+            syncStatus: "local",
+            sourceSystem: "workspace",
+            lastSyncedAt: null
+          })) === 0
+        )
+          throw new Error("Local prompt disappeared during unlink")
+      })
+      if (blockedAfterLease) return blockedAfterLease
+    } else if (
       (await db.prompts.update(localId, {
         serverId: null,
         studioProjectId: null,
@@ -1190,8 +1272,9 @@ export async function unlinkPrompt(localId: string): Promise<SyncResult> {
         sourceSystem: "workspace",
         lastSyncedAt: null
       })) === 0
-    )
+    ) {
       throw new Error("Local prompt disappeared during unlink")
+    }
 
     return {
       success: true,

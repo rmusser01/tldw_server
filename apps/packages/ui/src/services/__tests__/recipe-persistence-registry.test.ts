@@ -100,14 +100,35 @@ describe("recipe uncertainty registry", () => {
     expect(restarted.read("two", "alice")).toBe("clear")
   })
 
-  it("reconciles only one exact ID owned exclusively by the reported owner", () => {
+  it("holds exact reconciliation exclusively through its committed release", () => {
     const registry = new RecipePersistenceRegistry()
     registry.markScoped("one", "alice")
     registry.markScoped("two", "alice")
 
-    expect(registry.reconcileExact("one", "alice")).toBe(true)
+    expect(registry.reconcileExact("one", "alice", "reconcile-1")).toBe(true)
+    expect(registry.read("one", "alice")).toBe("unknown_owner")
+    expect(() => registry.reserve("one", "alice")).toThrow()
+    expect(() => registry.reserve("one", "bob")).toThrow()
+    expect(
+      registry.finishReconcileExact("one", "alice", "reconcile-1", true)
+    ).toBe(true)
     expect(registry.read("one", "alice")).toBe("clear")
     expect(registry.read("two", "alice")).toBe("scoped")
+  })
+
+  it("retains matching scoped evidence after an aborted or mismatched reconciliation release", () => {
+    const registry = new RecipePersistenceRegistry()
+
+    expect(registry.reconcileExact("one", "alice", "reconcile-1")).toBe(true)
+    expect(
+      registry.finishReconcileExact("one", "alice", "wrong-token", true)
+    ).toBe(false)
+    expect(registry.read("one", "alice")).toBe("unknown_owner")
+    registry.clearScoped("one", "alice")
+    expect(
+      registry.finishReconcileExact("one", "alice", "reconcile-1", false)
+    ).toBe(true)
+    expect(registry.read("one", "alice")).toBe("scoped")
   })
 
   it.each(["other owner", "unknown", "provisional"])(
@@ -120,7 +141,9 @@ describe("recipe uncertainty registry", () => {
       if (state === "provisional")
         registry.reserve("one", "alice", "operation-1")
 
-      expect(registry.reconcileExact("one", "alice")).toBe(false)
+      expect(registry.reconcileExact("one", "alice", "reconcile-1")).toBe(
+        false
+      )
       expect(registry.read("one", "alice")).not.toBe("clear")
       if (state === "other owner")
         expect(registry.read("one", "bob")).toBe("scoped")
