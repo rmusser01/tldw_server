@@ -43,6 +43,14 @@
         "label": "Writing Agent: Brainstorm",
         "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
       },
+      "writingContinuationPredict": {
+        "label": "Writing continuation: Predict",
+        "description": "Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed."
+      },
+      "writingContinuationFill": {
+        "label": "Writing continuation: Fill",
+        "description": "Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed."
+      },
       "studyAssistantExplain": {
         "label": "Study explanation",
         "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
@@ -122,6 +130,7 @@
     },
     "workflows": {
       "writingAgent": "Writing Playground AI Agent",
+      "writingContinuation": "Writing Playground continuation",
       "writingFeedback": "Writing Playground feedback",
       "studyAssistantFlashcard": "Flashcard Study Assistant",
       "studyAssistantQuiz": "Quiz Study Assistant",

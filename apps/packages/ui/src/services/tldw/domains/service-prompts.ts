@@ -10,6 +10,8 @@ export type KnownServicePromptId =
   | "writing.agent.quick"
   | "writing.agent.planning"
   | "writing.agent.brainstorm"
+  | "writing.continuation.predict"
+  | "writing.continuation.fill"
   | "study.assistant.explain"
   | "study.assistant.mnemonic"
   | "study.assistant.followup"

@@ -87,6 +87,10 @@ import {
   buildChatSurfaceScopeKeyFromConfig,
   deriveSingleUserApiKeyCredentialScope
 } from "@/services/chat-surface-scope"
+import {
+  FILL_SYSTEM_PROMPT,
+  PREDICT_SYSTEM_PROMPT
+} from "@/components/Option/WritingPlayground/hooks/utils"
 
 const definition = (
   id: KnownServicePromptId,
@@ -108,6 +112,8 @@ const definitions: Partial<Record<KnownServicePromptId, ServicePromptCatalogItem
   "writing.agent.quick": definition("writing.agent.quick", [{ key: "system", label: "System instructions", mode: "literal", required_variables: [] }]),
   "writing.agent.planning": definition("writing.agent.planning", [{ key: "system", label: "System instructions", mode: "literal", required_variables: [] }]),
   "writing.agent.brainstorm": definition("writing.agent.brainstorm", [{ key: "system", label: "System instructions", mode: "literal", required_variables: [] }]),
+  "writing.continuation.predict": definition("writing.continuation.predict", [{ key: "system", label: "System instructions", mode: "literal", required_variables: [] }]),
+  "writing.continuation.fill": definition("writing.continuation.fill", [{ key: "system", label: "System instructions", mode: "literal", required_variables: [] }]),
   "chat.rag.answer": definition("chat.rag.answer", [
     {
       key: "template",
@@ -190,12 +196,21 @@ describe("Service Prompt validation and rendering", () => {
       "writing.agent.quick": fixture.defaults["writing.agent.quick"],
       "writing.agent.planning": fixture.defaults["writing.agent.planning"],
       "writing.agent.brainstorm": fixture.defaults["writing.agent.brainstorm"],
+      "writing.continuation.predict": fixture.defaults["writing.continuation.predict"],
+      "writing.continuation.fill": fixture.defaults["writing.continuation.fill"],
       "chat.rag.answer": fixture.defaults["chat.rag.answer"],
       "chat.rag.question_rewrite": fixture.defaults["chat.rag.question_rewrite"],
       "chat.web_search.answer": fixture.defaults["chat.web_search.answer"],
       "chat.title.generation": fixture.defaults["chat.title.generation"],
       "image.prompt.refinement": fixture.defaults["image.prompt.refinement"]
     })
+  })
+
+  it("keeps continuation defaults byte-equivalent to the Writing Playground constants", () => {
+    expect(fixture.defaults["writing.continuation.predict"].system)
+      .toBe(PREDICT_SYSTEM_PROMPT)
+    expect(fixture.defaults["writing.continuation.fill"].system)
+      .toBe(FILL_SYSTEM_PROMPT)
   })
 
   it("requires exactly the registered parts", () => {
@@ -427,6 +442,46 @@ describe("Service Prompt migration and runtime snapshots", () => {
     }
   })
 
+  it.each(["predict", "fill"] as const)("loads %s continuation instructions independently with compatible literal defaults", async (mode) => {
+    const id = `writing.continuation.${mode}` as const
+    for (const fallback of ["catalog-404", "omitted", "detail-404", "saved"]) {
+      mocks.listServicePrompts.mockResolvedValue(fallback === "omitted" ? [] : catalog)
+      if (fallback === "catalog-404") {
+        mocks.listServicePrompts.mockRejectedValueOnce(
+          new ServicePromptApiError("Not found", { status: 404 })
+        )
+      }
+      mocks.getServicePrompt.mockResolvedValue(detailFor(id, {
+        effective_parts: { system: "Continue around {literal} braces." },
+        source: "user"
+      }))
+      if (fallback === "detail-404") {
+        mocks.getServicePrompt.mockRejectedValueOnce(
+          new ServicePromptApiError("Not found", { status: 404 })
+        )
+      }
+
+      const snapshot = await loadServicePromptSnapshot([id])
+      expect(snapshot.definitions[id]?.parts).toEqual(
+        fallback === "saved"
+          ? { system: "Continue around {literal} braces." }
+          : fixture.defaults[id]
+      )
+      expect(snapshot.definitions[id]?.definition).toEqual(renderDefinitionFor(id))
+      snapshot.release()
+    }
+
+    for (const status of [401, 403, 409, 422, 500]) {
+      const error = new ServicePromptApiError("Failed", { status })
+      mocks.getServicePrompt.mockRejectedValueOnce(error)
+      await expect(loadServicePromptSnapshot([id])).rejects.toBe(error)
+    }
+
+    const catalogError = new ServicePromptApiError("Catalog failed", { status: 500 })
+    mocks.listServicePrompts.mockRejectedValueOnce(catalogError)
+    await expect(loadServicePromptSnapshot([id])).rejects.toBe(catalogError)
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.localGet.mockResolvedValue(undefined)
@@ -651,9 +706,10 @@ describe("Service Prompt migration and runtime snapshots", () => {
       return { id: 84, username: "resolved" }
     })
 
-    await expect(resolveServicePromptScope()).rejects.toThrow(
-      "Authenticated Service Prompt scope changed while resolving."
-    )
+    await expect(resolveServicePromptScope()).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
   })
 
   it("does not resolve a user for single-user scope", async () => {

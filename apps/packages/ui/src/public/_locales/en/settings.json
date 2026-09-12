@@ -6518,6 +6518,18 @@
   "servicePrompts_definitions_writingAgentBrainstorm_description": {
     "message": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
   },
+  "servicePrompts_definitions_writingContinuationPredict_label": {
+    "message": "Writing continuation: Predict"
+  },
+  "servicePrompts_definitions_writingContinuationPredict_description": {
+    "message": "Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed."
+  },
+  "servicePrompts_definitions_writingContinuationFill_label": {
+    "message": "Writing continuation: Fill"
+  },
+  "servicePrompts_definitions_writingContinuationFill_description": {
+    "message": "Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed."
+  },
   "servicePrompts_workflows_writingAgent": {
     "message": "Writing Playground AI Agent"
   },
@@ -6550,5 +6562,8 @@
   },
   "managePrompts_recipe_unavailableDescription": {
     "message": "This saved recipe cannot be opened safely. Its structured definition is invalid or uses an unsupported version."
+  },
+  "servicePrompts_workflows_writingContinuation": {
+    "message": "Writing Playground continuation"
   }
 }
