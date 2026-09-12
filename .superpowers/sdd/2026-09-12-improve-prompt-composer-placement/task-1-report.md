@@ -226,3 +226,55 @@ To retain strict local TDD, a focused real-component geometry test was then adde
 ### Fix-round 3 self-review
 
 Collision discovery is bounded to the owning composer form, so unrelated page controls neither affect placement nor incur query work. The query runs only while transient feedback is mounted and only on the existing initial/resize/capture-scroll/visual-viewport schedule. Whole control rectangles are protected, so nested icon/text descendants do not weaken the hit target; duplicate semantic matches are harmless conservative rectangles. Hidden and zero-sized inputs do not consume space. No lifecycle, request, capability, persistence, menu/drawer coordination, V5 placement, system-prompt presentation, dependency, backend, or Quick Chat code changed.
+
+## Fix round 4 — settled, baseline-aware packaged browser proof
+
+This round changes only `apps/extension/tests/e2e/prompt-improvement.spec.ts` and task records. The production collision fix independently approved in `task-1-review-4.md` remains unchanged.
+
+### Fix-round 4 RED evidence
+
+The review's new V3 case failed during the still-closing drawer: feedback itself was hidden and did not intersect controls, but the drawer intercepted their centers. Settled review probes then exposed two test assumptions: unchanged fixed chrome already obscured the improvement draft/Save centers, and the recipe state exposed only three eligible controls, failing the arbitrary `>3` threshold. The prior four-case run was **2 passed, 1 failed, 1 not run**, because the improvement shrink test compared the bounds of intentionally hidden feedback against the draft as though that feedback were painted.
+
+Before this round's edits, the exact committed new case was rerun against the unchanged packaged artifact:
+
+```text
+TLDW_E2E_SKIP_EXTENSION_BUILD=1 bunx playwright test tests/e2e/prompt-improvement.spec.ts --reporter=line --workers=1 --grep 'V3 short viewport keeps every visible'
+```
+
+Result: **1 failed** in `expectVisibleComposerControlsRemainUsable`, reproducing the closing-drawer hit-test assertion rather than an environment/preflight error. Log: `/tmp/task12984-r4-red.log`. No production code was edited to resolve this test failure.
+
+### Fix-round 4 test correction
+
+- Wait for attached feedback, then for actual Ant Drawer content wrappers to stop being presented, then for feedback visibility before resizing. Recipe title changes cannot make the close wait pass early; no fixed sleeps were added.
+- Derive the eligible composer controls from visible, enabled, in-viewport candidates and the native `elementsFromPoint` stack, excluding only feedback and its descendants from the baseline stack. Existing fixed chrome is therefore excluded, while feedback intercepting an otherwise usable control still fails the unchanged real `elementFromPoint` and painted-rectangle intersection checks. No DOM/CSS is modified to establish this baseline.
+- Require the meaningful `Select a Prompt` control rather than a fixed control-count threshold. Every eligible control remains subject to both collision and center-hit assertions.
+- Explicitly allow the approved hidden fallback only in short-viewport checks. Require `visibility:hidden`, attached feedback and Undo state, and no feedback-owned hit at its own or descendant centers. Painted feedback still requires full viewport containment, no draft/send overlap, stable send-cluster dimensions, and an actual Undo center hit.
+- Preserve both improvement and recipe flows: real scroll at 360 x 240, mandatory hidden fallback at 360 x 50, return to 390 x 844, restored non-intersecting geometry, real mouse Undo, and exact original draft restoration.
+
+### Fix-round 4 GREEN commands and scope
+
+From `apps/extension`:
+
+```text
+TLDW_E2E_SKIP_EXTENSION_BUILD=1 bunx playwright test tests/e2e/prompt-improvement.spec.ts --reporter=line --workers=1 --grep 'V3 short viewport keeps every visible'
+TLDW_E2E_SKIP_EXTENSION_BUILD=1 bunx playwright test tests/e2e/prompt-improvement.spec.ts --reporter=line --workers=1 --grep 'V5 applied feedback yields|V3 applied feedback yields|feedback stays usable after viewport shrink'
+TLDW_E2E_SKIP_EXTENSION_BUILD=1 bunx playwright test tests/e2e/prompt-improvement.spec.ts --reporter=line --workers=1 --grep-invert 'configured real local server smoke'
+bun run compile
+bun run build:chrome:prod
+bunx prettier --config .prettierrc.cjs --check tests/e2e/prompt-improvement.spec.ts
+../tldw-frontend/node_modules/.bin/eslint --config ../tldw-frontend/eslint.config.mjs tests/e2e/prompt-improvement.spec.ts
+```
+
+The exact new case passed **1/1**, the prior cases passed **4/4**, and all five together passed **5/5**. The complete self-contained packaged suite passed **21/21** against a fresh production build, then passed **21/21** again with the final attached-before-close guard and painted Undo center assertions (`/tmp/task12984-r4-full-final.log`). The external configured-server smoke is excluded because its server/API-key configuration was not supplied; both fail-closed/configuration harness cases are included. Chromium launches succeeded with sandbox escalation; no environment retry cap was reached.
+
+From `apps/packages/ui`, the exact prior-review component gate:
+
+```text
+bunx vitest run src/components/Common/PromptAssist/__tests__/PromptAssistMenu.test.tsx src/components/Chat/composer/__tests__/PromptAssistComposerAction.test.tsx src/components/Sidepanel/Chat/__tests__/SidepanelComposerControlArea.prompt-assist.test.tsx src/components/Option/Playground/__tests__/ComposerToolbar.test.tsx --maxWorkers=1 --no-file-parallelism
+```
+
+Result: **4 files, 122 passed**. Additional runs including `PromptAssistPanel` and `usePromptAssist` also passed. Compile, production build, scoped Prettier, and scoped ESLint exited 0. Existing duplicate-import/Browserslist build warnings and four existing ESLint `any` warnings remain; ESLint also reports that its borrowed Next config cannot find an extension pages directory. No new lint errors. Bandit is **N/A** for this TypeScript-test/Markdown-only round. No WebUI source/test changed, so the prior complete 13-case WebUI evidence is retained rather than claimed as rerun.
+
+### Fix-round 4 self-review
+
+The baseline stack cannot mask feedback interception: only feedback-owned nodes are removed from baseline eligibility, while the actual top hit is checked unchanged. Hidden feedback bounds are never treated as painted geometry; state and pointer absence are checked separately and exact Undo is exercised after space returns. The only formatted source is the already-formatted, task-owned E2E file using its explicit extension config. No main-checkout/user file or production file was changed. The task remains In Progress for independent review.

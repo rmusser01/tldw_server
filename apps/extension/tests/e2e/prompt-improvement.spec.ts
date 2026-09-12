@@ -571,6 +571,46 @@ const waitForDrawerSettled = async (dialog: Locator) => {
     .toBe("none")
 }
 
+const waitForDrawersClosed = async (page: Page, feedback: Locator) => {
+  await expect(feedback).toBeAttached()
+  // Recipe Apply changes the shared drawer title before its exit motion ends.
+  // Observe the real wrappers, not a title-dependent dialog locator.
+  await expect
+    .poll(() =>
+      page.locator(".ant-drawer-content-wrapper").evaluateAll((wrappers) =>
+        wrappers.every(
+          (wrapper) =>
+            !wrapper.checkVisibility({
+              checkOpacity: true,
+              checkVisibilityCSS: true
+            })
+        )
+      )
+    )
+    .toBe(true)
+  await expect(feedback).toBeVisible()
+}
+
+const expectHiddenFeedbackRetainsState = async (feedback: Locator) => {
+  await expect(feedback).toBeAttached()
+  await expect(feedback).toHaveCSS("visibility", "hidden")
+  await expect(
+    feedback.getByRole("button", { name: /^Undo /, includeHidden: true })
+  ).toBeAttached()
+  expect(
+    await feedback.evaluate((element) =>
+      [element, ...element.querySelectorAll("*")].some((descendant) => {
+        const rect = descendant.getBoundingClientRect()
+        const hit = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2
+        )
+        return Boolean(hit && element.contains(hit))
+      })
+    )
+  ).toBe(false)
+}
+
 const scrollDraftNearViewportTop = async (input: Locator) => {
   const movement = await input.evaluate((element) => {
     const beforeTop = element.getBoundingClientRect().top
@@ -595,7 +635,8 @@ const expectLayoutNeutralFeedback = async (
   feedback: Locator,
   input: Locator,
   sendCluster: Locator,
-  initialCluster: { width: number; height: number }
+  initialCluster: { width: number; height: number },
+  allowHidden = false
 ) => {
   const [feedbackBox, inputBox, clusterBox, viewport] = await Promise.all([
     feedback.boundingBox(),
@@ -609,6 +650,13 @@ const expectLayoutNeutralFeedback = async (
   expect(feedbackBox).not.toBeNull()
   expect(inputBox).not.toBeNull()
   expect(clusterBox).not.toBeNull()
+  expect(clusterBox!.width).toBe(initialCluster.width)
+  expect(clusterBox!.height).toBe(initialCluster.height)
+  if (allowHidden && !(await feedback.isVisible())) {
+    await expectHiddenFeedbackRetainsState(feedback)
+    return
+  }
+  await expect(feedback).toBeVisible()
   expect(feedbackBox!.x).toBeGreaterThanOrEqual(0)
   expect(feedbackBox!.y).toBeGreaterThanOrEqual(0)
   expect(feedbackBox!.x + feedbackBox!.width).toBeLessThanOrEqual(
@@ -633,8 +681,18 @@ const expectLayoutNeutralFeedback = async (
   })
   expect(intersects(feedbackBox!, inputBox!), geometry).toBe(false)
   expect(intersects(feedbackBox!, clusterBox!), geometry).toBe(false)
-  expect(clusterBox!.width).toBe(initialCluster.width)
-  expect(clusterBox!.height).toBe(initialCluster.height)
+  await expect
+    .poll(() =>
+      feedback.getByRole("button", { name: /^Undo / }).evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const hit = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2
+        )
+        return Boolean(hit && element.contains(hit))
+      })
+    )
+    .toBe(true)
 }
 
 const expectVisibleComposerControlsRemainUsable = async (
@@ -703,6 +761,10 @@ const expectVisibleComposerControlsRemainUsable = async (
           rect.height > 0 &&
           style.display !== "none" &&
           style.visibility !== "hidden" &&
+          control.checkVisibility({
+            checkOpacity: true,
+            checkVisibilityCSS: true
+          }) &&
           control.getAttribute("aria-hidden") !== "true" &&
           control.getAttribute("aria-disabled") !== "true" &&
           !control.matches(":disabled") &&
@@ -719,6 +781,12 @@ const expectVisibleComposerControlsRemainUsable = async (
           y: rect.top + rect.height / 2
         }
         const hit = document.elementFromPoint(center.x, center.y)
+        // Remove only feedback from the native stack to establish baseline
+        // hit-testability. A feedback-owned top hit must still fail below;
+        // fixed headers/other pre-existing occluders are not feedback defects.
+        const baselineHit = document
+          .elementsFromPoint(center.x, center.y)
+          .find((element) => !feedbackElement.contains(element))
         return {
           name:
             control.getAttribute("aria-label") ||
@@ -727,6 +795,10 @@ const expectVisibleComposerControlsRemainUsable = async (
             control.textContent?.trim().slice(0, 80) ||
             control.tagName,
           rect: rect.toJSON(),
+          baselineHitMatches: Boolean(
+            baselineHit &&
+              (baselineHit === control || control.contains(baselineHit))
+          ),
           intersectsFeedback:
             feedbackPainted &&
             rect.left < feedbackRect.right &&
@@ -740,6 +812,7 @@ const expectVisibleComposerControlsRemainUsable = async (
           hitText: hit?.textContent?.trim().slice(0, 80) ?? null
         }
       })
+      .filter((control) => control.baselineHitMatches)
 
     return {
       controls,
@@ -750,7 +823,9 @@ const expectVisibleComposerControlsRemainUsable = async (
   })
 
   await expect(feedback).toBeAttached()
-  expect(result.controls.length).toBeGreaterThan(3)
+  expect(result.controls.map((control) => control.name)).toContain(
+    "Select a Prompt"
+  )
   expect(
     result.controls.filter(
       (control) => control.intersectsFeedback || !control.centerHitMatches
@@ -1863,13 +1938,33 @@ test.describe("Packaged extension prompt improvement parity", () => {
           menu.actions.getByRole("button", { name: /Improve now/ })
         )
         const feedback = getPromptAssistFeedback(page, "Improvement applied.")
-        await expect(feedback).toBeVisible()
+        await waitForDrawersClosed(page, feedback)
         await page.setViewportSize({ width: 360, height: 240 })
         await scrollDraftNearViewportTop(input)
-        await expectLayoutNeutralFeedback(page, feedback, input, sendCluster, {
+        const initialCluster = {
           width: initialClusterBox!.width,
           height: initialClusterBox!.height
-        })
+        }
+        await expectLayoutNeutralFeedback(
+          page,
+          feedback,
+          input,
+          sendCluster,
+          initialCluster,
+          true
+        )
+        await expectVisibleComposerControlsRemainUsable(page, feedback)
+        await page.setViewportSize({ width: 360, height: 50 })
+        await expectHiddenFeedbackRetainsState(feedback)
+        await page.setViewportSize({ width: 390, height: 844 })
+        await expect(feedback).toBeVisible()
+        await expectLayoutNeutralFeedback(
+          page,
+          feedback,
+          input,
+          sendCluster,
+          initialCluster
+        )
         await clickThroughPaintedCenter(
           page,
           feedback.getByRole("button", { name: "Undo improvement" })
@@ -1932,13 +2027,33 @@ test.describe("Packaged extension prompt improvement parity", () => {
         await applyRecipe.scrollIntoViewIfNeeded()
         await clickThroughPaintedCenter(page, applyRecipe)
         const feedback = getPromptAssistFeedback(page, "Recipe applied.")
-        await expect(feedback).toBeVisible()
+        await waitForDrawersClosed(page, feedback)
         await page.setViewportSize({ width: 360, height: 240 })
         await scrollDraftNearViewportTop(input)
-        await expectLayoutNeutralFeedback(page, feedback, input, sendCluster, {
+        const initialCluster = {
           width: initialClusterBox!.width,
           height: initialClusterBox!.height
-        })
+        }
+        await expectLayoutNeutralFeedback(
+          page,
+          feedback,
+          input,
+          sendCluster,
+          initialCluster,
+          true
+        )
+        await expectVisibleComposerControlsRemainUsable(page, feedback)
+        await page.setViewportSize({ width: 360, height: 50 })
+        await expectHiddenFeedbackRetainsState(feedback)
+        await page.setViewportSize({ width: 390, height: 844 })
+        await expect(feedback).toBeVisible()
+        await expectLayoutNeutralFeedback(
+          page,
+          feedback,
+          input,
+          sendCluster,
+          initialCluster
+        )
         await clickThroughPaintedCenter(
           page,
           feedback.getByRole("button", { name: "Undo recipe" })
@@ -1977,6 +2092,9 @@ test.describe("Packaged extension prompt improvement parity", () => {
         await seedExcludedContext(page)
         const originalDraft = "Retain exact {{topic}} draft."
         await input.fill(originalDraft)
+        const sendCluster = page.getByTestId("sidepanel-send-action-cluster")
+        const initialCluster = await sendCluster.boundingBox()
+        expect(initialCluster).not.toBeNull()
 
         const menu = await openPromptActions(page)
         if (operation === "improvement") {
@@ -2007,15 +2125,30 @@ test.describe("Packaged extension prompt improvement parity", () => {
             ? "Improvement applied."
             : "Recipe applied."
         )
-        await expect(feedback).toBeVisible()
+        await waitForDrawersClosed(page, feedback)
         await page.setViewportSize({ width: 360, height: 240 })
         await scrollDraftNearViewportTop(input)
         await expectVisibleComposerControlsRemainUsable(page, feedback)
+        await expectLayoutNeutralFeedback(
+          page,
+          feedback,
+          input,
+          sendCluster,
+          initialCluster!,
+          true
+        )
 
         await page.setViewportSize({ width: 360, height: 50 })
-        await expect(feedback).not.toBeVisible()
+        await expectHiddenFeedbackRetainsState(feedback)
         await page.setViewportSize({ width: 390, height: 844 })
         await expect(feedback).toBeVisible()
+        await expectLayoutNeutralFeedback(
+          page,
+          feedback,
+          input,
+          sendCluster,
+          initialCluster!
+        )
         await clickThroughPaintedCenter(
           page,
           feedback.getByRole("button", {
