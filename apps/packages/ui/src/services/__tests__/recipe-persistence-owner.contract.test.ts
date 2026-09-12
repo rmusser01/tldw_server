@@ -6,6 +6,7 @@ import {
 } from "@/components/Common/PromptAssist/recipes/recipe-editor-state"
 import { getRecipePersistenceState } from "@/components/Option/Prompt/prompt-recipe-library"
 import { renderSingleTextRecipe } from "@/components/Option/Prompt/structured-prompt-utils"
+import { db } from "@/db/dexie/schema"
 import { useRecipePersistenceOwner } from "@/hooks/useRecipePersistenceOwner"
 import { apiSend } from "@/services/api-send"
 import {
@@ -801,6 +802,117 @@ describe("uncertain outcomes, reopen, reconciliation, and recovery", () => {
 })
 
 describe("real sync stack through direct and extension authorities", () => {
+  it.each([
+    ["direct", "transport"],
+    ["direct", "local commit"],
+    ["direct", "local error"],
+    ["extension", "transport"],
+    ["extension", "local commit"],
+    ["extension", "local error"]
+  ] as const)(
+    "%s same-owner Pull cannot release an existing PUT during %s settlement",
+    async (surface, phase) => {
+      const id = localId(`active-put-${surface}-${phase}`)
+      extension.values.set("tldwConfig", storedManualConfig(`${id}-key`))
+      if (surface === "extension") await startExtensionBackground()
+      seedRecipe(id, 101)
+      const owner = (await resolveRecipePersistenceOwnerView())!
+      let release!: () => void
+      let signalStarted!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const started = new Promise<void>((resolve) => {
+        signalStarted = resolve
+      })
+      const originalUpdate = db.prompts.update.bind(db.prompts)
+      let localCommitHeld = false
+      const update = vi
+        .spyOn(db.prompts, "update")
+        .mockImplementation(async (...args) => {
+          const fields = args[1] as Record<string, unknown>
+          if (
+            !localCommitHeld &&
+            ((phase === "local commit" &&
+              fields.name === "Updated remote recipe") ||
+              (phase === "local error" && fields.syncStatus === "error"))
+          ) {
+            localCommitHeld = true
+            signalStarted()
+            await held
+          }
+          return originalUpdate(...args)
+        })
+      let putCount = 0
+      vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+        if (init.method === "PUT") {
+          putCount += 1
+          if (phase === "local error") throw new Error("connection lost")
+          if (phase === "transport" && putCount === 1) {
+            signalStarted()
+            await held
+          }
+          return response(200, {
+            success: true,
+            data: {
+              ...serverPrompt(101),
+              name: "Updated remote recipe",
+              version_number: 2
+            }
+          })
+        }
+        return successfulPromptResponse(101)
+      })
+
+      const first = pushToStudio(id, 42, { expectedOwnerId: owner.ownerId })
+      try {
+        await started
+        const pull = await pullFromStudio(101, id)
+        const second = await pushToStudio(id, 42, {
+          expectedOwnerId: owner.ownerId
+        })
+        expect.soft(putCount).toBe(1)
+        expect
+          .soft(pull)
+          .toMatchObject({ success: false, recipeWriteBlocked: true })
+        expect.soft(second).toMatchObject({
+          success: false,
+          recipeOwnership: { dispatch: { state: "not_dispatched" } }
+        })
+        expect
+          .soft(await readRecipePersistenceUncertainty(id, owner.ownerId))
+          .not.toBe("clear")
+      } finally {
+        release()
+        await first
+        update.mockRestore()
+      }
+      if (phase === "local error") {
+        expect(await first).toMatchObject({
+          success: false,
+          syncStatus: "error"
+        })
+        expect(extension.rows.get(id)?.syncStatus).toBe("error")
+        expect(await readRecipePersistenceUncertainty(id, owner.ownerId)).toBe(
+          "scoped"
+        )
+        expect(await pullFromStudio(101, id)).toMatchObject({ success: true })
+      } else {
+        expect(await first).toMatchObject({
+          success: true,
+          syncStatus: "synced"
+        })
+        expect(extension.rows.get(id)).toMatchObject({
+          name: "Updated remote recipe",
+          syncStatus: "synced"
+        })
+      }
+      expect(await readRecipePersistenceUncertainty(id, owner.ownerId)).toBe(
+        "clear"
+      )
+    }
+  )
+
   it.each(["manual direct owner", "runtime-key direct owner"] as const)(
     "%s carries its resolved owner through sync, fetch, and exact reconciliation",
     async (label) => {

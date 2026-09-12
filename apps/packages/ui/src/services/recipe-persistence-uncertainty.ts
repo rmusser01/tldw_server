@@ -203,9 +203,11 @@ export async function resolveRecipeOwnerWithConfig(
 export const directRecipeRequestAuthority = {
   getAuthenticatedPrincipal: getRecipeAuthenticatedPrincipal,
   dispatchAuthority: {
-    markDispatched: (id: string, ownerId: string): void => {
+    markDispatched: (id: string, ownerId: string): RecipeDeliveryReceipt => {
       assertRecipeDispatchMarker(id, ownerId)
-      directRegistry.reserve(id, ownerId)
+      const operationId = crypto.randomUUID()
+      directRegistry.reserve(id, ownerId, operationId)
+      return { id, ownerId, operationId }
     }
   }
 }

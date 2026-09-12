@@ -2,6 +2,7 @@ import {
   type RecipePersistenceOwnerView,
   deriveRecipePersistenceOwner
 } from "@/services/recipe-persistence-owner"
+import type { RecipeDeliveryReceipt } from "@/services/recipe-persistence-registry"
 import {
   type BrowserSurface,
   buildBrowserHttpBase,
@@ -37,7 +38,10 @@ export type RecipeOwnerResolution = Readonly<{
 }>
 
 export type RecipeDispatchAuthority = Readonly<{
-  markDispatched(localId: string, ownerId: string): void | Promise<void>
+  markDispatched(
+    localId: string,
+    ownerId: string
+  ): RecipeDeliveryReceipt | void | Promise<RecipeDeliveryReceipt | void>
 }>
 
 export type BrowserRequestTransport = {

@@ -741,6 +741,7 @@ async def _run_prompt_improvement_post_validation_gates(
     summary="Discover prompt feature capabilities",
     tags=["prompts"],
     dependencies=[
+        Depends(get_auth_principal),
         Depends(rbac_rate_limit("prompts.capabilities")),
     ],
 )

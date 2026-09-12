@@ -1,4 +1,5 @@
 import type { ApiSendResponse } from "@/services/api-send"
+import type { RecipeDeliveryReceipt } from "@/services/recipe-persistence-registry"
 import {
   isCookieSessionBrowserTransport,
   resolveAdvancedRequestTransportGuard
@@ -211,23 +212,28 @@ export const tldwRequest = async (
   if (!payload.recipePersistence) {
     return performTldwRequest(payload, runtime)
   }
-  const dispatch = {
+  const dispatch: {
+    value: RecipePersistenceDispatch
+    receipt?: RecipeDeliveryReceipt
+  } = {
     value: {
       state: "not_dispatched",
       actualOwnerId: null
-    } as RecipePersistenceDispatch
+    }
   }
   try {
     return {
       ...(await performTldwRequest(payload, runtime, dispatch)),
-      recipePersistence: dispatch.value
+      recipePersistence: dispatch.value,
+      ...(dispatch.receipt ? { recipeDelivery: dispatch.receipt } : {})
     }
   } catch (error) {
     return {
       ok: false,
       status: 0,
       error: formatErrorMessage(error, "Request failed"),
-      recipePersistence: dispatch.value
+      recipePersistence: dispatch.value,
+      ...(dispatch.receipt ? { recipeDelivery: dispatch.receipt } : {})
     }
   }
 }
@@ -235,7 +241,10 @@ export const tldwRequest = async (
 const performTldwRequest = async (
   payload: TldwRequestPayload,
   runtime: TldwRequestRuntime,
-  dispatch?: { value: RecipePersistenceDispatch }
+  dispatch?: {
+    value: RecipePersistenceDispatch
+    receipt?: RecipeDeliveryReceipt
+  }
 ): Promise<ApiSendResponse> => {
   const {
     path,
@@ -514,10 +523,11 @@ const performTldwRequest = async (
     if (dispatch && payload.recipePersistence) {
       const actualOwnerId = recipeSnapshot?.view?.ownerId ?? null
       if (payload.recipePersistence.mode === "require") {
-        await runtime.dispatchAuthority!.markDispatched(
+        const receipt = await runtime.dispatchAuthority!.markDispatched(
           payload.recipePersistence.localId,
           actualOwnerId!
         )
+        if (receipt) dispatch.receipt = receipt
       }
       dispatch.value = { state: "dispatched", actualOwnerId }
     }

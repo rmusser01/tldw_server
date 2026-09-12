@@ -658,13 +658,16 @@ describe("actual recipe surface adapter bridges", () => {
     ])
     expect(RecipePersistenceRegistry.prototype.reserve).toHaveBeenCalledWith(
       boundary.nextId,
-      expectedOwner!.ownerId
+      expectedOwner!.ownerId,
+      expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+      )
     )
     expect(boundary.observations).toEqual([
       expect.objectContaining({
         id: boundary.nextId,
         ownerId: expectedOwner!.ownerId,
-        state: "scoped",
+        state: "unknown_owner",
         body: expect.objectContaining({
           project_id: 42,
           prompt_schema_version: 2
@@ -704,7 +707,10 @@ describe("actual recipe surface adapter bridges", () => {
     expect(boundary.mutationCount).toBe(1)
     expect(RecipePersistenceRegistry.prototype.reserve).toHaveBeenCalledWith(
       boundary.nextId,
-      ownerA!.ownerId
+      ownerA!.ownerId,
+      expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+      )
     )
     expect(
       await readRecipePersistenceUncertainty(boundary.nextId, ownerA!.ownerId)

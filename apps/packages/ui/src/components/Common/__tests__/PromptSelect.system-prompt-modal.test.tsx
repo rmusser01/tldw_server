@@ -891,48 +891,177 @@ describe("PromptSelect system prompt modal", () => {
     }
   )
 
-  it("applies a local recipe only to the system draft and restores exact value and identity", async () => {
-    const user = userEvent.setup()
-    const original = "  Override 🧪\n\n"
-    const { props } = renderPromptSelect({ systemPrompt: original })
-    await user.click(
-      await screen.findByRole("button", { name: "selectAPrompt" })
-    )
-    await user.click(
-      await screen.findByRole("menuitem", { name: /edit system prompt/i })
-    )
-    expect(await screen.findByLabelText("Enter system prompt")).toHaveValue(
-      original
-    )
+  it.each([undefined, "", "  Override 🧪\n\n"])(
+    "applies a local recipe and restores exact override %s and template identity",
+    async (original) => {
+      const user = userEvent.setup()
+      const { props } = renderPromptSelect({ systemPrompt: original })
+      await user.click(
+        await screen.findByRole("button", { name: "selectAPrompt" })
+      )
+      await user.click(
+        await screen.findByRole("menuitem", { name: /edit system prompt/i })
+      )
+      expect(await screen.findByLabelText("Enter system prompt")).toHaveValue(
+        original || "Template body"
+      )
 
-    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
-    const build = screen.getByRole("button", { name: /Build from recipe/ })
-    expect(build).toBeEnabled()
-    await user.click(build)
-    expect(
-      await screen.findByRole("region", { name: "Recipe builder" })
-    ).toBeInTheDocument()
-    expect(props.setSystemPrompt).not.toHaveBeenCalled()
-    expect(props.setSelectedSystemPrompt).not.toHaveBeenCalled()
+      await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+      const build = screen.getByRole("button", { name: /Build from recipe/ })
+      expect(build).toBeEnabled()
+      await user.click(build)
+      expect(
+        await screen.findByRole("region", { name: "Recipe builder" })
+      ).toBeInTheDocument()
+      expect(props.setSystemPrompt).not.toHaveBeenCalled()
+      expect(props.setSelectedSystemPrompt).not.toHaveBeenCalled()
 
-    await user.type(
-      screen.getByLabelText("Current value for Task (not saved)"),
-      "Preserve system identity."
-    )
-    const preview = (
-      screen.getByLabelText("Compiled prompt preview") as HTMLTextAreaElement
-    ).value
-    await user.click(
-      screen.getByRole("button", { name: "Apply to system prompt" })
-    )
-    expect(props.setSystemPrompt).toHaveBeenLastCalledWith(preview)
-    expect(props.setSelectedSystemPrompt).not.toHaveBeenCalled()
+      await user.type(
+        screen.getByLabelText("Current value for Task (not saved)"),
+        "Preserve system identity."
+      )
+      const preview = (
+        screen.getByLabelText("Compiled prompt preview") as HTMLTextAreaElement
+      ).value
+      await user.click(
+        screen.getByRole("button", { name: "Apply to system prompt" })
+      )
+      expect(props.setSystemPrompt).toHaveBeenLastCalledWith(preview)
+      expect(props.setSelectedSystemPrompt).not.toHaveBeenCalled()
 
-    await user.click(screen.getByRole("button", { name: "Undo recipe" }))
-    expect(props.setSystemPrompt).toHaveBeenLastCalledWith(original)
-    expect(props.setSelectedSystemPrompt).toHaveBeenLastCalledWith("prompt-1")
-    expect(screen.getByLabelText("Enter system prompt")).toHaveValue(original)
-  })
+      await user.click(screen.getByRole("button", { name: "Undo recipe" }))
+      expect(props.setSystemPrompt).toHaveBeenLastCalledWith(original)
+      expect(props.setSelectedSystemPrompt).toHaveBeenLastCalledWith("prompt-1")
+      expect(screen.getByLabelText("Enter system prompt")).toHaveValue(
+        original || "Template body"
+      )
+    }
+  )
+
+  describe.each([undefined, "", "  Override 🧪\n\n"])(
+    "recipe followed by improvement with original override %s",
+    (original) => {
+      it.each([
+        ["Improve now", "success"],
+        ["Improve now", "cancel"],
+        ["Improve now", "failure"],
+        ["Review changes", "success"],
+        ["Review changes", "cancel"],
+        ["Review changes", "failure"]
+      ])("consumes recipe Undo at %s start through %s", async (mode, outcome) => {
+        const user = userEvent.setup()
+        const pending = createDeferred<void>()
+        mocks.improvePrompt.mockImplementation(async (request) => {
+          await pending.promise
+          if (outcome === "failure") throw new Error("provider unavailable")
+          return improvementResponse(
+            request.operation_id,
+            request.text + "\nRefined."
+          )
+        })
+        const view = renderPromptSelect({ systemPrompt: original })
+        await user.click(
+          await screen.findByRole("button", { name: "selectAPrompt" })
+        )
+        await user.click(
+          await screen.findByRole("menuitem", { name: /edit system prompt/i })
+        )
+        expect(await screen.findByLabelText("Enter system prompt")).toHaveValue(
+          original || "Template body"
+        )
+        await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+        await user.click(
+          screen.getByRole("button", { name: /Build from recipe/ })
+        )
+        await user.type(
+          await screen.findByLabelText("Current value for Task (not saved)"),
+          "Preserve system identity."
+        )
+        const compiled = (
+          screen.getByLabelText("Compiled prompt preview") as HTMLTextAreaElement
+        ).value
+        await user.click(
+          screen.getByRole("button", { name: "Apply to system prompt" })
+        )
+        expect(view.props.setSystemPrompt).toHaveBeenLastCalledWith(compiled)
+        expect(
+          screen.getByRole("button", { name: "Undo recipe" })
+        ).toBeInTheDocument()
+        // Reflect the conversation owner's accepted override, as the real shell does.
+        view.rerender(
+          <QueryClientProvider client={view.queryClient}>
+            <PromptSelect {...view.props} systemPrompt={compiled} />
+          </QueryClientProvider>
+        )
+        await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+        await user.click(screen.getByRole("button", { name: new RegExp(mode) }))
+        expect(mocks.improvePrompt).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({ target: "system", text: compiled })
+        )
+        expect(
+          screen.queryByRole("button", { name: "Undo recipe" })
+        ).not.toBeInTheDocument()
+
+        if (outcome === "cancel") {
+          // Cancel while transport is still pending: invalidation belongs to start,
+          // not success. A late successful response must not revive either Undo.
+          await user.click(screen.getByRole("button", { name: "Cancel" }))
+          expect(
+            screen.queryByRole("button", { name: "Undo recipe" })
+          ).not.toBeInTheDocument()
+        }
+        await act(async () => {
+          pending.resolve()
+          await pending.promise
+        })
+        if (outcome === "failure") {
+          await screen.findByRole("alert")
+          await user.click(screen.getByRole("button", { name: "Cancel" }))
+        } else if (outcome === "success") {
+          if (mode === "Review changes") {
+            expect(
+              await screen.findByRole("textbox", {
+                name: "Improved prompt candidate"
+              })
+            ).toHaveValue(compiled + "\nRefined.")
+            expect(view.props.setSystemPrompt).toHaveBeenCalledTimes(1)
+            await user.click(
+              screen.getByRole("button", { name: "Apply to draft" })
+            )
+          }
+          await screen.findByRole("button", { name: "Undo improvement" })
+          expect(
+            screen.queryByRole("button", { name: "Undo recipe" })
+          ).not.toBeInTheDocument()
+          expect(screen.getByLabelText("Enter system prompt")).toHaveValue(
+            compiled + "\nRefined."
+          )
+          await user.click(
+            screen.getByRole("button", { name: "Undo improvement" })
+          )
+        }
+        expect(screen.getByLabelText("Enter system prompt")).toHaveValue(compiled)
+        expect(view.props.setSystemPrompt).toHaveBeenLastCalledWith(compiled)
+        expect(view.props.setSystemPrompt).toHaveBeenCalledTimes(
+          outcome === "success" ? 3 : 1
+        )
+        expect(
+          screen.queryByRole("button", { name: "Undo recipe" })
+        ).not.toBeInTheDocument()
+        expect(
+          screen.queryByRole("button", { name: "Undo improvement" })
+        ).not.toBeInTheDocument()
+        expect(view.props.setSelectedSystemPrompt).not.toHaveBeenCalled()
+        expect(view.props.setSelectedQuickPrompt).not.toHaveBeenCalled()
+        expect(mocks.updatePrompt).not.toHaveBeenCalled()
+        await user.click(screen.getByRole("button", { name: "Reset" }))
+        expect(
+          await screen.findByDisplayValue("Template body")
+        ).toBeInTheDocument()
+        expect(view.props.setSelectedSystemPrompt).not.toHaveBeenCalled()
+      })
+    }
+  )
 
   it("gates cached recipe authorization while open-time revalidation is pending and revoked", async () => {
     const user = userEvent.setup()

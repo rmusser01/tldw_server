@@ -475,6 +475,7 @@ export const PromptSelect: React.FC<Props> = ({
 
   const enterPromptAssist = React.useCallback(
     (action: () => void) => {
+      setRecipeUndo(null)
       assistEntryDraftRef.current = editorDraftRef.current
       action()
     },

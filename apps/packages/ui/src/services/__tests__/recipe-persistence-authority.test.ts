@@ -85,13 +85,20 @@ describe("direct recipe authority", () => {
         state: "dispatched",
         actualOwnerId: owner.ownerId
       })
-      if (method === "POST")
+      if (method === "POST") {
         await authority.clearRecipePersistenceScoped("one", owner.ownerId)
+        expect(
+          await authority.readRecipePersistenceUncertainty("one", owner.ownerId)
+        ).toBe("unknown_owner")
+        await authority.acknowledgeRecipePersistenceReceipt(
+          result.recipeDelivery!
+        )
+      }
     }
-    expect(observed).toEqual(["scoped", "scoped"])
+    expect(observed).toEqual(["unknown_owner", "unknown_owner"])
     expect(
       await authority.readRecipePersistenceUncertainty("one", owner.ownerId)
-    ).toBe("scoped")
+    ).toBe("unknown_owner")
   })
 
   it("binds manual bearer principal lookup to the captured credentials despite config drift", async () => {

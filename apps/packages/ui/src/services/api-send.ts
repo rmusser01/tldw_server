@@ -1,8 +1,7 @@
+import type { RecipeDeliveryReceipt } from "@/services/recipe-persistence-registry"
 import {
-  acknowledgeRecipePersistenceReceipt,
   directRecipeRequestAuthority,
-  hasRecipeExtensionRuntime,
-  isRecipeDeliveryReceipt
+  hasRecipeExtensionRuntime
 } from "@/services/recipe-persistence-uncertainty"
 import { resolveDirectBrowserConfig as resolveDirectConfig } from "@/services/tldw/direct-browser-config"
 import type {
@@ -41,6 +40,8 @@ export interface ApiSendResponse<T = any> {
   retryAfterMs?: number | null
   /** Transport metadata, never supplied by the server response body. */
   recipePersistence?: RecipePersistenceDispatch
+  /** Client-only operation guard; sync acknowledges after local settlement. */
+  recipeDelivery?: RecipeDeliveryReceipt
 }
 
 const isSafeFallbackMethod = (method?: string): boolean => {
@@ -157,25 +158,6 @@ async function apiSendImpl<
       const resp = await Promise.race([extensionPromise, timeoutPromise])
 
       if (resp) {
-        if (payload.recipePersistence?.mode === "require") {
-          const received = resp as ApiSendResponse<T> & {
-            recipeDelivery?: unknown
-          }
-          const receipt = received.recipeDelivery
-          if (
-            isRecipeDeliveryReceipt(receipt) &&
-            receipt.id === payload.recipePersistence.localId &&
-            receipt.ownerId === payload.recipePersistence.expectedOwnerId &&
-            received.recipePersistence?.state === "dispatched" &&
-            receipt.ownerId === received.recipePersistence.actualOwnerId
-          ) {
-            // Receipt is known even if the ACK reply is lost. Never turn this
-            // into unknown dispatch; an undelivered ACK leaves quarantine in the worker.
-            await acknowledgeRecipePersistenceReceipt(receipt).catch(
-              () => undefined
-            )
-          }
-        }
         return resp as ApiSendResponse<T>
       }
       if (!methodIsSafeFallback || recipeExtension) {

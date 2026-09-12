@@ -31,11 +31,14 @@ import {
   getPromptStudioDefaults,
   setPromptStudioDefaults
 } from "@/services/prompt-studio-settings"
+import type { RecipeDeliveryReceipt } from "@/services/recipe-persistence-registry"
 import {
+  acknowledgeRecipePersistenceReceipt,
   beginRecipePersistenceUnlink,
   clearRecipePersistenceScoped,
   endRecipePersistenceUnlink,
   finishRecipePersistenceReconciliation,
+  isRecipeDeliveryReceipt,
   markRecipePersistenceScoped,
   markRecipePersistenceUnknown,
   readRecipePersistenceUncertainty,
@@ -688,6 +691,7 @@ async function persistServerPrompt(
     localId,
     dispatch: { state: "unknown", actualOwnerId: null }
   }
+  let deliveryReceipt: RecipeDeliveryReceipt | undefined
   try {
     const response = createCopy
       ? await createServerPrompt(payload as PromptCreatePayload, {
@@ -705,6 +709,17 @@ async function persistServerPrompt(
         actualOwnerId: null
       }
     }
+    if (
+      policy.mode === "require" &&
+      isRecipeDeliveryReceipt(response.recipeDelivery) &&
+      response.recipeDelivery.id === localId &&
+      response.recipeDelivery.ownerId === policy.expectedOwnerId &&
+      recipeOwnership.dispatch.state === "dispatched" &&
+      response.recipeDelivery.ownerId ===
+        recipeOwnership.dispatch.actualOwnerId
+    ) {
+      deliveryReceipt = response.recipeDelivery
+    }
     if (recipeOwnership.dispatch.state === "not_dispatched") {
       if (isRecipe && input) {
         // A late authority reservation can reject after sync's clear preflight.
@@ -715,7 +730,7 @@ async function persistServerPrompt(
         )
         if (blocked) return blocked
       }
-      return failure(
+      return await failure(
         response.error || "Prompt was not dispatched",
         "validation"
       )
@@ -725,19 +740,19 @@ async function persistServerPrompt(
       classifyRecipeDispatch(recipeOwnership.dispatch) === "unknown_owner"
     ) {
       await markRecipePersistenceUnknown(localId)
-      return failure(
+      return await failure(
         "Recipe dispatch owner is unknown",
         "invalid_server_payload"
       )
     }
     if (isKnownMutationRejection(response)) {
       await clearReconciledOwner(recipeOwnership)
-      return failure(response.error || "Prompt rejected", "validation")
+      return await failure(response.error || "Prompt rejected", "validation")
     }
     const serverPrompt =
       response.ok === false ? null : unwrapResponseData<ServerPrompt>(response)
     if (!serverPrompt || !isValidProjectId(serverPrompt.id)) {
-      return failure(
+      return await failure(
         response.error || "Invalid server prompt response",
         "invalid_server_payload"
       )
@@ -746,12 +761,12 @@ async function persistServerPrompt(
     try {
       fields = serverToLocalFields(serverPrompt)
     } catch (error) {
-      return failure(error, "invalid_server_payload")
+      return await failure(error, "invalid_server_payload")
     }
     if (createCopy) fields.studioProjectId = projectId
     const updated = await db.prompts.update(localId, fields)
     if (updated === 0)
-      return failure(
+      return await failure(
         "Local prompt disappeared during reconciliation",
         "transient"
       )
@@ -775,7 +790,14 @@ async function persistServerPrompt(
         /* Fail closed at the consumer too. */
       }
     }
-    return failure(error, "transient")
+    return await failure(error, "transient")
+  } finally {
+    // Keep the exact operation guarded through transport, local commit, and
+    // error compensation. An unacknowledged receipt remains quarantined.
+    if (deliveryReceipt)
+      await acknowledgeRecipePersistenceReceipt(deliveryReceipt).catch(
+        () => undefined
+      )
   }
 }
 

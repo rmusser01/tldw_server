@@ -1136,7 +1136,8 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
       await waitFor(() =>
         expect(mocks.rows.get("dispatch-id").serverId).toBe(101),
       );
-      await waitFor(() => expect(observedMarker).toBe("scoped"));
+      // A live operation is provisional, not yet reconcilable uncertainty.
+      await waitFor(() => expect(observedMarker).toBe("unknown_owner"));
       await waitFor(async () =>
         expect(
           await readRecipePersistenceUncertainty("dispatch-id", ownerScope),
