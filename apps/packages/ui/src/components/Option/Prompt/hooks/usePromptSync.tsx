@@ -1,3 +1,4 @@
+import { resolveRecipePersistenceOwnerView } from "@/services/recipe-persistence-uncertainty"
 import React, { useRef, useState } from "react"
 import { useMutation, type QueryClient } from "@tanstack/react-query"
 import { notification } from "antd"
@@ -65,66 +66,83 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
   const batchSyncCancelRef = useRef(false)
   const batchSyncRunningRef = useRef(false)
 
-  const syncPromptAfterLocalSave = React.useCallback(async (localId: string) => {
-    try {
-      const autoSyncEnabled = await shouldAutoSyncWorkspacePrompts()
-      if (!autoSyncEnabled) {
-        return {
-          attempted: false,
-          success: true,
-          error: undefined
+  const syncPromptAfterLocalSave = React.useCallback(
+    async (localId: string, options: { notifyOnFailure?: boolean } = {}) => {
+      const notifyOnFailure = options.notifyOnFailure !== false
+      try {
+        const autoSyncEnabled = await shouldAutoSyncWorkspacePrompts()
+        if (!autoSyncEnabled) {
+          return {
+            attempted: false,
+            success: true,
+            error: undefined
+          }
         }
-      }
 
-      const result = await autoSyncPrompt(localId)
-      if (!result.success) {
-        notification.warning({
-          message: t("managePrompts.sync.syncFailed", {
-            defaultValue: "Sync failed"
-          }),
-          description: t("managePrompts.sync.syncFailedWithLocalSave", {
-            defaultValue: "{{error}} Your changes are saved locally.",
-            error: result.error || t("managePrompts.sync.pendingTooltip", {
-              defaultValue: "Local changes not yet synced."
+        const owner = await resolveRecipePersistenceOwnerView()
+        const result = await autoSyncPrompt(
+          localId, undefined, owner ? { expectedOwnerId: owner.ownerId } : undefined
+        )
+        if (!result.success && notifyOnFailure) {
+          notification.warning({
+            message: t("managePrompts.sync.syncFailed", {
+              defaultValue: "Sync failed"
+            }),
+            description: t("managePrompts.sync.syncFailedWithLocalSave", {
+              defaultValue: "{{error}} Your changes are saved locally.",
+              error: result.error || t("managePrompts.sync.pendingTooltip", {
+                defaultValue: "Local changes not yet synced."
+              })
             })
           })
-        })
-      }
-      return {
-        attempted: true,
-        success: result.success,
-        error: result.error
-      }
-    } catch (error: unknown) {
-      const fallbackError =
-        error instanceof Error
-          ? error.message
-          : t("managePrompts.sync.pendingTooltip", {
-              defaultValue: "Local changes not yet synced"
+        }
+        return {
+          attempted: true,
+          success: result.success,
+          error: result.error,
+          syncStatus: result.syncStatus,
+          failureKind: result.failureKind
+        }
+      } catch (error: unknown) {
+        const fallbackError =
+          error instanceof Error
+            ? error.message
+            : t("managePrompts.sync.pendingTooltip", {
+                defaultValue: "Local changes not yet synced"
+              })
+        if (notifyOnFailure) {
+          notification.warning({
+            message: t("managePrompts.sync.syncFailed", {
+              defaultValue: "Sync failed"
+            }),
+            description: t("managePrompts.sync.syncFailedWithLocalSave", {
+              defaultValue: "{{error}} Your changes are saved locally.",
+              error: fallbackError
             })
-      notification.warning({
-        message: t("managePrompts.sync.syncFailed", {
-          defaultValue: "Sync failed"
-        }),
-        description: t("managePrompts.sync.syncFailedWithLocalSave", {
-          defaultValue: "{{error}} Your changes are saved locally.",
+          })
+        }
+        return {
+          attempted: true,
+          success: false,
           error: fallbackError
-        })
-      })
-      return {
-        attempted: true,
-        success: false,
-        error: fallbackError
+        }
       }
-    }
-  }, [t])
+    },
+    [t]
+  )
 
   const { mutate: pushToStudioMutation, isPending: isPushing } = useMutation({
     mutationFn: async ({ localId, projectId }: { localId: string; projectId: number }) => {
-      return await pushToStudio(localId, projectId)
+      const owner = await resolveRecipePersistenceOwnerView()
+      const result = await pushToStudio(
+        localId, projectId, owner ? { expectedOwnerId: owner.ownerId } : undefined
+      )
+      if (!result.success) {
+        throw new Error(result.error || t("managePrompts.notification.someError"))
+      }
+      return result
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
       setProjectSelectorOpen(false)
       setPromptToSync(null)
       notification.success({
@@ -137,15 +155,22 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         message: t("managePrompts.sync.pushError", { defaultValue: "Failed to push" }),
         description: error?.message || t("managePrompts.notification.someError")
       })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
+      queryClient.invalidateQueries({ queryKey: ["getAllPromptsForSelect"] })
     }
   })
 
   const { mutate: pullFromStudioMutation, isPending: isPulling } = useMutation({
     mutationFn: async ({ serverId, localId }: { serverId: number; localId?: string }) => {
-      return await pullFromStudio(serverId, localId)
+      const result = await pullFromStudio(serverId, localId)
+      if (!result.success) {
+        throw new Error(result.error || t("managePrompts.notification.someError"))
+      }
+      return result
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
       notification.success({
         message: t("managePrompts.sync.pullSuccess", { defaultValue: "Pulled from server" }),
         description: t("managePrompts.sync.pullSuccessDesc", { defaultValue: "Prompt has been updated from Prompt Studio." })
@@ -156,13 +181,21 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         message: t("managePrompts.sync.pullError", { defaultValue: "Failed to pull" }),
         description: error?.message || t("managePrompts.notification.someError")
       })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
     }
   })
 
   const { mutate: unlinkPromptMutation } = useMutation({
-    mutationFn: unlinkPromptFromServer,
+    mutationFn: async (localId: string) => {
+      const result = await unlinkPromptFromServer(localId)
+      if (!result.success) {
+        throw new Error(result.error || t("managePrompts.notification.someError"))
+      }
+      return result
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
       notification.success({
         message: t("managePrompts.sync.unlinkSuccess", { defaultValue: "Unlinked from server" }),
         description: t("managePrompts.sync.unlinkSuccessDesc", { defaultValue: "Prompt is now local-only." })
@@ -173,6 +206,9 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         message: t("managePrompts.sync.unlinkError", { defaultValue: "Failed to unlink" }),
         description: error?.message || t("managePrompts.notification.someError")
       })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
     }
   })
 
@@ -225,7 +261,10 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
       localId: string
       resolution: ConflictResolution
     }) => {
-      return await resolveConflict(localId, resolution)
+      const owner = resolution === "keep_server" ? null : await resolveRecipePersistenceOwnerView()
+      return await resolveConflict(
+        localId, resolution, owner ? { expectedOwnerId: owner.ownerId } : undefined
+      )
     },
     onSuccess: (result, variables) => {
       if (!result.success) {
@@ -238,7 +277,6 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         return
       }
 
-      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
       setConflictModalOpen(false)
       setConflictPromptId(null)
       setConflictInfo(null)
@@ -272,15 +310,20 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         }),
         description: error?.message || t("managePrompts.notification.someError")
       })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
     }
   })
 
   const { mutate: importFromStudioMutation, isPending: isImporting } = useMutation({
     mutationFn: async ({ serverId }: { serverId: number }) => {
-      return await pullFromStudio(serverId)
+      const result = await pullFromStudio(serverId)
+      if (!result.success)
+        throw new Error(result.error || "Prompt Studio import failed")
+      return result
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
       notification.success({
         message: t("managePrompts.studio.importSuccess", { defaultValue: "Prompt imported" }),
         description: t("managePrompts.studio.importSuccessDesc", { defaultValue: "The prompt has been saved to your local prompts." })
@@ -291,6 +334,9 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         message: t("managePrompts.studio.importError", { defaultValue: "Failed to import" }),
         description: error?.message || t("managePrompts.notification.someError")
       })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
     }
   })
 
@@ -361,6 +407,9 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
           cancelled: false
         })
 
+        // One opaque owner per user-initiated batch; never persisted in its tasks.
+        const owner = await resolveRecipePersistenceOwnerView()
+        const persistenceInput = owner ? { expectedOwnerId: owner.ownerId } : undefined
         let completed = 0
         let succeeded = 0
         const failed: BatchSyncFailure[] = []
@@ -397,8 +446,8 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
               task.direction === "pull"
                 ? await pullFromStudio(task.serverId!, task.promptId)
                 : task.serverId
-                  ? await pushToStudio(task.promptId, task.preferredProjectId || 1)
-                  : await autoSyncPrompt(task.promptId, task.preferredProjectId)
+                  ? await pushToStudio(task.promptId, task.preferredProjectId || 1, persistenceInput)
+                  : await autoSyncPrompt(task.promptId, task.preferredProjectId, persistenceInput)
 
             if (result.success) {
               succeeded += 1

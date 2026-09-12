@@ -1,23 +1,36 @@
-import { formatErrorMessage } from "@/utils/format-error-message"
-import { isPlaceholderApiKey } from "@/utils/api-key"
-import type { PathOrUrl } from "@/services/tldw/openapi-guard"
 import type { ApiSendResponse } from "@/services/api-send"
-import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
+import type { RecipeDeliveryReceipt } from "@/services/recipe-persistence-registry"
 import {
-  buildBrowserHttpBase,
   isCookieSessionBrowserTransport,
-  resolveAdvancedRequestTransportGuard,
-  resolveBrowserTransport,
-  type BrowserSurface
+  resolveAdvancedRequestTransportGuard
 } from "@/services/tldw/browser-networking"
+import type { PathOrUrl } from "@/services/tldw/openapi-guard"
+import {
+  type RecipeDispatchAuthority,
+  type RecipePersistenceDispatch,
+  type RecipePersistenceRequestPolicy,
+  type RecipeRequestSnapshotResolution,
+  type RecipeRequestTransportSnapshot,
+  isUnsafeMethod,
+  resolveBrowserRequestTransport,
+  resolveRecipeRequestSnapshot
+} from "@/services/tldw/recipe-request-snapshot"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import {
   ABSOLUTE_URL_BLOCK_ERROR,
+  type AllowlistWarnHooks,
   isAbsoluteUrlAllowlisted as guardIsAbsoluteUrlAllowlisted,
-  isSameOriginAbsoluteUrlForConfiguredServer as guardIsSameOriginAbsoluteUrlForConfiguredServer,
-  type AllowlistWarnHooks
+  isSameOriginAbsoluteUrlForConfiguredServer as guardIsSameOriginAbsoluteUrlForConfiguredServer
 } from "@/utils/absolute-url-guard"
-import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { isPlaceholderApiKey } from "@/utils/api-key"
+import { formatErrorMessage } from "@/utils/format-error-message"
+
+export {
+  isUnsafeMethod,
+  resolveBrowserRequestTransport,
+  type BrowserRequestTransport
+} from "@/services/tldw/recipe-request-snapshot"
 
 export type TldwRequestPayload = {
   path: PathOrUrl
@@ -28,6 +41,7 @@ export type TldwRequestPayload = {
   timeoutMs?: number
   abortSignal?: AbortSignal
   responseType?: "json" | "text" | "arrayBuffer"
+  recipePersistence?: RecipePersistenceRequestPolicy
 }
 
 type TldwConfigLike = Record<string, any> | null | undefined
@@ -37,12 +51,10 @@ type TldwRequestRuntime = {
   refreshAuth?: () => Promise<void>
   fetchFn?: typeof fetch
   useRuntimeAuthOverride?: boolean
-}
-
-export type BrowserRequestTransport = {
-  mode: "hosted" | "quickstart" | "advanced"
-  kind: "same-origin" | "absolute"
-  url: string
+  getAuthenticatedPrincipal?: (
+    snapshot: RecipeRequestTransportSnapshot
+  ) => Promise<string | number | null>
+  dispatchAuthority?: RecipeDispatchAuthority
 }
 
 export const readBrowserCookie = (name: string): string | null => {
@@ -60,20 +72,9 @@ export const readBrowserCookie = (name: string): string | null => {
   return null
 }
 
-export const isUnsafeMethod = (method: string): boolean =>
-  !new Set(["GET", "HEAD", "OPTIONS", "TRACE"]).has(method.toUpperCase())
 const REQUEST_LOG_PREFIX = "[tldw:request]"
 const malformedConfigServerUrlWarnings = new Set<string>()
 const malformedAllowlistEntryWarnings = new Set<string>()
-
-const toHostedProxyPath = (path: string): string => {
-  const [pathname, search = ""] = path.split("?")
-  if (pathname.startsWith("/api/v1/")) {
-    const proxiedPath = pathname.replace(/^\/api\/v1\//, "/api/proxy/")
-    return search ? `${proxiedPath}?${search}` : proxiedPath
-  }
-  return path
-}
 
 const normalizeKnownPathQuirks = (path: PathOrUrl): PathOrUrl => {
   if (typeof path !== "string") return path
@@ -82,9 +83,12 @@ const normalizeKnownPathQuirks = (path: PathOrUrl): PathOrUrl => {
   return path.replace("/api/v1/media/?", "/api/v1/media?") as PathOrUrl
 }
 
-const isMediaApiPath = (path: string): boolean => /\/api\/v1\/media(?:\/|\?|$)/.test(path)
-const isFilesApiPath = (path: string): boolean => /\/api\/v1\/files(?:\/|\?|$)/.test(path)
-const isSlidesApiPath = (path: string): boolean => /\/api\/v1\/slides(?:\/|\?|$)/.test(path)
+const isMediaApiPath = (path: string): boolean =>
+  /\/api\/v1\/media(?:\/|\?|$)/.test(path)
+const isFilesApiPath = (path: string): boolean =>
+  /\/api\/v1\/files(?:\/|\?|$)/.test(path)
+const isSlidesApiPath = (path: string): boolean =>
+  /\/api\/v1\/slides(?:\/|\?|$)/.test(path)
 const SLIDES_REQUEST_TIMEOUT_FLOOR_MS = 120000
 const MODEL_METADATA_REQUEST_TIMEOUT_FLOOR_MS = 60000
 // LLM generation and RAG endpoints routinely run far longer than the generic
@@ -92,29 +96,6 @@ const MODEL_METADATA_REQUEST_TIMEOUT_FLOOR_MS = 60000
 // mid-response and surfaces as a spurious "Network error". Default these paths
 // to a generation-appropriate timeout instead (still overridable via config).
 const GENERATION_REQUEST_TIMEOUT_DEFAULT_MS = 120000
-
-const getCurrentBrowserSurface = (): BrowserSurface => {
-  if (typeof window === "undefined") {
-    return "extension"
-  }
-
-  try {
-    const protocol = String(window.location?.protocol || "").trim().toLowerCase()
-    if (protocol === "chrome-extension:" || protocol === "moz-extension:") {
-      return "extension"
-    }
-    if (protocol === "http:" || protocol === "https:") {
-      return "webui-page"
-    }
-  } catch {
-    // Fall through to the browser-app default.
-  }
-
-  return "browser-app"
-}
-
-const joinOriginAndPath = (origin: string, path: string): string =>
-  `${origin.replace(/\/$/, "")}${path.startsWith("/") ? "" : "/"}${path}`
 
 export const deriveRequestTimeout = (
   cfg: TldwConfigLike,
@@ -224,68 +205,46 @@ const isAbsoluteUrlAllowlisted = (
 ): boolean =>
   guardIsAbsoluteUrlAllowlisted(absoluteUrl, cfg, requestCoreAllowlistWarnHooks)
 
-export const resolveBrowserRequestTransport = ({
-  config,
-  path,
-  pageOrigin
-}: {
-  config: TldwConfigLike
-  path: string
-  pageOrigin?: string | null
-}): BrowserRequestTransport => {
-  if (isHostedTldwDeployment()) {
-    return {
-      mode: "hosted",
-      kind: "same-origin",
-      url: toHostedProxyPath(path)
-    }
-  }
-
-  const configuredServerUrl = String(
-    (config as Record<string, unknown> | null)?.serverUrl || ""
-  ).trim()
-  const surface = getCurrentBrowserSurface()
-  if (surface === "webui-page") {
-    try {
-      const resolved = resolveBrowserTransport({
-        surface,
-        deploymentMode: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
-        pageOrigin:
-          pageOrigin ??
-          (typeof window === "undefined"
-            ? null
-            : String(window.location?.origin || "").trim()),
-        apiOrigin: configuredServerUrl || process.env.NEXT_PUBLIC_API_URL
-      })
-      const browserHttpBase = buildBrowserHttpBase(resolved)
-      if (!browserHttpBase) {
-        return {
-          mode: "quickstart",
-          kind: "same-origin",
-          url: path
-        }
-      }
-
-      return {
-        mode: "advanced",
-        kind: "absolute",
-        url: joinOriginAndPath(browserHttpBase, path)
-      }
-    } catch {
-      // Fall through to explicit configured server handling below.
-    }
-  }
-
-  return {
-    mode: "advanced",
-    kind: "absolute",
-    url: joinOriginAndPath(configuredServerUrl, path)
-  }
-}
-
 export const tldwRequest = async (
   payload: TldwRequestPayload,
   runtime: TldwRequestRuntime
+): Promise<ApiSendResponse> => {
+  if (!payload.recipePersistence) {
+    return performTldwRequest(payload, runtime)
+  }
+  const dispatch: {
+    value: RecipePersistenceDispatch
+    receipt?: RecipeDeliveryReceipt
+  } = {
+    value: {
+      state: "not_dispatched",
+      actualOwnerId: null
+    }
+  }
+  try {
+    return {
+      ...(await performTldwRequest(payload, runtime, dispatch)),
+      recipePersistence: dispatch.value,
+      ...(dispatch.receipt ? { recipeDelivery: dispatch.receipt } : {})
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      error: formatErrorMessage(error, "Request failed"),
+      recipePersistence: dispatch.value,
+      ...(dispatch.receipt ? { recipeDelivery: dispatch.receipt } : {})
+    }
+  }
+}
+
+const performTldwRequest = async (
+  payload: TldwRequestPayload,
+  runtime: TldwRequestRuntime,
+  dispatch?: {
+    value: RecipePersistenceDispatch
+    receipt?: RecipeDeliveryReceipt
+  }
 ): Promise<ApiSendResponse> => {
   const {
     path,
@@ -299,8 +258,10 @@ export const tldwRequest = async (
   } = payload || {}
   const normalizedPath = normalizeKnownPathQuirks(path)
   const fetchFn = runtime.fetchFn || fetch
-  const cfg = await runtime.getConfig()
-  const isAbsolute = typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath)
+  const resolvedConfig = await runtime.getConfig()
+  const cfg = resolvedConfig ? { ...resolvedConfig } : resolvedConfig
+  const isAbsolute =
+    typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath)
   const absolutePath = isAbsolute ? String(normalizedPath) : ""
   const transport =
     !isAbsolute && typeof normalizedPath === "string"
@@ -357,7 +318,7 @@ export const tldwRequest = async (
   if (!normalizedPath) {
     return { ok: false, status: 400, error: "Request path is required" }
   }
-  const url = isAbsolute
+  let url = isAbsolute
     ? normalizedPath
     : transport?.url || String(normalizedPath)
   const shouldSkipAuth = noAuth || (isAbsolute && !sameOriginAbsoluteUrl)
@@ -367,7 +328,8 @@ export const tldwRequest = async (
   )
   const isBinaryBody = (value: any) => {
     if (!value || typeof value !== "object") return false
-    if (typeof FormData !== "undefined" && value instanceof FormData) return true
+    if (typeof FormData !== "undefined" && value instanceof FormData)
+      return true
     if (typeof Blob !== "undefined" && value instanceof Blob) return true
     if (
       typeof URLSearchParams !== "undefined" &&
@@ -381,10 +343,83 @@ export const tldwRequest = async (
     }
     return false
   }
-  if (body != null && !hasContentType && typeof body !== "string" && !isBinaryBody(body)) {
+  if (
+    body != null &&
+    !hasContentType &&
+    typeof body !== "string" &&
+    !isBinaryBody(body)
+  ) {
     h["Content-Type"] = "application/json"
   }
-  if (cookieSession) {
+  const runtimeApiKey =
+    runtime.useRuntimeAuthOverride === false
+      ? ""
+      : String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+  let recipeSnapshot: RecipeRequestSnapshotResolution | null = null
+  if (payload.recipePersistence) {
+    const snapshotInput = {
+      config: cfg,
+      path: String(normalizedPath),
+      method,
+      headers: h,
+      noAuth,
+      runtimeApiKey,
+      csrfToken: readBrowserCookie("csrf_token"),
+      pageOrigin,
+      absoluteAuthAllowed: sameOriginAbsoluteUrl,
+      cookieSessionTransport: cookieSession
+    }
+    recipeSnapshot = resolveRecipeRequestSnapshot(snapshotInput)
+    const needsAuthenticatedPrincipal =
+      recipeSnapshot.snapshot.credentials === "same-origin" ||
+      Object.keys(recipeSnapshot.snapshot.headers).some(
+        (key) => key.toLowerCase() === "authorization"
+      )
+    if (needsAuthenticatedPrincipal && runtime.getAuthenticatedPrincipal) {
+      const authenticatedPrincipal = await runtime.getAuthenticatedPrincipal(
+        recipeSnapshot.snapshot
+      )
+      recipeSnapshot = resolveRecipeRequestSnapshot({
+        ...snapshotInput,
+        authenticatedPrincipalId: authenticatedPrincipal
+      })
+    }
+    url = recipeSnapshot.snapshot.url as PathOrUrl
+    for (const key of Object.keys(h)) delete h[key]
+    Object.assign(h, recipeSnapshot.snapshot.headers)
+    if (recipeSnapshot.authenticationError) {
+      return {
+        ok: false,
+        status: recipeSnapshot.authenticationError.status,
+        error: recipeSnapshot.authenticationError.error
+      }
+    }
+
+    if (payload.recipePersistence.mode === "require") {
+      const expectedOwnerId = payload.recipePersistence.expectedOwnerId
+      const localId = payload.recipePersistence.localId
+      const validExpectedOwner =
+        typeof expectedOwnerId === "string" &&
+        /^recipe-owner:sha256:[0-9a-f]{64}$/.test(expectedOwnerId)
+      const validLocalId =
+        typeof localId === "string" &&
+        localId.length > 0 &&
+        localId === localId.trim()
+      if (
+        !validExpectedOwner ||
+        !validLocalId ||
+        !recipeSnapshot.view ||
+        recipeSnapshot.view.ownerId !== expectedOwnerId ||
+        !runtime.dispatchAuthority
+      ) {
+        return {
+          ok: false,
+          status: 412,
+          error: "Request persistence owner is unavailable or changed"
+        }
+      }
+    }
+  } else if (cookieSession) {
     for (const k of Object.keys(h)) {
       const kl = k.toLowerCase()
       if (
@@ -405,9 +440,6 @@ export const tldwRequest = async (
       if (kl === "x-api-key" || kl === "authorization") delete h[k]
     }
     if (!hostedMode) {
-      const runtimeApiKey = runtime.useRuntimeAuthOverride === false
-        ? ""
-        : String(getRuntimeSingleUserApiKeyOverride() || "").trim()
       if (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey)) {
         h["X-API-KEY"] = runtimeApiKey
       } else if (cfg?.authMode === "single-user") {
@@ -456,7 +488,11 @@ export const tldwRequest = async (
 
   const controller = new AbortController()
   let retryController: AbortController | null = null
-  const timeoutMs = deriveRequestTimeout(cfg, normalizedPath, Number(overrideTimeoutMs))
+  const timeoutMs = deriveRequestTimeout(
+    cfg,
+    normalizedPath,
+    Number(overrideTimeoutMs)
+  )
   const onAbort = () => {
     try {
       controller.abort()
@@ -484,12 +520,29 @@ export const tldwRequest = async (
           : JSON.stringify(body)
 
     // lgtm[js/request-forgery]: url is same-origin/configured-server transport or an allowlisted absolute URL checked above.
+    if (dispatch && payload.recipePersistence) {
+      const actualOwnerId = recipeSnapshot?.view?.ownerId ?? null
+      if (payload.recipePersistence.mode === "require") {
+        const receipt = await runtime.dispatchAuthority!.markDispatched(
+          payload.recipePersistence.localId,
+          actualOwnerId!
+        )
+        if (receipt) dispatch.receipt = receipt
+      }
+      dispatch.value = { state: "dispatched", actualOwnerId }
+    }
     let resp = await fetchFn(url, {
       method,
       headers: h,
       body: resolvedBody,
       signal: controller.signal,
-      ...(cookieSession ? { credentials: "same-origin" as const } : {})
+      ...(recipeSnapshot
+        ? recipeSnapshot.snapshot.credentials
+          ? { credentials: recipeSnapshot.snapshot.credentials }
+          : {}
+        : cookieSession
+          ? { credentials: "same-origin" as const }
+          : {})
     })
     // Headers have arrived; fetch() resolves before the body is read. Re-arm the
     // timeout so the body read below is bounded too — otherwise a server that
@@ -524,17 +577,74 @@ export const tldwRequest = async (
         )
       }
       if (abortSignal?.aborted) {
-        const abortError = new Error("Request was aborted during token refresh.")
+        const abortError = new Error(
+          "Request was aborted during token refresh."
+        )
         abortError.name = "AbortError"
         throw abortError
       }
       const updated = await runtime.getConfig()
-      const retryHeaders = { ...h }
-      for (const k of Object.keys(retryHeaders)) {
-        const kl = k.toLowerCase()
-        if (kl === "authorization" || kl === "x-api-key") delete retryHeaders[k]
+      let retryHeaders: Record<string, string>
+      let retryCredentials: RequestCredentials | undefined
+      if (recipeSnapshot) {
+        const updatedConfig = updated ? { ...updated } : updated
+        const updatedSnapshotInput = {
+          config: updatedConfig,
+          path: String(normalizedPath),
+          method,
+          headers: h,
+          noAuth,
+          runtimeApiKey:
+            runtime.useRuntimeAuthOverride === false
+              ? ""
+              : String(getRuntimeSingleUserApiKeyOverride() || "").trim(),
+          csrfToken: readBrowserCookie("csrf_token"),
+          pageOrigin,
+          absoluteAuthAllowed: sameOriginAbsoluteUrl,
+          cookieSessionTransport: cookieSession
+        }
+        let updatedSnapshot = resolveRecipeRequestSnapshot(updatedSnapshotInput)
+        const needsAuthenticatedPrincipal =
+          updatedSnapshot.snapshot.credentials === "same-origin" ||
+          Object.keys(updatedSnapshot.snapshot.headers).some(
+            (key) => key.toLowerCase() === "authorization"
+          )
+        if (needsAuthenticatedPrincipal && runtime.getAuthenticatedPrincipal) {
+          const authenticatedPrincipal =
+            await runtime.getAuthenticatedPrincipal(updatedSnapshot.snapshot)
+          updatedSnapshot = resolveRecipeRequestSnapshot({
+            ...updatedSnapshotInput,
+            authenticatedPrincipalId: authenticatedPrincipal
+          })
+        }
+        if (
+          updatedSnapshot.authenticationError ||
+          !recipeSnapshot.view?.ownerId ||
+          !updatedSnapshot.view?.ownerId ||
+          updatedSnapshot.snapshot.url !== recipeSnapshot.snapshot.url ||
+          updatedSnapshot.snapshot.effectiveBase !==
+            recipeSnapshot.snapshot.effectiveBase ||
+          updatedSnapshot.view?.ownerId !== recipeSnapshot.view?.ownerId
+        ) {
+          return {
+            ok: false,
+            status: 412,
+            error: "Request persistence owner changed before retry"
+          }
+        }
+        retryHeaders = { ...updatedSnapshot.snapshot.headers }
+        retryCredentials = updatedSnapshot.snapshot.credentials
+      } else {
+        retryHeaders = { ...h }
+        for (const k of Object.keys(retryHeaders)) {
+          const kl = k.toLowerCase()
+          if (kl === "authorization" || kl === "x-api-key")
+            delete retryHeaders[k]
+        }
+        if (updated?.accessToken) {
+          retryHeaders["Authorization"] = `Bearer ${updated.accessToken}`
+        }
       }
-      if (updated?.accessToken) retryHeaders["Authorization"] = `Bearer ${updated.accessToken}`
       retryController = new AbortController()
       const activeRetryController = retryController
       if (abortSignal?.aborted) {
@@ -542,7 +652,10 @@ export const tldwRequest = async (
         abortError.name = "AbortError"
         throw abortError
       }
-      retryTimeoutId = setTimeout(() => activeRetryController.abort(), timeoutMs)
+      retryTimeoutId = setTimeout(
+        () => activeRetryController.abort(),
+        timeoutMs
+      )
       // lgtm[js/request-forgery]: retry reuses the same validated URL from the initial request.
       resp = await fetchFn(url, {
         method,
@@ -550,11 +663,15 @@ export const tldwRequest = async (
         // Reuse the binary-aware serialization from the first attempt. A plain
         // JSON.stringify here corrupts FormData/Blob uploads into "{}".
         body: resolvedBody,
-        signal: activeRetryController.signal
+        signal: activeRetryController.signal,
+        ...(retryCredentials ? { credentials: retryCredentials } : {})
       })
       // Re-arm so the retry body read is bounded as well.
       if (retryTimeoutId) clearTimeout(retryTimeoutId)
-      retryTimeoutId = setTimeout(() => activeRetryController.abort(), timeoutMs)
+      retryTimeoutId = setTimeout(
+        () => activeRetryController.abort(),
+        timeoutMs
+      )
       if (!refreshSucceeded && resp.status === 401) {
         return {
           ok: false,
@@ -581,7 +698,9 @@ export const tldwRequest = async (
       return await resp.text().catch(() => null)
     }
     if (responseType === "arrayBuffer") {
-      data = resp.ok ? await resp.arrayBuffer().catch(() => null) : await readDefaultBody()
+      data = resp.ok
+        ? await resp.arrayBuffer().catch(() => null)
+        : await readDefaultBody()
     } else if (responseType === "json") {
       data = await resp.json().catch(() => null)
     } else if (responseType === "text") {
@@ -625,7 +744,13 @@ export const tldwRequest = async (
       }
     }
 
-    return { ok: true, status: resp.status, data, headers: headersOut, retryAfterMs }
+    return {
+      ok: true,
+      status: resp.status,
+      data,
+      headers: headersOut,
+      retryAfterMs
+    }
   } catch (e: any) {
     if (isRequestConfigScopeChangedError(e)) throw e
     return {

@@ -1,4 +1,115 @@
 {
+  "managePrompts_structured_blockEditor_nameLabel": {
+    "message": "Block name"
+  },
+  "managePrompts_structured_blockEditor_roleLabel": {
+    "message": "Block role"
+  },
+  "managePrompts_structured_blockEditor_sectionKey": {
+    "message": "Section key"
+  },
+  "managePrompts_structured_blockEditor_contentLabel": {
+    "message": "Block content"
+  },
+  "managePrompts_structured_blockEditor_enabledLabel": {
+    "message": "Block enabled"
+  },
+  "managePrompts_structured_blockEditor_templateLabel": {
+    "message": "Block uses variables"
+  },
+  "managePrompts_structured_blockList_edit": {
+    "message": "Edit {{name}} block"
+  },
+  "managePrompts_structured_blockList_moveUp": {
+    "message": "Move {{name}} up"
+  },
+  "managePrompts_structured_blockList_moveDown": {
+    "message": "Move {{name}} down"
+  },
+  "managePrompts_structured_blockList_remove": {
+    "message": "Remove {{name}}"
+  },
+  "managePrompts_structured_blockList_number": {
+    "message": "Block {{index}}"
+  },
+  "managePrompts_structured_blockList_disabled": {
+    "message": " • disabled"
+  },
+  "managePrompts_structured_variables_number": {
+    "message": "Variable {{index}}"
+  },
+  "managePrompts_structured_variables_unnamed": {
+    "message": "variable {{index}}"
+  },
+  "managePrompts_structured_variables_remove": {
+    "message": "Remove {{name}}"
+  },
+  "managePrompts_structured_variables_nameLabel": {
+    "message": "Variable name"
+  },
+  "managePrompts_structured_variables_inputTypeLabel": {
+    "message": "Variable input type"
+  },
+  "managePrompts_structured_variables_label": {
+    "message": "Label"
+  },
+  "managePrompts_structured_variables_labelLabel": {
+    "message": "Variable label"
+  },
+  "managePrompts_structured_variables_maxLength": {
+    "message": "Maximum length"
+  },
+  "managePrompts_structured_variables_maxLengthLabel": {
+    "message": "Variable maximum length"
+  },
+  "managePrompts_structured_variables_description": {
+    "message": "Description"
+  },
+  "managePrompts_structured_variables_descriptionLabel": {
+    "message": "Variable description"
+  },
+  "managePrompts_structured_variables_options": {
+    "message": "Options, one per line"
+  },
+  "managePrompts_structured_variables_optionsLabel": {
+    "message": "Variable options"
+  },
+  "managePrompts_structured_variables_savedDefaultToggleLabel": {
+    "message": "Use a saved starter default for {{name}}"
+  },
+  "managePrompts_structured_variables_saveDefault": {
+    "message": "Save a starter default"
+  },
+  "managePrompts_structured_variables_savedDefault": {
+    "message": "Starter default (saved)"
+  },
+  "managePrompts_structured_variables_savedDefaultLabel": {
+    "message": "Starter default for {{name}} (saved)"
+  },
+  "managePrompts_structured_variables_requiredLabel": {
+    "message": "Variable required"
+  },
+  "managePrompts_structured_variables_runtimeDescription": {
+    "message": "Current inputs used only for this preview. They are not saved."
+  },
+  "managePrompts_structured_variables_previewDescription": {
+    "message": "Sample values passed to the backend preview endpoint."
+  },
+  "managePrompts_structured_variables_currentValue": {
+    "message": "{{name}} current value (not saved)"
+  },
+  "managePrompts_structured_variables_currentValueLabel": {
+    "message": "Current value for {{name}} (not saved)"
+  },
+  "managePrompts_recipe_starterTitle": {
+    "message": "Structured recipe"
+  },
+  "managePrompts_recipe_starterDescription": {
+    "message": "Start with ordered blocks, labels, variables, and editable default instructions."
+  },
+  "managePrompts_recipe_starterAction": {
+    "message": "Build a recipe"
+  },
   "servicePrompts_definitions_writingFeedbackMood_label": {
     "message": "Writing feedback: Mood"
   },
@@ -6409,5 +6520,35 @@
   },
   "servicePrompts_workflows_writingAgent": {
     "message": "Writing Playground AI Agent"
+  },
+  "managePrompts_recipe_badge": {
+    "message": "Recipe"
+  },
+  "managePrompts_recipe_targetSystem": {
+    "message": "System"
+  },
+  "managePrompts_recipe_targetUser": {
+    "message": "User"
+  },
+  "managePrompts_recipe_filters_all": {
+    "message": "Recipes"
+  },
+  "managePrompts_recipe_filters_system": {
+    "message": "System recipes"
+  },
+  "managePrompts_recipe_filters_user": {
+    "message": "User recipes"
+  },
+  "managePrompts_recipe_openEditor": {
+    "message": "Open recipe editor"
+  },
+  "managePrompts_recipe_cardOpenLabel": {
+    "message": "Open recipe editor for {{name}}"
+  },
+  "managePrompts_recipe_unavailableTitle": {
+    "message": "Recipe unavailable"
+  },
+  "managePrompts_recipe_unavailableDescription": {
+    "message": "This saved recipe cannot be opened safely. Its structured definition is invalid or uses an unsupported version."
   }
 }

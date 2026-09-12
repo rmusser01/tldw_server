@@ -4,13 +4,17 @@ Property-based tests for Prompt Management using Hypothesis.
 Tests invariants and properties that should always hold true.
 """
 
-import pytest
-from hypothesis import given, strategies as st, assume, settings, HealthCheck
-from hypothesis.stateful import RuleBasedStateMachine, rule, precondition, invariant, Bundle
 import json
 import re
+from copy import deepcopy
 from datetime import datetime
 
+import pytest
+from hypothesis import HealthCheck, assume, example, given, settings
+from hypothesis import strategies as st
+from hypothesis.stateful import Bundle, RuleBasedStateMachine, invariant, precondition, rule
+
+from tldw_Server_API.app.core.Prompt_Management import structured_prompts
 from tldw_Server_API.app.core.Prompt_Management.Prompts_Interop import PromptsInteropService
 
 # Apply a default Hypothesis profile for this module to suppress fixture health checks
@@ -650,3 +654,118 @@ class TestCollectionProperties:
         collection = service.get_collection(collection_id)
         final_ids = {p['id'] for p in collection['prompts']}
         assert final_ids == expected
+
+
+def _recipe_definition(blocks: list, variables: list | None = None) -> dict:
+    """Build a free-form recipe for schema properties, without render dependencies."""
+    return {
+        "schema_version": 2,
+        "format": "structured",
+        "definition_kind": "single_text_recipe",
+        "assembly_config": {
+            "assembly_mode": "single_text",
+            "target_role": "user",
+            "render_format": "freeform",
+            "block_separator": "\n\n",
+        },
+        "blocks": blocks,
+        "variables": variables or [],
+    }
+
+
+@pytest.mark.property
+@given(
+    orders=st.lists(st.integers(min_value=-9007199254740991, max_value=9007199254740991), max_size=20),
+    label=st.text(min_size=1, max_size=200),
+    content=st.text(max_size=1000),
+    separator=st.text(max_size=20),
+)
+def test_recipe_validation_preserves_order_unicode_and_separator(
+    orders: list[int], label: str, content: str, separator: str,
+) -> None:
+    """Validation must not sort, trim, normalize Unicode, or alter separators."""
+    payload = _recipe_definition(
+        [
+            {"id": f"b{i}", "name": label, "role": "user", "order": order, "content": content}
+            for i, order in enumerate(orders)
+        ]
+    )
+    payload["assembly_config"]["block_separator"] = separator
+    original = deepcopy(payload)
+    assert structured_prompts.validate_prompt_definition(payload) == []
+    parsed = structured_prompts.parse_prompt_definition(payload)
+    assert parsed.model_dump(exclude_unset=True) == original
+    assert payload == original
+
+
+@pytest.mark.property
+@given(
+    name=st.text(alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_", min_size=1, max_size=128)
+)
+def test_recipe_duplicate_variable_names_and_grammar(name: str) -> None:
+    """Every resolvable variable name is accepted once and rejected when duplicated."""
+    block = {
+        "id": "block",
+        "name": "Label",
+        "role": "user",
+        "order": 0,
+        "content": "{{" + name + "}}",
+        "is_template": True,
+    }
+    payload = _recipe_definition([block], [{"name": name}])
+    assert structured_prompts.validate_prompt_definition(payload) == []
+    payload["variables"].append({"name": name})
+    issues = structured_prompts.validate_prompt_definition(payload)
+    assert issues[0].code == "duplicate_variable_name"
+
+
+@pytest.mark.property
+@given(block_id=st.text(min_size=1, max_size=128))
+@example(block_id=" ")
+@example(block_id="\t")
+@example(block_id="\u2003")
+def test_recipe_block_identity_rejects_blank_and_duplicate_ids(block_id: str) -> None:
+    """Block IDs have their own Unicode domain; every accepted ID participates in duplicate detection."""
+    block = {"id": block_id, "name": "First", "role": "user", "order": 0, "content": "First content"}
+    payload = _recipe_definition([block, {**block, "name": "Second", "order": 1, "content": "Second content"}])
+    original = deepcopy(payload)
+    issues = structured_prompts.validate_prompt_definition(payload)
+    expected = (
+        [("duplicate_block_id", "blocks[1].id")]
+        if block_id.strip()
+        else [("invalid_block_id", "blocks[0].id"), ("invalid_block_id", "blocks[1].id")]
+    )
+    assert [(issue.code, issue.path) for issue in issues] == expected
+    assert payload == original
+
+
+@pytest.mark.property
+@given(version=st.integers(min_value=3))
+def test_recipe_future_schema_is_rejected_without_mutation(version: int) -> None:
+    """Future versions must never be interpreted as either supported version."""
+    payload = _recipe_definition([])
+    payload["schema_version"] = version
+    original = deepcopy(payload)
+    issues = structured_prompts.validate_prompt_definition(payload)
+    assert [(issue.code, issue.path) for issue in issues] == [("unsupported_schema_version", "schema_version")]
+    assert payload == original
+
+
+@pytest.mark.property
+@given(order=st.integers())
+@example(order=-9007199254740992)
+@example(order=9007199254740992)
+@example(order=-9007199254740991)
+@example(order=9007199254740991)
+def test_recipe_orders_have_lossless_javascript_integer_representation(order: int) -> None:
+    """Every accepted v2 order round-trips through JavaScript's number domain."""
+    payload = _recipe_definition([{"id": "a", "name": "A", "role": "user", "order": order, "content": ""}])
+    original = deepcopy(payload)
+    issues = structured_prompts.validate_prompt_definition(payload)
+    if abs(order) <= 9007199254740991:
+        assert issues == []
+        assert structured_prompts.parse_prompt_definition(payload).blocks[0].order == order
+    else:
+        code = "less_than_equal" if order > 0 else "greater_than_equal"
+        assert [(issue.code, issue.path) for issue in issues] == [(code, "blocks[0].order")]
+    assert payload == original

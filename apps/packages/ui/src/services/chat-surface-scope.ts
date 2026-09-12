@@ -73,6 +73,27 @@ export const deriveSingleUserApiKeyCredentialScope = (
   return `key:sha256:${bytesToHex(digest)}`
 }
 
+export const derivePromptAssistAuthorizationRevision = (
+  config:
+    | Pick<TldwConfig, "authMode" | "accessToken" | "apiKey">
+    | null
+    | undefined
+): string => {
+  const authMode = normalizeAuthMode(config?.authMode)
+  const kind = authMode === "single-user" ? "key" : "token"
+  const credential = String(
+    kind === "key" ? config?.apiKey || "" : config?.accessToken || ""
+  ).trim()
+  if (!credential) return `${authMode}:${kind}:none`
+
+  const digest = sha256(
+    utf8ToBytes(
+      `tldw:prompt-assist-capability-authorization:v1\0${kind}\0${credential}`
+    )
+  )
+  return `${authMode}:${kind}:sha256:${bytesToHex(digest)}`
+}
+
 export const buildChatSurfaceScopeKey = (
   input: ChatSurfaceScopeInput
 ): string => {

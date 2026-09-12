@@ -1,15 +1,50 @@
-import React from "react"
+import * as serverOnline from "@/hooks/useServerOnline"
+import {
+  clearRecipePersistenceScoped,
+  markRecipePersistenceScoped
+} from "@/services/recipe-persistence-uncertainty"
+import * as recipeAuthority from "@/services/recipe-persistence-uncertainty"
+import {
+  clearRuntimeAuthOverride,
+  setRuntimeSingleUserApiKeyOverride
+} from "@/services/tldw/runtime-auth-override"
+import { OPEN_PROMPT_SELECT_EVENT } from "@/utils/prompt-select-events"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { OPEN_PROMPT_SELECT_EVENT } from "@/utils/prompt-select-events"
+import React from "react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+import { CLEAR_TASK_RECIPE } from "../PromptAssist/recipes/built-in-recipes"
+import { PromptSelect } from "../PromptSelect"
+
+const ownerA = "recipe-owner:sha256:" + "a".repeat(64)
+const ownerB = "recipe-owner:sha256:" + "b".repeat(64)
+const revisionA = "recipe-authorization:sha256:" + "a".repeat(64)
 
 const mocks = vi.hoisted(() => ({
+  realCapabilities: false,
+  runtimeId: undefined as string | undefined,
+  sendMessage: vi.fn(),
+  updatePrompt: vi.fn(),
+  markPromptSyncError: vi.fn(),
+  autoSyncPrompt: vi.fn(),
+  shouldAutoSyncWorkspacePrompts: vi.fn(),
   getAllPrompts: vi.fn(async () => []),
   getPromptById: vi.fn(async () => undefined),
   improvePrompt: vi.fn(),
   fetchPromptCapabilities: vi.fn()
+}))
+
+vi.mock("wxt/browser", () => ({
+  browser: {
+    runtime: {
+      get id() {
+        return mocks.runtimeId
+      },
+      sendMessage: (...args: unknown[]) => mocks.sendMessage(...args)
+    }
+  }
 }))
 
 const registryLabels = vi.hoisted(() => ({
@@ -22,15 +57,20 @@ const commonLoadingResource = vi.hoisted(() => ({
   content: "Loading content from common"
 }))
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, fallback?: string) => {
-      if (key === "common:loading") return commonLoadingResource
-      if (key === "common:loading.title") return commonLoadingResource.title
-      return fallback || key
-    }
-  })
-}))
+vi.mock("react-i18next", async () => {
+  const { createInstance } = await import("i18next")
+  const i18n = createInstance()
+  await i18n.init({ lng: "en", resources: {}, interpolation: { escapeValue: false } })
+  return {
+    useTranslation: () => ({
+      t: (...args: Parameters<typeof i18n.t>) => {
+        if (args[0] === "common:loading") return commonLoadingResource
+        if (args[0] === "common:loading.title") return commonLoadingResource.title
+        return i18n.t(...args)
+      }
+    })
+  }
+})
 
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (_key: string, defaultValue: unknown) =>
@@ -38,6 +78,9 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("@/db/dexie/helpers", () => ({
+  updatePrompt: (...args: unknown[]) => mocks.updatePrompt(...args),
+  markPromptSyncError: (...args: unknown[]) =>
+    mocks.markPromptSyncError(...args),
   getAllPrompts: mocks.getAllPrompts,
   getPromptById: mocks.getPromptById
 }))
@@ -51,11 +94,24 @@ vi.mock("@/services/prompt-improvement", async (importActual) => {
   }
 })
 
+vi.mock("@/services/prompt-sync", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/prompt-sync")>()),
+  autoSyncPrompt: (...args: unknown[]) => mocks.autoSyncPrompt(...args),
+  shouldAutoSyncWorkspacePrompts: () => mocks.shouldAutoSyncWorkspacePrompts()
+}))
+
 vi.mock("@/services/prompts-api", async (importActual) => {
   const actual = await importActual<typeof import("@/services/prompts-api")>()
   return {
     ...actual,
-    fetchPromptCapabilities: () => mocks.fetchPromptCapabilities()
+    revalidatePromptCapabilities: () =>
+      mocks.realCapabilities
+        ? actual.revalidatePromptCapabilities()
+        : mocks.fetchPromptCapabilities(),
+    fetchPromptCapabilities: () =>
+      mocks.realCapabilities
+        ? actual.fetchPromptCapabilities()
+        : mocks.fetchPromptCapabilities()
   }
 })
 
@@ -123,8 +179,7 @@ vi.mock("antd", async () => {
           key={item.key}
           type="button"
           role="menuitem"
-          onClick={() => item.onClick?.()}
-        >
+          onClick={() => item.onClick?.()}>
           {item.label}
         </button>
       )
@@ -149,7 +204,9 @@ vi.mock("antd", async () => {
 
   const Modal = ({ open, title, children, footer }: any) =>
     open ? (
-      <div role="dialog" aria-label={typeof title === "string" ? title : undefined}>
+      <div
+        role="dialog"
+        aria-label={typeof title === "string" ? title : undefined}>
         <div>{title}</div>
         <div>{children}</div>
         <div>{footer}</div>
@@ -166,8 +223,6 @@ vi.mock("antd", async () => {
     Modal
   }
 })
-
-import { PromptSelect } from "../PromptSelect"
 
 const buildPrompt = (overrides: Record<string, unknown> = {}) => ({
   id: "prompt-1",
@@ -205,7 +260,9 @@ const improvementResponse = (
   meta_prompt_version: "prompt-improvement-v1"
 })
 
-const renderPromptSelect = (overrides: Partial<React.ComponentProps<typeof PromptSelect>> = {}) => {
+const renderPromptSelect = (
+  overrides: Partial<React.ComponentProps<typeof PromptSelect>> = {}
+) => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -243,9 +300,7 @@ const openEditor = async (
   user: ReturnType<typeof userEvent.setup>,
   expectedValue = "Template body"
 ) => {
-  await user.click(
-    await screen.findByRole("button", { name: "selectAPrompt" })
-  )
+  await user.click(await screen.findByRole("button", { name: "selectAPrompt" }))
   await user.click(
     await screen.findByRole("menuitem", { name: /edit system prompt/i })
   )
@@ -261,8 +316,26 @@ const applyImprovementNow = async (
 }
 
 describe("PromptSelect system prompt modal", () => {
+  afterEach(async () => {
+    mocks.runtimeId = undefined
+    await clearRecipePersistenceScoped("scoped-recipe", ownerA)
+    clearRuntimeAuthOverride()
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.realCapabilities = false
+    mocks.runtimeId = undefined
+    mocks.sendMessage.mockReset()
+    mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(false)
+    vi.spyOn(
+      recipeAuthority,
+      "resolveRecipePersistenceOwnerView"
+    ).mockResolvedValue({
+      ownerId: ownerA,
+      authorizationRevision: revisionA
+    })
     mocks.getAllPrompts.mockResolvedValue([buildPrompt()])
     mocks.getPromptById.mockResolvedValue(buildPrompt())
     mocks.fetchPromptCapabilities.mockResolvedValue({
@@ -278,6 +351,799 @@ describe("PromptSelect system prompt modal", () => {
     )
   })
 
+  it("keeps local recipe work usable when the real extension owner facade rejects", async () => {
+    vi.spyOn(serverOnline, "useServerOnline").mockReturnValue(true)
+    vi.mocked(recipeAuthority.resolveRecipePersistenceOwnerView).mockRestore()
+    mocks.runtimeId = "adapter-extension"
+    const pending = createDeferred<void>()
+    mocks.sendMessage.mockImplementation(async () => {
+      await pending.promise
+      throw new Error("extension authority disconnected")
+    })
+    const user = userEvent.setup()
+    const view = renderPromptSelect({ promptAssistBackendKey: null })
+    await openEditor(user)
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await user.type(
+      await screen.findByLabelText("Current value for Task (not saved)"),
+      "Keep local work"
+    )
+    const preview = (
+      screen.getByLabelText("Compiled prompt preview") as HTMLTextAreaElement
+    ).value
+    expect(preview).toContain("Keep local work")
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Apply to system prompt" })
+    ).toBeEnabled()
+    await act(async () => {
+      pending.resolve()
+      await pending.promise
+    })
+    expect(mocks.sendMessage).toHaveBeenCalledExactlyOnceWith({
+      type: "tldw:recipe-owner:resolve"
+    })
+    expect(mocks.fetchPromptCapabilities).not.toHaveBeenCalled()
+    expect(
+      view.queryClient
+        .getQueryCache()
+        .getAll()
+        .some((query) => String(query.queryKey[1]).startsWith("recipe-owner:"))
+    ).toBe(false)
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+    await user.click(
+      screen.getByRole("button", { name: "Apply to system prompt" })
+    )
+    expect(view.props.setSystemPrompt).toHaveBeenCalledWith(preview)
+  })
+
+  it.each(["same-owner reopen", "owner replacement"])(
+    "revalidates through real prompts-api/api-send for %s",
+    async (scenario) => {
+      vi.spyOn(serverOnline, "useServerOnline").mockReturnValue(true)
+      mocks.realCapabilities = true
+      mocks.runtimeId = "adapter-extension"
+      const old = createDeferred<unknown>()
+      const fresh = createDeferred<unknown>()
+      const capabilities = (authorized: boolean) => ({
+        ok: true,
+        status: 200,
+        data: {
+          prompt_improvement_v1: {
+            supported: true,
+            limits: {
+              max_request_bytes: 100000,
+              max_draft_chars: 10000,
+              max_candidate_chars: 10000,
+              max_raw_output_chars: 10000,
+              max_findings: 10,
+              max_finding_text_chars: 1000,
+              max_provider_chars: 100,
+              max_model_chars: 100,
+              max_meta_prompt_version_chars: 100,
+              max_warning_chars: 1000,
+              max_warnings: 10,
+              max_protected_tokens: 100,
+              max_protected_token_kind_chars: 100,
+              max_protected_token_chars: 1000,
+              max_protected_token_occurrences: 100,
+              max_protected_token_total_chars: 10000
+            }
+          },
+          single_text_recipe_v2: { supported: true },
+          prompt_persistence: {
+            create_authorized: authorized,
+            update_authorized: authorized
+          }
+        }
+      })
+      mocks.sendMessage
+        .mockReturnValueOnce(old.promise)
+        .mockReturnValueOnce(fresh.promise)
+      const user = userEvent.setup()
+      const view = renderPromptSelect({ promptAssistBackendKey: null })
+      await openEditor(user)
+      await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+      await user.click(
+        screen.getByRole("button", { name: /Build from recipe/ })
+      )
+      await waitFor(() => expect(mocks.sendMessage).toHaveBeenCalledTimes(1))
+      await user.click(await screen.findByRole("button", { name: "Back" }))
+      const nextOwner = scenario === "owner replacement" ? ownerB : ownerA
+      vi.mocked(
+        recipeAuthority.resolveRecipePersistenceOwnerView
+      ).mockResolvedValue({
+        ownerId: nextOwner,
+        authorizationRevision: revisionA
+      })
+      await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+      await user.click(
+        screen.getByRole("button", { name: /Build from recipe/ })
+      )
+      try {
+        await waitFor(() => expect(mocks.sendMessage).toHaveBeenCalledTimes(2))
+        expect(
+          mocks.sendMessage.mock.calls.map(([message]) => message)
+        ).toEqual([
+          {
+            type: "tldw:request",
+            payload: { path: "/api/v1/prompts/capabilities", method: "GET" }
+          },
+          {
+            type: "tldw:request",
+            payload: { path: "/api/v1/prompts/capabilities", method: "GET" }
+          }
+        ])
+        await act(async () => {
+          old.resolve(capabilities(true))
+          await old.promise
+        })
+        expect(
+          screen.getByRole("button", { name: "Save as new recipe" })
+        ).toBeDisabled()
+        await act(async () => {
+          fresh.resolve(capabilities(false))
+          await fresh.promise
+        })
+        await waitFor(() => expect(view.queryClient.isFetching()).toBe(0))
+        expect(
+          view.queryClient.getQueryData([
+            "promptCapabilities",
+            nextOwner,
+            revisionA
+          ])
+        ).toMatchObject({
+          prompt_persistence: {
+            create_authorized: false,
+            update_authorized: false
+          }
+        })
+        expect(
+          screen.getByRole("button", { name: "Save as new recipe" })
+        ).toBeDisabled()
+      } finally {
+        await act(async () => {
+          old.resolve(capabilities(true))
+          fresh.resolve(capabilities(false))
+          await Promise.all([old.promise, fresh.promise])
+        })
+      }
+    }
+  )
+
+  it.each([
+    ["advanced normalized base", true],
+    ["runtime-key override", false],
+    ["manual/cookie source", false],
+    ["same-sub bearer rotation", true],
+    ["principal replacement", false],
+    ["missing cookie principal", false]
+  ])("reopens with fresh authority for %s", async (scenario, sameOwner) => {
+    vi.spyOn(serverOnline, "useServerOnline").mockReturnValue(true)
+    let config: Parameters<
+      typeof recipeAuthority.resolveRecipeOwnerWithConfig
+    >[0] extends () => Promise<infer C>
+      ? C
+      : never = {
+      serverUrl: "http://localhost:3000",
+      authMode: "single-user",
+      authSource: "manual",
+      apiKey: "manual-adapter-key"
+    }
+    if (
+      scenario === "same-sub bearer rotation" ||
+      scenario === "principal replacement"
+    ) {
+      config = { ...config, authMode: "multi-user", accessToken: "bearer-one" }
+    }
+    let principal = "authoritative-user"
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(JSON.stringify({ id: principal }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+    )
+    vi.mocked(
+      recipeAuthority.resolveRecipePersistenceOwnerView
+    ).mockImplementation(() =>
+      recipeAuthority.resolveRecipeOwnerWithConfig(async () => config)
+    )
+    mocks.fetchPromptCapabilities.mockResolvedValue({
+      availability: "available",
+      prompt_improvement_v1: { supported: true, limits: null },
+      single_text_recipe_v2: { supported: true },
+      prompt_persistence: { create_authorized: true, update_authorized: true }
+    })
+    const user = userEvent.setup()
+    const view = renderPromptSelect({ promptAssistBackendKey: null })
+    await openEditor(user)
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    expect(
+      recipeAuthority.resolveRecipePersistenceOwnerView
+    ).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Save as new recipe" })
+      ).toBeEnabled()
+    )
+    const firstKey = view.queryClient
+      .getQueryCache()
+      .getAll()
+      .find(
+        (query) =>
+          query.queryKey[0] === "promptCapabilities" &&
+          String(query.queryKey[1]).startsWith("recipe-owner:")
+      )!.queryKey
+    expect(firstKey).toHaveLength(3)
+    expect(firstKey[2]).toMatch(/^recipe-authorization:sha256:[a-f0-9]{64}$/)
+    await user.click(screen.getByRole("button", { name: "Back" }))
+    if (scenario === "advanced normalized base")
+      config = { ...config, serverUrl: "HTTP://LOCALHOST:3000///" }
+    if (scenario === "runtime-key override")
+      setRuntimeSingleUserApiKeyOverride("runtime-adapter-key")
+    if (scenario === "same-sub bearer rotation")
+      config = { ...config, accessToken: "bearer-two" }
+    if (scenario === "principal replacement") principal = "replacement-user"
+    if (
+      scenario === "manual/cookie source" ||
+      scenario === "missing cookie principal"
+    ) {
+      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+      config = {
+        serverUrl: "http://localhost:3000",
+        authMode: "single-user",
+        authSource: "cookie-session"
+      }
+    }
+    if (scenario === "missing cookie principal")
+      vi.stubGlobal("fetch", async () => new Response("{}", { status: 200 }))
+    const pending =
+      createDeferred<
+        Awaited<
+          ReturnType<typeof recipeAuthority.resolveRecipePersistenceOwnerView>
+        >
+      >()
+    const resolved = await recipeAuthority.resolveRecipeOwnerWithConfig(
+      async () => config
+    )
+    vi.mocked(
+      recipeAuthority.resolveRecipePersistenceOwnerView
+    ).mockReturnValueOnce(pending.promise)
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    expect(
+      await screen.findByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+    expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(1)
+    if (scenario === "principal replacement") {
+      await user.type(
+        screen.getByLabelText("Current value for Task (not saved)"),
+        "Local during principal change"
+      )
+      expect(
+        (
+          screen.getByLabelText(
+            "Compiled prompt preview"
+          ) as HTMLTextAreaElement
+        ).value
+      ).toContain("Local during principal change")
+      expect(
+        screen.getByRole("button", { name: "Apply to system prompt" })
+      ).toBeEnabled()
+      expect(
+        screen.getByRole("button", { name: "Save as new recipe" })
+      ).toBeDisabled()
+    }
+    await act(async () => {
+      pending.resolve(resolved)
+      await pending.promise
+    })
+    if (scenario === "missing cookie principal") {
+      expect(
+        screen.getByRole("button", { name: "Save as new recipe" })
+      ).toBeDisabled()
+      expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(1)
+      await user.type(
+        screen.getByLabelText("Current value for Task (not saved)"),
+        "Still local"
+      )
+      expect(
+        screen.getByRole("button", { name: "Apply to system prompt" })
+      ).toBeEnabled()
+    } else {
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Save as new recipe" })
+        ).toBeEnabled()
+      )
+      expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(2)
+      expect(
+        view.queryClient.getQueryData([
+          "promptCapabilities",
+          resolved!.ownerId,
+          resolved!.authorizationRevision
+        ])
+      ).toBeDefined()
+      expect(resolved!.ownerId === firstKey[1]).toBe(sameOwner)
+      if (scenario === "same-sub bearer rotation")
+        expect(resolved!.authorizationRevision).not.toBe(firstKey[2])
+    }
+  })
+
+  it("does not revive cached recipe authorization after a failed reopen refetch", async () => {
+    vi.spyOn(serverOnline, "useServerOnline").mockReturnValue(true)
+    mocks.fetchPromptCapabilities.mockResolvedValue({
+      availability: "available",
+      prompt_improvement_v1: { supported: true, limits: null },
+      single_text_recipe_v2: { supported: true },
+      prompt_persistence: { create_authorized: true, update_authorized: true }
+    })
+    const user = userEvent.setup()
+    renderPromptSelect({ promptAssistBackendKey: null })
+    await openEditor(user)
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Save as new recipe" })
+      ).toBeEnabled()
+    )
+    await user.click(screen.getByRole("button", { name: "Back" }))
+    mocks.fetchPromptCapabilities.mockRejectedValueOnce(
+      new Error("authorization unavailable")
+    )
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await waitFor(() =>
+      expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(2)
+    )
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+  })
+
+  it("ignores an earlier open's pending authorized response after reopening", async () => {
+    vi.spyOn(serverOnline, "useServerOnline").mockReturnValue(true)
+    const old = createDeferred<unknown>()
+    const fresh = createDeferred<unknown>()
+    mocks.fetchPromptCapabilities
+      .mockReturnValueOnce(old.promise)
+      .mockReturnValueOnce(fresh.promise)
+    const user = userEvent.setup()
+    renderPromptSelect({ promptAssistBackendKey: null })
+    await openEditor(user)
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await waitFor(() =>
+      expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(1)
+    )
+    await user.click(await screen.findByRole("button", { name: "Back" }))
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await waitFor(() =>
+      expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(2)
+    )
+    await act(async () => {
+      old.resolve({
+        availability: "available",
+        prompt_improvement_v1: { supported: true, limits: null },
+        single_text_recipe_v2: { supported: true },
+        prompt_persistence: { create_authorized: true, update_authorized: true }
+      })
+      await old.promise
+    })
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+    await act(async () => {
+      fresh.resolve({
+        availability: "available",
+        prompt_improvement_v1: { supported: true, limits: null },
+        single_text_recipe_v2: { supported: true },
+        prompt_persistence: {
+          create_authorized: false,
+          update_authorized: false
+        }
+      })
+      await fresh.promise
+    })
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+  })
+
+  it("keeps the authoritative owner locked on reopen after durable marker storage fails", async () => {
+    vi.spyOn(serverOnline, "useServerOnline").mockReturnValue(true)
+    const definition = structuredClone(CLEAR_TASK_RECIPE.definition)
+
+    mocks.getAllPrompts.mockResolvedValue([
+      {
+        id: "scoped-recipe",
+        name: "Scoped recipe",
+        title: "Scoped recipe",
+        content: "Template body",
+        is_system: true,
+        createdAt: 1,
+        promptFormat: "structured",
+        promptSchemaVersion: 2,
+        syncStatus: "local",
+        structuredPromptDefinition: definition
+      }
+    ])
+    mocks.fetchPromptCapabilities.mockResolvedValue({
+      availability: "available",
+      prompt_improvement_v1: { supported: true, limits: null },
+      single_text_recipe_v2: { supported: true },
+      prompt_persistence: { create_authorized: true, update_authorized: true }
+    })
+    mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(true)
+    mocks.updatePrompt.mockResolvedValue("scoped-recipe")
+    mocks.autoSyncPrompt.mockResolvedValue({
+      success: false,
+      failureKind: "invalid_server_payload",
+      localId: "scoped-recipe",
+      recipeOwnership: {
+        localId: "scoped-recipe",
+        dispatch: { state: "dispatched", actualOwnerId: ownerA }
+      }
+    })
+    mocks.markPromptSyncError.mockRejectedValue(
+      new Error("durable storage unavailable")
+    )
+    const user = userEvent.setup()
+    renderPromptSelect({ promptAssistBackendKey: null })
+    await openEditor(user)
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await screen.findByRole("option", { name: "Scoped recipe" })
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Recipe source" }),
+      "saved:scoped-recipe"
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Update recipe" })
+      ).toBeEnabled()
+    )
+    await user.click(screen.getByRole("button", { name: "Update recipe" }))
+    await waitFor(() =>
+      expect(mocks.markPromptSyncError).toHaveBeenCalledWith("scoped-recipe")
+    )
+    expect(
+      await recipeAuthority.readRecipePersistenceUncertainty(
+        "scoped-recipe",
+        ownerA
+      )
+    ).toBe("scoped")
+    await user.click(screen.getByRole("button", { name: "Back" }))
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await screen.findByRole("option", { name: "Scoped recipe" })
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Recipe source" }),
+      "saved:scoped-recipe"
+    )
+    expect(screen.getByRole("button", { name: "Update recipe" })).toBeDisabled()
+    expect(
+      recipeAuthority.resolveRecipePersistenceOwnerView
+    ).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    [ownerA, "first-credential", false],
+    [ownerA, "refreshed-credential", false],
+    [ownerB, "first-credential", true]
+  ])(
+    "scopes system recipe ownership to %s, independently of %s",
+    async (backend, revision, enabled) => {
+      vi.spyOn(serverOnline, "useServerOnline").mockReturnValue(true)
+      await markRecipePersistenceScoped("scoped-recipe", ownerA)
+      vi.mocked(
+        recipeAuthority.resolveRecipePersistenceOwnerView
+      ).mockResolvedValue({
+        ownerId: backend,
+        authorizationRevision: revision
+      })
+      mocks.getAllPrompts.mockResolvedValue([
+        {
+          ...buildPrompt(),
+          id: "scoped-recipe",
+          name: "Scoped recipe",
+          title: "Scoped recipe",
+          promptFormat: "structured",
+          promptSchemaVersion: 2,
+          syncStatus: "local",
+          structuredPromptDefinition: structuredClone(
+            CLEAR_TASK_RECIPE.definition
+          )
+        }
+      ])
+      mocks.fetchPromptCapabilities.mockResolvedValue({
+        availability: "available",
+        prompt_improvement_v1: { supported: true, limits: null },
+        single_text_recipe_v2: { supported: true },
+        prompt_persistence: { create_authorized: true, update_authorized: true }
+      })
+      const user = userEvent.setup()
+      const view = renderPromptSelect({
+        promptAssistBackendKey: "unrelated-legacy-scope"
+      })
+      await openEditor(user)
+      await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+      await user.click(
+        screen.getByRole("button", { name: /Build from recipe/ })
+      )
+      await screen.findByRole("option", { name: "Scoped recipe" })
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Recipe source" }),
+        "saved:scoped-recipe"
+      )
+      await waitFor(() => expect(view.queryClient.isFetching()).toBe(0))
+      expect(
+        view.queryClient.getQueryData(["promptCapabilities", backend, revision])
+      ).toBeDefined()
+      const update = screen.getByRole("button", { name: "Update recipe" })
+      if (enabled) expect(update).toBeEnabled()
+      else expect(update).toBeDisabled()
+    }
+  )
+
+  it.each([undefined, "", "  Override 🧪\n\n"])(
+    "applies a local recipe and restores exact override %s and template identity",
+    async (original) => {
+      const user = userEvent.setup()
+      const { props } = renderPromptSelect({ systemPrompt: original })
+      await user.click(
+        await screen.findByRole("button", { name: "selectAPrompt" })
+      )
+      await user.click(
+        await screen.findByRole("menuitem", { name: /edit system prompt/i })
+      )
+      expect(await screen.findByLabelText("Enter system prompt")).toHaveValue(
+        original || "Template body"
+      )
+
+      await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+      const build = screen.getByRole("button", { name: /Build from recipe/ })
+      expect(build).toBeEnabled()
+      await user.click(build)
+      expect(
+        await screen.findByRole("region", { name: "Recipe builder" })
+      ).toBeInTheDocument()
+      expect(props.setSystemPrompt).not.toHaveBeenCalled()
+      expect(props.setSelectedSystemPrompt).not.toHaveBeenCalled()
+
+      await user.type(
+        screen.getByLabelText("Current value for Task (not saved)"),
+        "Preserve system identity."
+      )
+      const preview = (
+        screen.getByLabelText("Compiled prompt preview") as HTMLTextAreaElement
+      ).value
+      await user.click(
+        screen.getByRole("button", { name: "Apply to system prompt" })
+      )
+      expect(props.setSystemPrompt).toHaveBeenLastCalledWith(preview)
+      expect(props.setSelectedSystemPrompt).not.toHaveBeenCalled()
+
+      await user.click(screen.getByRole("button", { name: "Undo recipe" }))
+      expect(props.setSystemPrompt).toHaveBeenLastCalledWith(original)
+      expect(props.setSelectedSystemPrompt).toHaveBeenLastCalledWith("prompt-1")
+      expect(screen.getByLabelText("Enter system prompt")).toHaveValue(
+        original || "Template body"
+      )
+    }
+  )
+
+  describe.each([undefined, "", "  Override 🧪\n\n"])(
+    "recipe followed by improvement with original override %s",
+    (original) => {
+      it.each([
+        ["Improve now", "success"],
+        ["Improve now", "cancel"],
+        ["Improve now", "failure"],
+        ["Review changes", "success"],
+        ["Review changes", "cancel"],
+        ["Review changes", "failure"]
+      ])("consumes recipe Undo at %s start through %s", async (mode, outcome) => {
+        const user = userEvent.setup()
+        const pending = createDeferred<void>()
+        mocks.improvePrompt.mockImplementation(async (request) => {
+          await pending.promise
+          if (outcome === "failure") throw new Error("provider unavailable")
+          return improvementResponse(
+            request.operation_id,
+            request.text + "\nRefined."
+          )
+        })
+        const view = renderPromptSelect({ systemPrompt: original })
+        await user.click(
+          await screen.findByRole("button", { name: "selectAPrompt" })
+        )
+        await user.click(
+          await screen.findByRole("menuitem", { name: /edit system prompt/i })
+        )
+        expect(await screen.findByLabelText("Enter system prompt")).toHaveValue(
+          original || "Template body"
+        )
+        await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+        await user.click(
+          screen.getByRole("button", { name: /Build from recipe/ })
+        )
+        await user.type(
+          await screen.findByLabelText("Current value for Task (not saved)"),
+          "Preserve system identity."
+        )
+        const compiled = (
+          screen.getByLabelText("Compiled prompt preview") as HTMLTextAreaElement
+        ).value
+        await user.click(
+          screen.getByRole("button", { name: "Apply to system prompt" })
+        )
+        expect(view.props.setSystemPrompt).toHaveBeenLastCalledWith(compiled)
+        expect(
+          screen.getByRole("button", { name: "Undo recipe" })
+        ).toBeInTheDocument()
+        // Reflect the conversation owner's accepted override, as the real shell does.
+        view.rerender(
+          <QueryClientProvider client={view.queryClient}>
+            <PromptSelect {...view.props} systemPrompt={compiled} />
+          </QueryClientProvider>
+        )
+        await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+        await user.click(screen.getByRole("button", { name: new RegExp(mode) }))
+        expect(mocks.improvePrompt).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({ target: "system", text: compiled })
+        )
+        expect(
+          screen.queryByRole("button", { name: "Undo recipe" })
+        ).not.toBeInTheDocument()
+
+        if (outcome === "cancel") {
+          // Cancel while transport is still pending: invalidation belongs to start,
+          // not success. A late successful response must not revive either Undo.
+          await user.click(screen.getByRole("button", { name: "Cancel" }))
+          expect(
+            screen.queryByRole("button", { name: "Undo recipe" })
+          ).not.toBeInTheDocument()
+        }
+        await act(async () => {
+          pending.resolve()
+          await pending.promise
+        })
+        if (outcome === "failure") {
+          await screen.findByRole("alert")
+          await user.click(screen.getByRole("button", { name: "Cancel" }))
+        } else if (outcome === "success") {
+          if (mode === "Review changes") {
+            expect(
+              await screen.findByRole("textbox", {
+                name: "Improved prompt candidate"
+              })
+            ).toHaveValue(compiled + "\nRefined.")
+            expect(view.props.setSystemPrompt).toHaveBeenCalledTimes(1)
+            await user.click(
+              screen.getByRole("button", { name: "Apply to draft" })
+            )
+          }
+          await screen.findByRole("button", { name: "Undo improvement" })
+          expect(
+            screen.queryByRole("button", { name: "Undo recipe" })
+          ).not.toBeInTheDocument()
+          expect(screen.getByLabelText("Enter system prompt")).toHaveValue(
+            compiled + "\nRefined."
+          )
+          await user.click(
+            screen.getByRole("button", { name: "Undo improvement" })
+          )
+        }
+        expect(screen.getByLabelText("Enter system prompt")).toHaveValue(compiled)
+        expect(view.props.setSystemPrompt).toHaveBeenLastCalledWith(compiled)
+        expect(view.props.setSystemPrompt).toHaveBeenCalledTimes(
+          outcome === "success" ? 3 : 1
+        )
+        expect(
+          screen.queryByRole("button", { name: "Undo recipe" })
+        ).not.toBeInTheDocument()
+        expect(
+          screen.queryByRole("button", { name: "Undo improvement" })
+        ).not.toBeInTheDocument()
+        expect(view.props.setSelectedSystemPrompt).not.toHaveBeenCalled()
+        expect(view.props.setSelectedQuickPrompt).not.toHaveBeenCalled()
+        expect(mocks.updatePrompt).not.toHaveBeenCalled()
+        await user.click(screen.getByRole("button", { name: "Reset" }))
+        expect(
+          await screen.findByDisplayValue("Template body")
+        ).toBeInTheDocument()
+        expect(view.props.setSelectedSystemPrompt).not.toHaveBeenCalled()
+      })
+    }
+  )
+
+  it("gates cached recipe authorization while open-time revalidation is pending and revoked", async () => {
+    const user = userEvent.setup()
+    const revoked = createDeferred<{
+      availability: "available"
+      prompt_improvement_v1: { supported: true; limits: null }
+      single_text_recipe_v2: { supported: true }
+      prompt_persistence: {
+        create_authorized: false
+        update_authorized: false
+      }
+    }>()
+    mocks.fetchPromptCapabilities
+      .mockResolvedValueOnce({
+        availability: "available",
+        prompt_improvement_v1: { supported: true, limits: null },
+        single_text_recipe_v2: { supported: true },
+        prompt_persistence: {
+          create_authorized: true,
+          update_authorized: true
+        }
+      })
+      .mockReturnValueOnce(revoked.promise)
+    renderPromptSelect()
+    await waitFor(() =>
+      expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(1)
+    )
+
+    await openEditor(user)
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await waitFor(() =>
+      expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(2)
+    )
+    expect(
+      await screen.findByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+
+    await act(async () => {
+      revoked.resolve({
+        availability: "available",
+        prompt_improvement_v1: { supported: true, limits: null },
+        single_text_recipe_v2: { supported: true },
+        prompt_persistence: {
+          create_authorized: false,
+          update_authorized: false
+        }
+      })
+      await revoked.promise
+    })
+    expect(
+      screen.getByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+  })
+
+  it("returns from recipe mode without changing an empty system draft", async () => {
+    const user = userEvent.setup()
+    const { props } = renderPromptSelect({
+      selectedSystemPrompt: undefined,
+      systemPrompt: undefined,
+      selectedModel: null
+    })
+    await openEditor(user, "")
+
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    await user.type(
+      await screen.findByLabelText("Current value for Task (not saved)"),
+      "Unapplied runtime"
+    )
+    await user.click(screen.getByRole("button", { name: "Back" }))
+
+    expect(screen.getByDisplayValue("")).toBeInTheDocument()
+    expect(props.setSystemPrompt).not.toHaveBeenCalled()
+    expect(props.setSelectedSystemPrompt).not.toHaveBeenCalled()
+  })
+
   it("opens an editor modal with the effective selected template content", async () => {
     const user = userEvent.setup()
     renderPromptSelect()
@@ -285,7 +1151,9 @@ describe("PromptSelect system prompt modal", () => {
     await user.click(
       await screen.findByRole("button", { name: "selectAPrompt" })
     )
-    await user.click(await screen.findByRole("menuitem", { name: /edit system prompt/i }))
+    await user.click(
+      await screen.findByRole("menuitem", { name: /edit system prompt/i })
+    )
 
     expect(await screen.findByDisplayValue("Template body")).toBeInTheDocument()
   })
@@ -336,7 +1204,9 @@ describe("PromptSelect system prompt modal", () => {
     await user.click(
       await screen.findByRole("button", { name: "selectAPrompt" })
     )
-    await user.click(await screen.findByRole("menuitem", { name: /edit system prompt/i }))
+    await user.click(
+      await screen.findByRole("menuitem", { name: /edit system prompt/i })
+    )
 
     const textarea = await screen.findByDisplayValue("Template body")
     await user.clear(textarea)
@@ -344,7 +1214,9 @@ describe("PromptSelect system prompt modal", () => {
     await user.click(screen.getByRole("button", { name: /save/i }))
 
     await waitFor(() => {
-      expect(props.setSystemPrompt).toHaveBeenCalledWith("Conversation override")
+      expect(props.setSystemPrompt).toHaveBeenCalledWith(
+        "Conversation override"
+      )
     })
   })
 
@@ -357,7 +1229,9 @@ describe("PromptSelect system prompt modal", () => {
     await user.click(
       await screen.findByRole("button", { name: "selectAPrompt" })
     )
-    await user.click(await screen.findByRole("menuitem", { name: /edit system prompt/i }))
+    await user.click(
+      await screen.findByRole("menuitem", { name: /edit system prompt/i })
+    )
 
     const textarea = await screen.findByDisplayValue("Conversation override")
     await user.clear(textarea)
@@ -378,7 +1252,9 @@ describe("PromptSelect system prompt modal", () => {
     await user.click(
       await screen.findByRole("button", { name: "selectAPrompt" })
     )
-    await user.click(await screen.findByRole("menuitem", { name: /edit system prompt/i }))
+    await user.click(
+      await screen.findByRole("menuitem", { name: /edit system prompt/i })
+    )
 
     expect(await screen.findByText(/override active/i)).toBeInTheDocument()
   })
@@ -395,7 +1271,9 @@ describe("PromptSelect system prompt modal", () => {
     await user.click(
       await screen.findByRole("button", { name: "selectAPrompt" })
     )
-    await user.click(await screen.findByRole("menuitem", { name: /edit system prompt/i }))
+    await user.click(
+      await screen.findByRole("menuitem", { name: /edit system prompt/i })
+    )
     await user.click(screen.getByRole("button", { name: /reset/i }))
 
     await waitFor(() => {
@@ -411,7 +1289,9 @@ describe("PromptSelect system prompt modal", () => {
     await user.click(
       await screen.findByRole("button", { name: "selectAPrompt" })
     )
-    await user.click(await screen.findByRole("menuitem", { name: /edit system prompt/i }))
+    await user.click(
+      await screen.findByRole("menuitem", { name: /edit system prompt/i })
+    )
 
     expect(
       await screen.findByText("Loading title from common")
@@ -673,7 +1553,9 @@ describe("PromptSelect system prompt modal", () => {
       })
     )
 
-    await user.click(await screen.findByRole("menuitem", { name: /Prompt One/i }))
+    await user.click(
+      await screen.findByRole("menuitem", { name: /Prompt One/i })
+    )
 
     await waitFor(() => {
       expect(props.setSelectedSystemPrompt).toHaveBeenCalledWith("prompt-1")
@@ -770,7 +1652,9 @@ describe("PromptSelect system prompt modal", () => {
 
     expect(props.setSystemPrompt).toHaveBeenCalledWith("")
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "selectAPrompt" })).toHaveFocus()
+      expect(
+        screen.getByRole("button", { name: "selectAPrompt" })
+      ).toHaveFocus()
     })
   })
 
@@ -1109,6 +1993,9 @@ describe("PromptSelect system prompt modal", () => {
 
   it("fails closed without an authoritative backend identity", async () => {
     const user = userEvent.setup()
+    vi.mocked(
+      recipeAuthority.resolveRecipePersistenceOwnerView
+    ).mockResolvedValue(null)
     renderPromptSelect({ promptAssistBackendKey: null })
 
     await openEditor(user)
@@ -1116,9 +2003,15 @@ describe("PromptSelect system prompt modal", () => {
 
     expect(screen.getByRole("button", { name: /Improve now/ })).toBeDisabled()
     expect(mocks.fetchPromptCapabilities).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: /Build from recipe/ }))
+    expect(
+      await screen.findByRole("button", { name: "Save as new recipe" })
+    ).toBeDisabled()
+    expect(mocks.fetchPromptCapabilities).not.toHaveBeenCalled()
   })
 
-  it("does not reuse supported capabilities after the backend identity changes", async () => {
+  it("does not reuse supported capabilities for the same user after credential claims change", async () => {
     const user = userEvent.setup()
     const backendB = createDeferred<{
       availability: "available"
@@ -1132,7 +2025,11 @@ describe("PromptSelect system prompt modal", () => {
         single_text_recipe_v2: { supported: false }
       })
       .mockReturnValueOnce(backendB.promise)
-    const rendered = renderPromptSelect()
+    const firstProps = {
+      promptAssistBackendKey: "stable-backend",
+      promptAssistAuthorizationRevision: "authorization-one"
+    }
+    const rendered = renderPromptSelect(firstProps)
 
     await openEditor(user)
     await user.click(screen.getByRole("button", { name: "Improve prompt" }))
@@ -1142,7 +2039,11 @@ describe("PromptSelect system prompt modal", () => {
 
     rendered.rerender(
       <QueryClientProvider client={rendered.queryClient}>
-        <PromptSelect {...rendered.props} promptAssistBackendKey="backend-b" />
+        <PromptSelect
+          {...rendered.props}
+          promptAssistBackendKey="stable-backend"
+          promptAssistAuthorizationRevision="authorization-two"
+        />
       </QueryClientProvider>
     )
 
@@ -1150,7 +2051,7 @@ describe("PromptSelect system prompt modal", () => {
     expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(2)
     expect(
       rendered.queryClient.getQueryCache().find({
-        queryKey: ["promptCapabilities", "backend-b"]
+        queryKey: ["promptCapabilities", "stable-backend", "authorization-two"]
       })?.options.retry
     ).toBe(false)
   })

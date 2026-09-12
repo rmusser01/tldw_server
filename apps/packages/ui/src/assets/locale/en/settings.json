@@ -1303,6 +1303,65 @@
     "option2": "RAG",
     "questionPrompt": "Question Prompt",
     "search": "Search titles and contents",
+    "structured": {
+      "blockEditor": {
+        "nameLabel": "Block name",
+        "roleLabel": "Block role",
+        "sectionKey": "Section key",
+        "contentLabel": "Block content",
+        "enabledLabel": "Block enabled",
+        "templateLabel": "Block uses variables"
+      },
+      "blockList": {
+        "edit": "Edit {{name}} block",
+        "moveUp": "Move {{name}} up",
+        "moveDown": "Move {{name}} down",
+        "remove": "Remove {{name}}",
+        "number": "Block {{index}}",
+        "disabled": " • disabled"
+      },
+      "variables": {
+        "number": "Variable {{index}}",
+        "unnamed": "variable {{index}}",
+        "remove": "Remove {{name}}",
+        "nameLabel": "Variable name",
+        "inputTypeLabel": "Variable input type",
+        "label": "Label",
+        "labelLabel": "Variable label",
+        "maxLength": "Maximum length",
+        "maxLengthLabel": "Variable maximum length",
+        "description": "Description",
+        "descriptionLabel": "Variable description",
+        "options": "Options, one per line",
+        "optionsLabel": "Variable options",
+        "savedDefaultToggleLabel": "Use a saved starter default for {{name}}",
+        "saveDefault": "Save a starter default",
+        "savedDefault": "Starter default (saved)",
+        "savedDefaultLabel": "Starter default for {{name}} (saved)",
+        "requiredLabel": "Variable required",
+        "runtimeDescription": "Current inputs used only for this preview. They are not saved.",
+        "previewDescription": "Sample values passed to the backend preview endpoint.",
+        "currentValue": "{{name}} current value (not saved)",
+        "currentValueLabel": "Current value for {{name}} (not saved)"
+      }
+    },
+    "recipe": {
+      "starterTitle": "Structured recipe",
+      "starterDescription": "Start with ordered blocks, labels, variables, and editable default instructions.",
+      "starterAction": "Build a recipe",
+      "badge": "Recipe",
+      "targetSystem": "System",
+      "targetUser": "User",
+      "filters": {
+        "all": "Recipes",
+        "system": "System recipes",
+        "user": "User recipes"
+      },
+      "openEditor": "Open recipe editor",
+      "cardOpenLabel": "Open recipe editor for {{name}}",
+      "unavailableTitle": "Recipe unavailable",
+      "unavailableDescription": "This saved recipe cannot be opened safely. Its structured definition is invalid or uses an unsupported version."
+    },
     "filter": {
       "all": "All",
       "system": "System",

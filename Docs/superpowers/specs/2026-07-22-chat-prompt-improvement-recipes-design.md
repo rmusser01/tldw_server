@@ -2,7 +2,7 @@
 
 **Status:** Approved
 **Date:** 2026-07-22
-**Last reviewed:** 2026-08-01
+**Last reviewed:** 2026-09-10
 **Backlog:** TASK-12984
 **Surfaces:** WebUI /chat, browser extension chat and pop-out
 
@@ -89,6 +89,7 @@ The first release does not include:
 - Automatic provider retries
 - Attachment-content improvement
 - Tool use, web search, RAG, or function calling during improvement
+- Server-side idempotency or replay ledgers for recipe create/update mutations
 
 ## 5. Product decisions
 
@@ -737,6 +738,153 @@ handling. On a supported server with a transient failure, existing sync language
 such as Saved locally, sync pending remains applicable. Save as new provides a
 non-conflicting recovery path.
 
+### 10.6 Recipe persistence ownership
+
+Recipe persistence uses one recipe-specific ownership contract from the real
+chat surfaces through synchronization and HTTP dispatch. It must not reuse or
+change the global chat/session scope because that scope also owns unrelated
+drafts, sessions, and service-prompt state.
+
+The authority context derives a structured owner containing:
+
+- The normalized effective transport base used for the request: scheme, host,
+  port, and any semantically active deployment base path, excluding the endpoint
+  path, query, and fragment
+- The selected authentication mode
+- The selected authentication source after overrides are applied
+- The organization when applicable
+- A stable principal identity: the multi-user subject or a one-way fingerprint
+  of the actual single-user API key
+
+Authentication source is a closed recipe-specific enum:
+
+- manual_api_key
+- runtime_api_key
+- manual_bearer
+- cookie_session
+
+Selection precedence is runtime_api_key when a valid runtime override is
+eligible, then cookie_session when the resolved transport intentionally uses
+cookies, then manual_api_key for configured single-user credentials, then
+manual_bearer for configured multi-user bearer credentials. Any other or
+internally inconsistent combination has no trustworthy owner. A cookie session
+is trustworthy only when the authoritative session context supplies a stable
+authenticated principal; an unused local bearer token or stored user hint must
+never stand in for that cookie identity.
+
+Raw credentials never appear in the owner, cache keys, logs, errors, metrics,
+or synchronized records. Same-subject token rotation preserves ownership.
+Different origins, principals, organizations, authentication modes, or
+authentication sources are different owners.
+
+A single recipe-specific resolver is the only code allowed to canonicalize this
+identity. It uses domain-separated SHA-256 for API-key fingerprints and for an
+opaque owner_id derived from the canonical owner fields. The owner_id is safe to
+pass between local application contexts, but it is not sent to the server,
+persisted in synchronized records, or logged. The global chat/session scope and
+its serialization remain unchanged.
+
+The UI receives only owner_id, never an effective request snapshot, header, or
+credential. When the builder opens, the WebUI system adapter, WebUI composer
+adapter, and extension adapters obtain the current authoritative owner_id. Save
+or Update passes that value through synchronization as expected_owner_id.
+
+Immediately before a version-2 mutation is dispatched, the authoritative
+request context resolves one immutable effective request snapshot, including
+URL normalization, quickstart origin selection, runtime API-key overrides,
+authentication source, organization, and final request headers. It derives
+actual_owner_id from that same snapshot and compares it with expected_owner_id.
+If either value is unavailable or they differ, the operation fails before
+fetch. Otherwise the request uses that exact snapshot, preventing identity drift
+during intervening asynchronous work. A token refresh creates a new retry
+snapshot and may dispatch it only after proving that it resolves to the same
+owner_id and effective request base as the initial snapshot.
+
+In the direct WebUI, the shared resolver runs against the locally authoritative
+connection state. In the extension, the background context remains authoritative
+for connection, runtime credentials, and cookie-session identity and exposes a
+read-only owner-resolution request to the sidepanel or pop-out. That response
+contains only owner_id and a non-secret revision suitable for cache invalidation.
+Extension surfaces never approximate a background-owned identity from stale page
+configuration. If resolution is unavailable or changes while the builder is
+open, Save and Update fail closed until the authoritative owner is refreshed;
+Apply remains local.
+
+The transport returns request_dispatched and nullable actual_owner_id as client
+metadata on every relevant response path. Server response data cannot supply or
+override either field. A known pre-dispatch rejection returns
+request_dispatched=false and creates no uncertainty marker. A response after a
+known dispatch carries request_dispatched=true; a missing owner on that path is
+unknown-owner uncertainty. An extension-channel failure that cannot prove
+whether the background dispatched the request reports an unknown dispatch state
+and is also treated as unknown-owner uncertainty.
+
+A refresh retry is permitted only when a newly resolved snapshot produces the
+same owner_id and effective request base; ordinary same-subject token rotation
+is allowed. A changed origin, principal, organization, authentication mode,
+authentication source, or effective base fails before retry.
+
+Version-2 create and update require a trustworthy expected and actual owner
+before dispatch. If no owner can be resolved, persistence fails before the
+remote mutation while local editing, preview, and Apply remain available.
+Version-1 persistence retains its existing behavior. Pull may capture ownership
+without requiring it, but it never clears an uncertainty marker unless the
+returned owner is trustworthy.
+
+An ambiguous post-dispatch result is recorded against returned actual_owner_id
+and the exact local prompt ID, never against a render-time adapter value. Both
+real chat surfaces obtain authoritative owner_id when opening or reopening the
+builder, so Save and Update stay disabled until an authoritative create, update,
+pull, or permanent deletion under that same owner reconciles the exact ID. This
+scoped marker is neither visible to nor clearable by another owner.
+
+The uncertainty registry is application-wide, not component-local. The direct
+WebUI owns one app-level registry shared by system and composer adapters. The
+extension background owns the registry shared by sidepanel and pop-out through
+read/mark/clear messages; closing one surface must not release another surface's
+lock. MV3 background termination remains a process boundary, so durable local
+sync-error state is still attempted for restart recovery.
+
+If transport metadata is absent or inconsistent after a request may have been
+sent, the current process creates a separate unknown-owner quarantine for the
+exact local ID without guessing an owner. Unlike a scoped marker, this quarantine
+intentionally blocks Save and Update for every owner because none can prove it
+owns the ambiguous mutation. Apply remains available.
+
+Matching-owner reconciliation clears only scoped markers. It never clears an
+unknown-owner quarantine. The recovery surface explains the ambiguity and offers
+an explicit Forget unresolved operation action. That action requires confirmation
+that a duplicate remote record may exist and clears only the unknown-owner
+quarantine for the exact local ID; it does not clear scoped markers and does not
+send, save, update, or delete a remote prompt. Ordinary deletion does not claim
+reconciliation for another owner or silently clear unknown ownership. The
+runtime quarantine otherwise ends with its authoritative application process.
+Existing durable sync-error state remains the restart recovery mechanism; if
+durable marking also failed, a restart is an acknowledged recovery boundary
+rather than a claim that the remote outcome became known. This release does not
+add a database migration for durable ownership metadata.
+
+Recipe capability support, write authorization, and persistence ownership remain
+separate gates. The authorization query key contains owner_id plus a
+domain-separated credential revision, is forcibly revalidated whenever recipe
+mode opens, and is treated as unknown while revalidation is pending. A same-user
+token refresh preserves owner_id but changes the credential revision. Save and
+Update require current support, current action-specific authorization, a current
+owner_id, and a capability result for that exact owner/revision. Stale permission
+data never enables persistence. Manual API keys and bearer tokens use
+domain-separated credential digests for the revision. Cookie sessions use a
+non-secret authoritative session revision when one exists; otherwise each owner
+resolution receives a fresh local nonce so cached authorization cannot be reused.
+
+Captured unsafe extension mutations never fall back to a second direct request
+after an ambiguous background failure. Captured reads cannot coalesce with reads
+that did not request ownership metadata.
+
+Server-side idempotency keys would make ambiguous retries intrinsically safer,
+but require a persisted, per-principal replay contract and retention policy. They
+are intentionally deferred to a separate design rather than partially added to
+this release.
+
 ## 11. Rendering and diff implementation
 
 ### 11.1 Recipe renderer parity
@@ -957,6 +1105,20 @@ Normal CI never calls an external model.
 - Unmount and late-response disposal
 - Capability supported, unsupported, and unknown states
 - Recipe clone, validation, Apply, Save as new, Update, and conflict recovery
+- Recipe-owner parity between both real adapters and actual request dispatch
+- Advanced URL normalization, quickstart origin, and runtime API-key ownership
+- Closed authentication-source precedence and manual/cookie/runtime isolation
+- Cookie-session failure when no authoritative stable principal is available
+- Same-subject token refresh without owner rotation
+- expected_owner_id mismatch before fetch and before refresh retry
+- Backend, principal, organization, authentication-mode, and auth-source changes
+  during pre-dispatch work and refresh
+- Ambiguous create/update reopen behavior with durable-marker success and failure
+- Exact-ID quarantine when dispatch ownership is absent or inconsistent
+- Unknown-owner quarantine recovery and explicit confirmation semantics
+- Matching-owner reconciliation without cross-owner read or cleanup
+- Capability revalidation keyed by owner and credential revision
+- Extension background metadata propagation and duplicate-mutation prevention
 - Accessible diff semantics
 - Large-prompt diff fallback
 
@@ -1105,6 +1267,9 @@ prompt is migrated implicitly merely by opening the UI.
 - Recipes compile one field, preserve starter content, and never save runtime
   values.
 - Recipe records are distinguishable from normal structured prompts.
+- Recipe persistence uses the same effective owner in the real adapter, sync
+  result, and request transport; ambiguous writes cannot be repeated after
+  reopening the builder.
 - Schema-v1 prompts remain compatible.
 - WebUI and extension behavior remain aligned.
 - Logs, metrics, errors, browser storage, and sync queues do not leak prompt or
@@ -1123,5 +1288,8 @@ prompt is migrated implicitly merely by opening the UI.
 - Recipe output: one field
 - Recipe targets: target-specific
 - Recipe formats: XML-style, Markdown, free-form
+- Recipe persistence owner: effective origin, auth mode/source, organization,
+  and stable principal; resolved once and bound to transport
+- Unknown post-dispatch owner: exact-ID fail-closed runtime quarantine
 - Architecture: shared UI plus provider-neutral backend
 - Delivery: two coordinated implementation tracks

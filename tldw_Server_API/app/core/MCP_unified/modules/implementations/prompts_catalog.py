@@ -13,16 +13,21 @@ from typing import Any
 from loguru import logger
 
 from ....DB_Management.Prompts_DB import DatabaseError, PromptsDatabase
+from ....DB_Management.prompts_db_helpers import parse_stored_prompt_definition
 from ....exception_types import PromptCatalogError
 from ....Prompt_Management.structured_prompts import (
     PromptBlock,
     PromptDefinition,
     PromptVariableDefinition,
+    SingleTextRecipeDefinitionV2,
     StructuredPromptAssemblyError,
     assemble_prompt_definition,
     convert_legacy_prompt_to_definition,
     extract_legacy_prompt_variables,
     normalize_legacy_prompt_template,
+)
+from ....Prompt_Management.structured_prompts.single_text_renderer import (
+    SingleTextRecipeRenderResult,
 )
 from ....Utils.prompt_loader import load_prompt
 from ...persona_scope import assert_identifier_in_scope, get_explicit_scope_ids
@@ -193,20 +198,29 @@ class MCPPromptFormatter:
 
         definition = self._definition_from_library_row(row)
         prompt_uuid = str(row.get("uuid") or "")
+        metadata = {
+            "source": "library",
+            "prompt_id": row.get("id"),
+            "prompt_uuid": prompt_uuid,
+            "version": row.get("version"),
+            "tags": row.get("keywords") or [],
+        }
+        if isinstance(definition, SingleTextRecipeDefinitionV2):
+            metadata.update(
+                {
+                    "prompt_format": "structured",
+                    "prompt_schema_version": definition.schema_version,
+                    "definition_kind": definition.definition_kind,
+                    "target_role": definition.assembly_config.target_role,
+                    "render_format": definition.assembly_config.render_format,
+                }
+            )
         return {
             "name": f"{LIBRARY_PROMPT_PREFIX}{prompt_uuid}",
             "title": str(row.get("name") or prompt_uuid),
             "description": row.get("details") or None,
             "arguments": self._mcp_arguments(definition.variables),
-            "_meta": {
-                "tldw": {
-                    "source": "library",
-                    "prompt_id": row.get("id"),
-                    "prompt_uuid": prompt_uuid,
-                    "version": row.get("version"),
-                    "tags": row.get("keywords") or [],
-                }
-            },
+            "_meta": {"tldw": metadata},
         }
 
     def render_library_prompt(self, row: Mapping[str, Any], arguments: Any | None) -> dict[str, Any]:
@@ -261,11 +275,33 @@ class MCPPromptFormatter:
             "_meta": self.config_prompt_definition(entry, parts)["_meta"],
         }
 
-    def _definition_from_library_row(self, row: Mapping[str, Any]) -> PromptDefinition:
+    def _definition_from_library_row(
+        self,
+        row: Mapping[str, Any],
+    ) -> PromptDefinition | SingleTextRecipeDefinitionV2:
         raw_definition = row.get("prompt_definition")
-        if raw_definition:
+        prompt_format = row.get("prompt_format")
+        schema_version = row.get("prompt_schema_version")
+        genuinely_legacy = (
+            raw_definition is None
+            and prompt_format in (None, "legacy")
+            and schema_version is None
+        )
+        if not genuinely_legacy:
             try:
-                return PromptDefinition.model_validate(raw_definition)
+                if prompt_format not in (None, "structured"):
+                    raise ValueError("invalid_prompt_definition")
+                definition = parse_stored_prompt_definition(
+                    raw_definition,
+                    schema_version=schema_version,
+                )
+                if isinstance(definition, SingleTextRecipeDefinitionV2) and (
+                    prompt_format != "structured"
+                    or type(schema_version) is not int
+                    or schema_version != 2
+                ):
+                    raise ValueError("invalid_prompt_definition")
+                return definition
             except ValueError as exc:
                 raise PromptCatalogError(
                     "invalid_prompt_definition",
@@ -308,14 +344,20 @@ class MCPPromptFormatter:
 
     def _assemble_to_mcp_messages(
         self,
-        definition: PromptDefinition,
+        definition: PromptDefinition | SingleTextRecipeDefinitionV2,
         arguments: Mapping[str, str],
     ) -> list[dict[str, Any]]:
         try:
             assembled = assemble_prompt_definition(definition, arguments)
         except StructuredPromptAssemblyError as exc:
             raise PromptCatalogError("invalid_arguments", "Prompt arguments are invalid.") from exc
-        mcp_messages = self._to_mcp_messages(assembled.messages)
+        if isinstance(assembled, SingleTextRecipeRenderResult):
+            # MCP prompt messages only admit user/assistant roles. A system-target
+            # recipe retains its target in _meta and projects its exact text to
+            # the sole protocol-safe user message without a folding prefix.
+            mcp_messages = [self._mcp_text_message("user", assembled.rendered_text)]
+        else:
+            mcp_messages = self._to_mcp_messages(assembled.messages)
         rendered_size = sum(len(message["content"]["text"]) for message in mcp_messages)
         if rendered_size > self.max_rendered_chars:
             raise PromptCatalogError("rendered_prompt_too_large", "Rendered prompt is too large.")

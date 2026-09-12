@@ -3,11 +3,25 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from pydantic import TypeAdapter, ValidationError
+
 from .legacy_renderer import render_legacy_snapshot
-from .models import PromptAssemblyResult, PromptDefinition, PromptVariableDefinition
+from .models import (
+    PromptAssemblyResult,
+    PromptDefinition,
+    PromptVariableDefinition,
+    SingleTextRecipeDefinitionV2,
+    parse_prompt_definition,
+)
+from .single_text_renderer import (
+    SingleTextRecipeRenderError,
+    SingleTextRecipeRenderResult,
+    render_single_text_recipe,
+)
 from .validator import validate_prompt_definition
 
 _TEMPLATE_VARIABLE_PATTERN = re.compile(r"{{\s*([a-zA-Z0-9_]+)\s*}}")
+_LEGACY_VERSION_ADAPTER = TypeAdapter(int)
 
 
 class StructuredPromptAssemblyError(ValueError):
@@ -24,12 +38,18 @@ class StructuredPromptAssemblyError(ValueError):
 
 
 def assemble_prompt_definition(
-    definition: dict[str, Any] | PromptDefinition,
+    definition: dict[str, Any] | PromptDefinition | SingleTextRecipeDefinitionV2,
     variables: Mapping[str, Any] | None,
     *,
     extras: Mapping[str, Any] | None = None,
-) -> PromptAssemblyResult:
+) -> PromptAssemblyResult | SingleTextRecipeRenderResult:
     prompt_definition = _coerce_definition(definition)
+    if isinstance(prompt_definition, SingleTextRecipeDefinitionV2):
+        try:
+            return render_single_text_recipe(prompt_definition, variables)
+        except SingleTextRecipeRenderError as error:
+            raise StructuredPromptAssemblyError(error.code, str(error), variable_name=error.variable_name) from error
+
     validation_issues = validate_prompt_definition(prompt_definition)
     if validation_issues:
         first_issue = validation_issues[0]
@@ -45,10 +65,22 @@ def assemble_prompt_definition(
     return PromptAssemblyResult(messages=messages, legacy=legacy)
 
 
-def _coerce_definition(definition: dict[str, Any] | PromptDefinition) -> PromptDefinition:
-    if isinstance(definition, PromptDefinition):
+def _coerce_definition(
+    definition: dict[str, Any] | PromptDefinition | SingleTextRecipeDefinitionV2,
+) -> PromptDefinition | SingleTextRecipeDefinitionV2:
+    if isinstance(definition, (PromptDefinition, SingleTextRecipeDefinitionV2)):
         return definition
-    return PromptDefinition.model_validate(definition)
+    if "schema_version" not in definition:
+        return PromptDefinition.model_validate(definition)
+    # The original v1 model used an int field. Preserve its coercion only when
+    # it selects version 1; v2/future identity still goes through the strict union.
+    try:
+        legacy_version = _LEGACY_VERSION_ADAPTER.validate_python(definition["schema_version"])
+    except ValidationError:
+        return parse_prompt_definition(definition)
+    if legacy_version == 1:
+        return PromptDefinition.model_validate({**definition, "schema_version": 1})
+    return parse_prompt_definition(definition)
 
 
 def _resolve_variables(
@@ -134,11 +166,7 @@ def _insert_fixed_sections(
         (index for index, message in enumerate(rendered_messages) if message["role"] == "user"),
         len(rendered_messages),
     )
-    return (
-        rendered_messages[:first_user_index]
-        + inserted_messages
-        + rendered_messages[first_user_index:]
-    )
+    return rendered_messages[:first_user_index] + inserted_messages + rendered_messages[first_user_index:]
 
 
 def _render_module_messages(modules_config: Any) -> list[dict[str, str]]:
@@ -155,10 +183,7 @@ def _render_module_messages(modules_config: Any) -> list[dict[str, str]]:
         module_type = str(module.get("type") or "unknown")
         config = module.get("config")
         if isinstance(config, Mapping) and config:
-            config_text = ", ".join(
-                f"{key}={_stringify_module_value(value)}"
-                for key, value in sorted(config.items())
-            )
+            config_text = ", ".join(f"{key}={_stringify_module_value(value)}" for key, value in sorted(config.items()))
             content = f"Module {module_type}: {config_text}"
         else:
             content = f"Module {module_type}"

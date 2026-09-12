@@ -26,11 +26,13 @@ import {
   deletePromptByIdFB,
   getAllPromptsFB,
   getPromptByIdFB,
+  restorePromptSnapshotFB,
   savePromptFB,
   updatePromptFB
 } from ".."
 import { ModelNickname } from "./nickname"
 import { ModelDb } from "./models"
+import { clearRecipePersistenceScoped, resolveRecipePersistenceOwnerView } from "@/services/recipe-persistence-uncertainty"
 
 // Helper function to generate IDs (keeping the same format)
 export const generateID = () => {
@@ -598,11 +600,33 @@ export const deletePromptById = async (id: string) => {
   return id
 }
 
-export const permanentlyDeletePrompt = async (id: string) => {
+export const permanentlyDeletePrompt = async (
+  id: string,
+  persistenceScope?: string | null
+) => {
+  const scope = persistenceScope === undefined
+    ? (await resolveRecipePersistenceOwnerView())?.ownerId ?? null
+    : persistenceScope
   // Hard delete: removes from both Dexie and Firefox storage
   const db = new PageAssistDatabase()
   await db.permanentlyDeletePrompt(id)
   await deletePromptByIdFB(id)
+  if (scope) await clearRecipePersistenceScoped(id, scope)
+  return id
+}
+
+export const restorePromptSnapshot = async (snapshot: Prompt) => {
+  const restored = structuredClone(snapshot)
+  const db = new PageAssistDatabase()
+  await db.restorePromptSnapshot(restored)
+  await restorePromptSnapshotFB(restored)
+  return restored.id
+}
+
+export const markPromptSyncError = async (id: string) => {
+  const db = new PageAssistDatabase()
+  await db.updatePromptSyncStatus(id, { syncStatus: "error" })
+  await updatePromptFB({ id, syncStatus: "error" })
   return id
 }
 

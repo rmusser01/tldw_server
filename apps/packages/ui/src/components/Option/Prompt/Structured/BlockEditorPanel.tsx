@@ -1,4 +1,5 @@
 import React from "react"
+import { useTranslation } from "react-i18next"
 
 type StructuredPromptBlock = {
   id: string
@@ -13,15 +14,38 @@ type StructuredPromptBlock = {
 type BlockEditorPanelProps = {
   block: StructuredPromptBlock | null
   onChange: (updates: Partial<StructuredPromptBlock>) => void
+  allowedRoles?: readonly StructuredPromptBlock["role"][]
+  showRole?: boolean
+  sectionKey?: string | null
+  onSectionKeyChange?: (sectionKey: string) => void
+  sectionKeyError?: string | null
+  nameInputRef?: React.Ref<HTMLInputElement>
 }
+
+const ALL_ROLES: readonly StructuredPromptBlock["role"][] = [
+  "system",
+  "developer",
+  "user",
+  "assistant"
+]
+
+const roleLabel = (role: StructuredPromptBlock["role"]): string =>
+  role.charAt(0).toUpperCase() + role.slice(1)
 
 export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
   block,
-  onChange
+  onChange,
+  allowedRoles = ALL_ROLES,
+  showRole = true,
+  sectionKey,
+  onSectionKeyChange,
+  sectionKeyError,
+  nameInputRef
 }) => {
+  const { t } = useTranslation("settings")
   if (!block) {
     return (
-      <section className="rounded-xl border border-border bg-surface1 p-4">
+      <section className="rounded-xl border border-border bg-surface p-4">
         <h3 className="text-sm font-semibold text-text">Block editor</h3>
         <p className="mt-2 text-sm text-text-muted">
           Select a block to edit its role, content, and template behavior.
@@ -31,11 +55,12 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
   }
 
   return (
-    <section className="rounded-xl border border-border bg-surface1 p-4">
+    <section className="rounded-xl border border-border bg-surface p-4">
       <div className="mb-3">
         <h3 className="text-sm font-semibold text-text">Block editor</h3>
         <p className="text-xs text-text-muted">
-          Keep each block focused on one job: identity, task, constraints, or examples.
+          Keep each block focused on one job: identity, task, constraints, or
+          examples.
         </p>
       </div>
 
@@ -45,45 +70,95 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
             Name
           </span>
           <input
+            ref={nameInputRef}
             type="text"
+            aria-label={t(
+              "managePrompts.structured.blockEditor.nameLabel",
+              "Block name"
+            )}
             value={block.name}
             onChange={(event) => onChange({ name: event.target.value })}
             data-testid="structured-block-name"
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
+            className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text"
           />
         </label>
 
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
-            Role
-          </span>
-          <select
-            value={block.role}
-            onChange={(event) =>
-              onChange({
-                role: event.target.value as StructuredPromptBlock["role"]
-              })
-            }
-            data-testid="structured-block-role"
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
-          >
-            <option value="system">System</option>
-            <option value="developer">Developer</option>
-            <option value="user">User</option>
-            <option value="assistant">Assistant</option>
-          </select>
-        </label>
+        {showRole ? (
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
+              Role
+            </span>
+            <select
+              aria-label={t(
+                "managePrompts.structured.blockEditor.roleLabel",
+                "Block role"
+              )}
+              value={block.role}
+              onChange={(event) =>
+                onChange({
+                  role: event.target.value as StructuredPromptBlock["role"]
+                })
+              }
+              data-testid="structured-block-role"
+              className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text"
+            >
+              {allowedRoles.map((role) => (
+                <option key={role} value={role}>
+                  {roleLabel(role)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        {onSectionKeyChange ? (
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
+              {t(
+                "managePrompts.structured.blockEditor.sectionKey",
+                "Section key"
+              )}
+            </span>
+            <input
+              type="text"
+              aria-label={t(
+                "managePrompts.structured.blockEditor.sectionKey",
+                "Section key"
+              )}
+              aria-invalid={Boolean(sectionKeyError)}
+              aria-describedby={
+                sectionKeyError ? "recipe-section-key-error" : undefined
+              }
+              value={sectionKey ?? ""}
+              onChange={(event) => onSectionKeyChange(event.target.value)}
+              className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text aria-invalid:border-danger"
+            />
+            {sectionKeyError ? (
+              <span
+                id="recipe-section-key-error"
+                role="alert"
+                className="mt-1 block text-xs text-danger"
+              >
+                {sectionKeyError}
+              </span>
+            ) : null}
+          </label>
+        ) : null}
 
         <label className="block">
           <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
             Content
           </span>
           <textarea
+            aria-label={t(
+              "managePrompts.structured.blockEditor.contentLabel",
+              "Block content"
+            )}
             value={block.content}
             onChange={(event) => onChange({ content: event.target.value })}
             rows={8}
             data-testid="structured-block-content"
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
+            className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text"
           />
         </label>
 
@@ -92,6 +167,10 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
             <input
               type="checkbox"
               checked={block.enabled}
+              aria-label={t(
+                "managePrompts.structured.blockEditor.enabledLabel",
+                "Block enabled"
+              )}
               onChange={(event) => onChange({ enabled: event.target.checked })}
               data-testid="structured-block-enabled"
             />
@@ -101,6 +180,10 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
             <input
               type="checkbox"
               checked={block.is_template}
+              aria-label={t(
+                "managePrompts.structured.blockEditor.templateLabel",
+                "Block uses variables"
+              )}
               onChange={(event) =>
                 onChange({ is_template: event.target.checked })
               }

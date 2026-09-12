@@ -19,8 +19,10 @@ import {
 } from "../Studio/Prompts/execute-playground-provider-utils"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { usePromptStudioStore } from "@/store/prompt-studio"
+import { useStoreChatModelSettings } from "@/store/model"
 import { filterCopilotPrompts } from "../copilot-prompts-utils"
 import type { PromptRowVM } from "../prompt-workspace-types"
+import type { RecipeTarget } from "@/components/Common/PromptAssist/recipes/types"
 
 type LocalQuickTestPrompt = {
   id: string
@@ -69,6 +71,9 @@ export function usePromptInteractions(deps: UsePromptInteractionsDeps) {
 
   const navigate = useNavigate()
   const { setSelectedQuickPrompt, setSelectedSystemPrompt } = useMessageOption()
+  const setSystemPrompt = useStoreChatModelSettings(
+    (state) => state.setSystemPrompt
+  )
   const setStudioActiveSubTab = usePromptStudioStore((s) => s.setActiveSubTab)
   const setStudioSelectedProjectId = usePromptStudioStore((s) => s.setSelectedProjectId)
   const setStudioSelectedPromptId = usePromptStudioStore((s) => s.setSelectedPromptId)
@@ -307,6 +312,34 @@ export function usePromptInteractions(deps: UsePromptInteractionsDeps) {
       setSelectedQuickPrompt,
       setSelectedSystemPrompt
     ]
+  )
+
+  const handleApplyRecipe = React.useCallback(
+    (compiledText: string, target: RecipeTarget): boolean => {
+      try {
+        if (target === "system") {
+          setSystemPrompt(compiledText)
+        } else {
+          setSelectedQuickPrompt(compiledText)
+        }
+        navigate("/chat")
+        return true
+      } catch (error: unknown) {
+        notification.error({
+          message: t("managePrompts.recipe.applyFailed", {
+            defaultValue: "Could not apply recipe"
+          }),
+          description:
+            error instanceof Error
+              ? error.message
+              : t("managePrompts.recipe.applyFailedDesc", {
+                  defaultValue: "The compiled recipe could not be sent to chat."
+                })
+        })
+        return false
+      }
+    },
+    [navigate, setSelectedQuickPrompt, setSystemPrompt, t]
   )
 
   // Copilot handlers
@@ -701,6 +734,7 @@ export function usePromptInteractions(deps: UsePromptInteractionsDeps) {
     setInsertPrompt,
     handleInsertChoice,
     handleUsePromptInChat,
+    handleApplyRecipe,
     // Quick test
     localQuickTestPrompt,
     localQuickTestInput,

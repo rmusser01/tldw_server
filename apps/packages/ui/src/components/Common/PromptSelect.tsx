@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Dropdown, Empty, Input, Modal, Tooltip } from "antd"
 import type { InputRef } from "antd"
 import type { TextAreaRef } from "antd/es/input/TextArea"
@@ -26,7 +26,11 @@ import {
   type PromptTargetAdapter
 } from "./PromptAssist/usePromptAssist"
 import type { PromptImproveModelSelection } from "@/services/prompt-improvement"
-import { fetchPromptCapabilities } from "@/services/prompts-api"
+import {
+  fetchPromptCapabilities,
+  revalidatePromptCapabilities
+} from "@/services/prompts-api"
+import { useRecipePersistenceOwner } from "@/hooks/useRecipePersistenceOwner"
 import {
   captureSystemPromptOverrideSnapshot,
   normalizeSystemPromptOverrideValue,
@@ -35,6 +39,12 @@ import {
   restoreSystemPromptOverrideSnapshot,
   type SystemPromptOverrideSnapshot
 } from "./system-prompt-utils"
+
+const PromptRecipeBuilder = React.lazy(() =>
+  import("./PromptAssist/recipes/PromptRecipeBuilder").then(
+    ({ PromptRecipeBuilder }) => ({ default: PromptRecipeBuilder })
+  )
+)
 
 type Props = {
   setSelectedSystemPrompt: (promptId: string | undefined) => void
@@ -46,6 +56,7 @@ type Props = {
   currentProvider?: string | null
   promptAssistContextKey?: string
   promptAssistBackendKey?: string | null
+  promptAssistAuthorizationRevision?: string | null
   onSelectModel?: () => void
   className?: string
   iconClassName?: string
@@ -54,6 +65,10 @@ type Props = {
 type SystemPromptUndoSnapshot = {
   override: SystemPromptOverrideSnapshot
   editorDraft: string
+}
+
+type RecipeSystemPromptUndoSnapshot = SystemPromptUndoSnapshot & {
+  selectedSystemPrompt: string | undefined
 }
 
 export const PromptSelect: React.FC<Props> = ({
@@ -66,6 +81,7 @@ export const PromptSelect: React.FC<Props> = ({
   currentProvider,
   promptAssistContextKey = "system-prompt",
   promptAssistBackendKey = null,
+  promptAssistAuthorizationRevision = null,
   onSelectModel,
   className = "text-text-muted",
   iconClassName = "size-5"
@@ -79,6 +95,13 @@ export const PromptSelect: React.FC<Props> = ({
   const [editorDraft, setEditorDraft] = useState("")
   const [editorTemplateContent, setEditorTemplateContent] = useState("")
   const [editorOverrideActive, setEditorOverrideActive] = useState(false)
+  const [recipeMode, setRecipeMode] = useState(false)
+  const { owner: recipeOwner, loading: recipeOwnerLoading } =
+    useRecipePersistenceOwner(recipeMode && editorOpen)
+  const [authorizedRecipeOwner, setAuthorizedRecipeOwner] =
+    React.useState<typeof recipeOwner>(null)
+  const [recipeUndo, setRecipeUndo] =
+    useState<RecipeSystemPromptUndoSnapshot | null>(null)
   const searchInputRef = useRef<InputRef | null>(null)
   const editorInputRef = useRef<TextAreaRef | null>(null)
   const editorFocusRequestedRef = useRef(false)
@@ -108,6 +131,8 @@ export const PromptSelect: React.FC<Props> = ({
 
   const normalizedPromptAssistBackendKey =
     promptAssistBackendKey?.trim() || null
+  const normalizedPromptAssistAuthorizationRevision =
+    promptAssistAuthorizationRevision?.trim() || null
   const editorLifecycleKey = JSON.stringify([
     promptAssistContextKey,
     selectedSystemPrompt ?? "",
@@ -122,7 +147,11 @@ export const PromptSelect: React.FC<Props> = ({
   }
 
   const { data: promptCapabilities } = useQuery({
-    queryKey: ["promptCapabilities", normalizedPromptAssistBackendKey],
+    queryKey: [
+      "promptCapabilities",
+      normalizedPromptAssistBackendKey,
+      normalizedPromptAssistAuthorizationRevision
+    ],
     queryFn: fetchPromptCapabilities,
     enabled: Boolean(normalizedPromptAssistBackendKey),
     retry: false
@@ -133,6 +162,53 @@ export const PromptSelect: React.FC<Props> = ({
         promptCapabilities.prompt_improvement_v1.supported
       ? "supported"
       : "unsupported"
+  const {
+    data: resolvedRecipeCapabilities,
+    isFetching: recipeCapabilitiesFetching,
+    isError: recipeCapabilitiesError,
+    refetch: refetchRecipeCapabilities
+  } = useQuery({
+    queryKey: [
+      "promptCapabilities",
+      recipeOwner?.ownerId ?? null,
+      recipeOwner?.authorizationRevision ?? null
+    ],
+    queryFn: revalidatePromptCapabilities,
+    enabled: false,
+    retry: false
+  })
+  const recipeQueryClient = useQueryClient()
+  React.useEffect(() => {
+    if (!recipeOwner) return
+    let current = true
+    // An earlier open's initial fetch may still be in flight. Do not deduplicate
+    // this open's authorization check onto that older request.
+    void recipeQueryClient
+      .cancelQueries({
+        queryKey: [
+          "promptCapabilities",
+          recipeOwner.ownerId,
+          recipeOwner.authorizationRevision
+        ],
+        exact: true
+      })
+      .then(async () => {
+        if (!current) return
+        const result = await refetchRecipeCapabilities()
+        if (current && result.isSuccess) setAuthorizedRecipeOwner(recipeOwner)
+      })
+    return () => {
+      current = false
+    }
+  }, [recipeOwner, recipeQueryClient, refetchRecipeCapabilities])
+  const recipeCapabilities =
+    recipeOwner &&
+    !recipeOwnerLoading &&
+    authorizedRecipeOwner === recipeOwner &&
+    !recipeCapabilitiesFetching &&
+    !recipeCapabilitiesError
+      ? resolvedRecipeCapabilities
+      : undefined
 
   const updateEditorDraft = React.useCallback((nextDraft: string) => {
     editorLookupEpochRef.current += 1
@@ -214,6 +290,8 @@ export const PromptSelect: React.FC<Props> = ({
 
   useEffect(() => {
     setEditorLoading(false)
+    setRecipeMode(false)
+    setRecipeUndo(null)
   }, [editorLifecycleKey])
 
   const requestEditorFocus = React.useCallback(() => {
@@ -305,6 +383,8 @@ export const PromptSelect: React.FC<Props> = ({
   const openSystemPromptEditor = React.useCallback(async () => {
     setDropdownOpen(false)
     promptAssist.dismiss()
+    setRecipeMode(false)
+    setRecipeUndo(null)
     editorOpenRef.current = true
     setEditorOpen(true)
     const lookupEpoch = ++editorLookupEpochRef.current
@@ -342,9 +422,12 @@ export const PromptSelect: React.FC<Props> = ({
     editorLookupEpochRef.current += 1
     setEditorLoading(false)
     setEditorOpen(false)
+    setRecipeMode(false)
+    setRecipeUndo(null)
   }, [editorDraft, editorTemplateContent, promptAssist, setSystemPrompt])
 
   const handleEditorReset = React.useCallback(async () => {
+    setRecipeUndo(null)
     const lookupEpoch = ++editorLookupEpochRef.current
     const lifecycleKey = editorLifecycleKeyRef.current
     setEditorLoading(true)
@@ -376,6 +459,8 @@ export const PromptSelect: React.FC<Props> = ({
     editorLookupEpochRef.current += 1
     setEditorLoading(false)
     setEditorOpen(false)
+    setRecipeMode(false)
+    setRecipeUndo(null)
   }, [promptAssist])
 
   const handleSelectModel = React.useCallback(() => {
@@ -390,6 +475,7 @@ export const PromptSelect: React.FC<Props> = ({
 
   const enterPromptAssist = React.useCallback(
     (action: () => void) => {
+      setRecipeUndo(null)
       assistEntryDraftRef.current = editorDraftRef.current
       action()
     },
@@ -404,6 +490,46 @@ export const PromptSelect: React.FC<Props> = ({
     setEditorDraft(assistEntryDraftRef.current)
     promptAssist.dismiss()
   }, [promptAssist])
+
+  const enterRecipeMode = React.useCallback(() => {
+    promptAssist.dismiss()
+    setRecipeMode(true)
+  }, [promptAssist])
+
+  const leaveRecipeMode = React.useCallback(() => {
+    setRecipeMode(false)
+    requestEditorFocus()
+  }, [requestEditorFocus])
+
+  const applyRecipe = React.useCallback(
+    (compiledText: string) => {
+      setRecipeUndo({
+        override: captureSystemPromptOverrideSnapshot(rawSystemPromptRef.current),
+        editorDraft: editorDraftRef.current,
+        selectedSystemPrompt
+      })
+      applySystemPromptCandidate(compiledText)
+      setRecipeMode(false)
+      window.setTimeout(requestEditorFocus, 0)
+    },
+    [applySystemPromptCandidate, requestEditorFocus, selectedSystemPrompt]
+  )
+
+  const undoRecipe = React.useCallback(() => {
+    if (!recipeUndo) return
+    const rawOverride = restoreSystemPromptOverrideSnapshot(recipeUndo.override)
+    updateEditorDraft(recipeUndo.editorDraft)
+    setSystemPrompt(rawOverride)
+    setSelectedSystemPrompt(recipeUndo.selectedSystemPrompt)
+    setEditorOverrideActive(
+      Boolean(recipeUndo.selectedSystemPrompt) &&
+        typeof rawOverride === "string" &&
+        rawOverride.trim().length > 0 &&
+        rawOverride !== editorTemplateContentRef.current
+    )
+    setRecipeUndo(null)
+    requestEditorFocus()
+  }, [recipeUndo, requestEditorFocus, setSelectedSystemPrompt, setSystemPrompt, updateEditorDraft])
 
   // Group prompts by category: Favorites, System, Quick
   const groupedMenuItems = useMemo<ItemType[]>(() => {
@@ -764,8 +890,9 @@ export const PromptSelect: React.FC<Props> = ({
         title={t("promptSelect.editSystemPrompt", "Edit system prompt")}
         onCancel={closeEditor}
         footer={
-          promptAssist.state.status === "idle" ||
-          promptAssist.state.status === "applied" ? (
+          !recipeMode &&
+          (promptAssist.state.status === "idle" ||
+          promptAssist.state.status === "applied") ? (
             <div className="flex items-center justify-end gap-2">
               <button type="button" onClick={closeEditor}>
                 {t("common:cancel", "Cancel")}
@@ -789,8 +916,14 @@ export const PromptSelect: React.FC<Props> = ({
                   onReviewChanges={() =>
                     enterPromptAssist(promptAssist.reviewChanges)
                   }
+                  onBuildFromRecipe={enterRecipeMode}
                   onSelectModel={onSelectModel ? handleSelectModel : undefined}
                 />
+              ) : null}
+              {recipeUndo ? (
+                <button type="button" onClick={undoRecipe}>
+                  {t("common:promptAssist.undoRecipe", "Undo recipe")}
+                </button>
               ) : null}
               <button type="button" onClick={handleEditorSave}>
                 {t("common:save", "Save")}
@@ -798,6 +931,22 @@ export const PromptSelect: React.FC<Props> = ({
             </div>
           ) : null
         }>
+        {recipeMode ? (
+          <React.Suspense
+            fallback={
+              <p role="status">
+                {t("common:promptAssist.recipeLoading", "Loading recipe builder…")}
+              </p>
+            }>
+            <PromptRecipeBuilder
+              target="system"
+              capabilities={recipeCapabilities}
+              persistenceScope={recipeOwner?.ownerId ?? null}
+              onApply={applyRecipe}
+              onBack={leaveRecipeMode}
+            />
+          </React.Suspense>
+        ) : (
         <div className="space-y-3">
           {editorOverrideActive ? (
             <div className="text-xs text-text-subtle">
@@ -816,6 +965,7 @@ export const PromptSelect: React.FC<Props> = ({
             )}
             value={editorDraft}
             onChange={(event) => {
+              setRecipeUndo(null)
               updateEditorDraft(event.target.value)
               promptAssist.notifyTargetEdited()
             }}
@@ -826,7 +976,8 @@ export const PromptSelect: React.FC<Props> = ({
             </div>
           ) : null}
         </div>
-        {promptAssist.state.status !== "idle" ||
+        )}
+        {!recipeMode && (promptAssist.state.status !== "idle" ||
         promptAssist.state.notice === "no_change" ? (
           <PromptAssistPanel
             state={promptAssist.state}
@@ -839,7 +990,7 @@ export const PromptSelect: React.FC<Props> = ({
             onUndo={promptAssist.undo}
             onRequestReturnFocus={requestEditorFocus}
           />
-        ) : null}
+        ) : null)}
       </Modal>
     </>
   )

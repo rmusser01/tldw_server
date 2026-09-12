@@ -40,6 +40,8 @@ import { tagColors } from "@/utils/color"
 // isFireFoxPrivateMode moved to usePromptUtilities hook
 // useConfirmDanger moved to usePromptUtilities hook
 import { useServerOnline } from "@/hooks/useServerOnline"
+import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
 import ConnectFeatureBanner from "@/components/Common/ConnectFeatureBanner"
 import { Alert } from "@/components/ui/primitives"
@@ -49,6 +51,7 @@ import {
   pullFromStudio
 } from "@/services/prompt-sync"
 import {
+  fetchPromptCapabilities,
   type PromptCollection
 } from "@/services/prompts-api"
 // prompt-studio imports moved to usePromptInteractions hook
@@ -75,6 +78,11 @@ import { usePromptCollections } from "./hooks/usePromptCollections"
 import { usePromptUtilities } from "./hooks/usePromptUtilities"
 import { usePromptFilteredData } from "./hooks/usePromptFilteredData"
 import { usePromptInteractions } from "./hooks/usePromptInteractions"
+import {
+  classifyPromptRecipe,
+  cloneSavedRecipeSource,
+  getRecipePersistenceState
+} from "./prompt-recipe-library"
 
 const PromptDrawer = React.lazy(() =>
   import("./PromptDrawer").then((module) => ({ default: module.PromptDrawer }))
@@ -220,6 +228,17 @@ export const PromptBody = () => {
   const { t } = useTranslation(["settings", "common", "option"])
   const navigate = useNavigate()
   const isOnline = useServerOnline()
+  const {
+    config: canonicalConnectionConfig,
+    loading: canonicalConnectionLoading
+  } = useCanonicalConnectionConfig()
+  const promptBackendKey = useMemo(
+    () =>
+      canonicalConnectionLoading || !canonicalConnectionConfig
+        ? null
+        : buildChatSurfaceScopeKeyFromConfig(canonicalConnectionConfig),
+    [canonicalConnectionConfig, canonicalConnectionLoading]
+  )
   // Get initial segment from URL param
   const initialSegment = getSegmentFromParam(searchParams.get("tab"))
 
@@ -230,9 +249,8 @@ export const PromptBody = () => {
   const projectFilter = searchParams.get("project")
 
   const [searchText, setSearchText] = useState("")
-  const [typeFilter, setTypeFilter] = useState<"all" | "system" | "quick">(
-    "all"
-  )
+  const [typeFilter, setTypeFilter] =
+    useState<PromptListQueryState["typeFilter"]>("all")
   const [usageFilter, setUsageFilter] = useState<"all" | "used" | "unused">(
     "all"
   )
@@ -296,6 +314,26 @@ export const PromptBody = () => {
     queryFn: getDeletedPrompts
   })
 
+  const { data: promptCapabilities } = useQuery({
+    queryKey: ["promptCapabilities", promptBackendKey],
+    queryFn: fetchPromptCapabilities,
+    enabled: isOnline && Boolean(promptBackendKey),
+    retry: false
+  })
+  const recipePersistence = getRecipePersistenceState(
+    isOnline,
+    promptCapabilities
+  )
+  const savedRecipes = useMemo(
+    () =>
+      (Array.isArray(data) ? data : []).flatMap((prompt: any) =>
+        classifyPromptRecipe(prompt).kind === "recipe"
+          ? [cloneSavedRecipeSource(prompt)]
+          : []
+      ),
+    [data]
+  )
+
   // --- Utility Hooks ---
 
   const utils = usePromptUtilities({ t, data })
@@ -331,6 +369,7 @@ export const PromptBody = () => {
     getPromptRecordById,
     confirmDanger,
     syncPromptAfterLocalSave: sync.syncPromptAfterLocalSave,
+    recipePersistenceAvailable: recipePersistence.available,
     onEmptyTrashSuccess: () => {
       bulk.setTrashSelectedRowKeys([])
     }
@@ -415,7 +454,7 @@ export const PromptBody = () => {
     updateCopilotPrompt, isUpdatingCopilotPrompt,
     copyCopilotPromptToClipboard, copyPromptShareLink,
     insertPrompt, setInsertPrompt,
-    handleInsertChoice, handleUsePromptInChat,
+    handleInsertChoice, handleUsePromptInChat, handleApplyRecipe,
     localQuickTestPrompt, localQuickTestInput, setLocalQuickTestInput,
     localQuickTestOutput, isRunningLocalQuickTest, localQuickTestRunInfo,
     closeLocalQuickTestModal, handleQuickTest, runLocalQuickTest,
@@ -565,6 +604,10 @@ export const PromptBody = () => {
 
     const openPromptDrawer = (promptRecord: any) => {
       clearPromptParam()
+      if (classifyPromptRecipe(promptRecord).kind !== "ordinary") {
+        editor.openFullEditor(promptRecord)
+        return
+      }
       editor.setEditId(promptRecord.id)
       editor.setDrawerOpen(true)
       editor.setDrawerInitialValues({
@@ -872,6 +915,19 @@ export const PromptBody = () => {
 
   // --- Callbacks ---
 
+  const handleOpenCustomPrompt = React.useCallback(
+    (promptId: string) => {
+      const promptRecord = getPromptRecordById(promptId)
+      if (!promptRecord) return
+      if (classifyPromptRecipe(promptRecord).kind !== "ordinary") {
+        editor.openFullEditor(promptRecord)
+        return
+      }
+      openPromptInspector(promptId)
+    },
+    [editor.openFullEditor, getPromptRecordById, openPromptInspector]
+  )
+
   const handleCopyCopilotToCustom = React.useCallback(
     (record: { key?: string; prompt?: string }) => {
       interactions.copyCopilotToCustom(record, editor.openCreateDrawer)
@@ -1118,6 +1174,7 @@ export const PromptBody = () => {
     (row: PromptRowVM) => {
       const promptRecord = getPromptRecordById(row.id)
       const actionDisabled = isFireFoxPrivateMode || !promptRecord
+      const isRecipe = classifyPromptRecipe(promptRecord).kind === "recipe"
       return (
         <PromptActionsMenu
           promptId={row.id}
@@ -1125,6 +1182,7 @@ export const PromptBody = () => {
           syncStatus={row.syncStatus}
           serverId={row.serverId}
           inlineUseInChat={false}
+          isRecipe={isRecipe}
           onEdit={() => {
             if (!promptRecord) return
             editor.openFullEditor(promptRecord)
@@ -1135,12 +1193,20 @@ export const PromptBody = () => {
           }}
           onUseInChat={() => {
             if (!promptRecord) return
+            if (isRecipe) {
+              editor.openFullEditor(promptRecord)
+              return
+            }
             void handleUsePromptInChat(promptRecord)
           }}
-          onQuickTest={() => {
-            if (!promptRecord) return
-            void handleQuickTest(promptRecord)
-          }}
+          onQuickTest={
+            isRecipe
+              ? undefined
+              : () => {
+                  if (!promptRecord) return
+                  void handleQuickTest(promptRecord)
+                }
+          }
           onDelete={() => {
             if (!promptRecord) return
             void editor.handleDeletePrompt(promptRecord)
@@ -1582,7 +1648,10 @@ export const PromptBody = () => {
                   options={[
                     { label: t("managePrompts.filter.all", { defaultValue: "All types" }), value: "all" },
                     { label: t("managePrompts.filter.system", { defaultValue: "System" }), value: "system" },
-                    { label: t("managePrompts.filter.quick", { defaultValue: "Quick" }), value: "quick" }
+                    { label: t("managePrompts.filter.quick", { defaultValue: "Quick" }), value: "quick" },
+                    { label: "Recipes", value: "recipe" },
+                    { label: "System recipes", value: "recipe_system" },
+                    { label: "User recipes", value: "recipe_user" }
                   ]}
                 />
               </div>
@@ -1927,7 +1996,7 @@ export const PromptBody = () => {
             selectedIds={bulk.selectedRowKeys.map((key) => String(key))}
             onQueryChange={handleCustomPromptTableQueryChange}
             onSelectionChange={(ids) => bulk.setSelectedRowKeys(ids)}
-            onRowOpen={openPromptInspector}
+            onRowOpen={handleOpenCustomPrompt}
             onEdit={editor.handleEditPromptById}
             onToggleFavorite={editor.handleTogglePromptFavorite}
             onOpenConflictResolution={sync.openConflictResolution}
@@ -1970,7 +2039,16 @@ export const PromptBody = () => {
                 defaultValue:
                   "Sync unavailable (offline). Showing last known status."
               }),
-              edit: t("managePrompts.tooltip.edit")
+                edit: t("managePrompts.tooltip.edit"),
+                recipe: t("managePrompts.recipe.badge", {
+                  defaultValue: "Recipe"
+                }),
+                recipeSystem: t("managePrompts.recipe.targetSystem", {
+                  defaultValue: "System"
+                }),
+                recipeUser: t("managePrompts.recipe.targetUser", {
+                  defaultValue: "User"
+                })
             }}
             paginationShowTotal={(total, range) =>
               t("managePrompts.pagination.summary", {
@@ -1994,7 +2072,7 @@ export const PromptBody = () => {
                   <PromptGalleryCard
                     key={prompt.id}
                     prompt={prompt}
-                    onClick={() => openPromptInspector(prompt.id)}
+                    onClick={() => handleOpenCustomPrompt(prompt.id)}
                     density={galleryDensity}
                     onToggleFavorite={(next) => editor.handleTogglePromptFavorite(prompt.id, next)}
                   />
@@ -2547,6 +2625,16 @@ export const PromptBody = () => {
         onSubmit={editor.handleFullEditorSubmit}
         isLoading={editor.fullEditorMode === "create" ? editor.savePromptLoading : editor.isUpdatingPrompt}
         allTags={allTags}
+        savedRecipes={savedRecipes}
+        recipePersistenceAvailable={recipePersistence.available}
+        recipePersistenceUnavailableReason={recipePersistence.reason}
+        onApplyRecipe={(compiledText, target) => {
+          if (handleApplyRecipe(compiledText, target)) {
+            editor.closeFullEditor()
+          }
+        }}
+        onSaveRecipeAsNew={editor.handleSaveRecipeAsNew}
+        onUpdateRecipe={editor.handleUpdateRecipe}
       />
     </Suspense>
   )
@@ -2594,7 +2682,10 @@ export const PromptBody = () => {
         }}
         onSelect={(projectId) => {
           if (sync.promptToSync) {
-            sync.pushToStudioMutation({ localId: sync.promptToSync, projectId })
+            sync.pushToStudioMutation({
+              localId: sync.promptToSync,
+              projectId
+            })
           }
         }}
         loading={sync.isPushing}

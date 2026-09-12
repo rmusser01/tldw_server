@@ -139,7 +139,7 @@ type Prompt = {
   serverId?: number | null
   studioProjectId?: number | null
   studioPromptId?: number | null
-  syncStatus?: "local" | "synced" | "pending" | "conflict"
+  syncStatus?: "local" | "synced" | "pending" | "conflict" | "error"
   sourceSystem?: "workspace" | "studio" | "copilot"
   lastSyncedAt?: number | null
   serverUpdatedAt?: string | null
@@ -406,13 +406,25 @@ export class PageAssitDatabase {
       keywords: mergedKeywords ?? prompt.keywords ?? prompt.tags
     }
     const newPrompts = [normalized, ...prompts]
-    this.db.set({ prompts: newPrompts })
+    await this.db.set({ prompts: newPrompts })
   }
 
   async deletePrompt(id: string) {
     const prompts = await this.getAllPrompts()
     const newPrompts = prompts.filter((prompt) => prompt.id !== id)
-    this.db.set({ prompts: newPrompts })
+    await this.db.set({ prompts: newPrompts })
+  }
+
+  async restorePromptSnapshot(snapshot: Prompt) {
+    const prompts = await this.getAllPrompts()
+    if (!prompts.some((prompt) => prompt.id === snapshot.id)) {
+      throw new Error("prompt_snapshot_target_missing")
+    }
+    await this.db.set({
+      prompts: prompts.map((prompt) =>
+        prompt.id === snapshot.id ? structuredClone(snapshot) : prompt
+      )
+    })
   }
 
   async updatePrompt(
@@ -449,7 +461,7 @@ export class PageAssitDatabase {
       }
       return prompt
     })
-    this.db.set({ prompts: newPrompts })
+    await this.db.set({ prompts: newPrompts })
   }
 
   async getPromptById(id: string) {
@@ -800,6 +812,12 @@ export const updatePromptFB = async (
     keywords: mergedKeywords ?? updates.keywords ?? updates.tags
   })
   return updates.id
+}
+
+export const restorePromptSnapshotFB = async (snapshot: Prompt) => {
+  const db = new PageAssitDatabase()
+  await db.restorePromptSnapshot(snapshot)
+  return snapshot.id
 }
 
 export const getPromptById = async (id: string) => {

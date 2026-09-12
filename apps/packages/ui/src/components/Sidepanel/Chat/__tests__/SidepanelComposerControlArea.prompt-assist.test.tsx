@@ -1,7 +1,7 @@
 import { RadialCommandV5 } from "@/components/Chat/composer/variants/RadialCommandV5"
 import { SplitBriefV3 } from "@/components/Chat/composer/variants/SplitBriefV3"
 import { TerminalStackV1 } from "@/components/Chat/composer/variants/TerminalStackV1"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { SidepanelComposerControlArea } from "../SidepanelComposerControlArea"
@@ -13,19 +13,24 @@ const commonProps = {
 }
 
 const casualControlArea = (
-  <SidepanelComposerControlArea
-    promptAssistAction={
-      <button type="button" aria-label="Improve prompt">
-        Improve
+  <div>
+    <button type="button">Secondary action</button>
+    <SidepanelComposerControlArea
+      promptAssistAction={
+        <button type="button" aria-label="Improve prompt">
+          Improve
+        </button>
+      }>
+      <button type="button" aria-label="Send message">
+        Send
       </button>
-    }>
-    <div>Casual controls</div>
-  </SidepanelComposerControlArea>
+    </SidepanelComposerControlArea>
+  </div>
 )
 
 describe("SidepanelComposerControlArea prompt-assist parity", () => {
   it.each(["legacy", "v1", "v3", "v5"] as const)(
-    "renders exactly one casual action through the %s shared control slot",
+    "renders one Improve action immediately before Send through the %s shared control slot",
     (variant) => {
       if (variant === "legacy") {
         render(casualControlArea)
@@ -50,7 +55,14 @@ describe("SidepanelComposerControlArea prompt-assist parity", () => {
       expect(
         screen.getAllByRole("button", { name: "Improve prompt" })
       ).toHaveLength(1)
-      expect(screen.getByText("Casual controls")).toBeInTheDocument()
+      const sendCluster = screen.getByTestId("sidepanel-send-action-cluster")
+      const clusterButtons = within(sendCluster).getAllByRole("button")
+      expect(
+        clusterButtons.map((button) => button.getAttribute("aria-label"))
+      ).toEqual(["Improve prompt", "Send message"])
+      expect(screen.getByRole("button", { name: "Secondary action" })).not.toBe(
+        sendCluster
+      )
     }
   )
 })

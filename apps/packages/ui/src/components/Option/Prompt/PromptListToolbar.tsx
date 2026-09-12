@@ -1,6 +1,7 @@
 import React from "react"
 import { Input, Select } from "antd"
 import { Download, Plus, UploadCloud } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import type { PromptListQueryState } from "./prompt-workspace-types"
 
 type PromptListToolbarV1Props = {
@@ -24,6 +25,7 @@ type PromptListToolbarLegacyProps = {
 type PromptListToolbarProps = PromptListToolbarV1Props | PromptListToolbarLegacyProps
 
 export const PromptListToolbar: React.FC<PromptListToolbarProps> = (props) => {
+  const { t } = useTranslation(["settings"])
   if (props.mode === "legacy") {
     return (
       <div
@@ -98,7 +100,25 @@ export const PromptListToolbar: React.FC<PromptListToolbarProps> = (props) => {
             { label: "All types", value: "all" },
             { label: "System", value: "system" },
             { label: "Quick", value: "quick" },
-            { label: "Mixed", value: "mixed" }
+            { label: "Mixed", value: "mixed" },
+            {
+              label: t("managePrompts.recipe.filters.all", {
+                defaultValue: "Recipes"
+              }),
+              value: "recipe"
+            },
+            {
+              label: t("managePrompts.recipe.filters.system", {
+                defaultValue: "System recipes"
+              }),
+              value: "recipe_system"
+            },
+            {
+              label: t("managePrompts.recipe.filters.user", {
+                defaultValue: "User recipes"
+              }),
+              value: "recipe_user"
+            }
           ]}
         />
         <Select

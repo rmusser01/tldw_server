@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { notification } from "antd"
 import { MemoryRouter, useLocation, useSearchParams } from "react-router-dom"
+import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/built-in-recipes"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import {
   PromptBody,
   PROMPTS_COPILOT_HELP_STORAGE_KEY as COPILOT_HELP_STORAGE_KEY
@@ -12,19 +14,30 @@ import {
 const state = vi.hoisted(() => ({
   isOnline: true,
   privateMode: false,
-  prompts: [] as any[]
+  prompts: [] as any[],
+  canonicalConnectionConfig: {
+    serverUrl: "https://backend-a.test",
+    authMode: "single-user",
+    apiKey: "key-a"
+  } as any,
+  canonicalConnectionLoading: false
 }))
 
 const FILTER_PRESETS_STORAGE_KEY = "tldw-prompt-filter-presets-v1"
 const FILTER_PRESET_HINT_DISMISSED_KEY =
   "tldw-prompt-hint-dismissed-filter-presets"
 const FILTER_PRESET_HINT_SHOWN_KEY = "tldw-prompt-hint-shown-filter-presets"
+const recipeOwner = {
+  ownerId: `recipe-owner:sha256:${"a".repeat(64)}`,
+  authorizationRevision: `recipe-authorization:sha256:${"a".repeat(64)}`
+}
 
 type PromptSyncMockResult = {
   success: boolean
   syncStatus?: string
   localId?: string
   error?: string
+  failureKind?: string
 }
 
 const promptStudioStore = vi.hoisted(() => ({
@@ -50,6 +63,9 @@ const mocks = vi.hoisted(() => ({
   restorePrompt: vi.fn(async (_id?: string | number) => undefined),
   permanentlyDeletePrompt: vi.fn(async () => undefined),
   emptyTrash: vi.fn(async () => 0),
+  fetchPromptCapabilities: vi.fn(),
+  savePrompt: vi.fn(async (payload: any) => ({ id: "saved-id", ...payload })),
+  shouldAutoSyncWorkspacePrompts: vi.fn(async () => false),
   autoSyncPrompt: vi.fn(
     async (_id?: string | number) =>
       ({ success: true, syncStatus: "synced" }) as {
@@ -80,23 +96,23 @@ const mocks = vi.hoisted(() => ({
   hasPromptStudio: vi.fn(),
   navigate: vi.fn(),
   setSelectedQuickPrompt: vi.fn(),
-  setSelectedSystemPrompt: vi.fn()
+  setSelectedSystemPrompt: vi.fn(),
+  setSystemPrompt: vi.fn(),
+  resolveRecipePersistenceOwnerView: vi.fn()
 }))
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (
-      key: string,
-      fallbackOrOptions?: string | { defaultValue?: string; [k: string]: unknown }
-    ) => {
-      if (typeof fallbackOrOptions === "string") return fallbackOrOptions
-      if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
-        return fallbackOrOptions.defaultValue || key
-      }
-      return key
-    }
-  })
+vi.mock("@/services/recipe-persistence-uncertainty", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/recipe-persistence-uncertainty")>()),
+  resolveRecipePersistenceOwnerView: () =>
+    mocks.resolveRecipePersistenceOwnerView()
 }))
+
+vi.mock("react-i18next", async () => {
+  const { createInstance } = await import("i18next")
+  const i18n = createInstance()
+  await i18n.init({ lng: "en", resources: {}, interpolation: { escapeValue: false } })
+  return { useTranslation: () => ({ t: i18n.t.bind(i18n) }) }
+})
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>(
@@ -124,6 +140,7 @@ vi.mock("antd", async () => {
       return (
         <div data-testid={props["data-testid"] || "mock-table"}>
           <div data-testid="table-row-count">{rows.length}</div>
+          <div data-testid="table-total">{props?.pagination?.total ?? rows.length}</div>
           <div data-testid="table-selected-count">{selectedRowKeys.length}</div>
           {rows.map((row: any, index: number) => {
             const rowId = row?.id || row?.key || `row-${index}`
@@ -225,6 +242,13 @@ vi.mock("@/hooks/useServerOnline", () => ({
   useServerOnline: () => state.isOnline
 }))
 
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: state.canonicalConnectionConfig,
+    loading: state.canonicalConnectionLoading
+  })
+}))
+
 vi.mock("@/utils/is-private-mode", () => ({
   get isFireFoxPrivateMode() {
     return state.privateMode
@@ -241,6 +265,14 @@ vi.mock("@/hooks/useMessageOption", () => ({
   })
 }))
 
+vi.mock("@/store/model", () => ({
+  useStoreChatModelSettings: (
+    selector: (state: {
+      setSystemPrompt: typeof mocks.setSystemPrompt
+    }) => unknown
+  ) => selector({ setSystemPrompt: mocks.setSystemPrompt })
+}))
+
 vi.mock("@/components/Common/confirm-danger", () => ({
   useConfirmDanger: () => vi.fn(async () => true)
 }))
@@ -253,6 +285,8 @@ vi.mock("@/services/application", () => ({
 }))
 
 vi.mock("@/services/prompts-api", () => ({
+  fetchPromptCapabilities: (...args: unknown[]) =>
+    (mocks.fetchPromptCapabilities as (...args: unknown[]) => unknown)(...args),
   exportPromptsServer: (...args: unknown[]) =>
     (mocks.exportPromptsServer as (...args: unknown[]) => unknown)(...args),
   searchPromptsServer: (...args: unknown[]) =>
@@ -295,7 +329,10 @@ vi.mock("@/services/prompt-sync", () => ({
     (mocks.pushToStudio as (...args: unknown[]) => unknown)(...args),
   pullFromStudio: (...args: unknown[]) =>
     (mocks.pullFromStudio as (...args: unknown[]) => unknown)(...args),
-  shouldAutoSyncWorkspacePrompts: vi.fn(async () => false),
+  shouldAutoSyncWorkspacePrompts: (...args: unknown[]) =>
+    (mocks.shouldAutoSyncWorkspacePrompts as (...args: unknown[]) => unknown)(
+      ...args
+    ),
   unlinkPrompt: vi.fn(async () => ({ success: true })),
   getConflictInfo: vi.fn(async () => null),
   resolveConflict: vi.fn(async () => ({ success: true })),
@@ -307,10 +344,8 @@ vi.mock("@/db/dexie/helpers", () => ({
     (mocks.deletePromptById as (...args: unknown[]) => unknown)(...args),
   getAllPrompts: (...args: unknown[]) =>
     (mocks.getAllPrompts as (...args: unknown[]) => unknown)(...args),
-  savePrompt: vi.fn(async (payload: any) => ({
-    id: "saved-id",
-    ...payload
-  })),
+  savePrompt: (...args: unknown[]) =>
+    (mocks.savePrompt as (...args: unknown[]) => unknown)(...args),
   updatePrompt: (...args: unknown[]) =>
     (mocks.updatePrompt as (...args: unknown[]) => unknown)(...args),
   incrementPromptUsage: (...args: unknown[]) =>
@@ -343,17 +378,26 @@ vi.mock("../PromptActionsMenu", () => ({
     <div data-testid="mock-prompt-actions-menu">
       <button
         type="button"
-        data-testid={`mock-use-in-chat-${props?.promptId || "unknown"}`}
+        data-testid={`${props?.isRecipe ? "mock-open-recipe" : "mock-use-in-chat"}-${props?.promptId || "unknown"}`}
         onClick={() => props?.onUseInChat?.()}
       >
-        use in chat
+        {props?.isRecipe ? "open recipe editor" : "use in chat"}
       </button>
+      {props?.onQuickTest && (
+        <button
+          type="button"
+          data-testid={`mock-quick-test-${props?.promptId || "unknown"}`}
+          onClick={() => props.onQuickTest()}
+        >
+          quick test
+        </button>
+      )}
       <button
         type="button"
-        data-testid={`mock-quick-test-${props?.promptId || "unknown"}`}
-        onClick={() => props?.onQuickTest?.()}
+        data-testid={`mock-duplicate-${props?.promptId || "unknown"}`}
+        onClick={() => props?.onDuplicate?.()}
       >
-        quick test
+        duplicate
       </button>
       <button
         type="button"
@@ -437,7 +481,7 @@ const renderPromptBody = (
     }
   })
 
-  return render(
+  const tree = () => (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={initialEntries}>
         {extraChildren}
@@ -446,7 +490,29 @@ const renderPromptBody = (
       </MemoryRouter>
     </QueryClientProvider>
   )
+  const rendered = render(tree())
+  return {
+    ...rendered,
+    queryClient,
+    rerenderPromptBody: () => rendered.rerender(tree())
+  }
 }
+
+const savedRecipeRecord = (overrides: Record<string, unknown> = {}) => ({
+  id: "recipe-system",
+  name: "Clear task recipe",
+  title: "Clear task recipe",
+  promptFormat: "structured",
+  promptSchemaVersion: 2,
+  structuredPromptDefinition: structuredClone(CLEAR_TASK_RECIPE.definition),
+  content: "compiled recipe sentinel",
+  system_prompt: "compiled recipe sentinel",
+  user_prompt: "",
+  is_system: true,
+  createdAt: 120,
+  keywords: ["recipe"],
+  ...overrides
+})
 
 describe("PromptBody server search and pagination", () => {
   const setViewportWidth = (width: number) => {
@@ -476,8 +542,31 @@ describe("PromptBody server search and pagination", () => {
     mocks.navigate.mockReset()
     mocks.setSelectedQuickPrompt.mockReset()
     mocks.setSelectedSystemPrompt.mockReset()
+    mocks.setSystemPrompt.mockReset()
     state.privateMode = false
     state.isOnline = true
+    state.canonicalConnectionConfig = {
+      serverUrl: "https://backend-a.test",
+      authMode: "single-user",
+      apiKey: "key-a"
+    }
+    state.canonicalConnectionLoading = false
+    mocks.resolveRecipePersistenceOwnerView.mockResolvedValue(recipeOwner)
+    mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(false)
+    mocks.fetchPromptCapabilities.mockResolvedValue({
+      availability: "available",
+      prompt_improvement_v1: { supported: true, limits: null },
+      single_text_recipe_v2: { supported: true }
+    })
+    mocks.savePrompt.mockImplementation(async (payload: any) => ({
+      id: "saved-id",
+      ...payload
+    }))
+    mocks.autoSyncPrompt.mockResolvedValue({
+      success: true,
+      syncStatus: "synced"
+    })
+    mocks.updatePrompt.mockResolvedValue("updated-id")
     setViewportWidth(1280)
     state.prompts = [
       {
@@ -685,6 +774,7 @@ describe("PromptBody server search and pagination", () => {
       })
     )
     expect(screen.getByTestId("table-row-count")).toHaveTextContent("2")
+    expect(screen.getByTestId("table-total")).toHaveTextContent("3")
 
     fireEvent.click(screen.getByTestId("table-next-page"))
 
@@ -700,6 +790,162 @@ describe("PromptBody server search and pagination", () => {
     await waitFor(() => {
       expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
     })
+  })
+
+  it("merges matching local-only and pending recipes into online search without duplicating synced recipes", async () => {
+    state.prompts = [
+      savedRecipeRecord({
+        id: "recipe-synced",
+        name: "Synced title-only recipe",
+        title: "Synced title-only recipe",
+        serverId: 201,
+        syncStatus: "synced",
+        content: "pending-content synced"
+      }),
+      savedRecipeRecord({
+        id: "recipe-local-only",
+        name: "Local title-only recipe",
+        title: "Local title-only recipe",
+        serverId: null,
+        syncStatus: "local"
+      }),
+      savedRecipeRecord({
+        id: "recipe-pending",
+        name: "Pending recipe",
+        title: "Pending recipe",
+        serverId: null,
+        syncStatus: "pending",
+        content: "pending-content only"
+      }),
+      {
+        id: "ordinary-local-only",
+        name: "Ordinary title-only prompt",
+        title: "Ordinary title-only prompt",
+        content: "pending-content ordinary",
+        is_system: false,
+        syncStatus: "local"
+      }
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    mocks.searchPromptsServer.mockImplementation(async (params: any) => ({
+      items: [{ id: 201, uuid: "s-201", name: `Synced ${params.searchQuery}` }],
+      total_matches: 1,
+      page: 1,
+      per_page: 20
+    }))
+
+    renderPromptBody()
+    const search = await screen.findByRole("textbox", {
+      name: "Search prompts..."
+    })
+    fireEvent.change(search, { target: { value: "title-only" } })
+    await new Promise((resolve) => setTimeout(resolve, 320))
+    await waitFor(() =>
+      expect(getVisibleRowNames()).toEqual([
+        "Synced title-only recipe",
+        "Local title-only recipe",
+        "Ordinary title-only prompt"
+      ])
+    )
+
+    fireEvent.change(search, { target: { value: "pending-content" } })
+    await new Promise((resolve) => setTimeout(resolve, 320))
+    await waitFor(() =>
+      expect(getVisibleRowNames()).toEqual([
+        "Synced title-only recipe",
+        "Pending recipe",
+        "Ordinary title-only prompt"
+      ])
+    )
+  })
+
+  it("paginates the complete mixed local result set when a recipe overlay is present", async () => {
+    const ordinarySynced = Array.from({ length: 20 }, (_, index) => ({
+      id: `ordinary-synced-${index + 1}`,
+      name: `Mixed overlay match ${String(index + 1).padStart(2, "0")}`,
+      title: `Mixed overlay match ${String(index + 1).padStart(2, "0")}`,
+      content: "ordinary synced result",
+      is_system: false,
+      serverId: 301 + index,
+      syncStatus: "synced",
+      createdAt: 1_000 - index
+    }))
+    const syncedRecipe = savedRecipeRecord({
+      id: "recipe-overlay-synced",
+      name: "Mixed overlay match synced recipe",
+      title: "Mixed overlay match synced recipe",
+      serverId: 321,
+      syncStatus: "synced",
+      createdAt: 980
+    })
+    const localOnly = savedRecipeRecord({
+      id: "recipe-overlay-local",
+      name: "Mixed overlay match local only",
+      title: "Mixed overlay match local only",
+      serverId: null,
+      syncStatus: "local",
+      createdAt: 2
+    })
+    const pending = savedRecipeRecord({
+      id: "recipe-overlay-pending",
+      name: "Mixed overlay match pending edit",
+      title: "Mixed overlay match pending edit",
+      serverId: 399,
+      syncStatus: "pending",
+      createdAt: 1
+    })
+    const syncedRecords = [...ordinarySynced, syncedRecipe]
+    state.prompts = [...syncedRecords, localOnly, pending]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    mocks.searchPromptsServer.mockImplementation(async (params: any) => ({
+      items:
+        params.page === 1
+          ? syncedRecords.slice(0, 20).map((prompt) => ({
+              id: prompt.serverId,
+              uuid: `server-${prompt.serverId}`,
+              name: prompt.name
+            }))
+          : syncedRecords.slice(20).map((prompt) => ({
+              id: prompt.serverId,
+              uuid: `server-${prompt.serverId}`,
+              name: prompt.name
+            })),
+      total_matches: 21,
+      page: params.page,
+      per_page: 20
+    }))
+
+    renderPromptBody()
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "Search prompts..." }),
+      { target: { value: "mixed overlay match" } }
+    )
+    await new Promise((resolve) => setTimeout(resolve, 320))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("20")
+    )
+    expect(screen.getByTestId("table-total")).toHaveTextContent("23")
+    const firstPage = getVisibleRowNames()
+    expect(new Set(firstPage).size).toBe(20)
+
+    fireEvent.click(screen.getByTestId("table-next-page"))
+    await waitFor(() =>
+      expect(mocks.searchPromptsServer).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 2 })
+      )
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    await waitFor(() =>
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("3")
+    )
+    const secondPage = getVisibleRowNames()
+    expect(secondPage).toEqual([
+      "Mixed overlay match synced recipe",
+      "Mixed overlay match local only",
+      "Mixed overlay match pending edit"
+    ])
+    expect(new Set([...firstPage, ...secondPage]).size).toBe(23)
   })
 
   it("falls back to local filtering when offline", async () => {
@@ -740,6 +986,440 @@ describe("PromptBody server search and pagination", () => {
     })
     expect(getVisibleRowNames()).toEqual(["Beta Prompt"])
     expect(mocks.searchPromptsServer).not.toHaveBeenCalled()
+  })
+
+  it("groups, filters, searches, and opens recipes in the builder while offline", async () => {
+    state.isOnline = false
+    state.prompts = [
+      savedRecipeRecord(),
+      {
+        id: "ordinary-quick",
+        name: "Ordinary quick prompt",
+        title: "Ordinary quick prompt",
+        content: "ordinary content",
+        is_system: false,
+        createdAt: 100,
+        keywords: []
+      }
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+
+    renderPromptBody()
+
+    expect(await screen.findByText("Recipe")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("mock-duplicate-recipe-system"))
+    expect(mocks.savePrompt).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("facet-type-recipe_system"))
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
+    })
+
+    const search = screen.getByRole("textbox", { name: "Search prompts..." })
+    fireEvent.change(search, { target: { value: "Clear task recipe" } })
+    await new Promise((resolve) => setTimeout(resolve, 320))
+    expect(getVisibleRowNames()).toEqual(["Clear task recipe"])
+
+    fireEvent.change(search, { target: { value: "compiled recipe sentinel" } })
+    await new Promise((resolve) => setTimeout(resolve, 320))
+    expect(getVisibleRowNames()).toEqual(["Clear task recipe"])
+
+    fireEvent.click(screen.getByTestId("prompt-row-recipe-system"))
+    expect(
+      await screen.findByTestId("single-field-recipe-editor")
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId("prompts-inspector-panel-scaffold")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Update recipe" })).toBeDisabled()
+    expect(screen.getByText(/Recipe saving is unavailable offline/)).toBeInTheDocument()
+    expect(mocks.savePrompt).not.toHaveBeenCalled()
+  })
+
+  it("applies compiled recipes through the real target-aware chat handoff", async () => {
+    const userDefinition = structuredClone(CLEAR_TASK_RECIPE.definition)
+    userDefinition.assembly_config.target_role = "user"
+    userDefinition.blocks = userDefinition.blocks?.map((block) => ({
+      ...block,
+      role: "user"
+    }))
+    state.prompts = [
+      savedRecipeRecord(),
+      savedRecipeRecord({
+        id: "recipe-user",
+        name: "User recipe",
+        title: "User recipe",
+        structuredPromptDefinition: userDefinition,
+        content: "compiled user recipe sentinel",
+        system_prompt: "",
+        user_prompt: "compiled user recipe sentinel",
+        is_system: false
+      })
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+
+    renderPromptBody()
+    fireEvent.click(await screen.findByTestId("prompt-row-recipe-system"))
+    fireEvent.change(
+      await screen.findByRole("textbox", {
+        name: "Current value for Task (not saved)"
+      }),
+      { target: { value: "System task" } }
+    )
+    const systemPreview = (
+      screen.getByRole("textbox", {
+        name: "Compiled prompt preview"
+      }) as HTMLTextAreaElement
+    ).value
+    fireEvent.click(
+      screen.getByRole("button", { name: "Apply to system prompt" })
+    )
+
+    expect(mocks.setSystemPrompt).toHaveBeenCalledWith(systemPreview)
+    expect(mocks.setSelectedSystemPrompt).not.toHaveBeenCalled()
+    expect(mocks.setSelectedQuickPrompt).not.toHaveBeenCalled()
+    expect(mocks.navigate).toHaveBeenCalledWith("/chat")
+
+    fireEvent.click(await screen.findByTestId("prompt-row-recipe-user"))
+    fireEvent.change(
+      await screen.findByRole("textbox", {
+        name: "Current value for Task (not saved)"
+      }),
+      { target: { value: "User task" } }
+    )
+    const userPreview = (
+      screen.getByRole("textbox", {
+        name: "Compiled prompt preview"
+      }) as HTMLTextAreaElement
+    ).value
+    fireEvent.click(
+      screen.getByRole("button", { name: "Apply to user message" })
+    )
+
+    expect(mocks.setSelectedQuickPrompt).toHaveBeenCalledWith(userPreview)
+    expect(mocks.setSelectedSystemPrompt).not.toHaveBeenCalled()
+    expect(mocks.setSystemPrompt).toHaveBeenCalledTimes(1)
+    expect(mocks.navigate).toHaveBeenLastCalledWith("/chat")
+  })
+
+  it("routes recipe row actions to the builder without legacy insert or quick test", async () => {
+    state.prompts = [savedRecipeRecord()]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+
+    renderPromptBody()
+
+    fireEvent.click(await screen.findByTestId("mock-open-recipe-recipe-system"))
+    expect(
+      await screen.findByTestId("single-field-recipe-editor")
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByTestId("mock-quick-test-recipe-system")
+    ).not.toBeInTheDocument()
+    expect(mocks.setSelectedQuickPrompt).not.toHaveBeenCalled()
+    expect(mocks.setSelectedSystemPrompt).not.toHaveBeenCalled()
+    expect(mocks.createChatCompletion).not.toHaveBeenCalled()
+  })
+
+  it("fails closed when the normalized backend identity changes", async () => {
+    let resolveBackendB!: (value: any) => void
+    const backendB = new Promise((resolve) => {
+      resolveBackendB = resolve
+    })
+    mocks.fetchPromptCapabilities
+      .mockResolvedValueOnce({
+        availability: "available",
+        prompt_improvement_v1: { supported: true, limits: null },
+        single_text_recipe_v2: { supported: true }
+      })
+      .mockReturnValueOnce(backendB)
+    state.prompts = [savedRecipeRecord()]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+
+    const rendered = renderPromptBody()
+    fireEvent.click(await screen.findByTestId("prompt-row-recipe-system"))
+    await screen.findByTestId(
+      "single-field-recipe-editor",
+      {},
+      { timeout: 3000 }
+    )
+    const save = await screen.findByRole("button", {
+      name: "Save as new recipe"
+    })
+    await waitFor(() => expect(save).toBeEnabled())
+
+    state.canonicalConnectionConfig = {
+      serverUrl: "https://backend-b.test",
+      authMode: "single-user",
+      apiKey: "key-b"
+    }
+    rendered.rerenderPromptBody()
+
+    await waitFor(() =>
+      expect(mocks.fetchPromptCapabilities).toHaveBeenCalledTimes(2)
+    )
+    expect(save).toBeDisabled()
+    expect(
+      rendered.queryClient.getQueryCache().find({
+        queryKey: [
+          "promptCapabilities",
+          buildChatSurfaceScopeKeyFromConfig(state.canonicalConnectionConfig)
+        ]
+      })
+    ).toBeDefined()
+
+    resolveBackendB({
+      availability: "available",
+      prompt_improvement_v1: { supported: true, limits: null },
+      single_text_recipe_v2: { supported: true }
+    })
+    await waitFor(() => expect(save).toBeEnabled())
+  })
+
+  it("saves new recipes and updates the exact saved source with strict snapshots", async () => {
+    state.prompts = [
+      savedRecipeRecord({
+        favorite: true,
+        author: "Recipe author",
+        details: "Recipe details"
+      })
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+
+    renderPromptBody()
+    fireEvent.click(await screen.findByTestId("prompt-row-recipe-system"))
+
+    const updateButton = await screen.findByRole("button", {
+      name: "Update recipe"
+    })
+    await waitFor(() => expect(updateButton).toBeEnabled())
+    fireEvent.click(updateButton)
+
+    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledTimes(1))
+    const updated = mocks.updatePrompt.mock.calls[0]?.[0]
+    expect(updated).toMatchObject({
+      id: "recipe-system",
+      promptFormat: "structured",
+      promptSchemaVersion: 2,
+      is_system: true,
+      user_prompt: "",
+      keywords: ["recipe"],
+      favorite: true,
+      author: "Recipe author",
+      details: "Recipe details"
+    })
+    expect(updated.system_prompt).toBe(updated.content)
+    expect(updated.content).toContain("{{task}}")
+    expect(JSON.stringify(updated)).not.toMatch(
+      /runtimeValues|runtime_values|variable_values|resolved_values/
+    )
+
+    const saveButton = screen.getByRole("button", {
+      name: "Save as new recipe"
+    })
+    await waitFor(() => expect(saveButton).toBeEnabled())
+    fireEvent.click(saveButton)
+
+    await waitFor(() => expect(mocks.savePrompt).toHaveBeenCalledTimes(1))
+    const saved = mocks.savePrompt.mock.calls[0]?.[0]
+    expect(saved).toMatchObject({
+      title: "Clear task recipe (Copy)",
+      promptFormat: "structured",
+      promptSchemaVersion: 2,
+      is_system: true,
+      user_prompt: ""
+    })
+    expect(saved.system_prompt).toBe(saved.content)
+    expect(saved.content).toContain("{{task}}")
+    expect(JSON.stringify(saved)).not.toMatch(
+      /runtimeValues|runtime_values|variable_values|resolved_values/
+    )
+  })
+
+  it("updates a same-target saved recipe selected from starter mode", async () => {
+    state.prompts = []
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    const rendered = renderPromptBody()
+    await screen.findByTestId("prompt-starter-cards")
+    fireEvent.click(screen.getByTestId("starter-use-structured-recipe"))
+
+    const savedSystemRecipe = savedRecipeRecord({
+      id: "recipe-saved-system",
+      name: "Saved system recipe",
+      title: "Saved system recipe"
+    })
+    const userDefinition = structuredClone(CLEAR_TASK_RECIPE.definition)
+    userDefinition.assembly_config.target_role = "user"
+    userDefinition.blocks = userDefinition.blocks?.map((block) => ({
+      ...block,
+      role: "user"
+    }))
+    rendered.queryClient.setQueryData(
+      ["fetchAllPrompts"],
+      [
+        savedSystemRecipe,
+        savedRecipeRecord({
+          id: "recipe-opposite-target",
+          name: "Opposite target recipe",
+          title: "Opposite target recipe",
+          structuredPromptDefinition: userDefinition,
+          system_prompt: "",
+          user_prompt: "compiled user recipe sentinel",
+          is_system: false
+        })
+      ]
+    )
+
+    const source = await screen.findByRole("combobox", {
+      name: "Recipe source"
+    })
+    expect(
+      screen.getByRole("option", { name: "Saved system recipe" })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("option", { name: "Opposite target recipe" })
+    ).not.toBeInTheDocument()
+    fireEvent.change(source, {
+      target: { value: "saved:recipe-saved-system" }
+    })
+    const updateButton = screen.getByRole("button", { name: "Update recipe" })
+    await waitFor(() => expect(updateButton).toBeEnabled())
+    fireEvent.click(updateButton)
+
+    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledTimes(1))
+    expect(mocks.updatePrompt.mock.calls[0]?.[0]).toMatchObject({
+      id: "recipe-saved-system",
+      name: "Saved system recipe"
+    })
+  })
+
+  it("updates recipe B after selecting it while recipe A was opened", async () => {
+    state.prompts = [
+      savedRecipeRecord({
+        id: "recipe-a",
+        name: "Recipe A",
+        title: "Recipe A"
+      }),
+      savedRecipeRecord({
+        id: "recipe-b",
+        name: "Recipe B",
+        title: "Recipe B"
+      })
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+
+    renderPromptBody()
+    fireEvent.click(await screen.findByTestId("prompt-row-recipe-a"))
+    fireEvent.change(
+      await screen.findByRole("combobox", { name: "Recipe source" }),
+      {
+        target: { value: "saved:recipe-b" }
+      }
+    )
+    const updateButton = screen.getByRole("button", { name: "Update recipe" })
+    await waitFor(() => expect(updateButton).toBeEnabled())
+    fireEvent.click(updateButton)
+
+    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledTimes(1))
+    expect(mocks.updatePrompt.mock.calls[0]?.[0]).toMatchObject({
+      id: "recipe-b",
+      name: "Recipe B"
+    })
+  })
+
+  it("keeps a positively supported recipe locally pending after transient sync failure", async () => {
+    const warningSpy = vi.spyOn(notification, "warning")
+    state.prompts = [savedRecipeRecord()]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(true)
+    mocks.autoSyncPrompt.mockResolvedValue({
+      success: false,
+      syncStatus: "pending",
+      failureKind: "transient",
+      error: "temporary sync failure"
+    })
+
+    renderPromptBody()
+    fireEvent.click(await screen.findByTestId("prompt-row-recipe-system"))
+    const saveButton = await screen.findByRole("button", {
+      name: "Save as new recipe"
+    })
+    await waitFor(() => expect(saveButton).toBeEnabled())
+    fireEvent.click(saveButton)
+
+    await waitFor(() => {
+      expect(mocks.savePrompt).toHaveBeenCalledTimes(1)
+      expect(mocks.autoSyncPrompt).toHaveBeenCalledWith("saved-id", undefined, {
+        expectedOwnerId: recipeOwner.ownerId
+      })
+      expect(warningSpy).toHaveBeenCalled()
+    })
+    const warning = warningSpy.mock.calls.at(-1)?.[0] as
+      | { description?: string }
+      | undefined
+    expect(warning?.description).toContain("saved locally")
+  })
+
+  it.each([
+    {
+      label: "validation",
+      result: {
+        success: false,
+        syncStatus: "local",
+        failureKind: "validation",
+        error: "invalid prompt definition"
+      }
+    },
+    {
+      label: "invalid server payload",
+      result: {
+        success: false,
+        syncStatus: "pending",
+        failureKind: "invalid_server_payload",
+        error: "invalid server payload"
+      }
+    },
+    {
+      label: "unclassified authorization or unsupported response",
+      result: {
+        success: false,
+        syncStatus: "pending",
+        error: "server rejected recipe sync"
+      }
+    }
+  ])("surfaces $label recipe sync failures as errors", async ({ result }) => {
+    const warningSpy = vi.spyOn(notification, "warning")
+    state.prompts = [savedRecipeRecord()]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    mocks.shouldAutoSyncWorkspacePrompts.mockResolvedValue(true)
+    mocks.autoSyncPrompt.mockResolvedValue(result)
+
+    renderPromptBody()
+    fireEvent.click(await screen.findByTestId("prompt-row-recipe-system"))
+    const saveButton = await screen.findByRole("button", {
+      name: "Save as new recipe"
+    })
+    await waitFor(() => expect(saveButton).toBeEnabled())
+    fireEvent.click(saveButton)
+
+    expect(
+      await screen.findByText("Could not save the recipe. Try again.")
+    ).toBeInTheDocument()
+    expect(warningSpy).not.toHaveBeenCalled()
+    expect(screen.getByTestId("single-field-recipe-editor")).toBeInTheDocument()
+  })
+
+  it("keeps conflict recipes in the conflict flow without an Update affordance", async () => {
+    state.prompts = [
+      savedRecipeRecord({ syncStatus: "conflict", serverId: 201 })
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+
+    renderPromptBody()
+    fireEvent.click(await screen.findByTestId("prompt-row-recipe-system"))
+    await screen.findByTestId("single-field-recipe-editor")
+
+    expect(
+      screen.queryByRole("button", { name: "Update recipe" })
+    ).not.toBeInTheDocument()
+    expect(mocks.updatePrompt).not.toHaveBeenCalled()
+    expect(mocks.autoSyncPrompt).not.toHaveBeenCalled()
   })
 
   it("saves the current custom filters from the toolbar", async () => {
@@ -1248,7 +1928,9 @@ describe("PromptBody server search and pagination", () => {
     fireEvent.click(screen.getByTestId("mock-sync-status-retry"))
 
     await waitFor(() => {
-      expect(mocks.pushToStudio).toHaveBeenCalledWith("pending-retry", 77)
+      expect(mocks.pushToStudio).toHaveBeenCalledWith("pending-retry", 77, {
+        expectedOwnerId: recipeOwner.ownerId
+      })
     })
     await waitFor(() => {
       expect(screen.queryByTestId("prompts-batch-sync-status")).not.toBeInTheDocument()
@@ -1258,7 +1940,9 @@ describe("PromptBody server search and pagination", () => {
     fireEvent.click(screen.getByTestId("mock-retry-sync-pending-retry"))
 
     await waitFor(() => {
-      expect(mocks.pushToStudio).toHaveBeenCalledWith("pending-retry", 77)
+      expect(mocks.pushToStudio).toHaveBeenCalledWith("pending-retry", 77, {
+        expectedOwnerId: recipeOwner.ownerId
+      })
     })
   })
 

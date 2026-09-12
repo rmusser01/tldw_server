@@ -6,7 +6,6 @@ import { ComposerToolbar } from "../ComposerToolbar"
 
 const assistantSelectMock = vi.hoisted(() => vi.fn())
 const promptSelectMock = vi.hoisted(() => vi.fn())
-const promptAssistComposerMock = vi.hoisted(() => vi.fn())
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -39,13 +38,6 @@ vi.mock("@/components/Common/AssistantSelect", () => ({
     return (
       <div data-testid="character-select" data-variant={props.variant ?? ""} />
     )
-  }
-}))
-
-vi.mock("@/components/Chat/composer/PromptAssistComposerAction", () => ({
-  PromptAssistComposerAction: (props: unknown) => {
-    promptAssistComposerMock(props)
-    return <button type="button" aria-label="Improve prompt" />
   }
 }))
 
@@ -171,45 +163,20 @@ describe("ComposerToolbar web search", () => {
       isMobile: true,
       optionsExpanded: false
     }
-  ])("renders one composer prompt action for $label", (layout) => {
-    const promptAssistComposer = {
-      form: {
-        values: { message: "User draft", image: "" },
-        setFieldValue: vi.fn()
-      },
-      messageRevision: 7,
-      modelSelection: {
-        selected_model: "gpt-5-mini",
-        provider_hint: "openai"
-      },
-      promptAssistContextKey: "local:history-42",
-      promptAssistBackendKey: "backend-a",
-      sending: false,
-      surfaceOpen: true,
-      onReturnFocus: vi.fn()
-    }
-
+  ])("does not render the external composer action for $label", (layout) => {
     render(
       <ComposerToolbar
         {...createProps({
           isProMode: layout.isProMode,
           isMobile: layout.isMobile,
-          optionsExpanded: layout.optionsExpanded,
-          promptAssistComposer
-        } as any)}
+          optionsExpanded: layout.optionsExpanded
+        })}
       />
     )
 
     expect(
-      screen.getAllByRole("button", { name: "Improve prompt" })
-    ).toHaveLength(1)
-    expect(promptAssistComposerMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ...promptAssistComposer,
-        narrow: layout.isMobile,
-        onSelectModel: expect.any(Function)
-      })
-    )
+      screen.queryByRole("button", { name: "Improve prompt" })
+    ).not.toBeInTheDocument()
   })
 
   it("passes the active chat route to system prompt assist", () => {

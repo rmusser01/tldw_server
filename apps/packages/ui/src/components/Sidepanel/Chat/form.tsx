@@ -52,7 +52,10 @@ import { appendDictationTranscript } from "@/components/Chat/composer/utils"
 import { useTemporaryChatToggle } from "@/hooks/useTemporaryChatToggle"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
-import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import {
+  buildChatSurfaceScopeKeyFromConfig,
+  derivePromptAssistAuthorizationRevision
+} from "@/services/chat-surface-scope"
 import { useComposerVoiceChat } from "@/components/Chat/composer/hooks/useComposerVoiceChat"
 import {
   COMPOSER_CONSTANTS,
@@ -313,6 +316,13 @@ export const SidepanelForm = ({
       canonicalConnectionLoading || !canonicalConnectionConfig
         ? null
         : buildChatSurfaceScopeKeyFromConfig(canonicalConnectionConfig),
+    [canonicalConnectionConfig, canonicalConnectionLoading]
+  )
+  const promptAssistAuthorizationRevision = React.useMemo(
+    () =>
+      canonicalConnectionLoading || !canonicalConnectionConfig
+        ? null
+        : derivePromptAssistAuthorizationRevision(canonicalConnectionConfig),
     [canonicalConnectionConfig, canonicalConnectionLoading]
   )
   const [ttsProvider] = useStorage("ttsProvider", "browser")
@@ -3086,6 +3096,7 @@ export const SidepanelForm = ({
               )}
               <div className="flex">
                 <form
+                  data-prompt-assist-collision-surface
                   onSubmit={(event) => {
                     event.preventDefault()
                     void submitForm()
@@ -3344,6 +3355,36 @@ export const SidepanelForm = ({
                         </>
                       )
 
+                      const promptAssistAction = (
+                        <PromptAssistComposerAction
+                          form={form}
+                          messageRevision={messageRevision}
+                          promptAssistMutation={promptAssistMutation}
+                          promptAssistSavedAttemptId={promptAssistSavedAttemptId}
+                          modelSelection={selectedModel?.trim()
+                            ? {
+                                selected_model: selectedModel,
+                                provider_hint:
+                                  currentChatApiProvider ?? undefined
+                              }
+                            : null}
+                          promptAssistContextKey={serverChatId
+                            ? `server:${serverChatId}`
+                            : historyId
+                              ? `local:${historyId}`
+                              : "local:sidepanel-draft"}
+                          promptAssistBackendKey={promptAssistBackendKey}
+                          promptAssistAuthorizationRevision={
+                            promptAssistAuthorizationRevision
+                          }
+                          sending={isSending || streaming}
+                          surfaceOpen
+                          narrow
+                          onSelectModel={() => setOpenModelSettings(true)}
+                          onReturnFocus={promptAssistReturnFocus}
+                        />
+                      )
+
                       const composerControlAreaNode = (
                         <div className="mt-2 flex min-w-0 flex-col gap-2">
                       <Tooltip title={persistenceTooltip}>
@@ -3363,35 +3404,6 @@ export const SidepanelForm = ({
                         </div>
                       </Tooltip>
                       <div className="flex w-full min-w-0 flex-row flex-wrap items-center justify-between gap-1.5">
-                      <SidepanelComposerControlArea
-                        promptAssistAction={
-                          <PromptAssistComposerAction
-                            form={form}
-                            messageRevision={messageRevision}
-                            promptAssistMutation={promptAssistMutation}
-                            promptAssistSavedAttemptId={
-                              promptAssistSavedAttemptId
-                            }
-                            modelSelection={selectedModel?.trim()
-                              ? {
-                                  selected_model: selectedModel,
-                                  provider_hint:
-                                    currentChatApiProvider ?? undefined
-                                }
-                              : null}
-                            promptAssistContextKey={serverChatId
-                              ? `server:${serverChatId}`
-                              : historyId
-                                ? `local:${historyId}`
-                                : "local:sidepanel-draft"}
-                            promptAssistBackendKey={promptAssistBackendKey}
-                            sending={isSending || streaming}
-                            surfaceOpen
-                            narrow
-                            onSelectModel={() => setOpenModelSettings(true)}
-                            onReturnFocus={promptAssistReturnFocus}
-                          />
-                        }>
                       {isProMode ? (
                         <>
                           {/* Control Row - contains Prompt, Model, RAG, and More tools */}
@@ -3414,6 +3426,9 @@ export const SidepanelForm = ({
                                     : "local:sidepanel-draft"
                               }
                               promptAssistBackendKey={promptAssistBackendKey}
+                              promptAssistAuthorizationRevision={
+                                promptAssistAuthorizationRevision
+                              }
                               conversationContextComposition={
                                 conversationContextComposition.composition
                               }
@@ -3617,7 +3632,9 @@ export const SidepanelForm = ({
                                     </button>
                                   </Tooltip>
                                 )}
-                                <Space.Compact>
+                                <SidepanelComposerControlArea
+                                  promptAssistAction={promptAssistAction}>
+                                  <Space.Compact>
                                   <button
                                     aria-label={primaryActionAriaLabel}
                                     data-testid="chat-send"
@@ -3752,7 +3769,8 @@ export const SidepanelForm = ({
                                       </svg>
                                     </button>
                                   </Dropdown>
-                                </Space.Compact>
+                                  </Space.Compact>
+                                </SidepanelComposerControlArea>
                                 <Tooltip
                                   title={
                                     t("common:currentChatModelSettings") as string
@@ -3970,6 +3988,8 @@ export const SidepanelForm = ({
                                 </span>
                               </div>
                             )}
+                            <SidepanelComposerControlArea
+                              promptAssistAction={promptAssistAction}>
                             <Button
                               type={shouldQueuePrimaryAction ? "button" : "submit"}
                               onClick={
@@ -3987,10 +4007,10 @@ export const SidepanelForm = ({
                             >
                               {primaryActionLabel}
                             </Button>
+                            </SidepanelComposerControlArea>
                           </div>
                         </>
                       )}
-                      </SidepanelComposerControlArea>
                         </div>
                         </div>
                       )
@@ -4284,6 +4304,8 @@ export const SidepanelForm = ({
                           </>
                         )
                         const v5SendSlot = (
+                          <SidepanelComposerControlArea
+                            promptAssistAction={promptAssistAction}>
                           <Button
                             type={shouldQueuePrimaryAction ? "button" : "submit"}
                             onClick={
@@ -4303,6 +4325,7 @@ export const SidepanelForm = ({
                           >
                             {primaryActionLabel}
                           </Button>
+                          </SidepanelComposerControlArea>
                         )
 
                         const variantNode =

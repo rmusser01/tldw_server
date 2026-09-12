@@ -1,0 +1,622 @@
+[
+  {
+    "name": "unsafe-positive-order",
+    "definition": {
+      "schema_version": 2, "format": "structured", "definition_kind": "single_text_recipe",
+      "assembly_config": {"assembly_mode": "single_text", "target_role": "system", "render_format": "freeform"},
+      "blocks": [{"id": "a", "name": "A", "role": "system", "content": "", "order": 9007199254740992}]
+    },
+    "expected_error_code": "less_than_equal"
+  },
+  {
+    "name": "unsafe-negative-order-even-if-disabled",
+    "definition": {
+      "schema_version": 2, "format": "structured", "definition_kind": "single_text_recipe",
+      "assembly_config": {"assembly_mode": "single_text", "target_role": "system", "render_format": "freeform"},
+      "blocks": [{"id": "a", "name": "A", "role": "system", "content": "", "order": -9007199254740992, "enabled": false}]
+    },
+    "expected_error_code": "greater_than_equal"
+  },
+  {
+    "name": "fractional-order",
+    "definition": {
+      "schema_version": 2, "format": "structured", "definition_kind": "single_text_recipe",
+      "assembly_config": {"assembly_mode": "single_text", "target_role": "system", "render_format": "freeform"},
+      "blocks": [{"id": "a", "name": "A", "role": "system", "content": "", "order": 1.5}]
+    },
+    "expected_error_code": "int_type"
+  },
+  {
+    "name": "boolean-order",
+    "definition": {
+      "schema_version": 2, "format": "structured", "definition_kind": "single_text_recipe",
+      "assembly_config": {"assembly_mode": "single_text", "target_role": "system", "render_format": "freeform"},
+      "blocks": [{"id": "a", "name": "A", "role": "system", "content": "", "order": true}]
+    },
+    "expected_error_code": "int_type"
+  },
+  {
+    "name": "string-order",
+    "definition": {
+      "schema_version": 2, "format": "structured", "definition_kind": "single_text_recipe",
+      "assembly_config": {"assembly_mode": "single_text", "target_role": "system", "render_format": "freeform"},
+      "blocks": [{"id": "a", "name": "A", "role": "system", "content": "", "order": "1"}]
+    },
+    "expected_error_code": "int_type"
+  },
+  {
+    "name": "required-missing",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x",
+          "required": true
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_error_code": "missing_required_variable"
+  },
+  {
+    "name": "required-null-default-means-absent",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x",
+          "required": true,
+          "default_value": null
+        }
+      ],
+      "blocks": []
+    },
+    "runtimeValues": {},
+    "expected_error_code": "missing_required_variable"
+  },
+  {
+    "name": "unknown-template-not-authorized-by-runtime",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{unknown}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {
+      "unknown": "ignored"
+    },
+    "expected_error_code": "unknown_variable_reference"
+  },
+  {
+    "name": "disabled-unknown-template-is-invalid-definition",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{unknown}}",
+          "order": 10,
+          "is_template": true,
+          "enabled": false
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_error_code": "unknown_variable_reference"
+  },
+  {
+    "name": "xml-authored-closing-tag",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "xml",
+        "block_separator": "\n\n"
+      },
+      "variables": [],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "before </a> after",
+          "order": 10,
+          "section_key": "a"
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_error_code": "closing_tag_collision"
+  },
+  {
+    "name": "xml-runtime-closing-tag",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "xml",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "section_key": "a",
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {
+      "x": "secret </a>"
+    },
+    "expected_error_code": "closing_tag_collision"
+  },
+  {
+    "name": "xml-closing-tag-created-across-substitution",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "xml",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "</{{x}}>",
+          "order": 10,
+          "section_key": "a",
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {
+      "x": "a"
+    },
+    "expected_error_code": "closing_tag_collision"
+  },
+  {
+    "name": "runtime-null-rejected",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x",
+          "required": true,
+          "default_value": "default"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {
+      "x": null
+    },
+    "expected_error_code": "invalid_variable_value"
+  },
+  {
+    "name": "runtime-boolean-rejected",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x",
+          "required": true,
+          "default_value": "default"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {
+      "x": false
+    },
+    "expected_error_code": "invalid_variable_value"
+  },
+  {
+    "name": "runtime-number-rejected",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x",
+          "required": true,
+          "default_value": "default"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {
+      "x": 12.5
+    },
+    "expected_error_code": "invalid_variable_value"
+  },
+  {
+    "name": "runtime-array-rejected",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x",
+          "required": true,
+          "default_value": "default"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {
+      "x": [
+        "a"
+      ]
+    },
+    "expected_error_code": "invalid_variable_value"
+  },
+  {
+    "name": "runtime-object-rejected",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x",
+          "required": true,
+          "default_value": "default"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {
+      "x": {
+        "private": "do not echo"
+      }
+    },
+    "expected_error_code": "invalid_variable_value"
+  },
+  {
+    "name": "selected-nonstring-default-rejected",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x",
+          "default_value": true
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_error_code": "invalid_variable_value"
+  },
+  {
+    "name": "output-limit-exceeded-codepoints",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_error_code": "rendered_output_too_large",
+    "runtime_repeats": {
+      "x": {
+        "text": "😀",
+        "count": 100001
+      }
+    }
+  },
+  {
+    "name": "xml-wrapper-exceeds-output-limit",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "xml",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "section_key": "a",
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_error_code": "rendered_output_too_large",
+    "runtime_repeats": {
+      "x": {
+        "text": "x",
+        "count": 99994
+      }
+    }
+  },
+  {
+    "name": "separator-exceeds-output-limit",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "!"
+      },
+      "variables": [
+        {
+          "name": "x"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "is_template": true
+        },
+        {
+          "id": "b",
+          "name": "b",
+          "role": "system",
+          "content": "",
+          "order": 20
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_error_code": "rendered_output_too_large",
+    "runtime_repeats": {
+      "x": {
+        "text": "x",
+        "count": 100000
+      }
+    }
+  },
+  {
+    "name": "markdown-heading-exceeds-output-limit",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "markdown",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_error_code": "rendered_output_too_large",
+    "runtime_repeats": {
+      "x": {
+        "text": "x",
+        "count": 99995
+      }
+    }
+  }
+]
