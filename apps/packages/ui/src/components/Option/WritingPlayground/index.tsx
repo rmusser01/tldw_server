@@ -504,7 +504,8 @@ export const WritingPlayground = () => {
   const isSceneEditorPending = isSceneNodeSelected && !isSceneBound
   const isEditorLocked = isGenerating || isSceneEditorPending
   const generationBinding = JSON.stringify([
-    activeSessionId, activeProjectId, activeNodeType, activeNodeId, activeSceneId
+    activeSessionId, activeProjectId, activeNodeType, activeNodeId, activeSceneId,
+    activeSceneVersion
   ])
   const generationBindingRef = React.useRef(generationBinding)
   generationBindingRef.current = generationBinding

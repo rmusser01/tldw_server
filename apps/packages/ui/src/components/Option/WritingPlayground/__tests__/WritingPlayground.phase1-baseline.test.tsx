@@ -1010,6 +1010,28 @@ describe("WritingPlayground phase1 baseline", () => {
       expect(snapshot.release).toHaveBeenCalledTimes(1)
     })
 
+    it.each([false, true])("preserves a refreshed scene version before the first continuation response with streaming=%s", async (streaming) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Session prompt", settings: { token_streaming: streaming } })
+      seedManuscriptScene("Original scene", { version: 1 })
+      useWritingPlaygroundStore.setState({ activeProjectId: "project-1", activeNodeType: "scene", activeNodeId: "scene-1" })
+      const response = deferred<string>()
+      mockState.sendResponses.push(response.promise)
+      mockState.streamResults.push((async function* () { yield await response.promise })())
+      const view = render(<WritingPlayground />)
+      await waitFor(() => expect(getEditor()).toHaveValue("Original scene"))
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await waitFor(() => expect(mockState.responseCallbacks).toHaveLength(1))
+
+      seedManuscriptScene("Newer saved scene", { version: 2 })
+      view.rerender(<WritingPlayground />)
+      await waitFor(() => expect(getEditor()).toHaveValue("Newer saved scene"))
+      await act(async () => { response.resolve(" stale continuation") })
+
+      expect(getEditor()).toHaveValue("Newer saved scene")
+      expect(screen.getByTitle("Undo generation")).toBeDisabled()
+    })
+
     it("does not overwrite independent editor edits during invalidation", async () => {
       mockState.storageValues.set("selectedModel", "mock-model")
       seedWritingSession({ prompt: "Opening" })

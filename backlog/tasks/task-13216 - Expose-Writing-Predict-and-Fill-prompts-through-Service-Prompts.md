@@ -1,16 +1,16 @@
 ---
 id: TASK-13216
 title: Expose Writing Predict and Fill prompts through Service Prompts
-status: Done
+status: In Progress
 assignee: []
-created_date: 2026-09-07 21:52
-updated_date: 2026-09-07 23:16
+created_date: '2026-09-07 21:52'
+updated_date: '2026-09-12 15:09'
 labels: []
 dependencies: []
-documentation:
-- Docs/Design/writing-continuation-service-prompts.md
 references:
-- https://github.com/rmusser01/tldw_server/pull/2931
+  - 'https://github.com/rmusser01/tldw_server/pull/2931'
+documentation:
+  - Docs/Design/writing-continuation-service-prompts.md
 ---
 
 ## Description
@@ -50,6 +50,10 @@ Known limitations and baseline output: full frontend builds and live-browser che
 Stage 3 remains in progress pending controller full base-to-head review, plan removal and temporary dependency-symlink cleanup. This record does not claim whole-branch approval.
 
 Final review found and test-first fixed provisional continuation autosave through revision controls in 3f67f71fa4. Scoped re-review approved all findings addressed. Final combined UI run: 388/388 across 13 files; backend 101/101. Post-fix TypeScript 158 diagnostics exactly matches baseline. Production Bandit zero findings; Ruff clean; changed-file ESLint zero errors with baseline warnings. All implementation stages complete; task-owned implementation plan removed and dependency symlinks cleaned. Adjacent unchanged idle Apply persistence issue tracked separately as TASK-13217. Earlier in-progress notes are superseded by this final closeout.
+
+2026-09-12: Rebased PR #2931 onto origin/dev 0a5d0d6e0a, preserving both additions in the extension locale conflict. Verifying Qodo findings on scene-version ownership and non-streaming cancellation test-first before republishing.
+
+2026-09-12 review verification: Qodo scene-version overwrite reproduced in both modes (2 failing regressions), fixed by including activeSceneVersion in operation binding (2 passing). Full client union 390/390 across 13 files; backend registry/API 101/101. Production Bandit 0 findings/errors, Ruff clean, changed-file ESLint 0 errors/27 baseline warnings. Rebased shared-UI TypeScript reports 192 diagnostics, none in the two changed files; latest-dev comparison is being finalized in an isolated archive. Independent review approved. Qodo cancellation finding verified false positive: parent abort chains to snapshot scopeSignal before release and reaches non-streaming transport; replied in its thread. Rebased locale JSON is valid and preserves both feature additions. Temporary dependency symlinks removed. Awaiting current-head Qodo/CI and PR-specific human-summary decision.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -57,6 +61,7 @@ Final review found and test-first fixed provisional continuation autosave throug
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented independent literal Predict/Fill Service Prompts in shared WebUI/extension Settings using existing registry, storage and 404-compatible defaults. Non-chat generation captures one scope-bound snapshot; chat precedence and provider/context/stop behavior remain unchanged. Operation ownership and revision mutation guards prevent stale or invalidated continuation output from reaching editor state, history or autosave. Task reviews and final scoped fix review approved. Final verification: 388 client tests across 13 files plus 101 backend tests pass; Ruff clean; production Bandit zero findings; ESLint zero errors with baseline warnings; five locale entries match; post-fix TypeScript158 diagnostics exactly matches baseline. Full builds/live-browser checks not run. Two unrelated TTS failures reproduced original base. Separate unchanged idle-Apply save issue tracked as TASK-13217. Implementation plan and temporary dependency symlinks removed; branch ready for user-selected integration.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
