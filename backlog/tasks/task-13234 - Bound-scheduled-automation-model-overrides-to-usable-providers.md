@@ -1,7 +1,7 @@
 ---
 id: TASK-13234
 title: 'Bound scheduled-automation model overrides to usable providers at authoring time'
-status: In Progress
+status: Done
 assignee:
   - '@robert'
 created_date: '2026-08-30 00:00'
