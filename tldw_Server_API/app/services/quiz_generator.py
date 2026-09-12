@@ -21,7 +21,7 @@ from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
 )
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.exceptions import BadRequestError, OsceVerificationError
+from tldw_Server_API.app.core.exceptions import BadRequestError, OsceVerificationError, QuizMalformedOutputError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
@@ -458,15 +458,15 @@ def _normalize_emq_mc_answer(raw: Any, options: list[str]) -> int:
 def _normalize_best_of_five_answer(raw: Any, options: list[str]) -> int:
     """Return a strict zero-based answer index for a Best-of-Five question."""
     if isinstance(raw, bool):
-        raise ValueError(
+        raise QuizMalformedOutputError(
             "Best-of-Five correct_answer must be an integer, A-E letter, or exact option label"
         )
     if isinstance(raw, int):
         if 0 <= raw < len(options):
             return raw
-        raise ValueError("Best-of-Five correct_answer index is out of range")
+        raise QuizMalformedOutputError("Best-of-Five correct_answer index is out of range")
     if not isinstance(raw, str):
-        raise ValueError(
+        raise QuizMalformedOutputError(
             "Best-of-Five correct_answer must be an integer, A-E letter, or exact option label"
         )
 
@@ -485,8 +485,8 @@ def _normalize_best_of_five_answer(raw: Any, options: list[str]) -> int:
     if len(candidates) == 1:
         return candidates.pop()
     if candidates:
-        raise ValueError("Best-of-Five correct_answer is ambiguous")
-    raise ValueError(
+        raise QuizMalformedOutputError("Best-of-Five correct_answer is ambiguous")
+    raise QuizMalformedOutputError(
         "Best-of-Five correct_answer must be an integer, A-E letter, or exact option label"
     )
 
@@ -1038,7 +1038,7 @@ def _normalize_questions(
         if is_assertion_reasoning and q_type != "multiple_choice":
             raise ValueError("Assertion / Reasoning questions must use the multiple_choice question type")
         if is_best_of_five and q_type != "multiple_choice":
-            raise ValueError("Best-of-Five questions must use the multiple_choice question type")
+            raise QuizMalformedOutputError("Best-of-Five questions must use the multiple_choice question type")
         if q_type not in DEFAULT_QUESTION_TYPES and not is_emq:
             continue
         if is_assertion_reasoning:
@@ -1086,17 +1086,19 @@ def _normalize_questions(
                     max_options=None if profile_id == "best_of_five" else mc_option_count,
                 )
                 if profile_id == "best_of_five" and len(options) != 5:
-                    raise ValueError("Best-of-Five questions must include exactly 5 options")
+                    raise QuizMalformedOutputError("Best-of-Five questions must include exactly 5 options")
                 if profile_id == "best_of_five" and len(
                     {option.casefold() for option in options}
                 ) != len(options):
-                    raise ValueError("Best-of-Five questions must not include duplicate option labels")
+                    raise QuizMalformedOutputError("Best-of-Five questions must not include duplicate option labels")
                 if is_emq:
                     correct_answer = raw.get("correct_answer")
                 elif profile_id == "best_of_five":
                     correct_answer = _normalize_best_of_five_answer(
                         raw.get("correct_answer"), options
                     )
+                    if not isinstance(raw.get("explanation"), str) or not explanation:
+                        raise QuizMalformedOutputError("Best-of-Five questions must include a nonempty explanation")
                 else:
                     correct_answer = _normalize_mc_answer(
                         raw.get("correct_answer"), options

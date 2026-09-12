@@ -194,6 +194,10 @@ class ClaimsAnalyticsExportError(RuntimeError):
         self.http_status = http_status
 
 
+class QuizMalformedOutputError(ValueError):
+    """Generated quiz content violates a required output contract."""
+
+
 class OsceGenerationError(ValueError):
     """Base class for bounded OSCE generation failures."""
 

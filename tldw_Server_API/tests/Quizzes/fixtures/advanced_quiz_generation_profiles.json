@@ -234,6 +234,13 @@
   },
   "malformed_output_cases": [
     {
+      "id": "best_of_five_missing_explanation",
+      "profile": "best_of_five",
+      "mode": "normalize_reject",
+      "error": "nonempty explanation",
+      "output": {"questions": [{"question_type": "multiple_choice", "question_text": "Choose the best answer.", "options": ["A", "B", "C", "D", "E"], "correct_answer": 0, "source_citations": [{"source_type": "note", "source_id": "note-advanced-quiz"}]}]}
+    },
+    {
       "id": "question_count_mismatch",
       "profile": "standard_recall",
       "mode": "planned_reject",
@@ -336,8 +343,8 @@
     {
       "id": "assertion_reasoning_unlabeled_question_text",
       "profile": "assertion_reasoning",
-      "mode": "assertion_schema_reject",
-      "error": "labeled assertion and reason",
+      "mode": "normalize_reject",
+      "error": "assertion must contain",
       "output": {"questions": [{"question_type": "multiple_choice", "question_text": "The assertion and reason labels are missing.", "group_id": null, "group_prompt": null, "options": ["Both the assertion and reason are true, and the reason correctly explains the assertion.", "Both the assertion and reason are true, but the reason does not explain the assertion.", "The assertion is true, but the reason is false.", "The assertion is false, but the reason is true.", "Both the assertion and reason are false."], "correct_answer": 0, "explanation": "A concise rationale.", "tags": ["assertion_reasoning"]}]}
     },
     {

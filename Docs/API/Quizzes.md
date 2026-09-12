@@ -118,7 +118,8 @@ questions.
 Each output is a `multiple_choice` question with exactly five distinct options, a
 zero-based `correct_answer`, a source-backed explanation, and one canonical
 `best_of_five` tag in addition to optional topic tags. Generation rejects an
-invalid option count or answer instead of guessing. Take Quiz renders the five
+invalid option count or answer, or a missing, blank, or non-string explanation,
+instead of guessing. Take Quiz renders the five
 options as an ordinary single-answer question. The profile constrains shape but
 cannot guarantee that model-generated distractors are equally plausible.
 
