@@ -61,7 +61,43 @@ tests, touched-scope lint and Bandit, then independent code review.
 
 ## Verification results
 
-At `3f67f71fa4`, the final 13-file shared UI union passed 388/388 tests. The backend
+### Rebased code revision `5265b6b90f` (2026-09-12)
+
+These results supersede the pre-rebase verification below. The branch was rebased
+onto `dev` at `0a5d0d6e0a`. Qodo's scene-refresh finding was reproduced by two
+regression tests, then fixed by including `activeSceneVersion` in continuation
+ownership. Both streaming and non-streaming requests now discard a late response
+after a newer saved scene version replaces their starting binding.
+
+- The 13-file client regression union passed **390/390** tests; the backend
+  Service Prompts registry/API pair passed **101/101** tests.
+- The shared UI typecheck reported **192 diagnostics**, identical to latest
+  `dev` after line/column normalization. No new diagnostics were introduced.
+- Changed-file ESLint reported zero errors and 27 baseline warnings; Ruff
+  passed and production-registry Bandit reported zero findings/errors.
+- Independent review approved the scene-version fix. Qodo subsequently marked
+  the scene finding resolved and dismissed the cancellation finding: the local
+  controller already aborts the snapshot transport signal before lease release.
+- The production WebUI build completed successfully in
+  [container-build-check](https://github.com/rmusser01/tldw_server/actions/runs/34701380058/job/103573643658),
+  running `bun run build:prod` through `Dockerfiles/Dockerfile.webui`. The log
+  confirms a fresh compilation, not merely a restored build artifact.
+- The production Chrome extension build, `bun run build:chrome:prod`, completed
+  successfully in the
+  [frontend-required job](https://github.com/rmusser01/tldw_server/actions/runs/34701380036/job/103574310043).
+  Both CI runs identify `5265b6b90f` as their head revision.
+- As checked at 15:34 UTC, backend, container, coverage, E2E, security and trusted
+  frontend-license gates had passed. The overall frontend-required job was still
+  running later lifecycle/admin checks; its successful extension build does not
+  imply that the entire job had finished. Live-browser smoke was not run locally.
+
+Any later documentation-only revision retains this code-verification provenance;
+merge readiness still requires the GitHub gates on that revision, rather than
+assuming these earlier check results apply to a new head.
+
+### Historical pre-rebase verification
+
+At `3f67f71fa4`, the then-final 13-file shared UI union passed 388/388 tests. The backend
 registry/API pair passed 101/101 tests with 14 existing environment/deprecation
 warnings. Ruff passed for the registry and its two test modules. Bandit reported
 zero findings and zero errors across the 748-line production registry module.

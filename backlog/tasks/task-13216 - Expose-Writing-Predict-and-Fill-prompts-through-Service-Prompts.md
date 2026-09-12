@@ -3,14 +3,14 @@ id: TASK-13216
 title: Expose Writing Predict and Fill prompts through Service Prompts
 status: In Progress
 assignee: []
-created_date: '2026-09-07 21:52'
-updated_date: '2026-09-12 15:09'
+created_date: 2026-09-07 21:52
+updated_date: 2026-09-12 15:36
 labels: []
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/pull/2931'
+- https://github.com/rmusser01/tldw_server/pull/2931
 documentation:
-  - Docs/Design/writing-continuation-service-prompts.md
+- Docs/Design/writing-continuation-service-prompts.md
 ---
 
 ## Description
@@ -59,9 +59,8 @@ Final review found and test-first fixed provisional continuation autosave throug
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented independent literal Predict/Fill Service Prompts in shared WebUI/extension Settings using existing registry, storage and 404-compatible defaults. Non-chat generation captures one scope-bound snapshot; chat precedence and provider/context/stop behavior remain unchanged. Operation ownership and revision mutation guards prevent stale or invalidated continuation output from reaching editor state, history or autosave. Task reviews and final scoped fix review approved. Final verification: 388 client tests across 13 files plus 101 backend tests pass; Ruff clean; production Bandit zero findings; ESLint zero errors with baseline warnings; five locale entries match; post-fix TypeScript158 diagnostics exactly matches baseline. Full builds/live-browser checks not run. Two unrelated TTS failures reproduced original base. Separate unchanged idle-Apply save issue tracked as TASK-13217. Implementation plan and temporary dependency symlinks removed; branch ready for user-selected integration.
+Implemented independent literal Predict/Fill Service Prompts using the existing registry, owner storage, shared Settings and 404-compatible defaults. Non-chat requests retain scope-bound snapshots; chat and provider/context/stop behavior remain unchanged. Rebased code revision 5265b6b90f fixes Qodo's scene-version overwrite with two red/green regressions; Qodo marked it resolved and dismissed the cancellation claim after verifying parent-to-snapshot abort propagation. Current local verification: 390 client tests and 101 backend tests pass; TypeScript 192 diagnostics exactly matches latest dev; ESLint zero errors with baseline warnings, Ruff clean, Bandit zero findings/errors. Production WebUI and Chrome extension builds succeeded in current-code CI; overall frontend-required remained in progress at 15:34 UTC. Design verification updated with exact revision/build links and historical results clearly labeled. TASK-13217 remains separate. Awaiting current-head checks/review and human Change summary or explicit PR-specific waiver before merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
