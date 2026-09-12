@@ -15,6 +15,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Drawer } from "antd"
 import React from "react"
+import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 
 import type { ComposerPromptAssistMutation } from "./hooks/useComposerText"
@@ -33,6 +34,106 @@ type ComposerForm = Pick<
 type ControllerMutation = {
   fromRevision: number
   expectedValue: string
+}
+
+type FeedbackPosition = {
+  left: number
+  top: number
+}
+
+function PromptAssistFeedbackOverlay({
+  anchorRef,
+  children
+}: {
+  anchorRef: React.RefObject<HTMLElement | null>
+  children: React.ReactNode
+}) {
+  const overlayRef = React.useRef<HTMLDivElement>(null)
+  const [portalTarget, setPortalTarget] = React.useState<HTMLElement | null>(
+    null
+  )
+  const [position, setPosition] = React.useState<FeedbackPosition | null>(null)
+
+  React.useLayoutEffect(() => {
+    const body = typeof document === "undefined" ? null : document.body
+    setPortalTarget(body)
+  }, [])
+
+  React.useLayoutEffect(() => {
+    if (!portalTarget) return
+    let animationFrame: number | null = null
+
+    const updatePosition = () => {
+      const anchor = anchorRef.current
+      const overlay = overlayRef.current
+      if (!anchor || !overlay) return
+      const inset = 8
+      const anchorRect = anchor.getBoundingClientRect()
+      let composerTop = anchorRect.top
+      let ancestor = anchor.parentElement
+      while (ancestor && ancestor !== document.body) {
+        const draft = Array.from(
+          ancestor.querySelectorAll<HTMLElement>(
+            "textarea, [contenteditable='true'], input:not([type='hidden']):not([type='button']):not([type='submit'])"
+          )
+        ).find((candidate) => {
+          const rect = candidate.getBoundingClientRect()
+          const style = window.getComputedStyle(candidate)
+          return (
+            rect.width > 0 &&
+            rect.height > 0 &&
+            style.display !== "none" &&
+            style.visibility !== "hidden"
+          )
+        })
+        if (draft) {
+          composerTop = Math.min(composerTop, draft.getBoundingClientRect().top)
+          break
+        }
+        ancestor = ancestor.parentElement
+      }
+      const overlayRect = overlay.getBoundingClientRect()
+      setPosition({
+        left: Math.min(
+          Math.max(inset, anchorRect.right - overlayRect.width),
+          Math.max(inset, window.innerWidth - inset - overlayRect.width)
+        ),
+        top: Math.max(inset, composerTop - inset - overlayRect.height)
+      })
+    }
+
+    const schedulePosition = () => {
+      if (animationFrame !== null) cancelAnimationFrame(animationFrame)
+      animationFrame = requestAnimationFrame(() => {
+        animationFrame = null
+        updatePosition()
+      })
+    }
+
+    updatePosition()
+    window.addEventListener("resize", schedulePosition)
+    window.addEventListener("scroll", schedulePosition, true)
+    return () => {
+      window.removeEventListener("resize", schedulePosition)
+      window.removeEventListener("scroll", schedulePosition, true)
+      if (animationFrame !== null) cancelAnimationFrame(animationFrame)
+    }
+  }, [anchorRef, portalTarget])
+
+  if (!portalTarget) return null
+  return createPortal(
+    <div
+      ref={overlayRef}
+      style={{
+        left: position?.left ?? 0,
+        top: position?.top ?? 0,
+        visibility: position ? undefined : "hidden"
+      }}
+      className="fixed z-[1100] flex w-max max-w-[calc(100vw-1rem)] flex-wrap items-center gap-2 rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-lg">
+      {children}
+    </div>,
+    portalTarget
+  )
 }
 
 export type PromptAssistComposerActionProps = {
@@ -397,7 +498,7 @@ export function PromptAssistComposerAction({
       />
 
       {promptAssist.state.status === "applied" ? (
-        <div className="absolute bottom-full right-0 z-40 mb-2 flex w-max max-w-[calc(100vw-1rem)] flex-wrap items-center gap-2 rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-lg">
+        <PromptAssistFeedbackOverlay anchorRef={promptAssistTriggerRef}>
           <span role="status" className="text-xs text-muted-foreground">
             {t("common:promptAssist.applied", "Improvement applied.")}
           </span>
@@ -415,18 +516,18 @@ export function PromptAssistComposerAction({
               {t("common:promptAssist.undo", "Undo improvement")}
             </Button>
           ) : null}
-        </div>
+        </PromptAssistFeedbackOverlay>
       ) : null}
 
       {recipeUndo ? (
-        <div className="absolute bottom-full right-0 z-40 mb-2 flex w-max max-w-[calc(100vw-1rem)] flex-wrap items-center gap-2 rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-lg">
+        <PromptAssistFeedbackOverlay anchorRef={promptAssistTriggerRef}>
           <span role="status" className="text-xs text-muted-foreground">
             {t("common:promptAssist.recipeApplied", "Recipe applied.")}
           </span>
           <Button variant="outline" size="sm" onClick={undoRecipe}>
             {t("common:promptAssist.undoRecipe", "Undo recipe")}
           </Button>
-        </div>
+        </PromptAssistFeedbackOverlay>
       ) : null}
 
       <Drawer

@@ -416,7 +416,19 @@ test.describe("WebUI prompt improvement parity", () => {
       )
 
       await page.getByRole("button", { name: /Improve now/ }).click()
-      await expect(cluster.getByText("Improvement applied.")).toBeVisible()
+      const improvementStatus = page
+        .locator('[role="status"]')
+        .filter({ hasText: /^Improvement applied\.$/ })
+        .filter({ visible: true })
+        .first()
+      await expect(improvementStatus).toBeVisible()
+      const feedbackBox = await improvementStatus.locator("..").boundingBox()
+      expect(feedbackBox).not.toBeNull()
+      expect(feedbackBox!.x).toBeGreaterThanOrEqual(0)
+      expect(feedbackBox!.y).toBeGreaterThanOrEqual(0)
+      expect(feedbackBox!.x + feedbackBox!.width).toBeLessThanOrEqual(
+        viewport.width,
+      )
       await expect.poll(() => cluster.evaluate((element) => element.offsetHeight)).toBe(
         clusterHeight,
       )
@@ -637,5 +649,49 @@ test.describe("WebUI prompt improvement parity", () => {
       contentType: "application/json",
     })
     expect(results.violations).toEqual([])
+  })
+
+  test("640px review and recipe drawers both retain the full-width mobile presentation", async ({ page }) => {
+    await page.setViewportSize({ width: 640, height: 844 })
+    await prepareChat(page)
+    await page.getByTestId("chat-input").first().fill(USER_DRAFT)
+
+    const expectFullWidthDrawer = async (name: string) => {
+      const dialog = page.getByRole("dialog", { name })
+      await expect(dialog).toBeVisible()
+      const readDrawer = () =>
+        dialog.evaluate((element) => {
+          const wrapper = element.closest(".ant-drawer-content-wrapper")
+          const rect = (wrapper ?? element).getBoundingClientRect()
+          return { left: rect.left, right: rect.right, width: rect.width }
+        })
+      await expect
+        .poll(async () => Math.round((await readDrawer()).width))
+        .toBe(640)
+      await expect
+        .poll(async () => Math.round((await readDrawer()).left))
+        .toBe(0)
+      const box = await readDrawer()
+      expect(Math.round(box.left)).toBe(0)
+      expect(Math.round(box.right)).toBe(640)
+    }
+
+    await openPromptActions(page)
+    await page
+      .getByRole("group", { name: "Prompt improvement actions" })
+      .getByRole("button", { name: /Review changes/ })
+      .click()
+    await expectFullWidthDrawer("Prompt improvement")
+    await page.keyboard.press("Escape")
+    await expect(
+      page.getByRole("dialog", { name: "Prompt improvement" })
+    ).not.toBeVisible()
+
+    await openPromptActions(page)
+    await page
+      .getByRole("group", { name: "Prompt improvement actions" })
+      .getByRole("button", { name: /Build from recipe/ })
+      .click()
+    await expectFullWidthDrawer("Build from recipe")
   })
 })

@@ -430,9 +430,11 @@ describe("PromptAssistComposerAction entry and request contract", () => {
     expect(trigger).not.toHaveTextContent("Improve my prompt")
 
     await user.click(trigger)
-    expect(
-      screen.getByRole("group", { name: "Prompt improvement actions" })
-    ).toHaveClass("bottom-full", "mb-2")
+    const actions = screen.getByRole("group", {
+      name: "Prompt improvement actions"
+    })
+    expect(actions).toHaveClass("fixed")
+    expect(actions.parentElement).toBe(document.body)
   })
 
   it("keeps local recipe work usable when the real extension owner facade rejects", async () => {
@@ -818,7 +820,10 @@ describe("PromptAssistComposerAction entry and request contract", () => {
         availability: "available",
         prompt_improvement_v1: { supported: true, limits: null },
         single_text_recipe_v2: { supported: true },
-        prompt_persistence: { create_authorized: true, update_authorized: true }
+        prompt_persistence: {
+          create_authorized: true,
+          update_authorized: true
+        }
       })
       await old.promise
     })
@@ -960,7 +965,10 @@ describe("PromptAssistComposerAction entry and request contract", () => {
         availability: "available",
         prompt_improvement_v1: { supported: true, limits: null },
         single_text_recipe_v2: { supported: true },
-        prompt_persistence: { create_authorized: true, update_authorized: true }
+        prompt_persistence: {
+          create_authorized: true,
+          update_authorized: true
+        }
       })
       const user = userEvent.setup()
       const view = renderHarness({
@@ -1015,9 +1023,11 @@ describe("PromptAssistComposerAction entry and request contract", () => {
     expect(screen.getByLabelText("User draft")).toHaveValue(preview)
     expect(mocks.improvePrompt).not.toHaveBeenCalled()
     expect(screen.getByText("Recipe applied.").parentElement).toHaveClass(
-      "absolute",
-      "bottom-full"
+      "fixed"
     )
+    expect(
+      screen.getByText("Recipe applied.").parentElement?.parentElement
+    ).toBe(document.body)
     await user.click(screen.getByRole("button", { name: "Undo recipe" }))
     expect(
       (screen.getByLabelText("User draft") as HTMLTextAreaElement).value
@@ -1485,9 +1495,11 @@ describe("PromptAssistComposerAction review application", () => {
       screen.getByRole("button", { name: "Undo improvement" })
     ).toBeInTheDocument()
     expect(screen.getByText("Improvement applied.").parentElement).toHaveClass(
-      "absolute",
-      "bottom-full"
+      "fixed"
     )
+    expect(
+      screen.getByText("Improvement applied.").parentElement?.parentElement
+    ).toBe(document.body)
   })
 
   it("requires confirmation before replacing a draft edited after review began", async () => {

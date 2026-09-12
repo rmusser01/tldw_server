@@ -19,7 +19,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 describe("PromptAssistMenu", () => {
-  it("renders the composer presentation as an icon-only 44px action that opens upward", async () => {
+  it("renders the composer presentation as an icon-only 44px action in a body-level upward overlay", async () => {
     const user = userEvent.setup()
     render(
       <PromptAssistMenu
@@ -42,8 +42,78 @@ describe("PromptAssistMenu", () => {
     const actions = screen.getByRole("group", {
       name: "Prompt improvement actions"
     })
-    expect(actions).toHaveClass("bottom-full", "mb-2")
-    expect(actions).not.toHaveClass("top-full", "mt-2")
+    expect(actions).toHaveClass("fixed")
+    expect(actions.parentElement).toBe(document.body)
+    expect(trigger.parentElement).not.toContainElement(actions)
+  })
+
+  it("keeps focus transitions into the upward overlay and restores the trigger on Escape", async () => {
+    const user = userEvent.setup()
+    render(
+      <>
+        <PromptAssistMenu
+          draft="Draft"
+          capability="supported"
+          modelSelection={{ selected_model: "auto" }}
+          onImproveNow={vi.fn()}
+          onReviewChanges={vi.fn()}
+          compact
+          placement="top"
+        />
+        <button>After prompt actions</button>
+      </>
+    )
+
+    const trigger = screen.getByRole("button", { name: "Improve prompt" })
+    trigger.focus()
+    await user.keyboard("{Enter}")
+    await user.tab()
+    expect(screen.getByRole("button", { name: /Improve now/ })).toHaveFocus()
+    await user.keyboard("{Escape}")
+    expect(trigger).toHaveFocus()
+    expect(
+      screen.queryByRole("group", { name: "Prompt improvement actions" })
+    ).not.toBeInTheDocument()
+
+    await user.click(trigger)
+    await user.tab()
+    await user.tab()
+    await user.tab()
+    expect(
+      screen.getByRole("button", { name: "After prompt actions" })
+    ).toHaveFocus()
+    expect(
+      screen.queryByRole("group", { name: "Prompt improvement actions" })
+    ).not.toBeInTheDocument()
+
+    await user.click(trigger)
+    await user.click(
+      screen.getByRole("button", { name: "After prompt actions" })
+    )
+    expect(
+      screen.queryByRole("group", { name: "Prompt improvement actions" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps the default downward disclosure inline for non-composer surfaces", async () => {
+    const user = userEvent.setup()
+    render(
+      <PromptAssistMenu
+        draft="Draft"
+        capability="supported"
+        modelSelection={{ selected_model: "auto" }}
+        onImproveNow={vi.fn()}
+        onReviewChanges={vi.fn()}
+      />
+    )
+
+    const trigger = screen.getByRole("button", { name: "Improve prompt" })
+    await user.click(trigger)
+    const actions = screen.getByRole("group", {
+      name: "Prompt improvement actions"
+    })
+    expect(actions).toHaveClass("absolute", "top-full", "mt-2")
+    expect(trigger.parentElement).toContainElement(actions)
   })
 
   it("adds recipe building as the third PromptAssist action", async () => {

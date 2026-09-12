@@ -527,6 +527,71 @@ const openPromptActions = async (page: Page, scope: Page | Locator = page) => {
   return { trigger, actions }
 }
 
+const clickThroughPaintedCenter = async (page: Page, target: Locator) => {
+  const readHitTest = () =>
+    target.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      const point = {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2
+      }
+      const hit = document.elementFromPoint(point.x, point.y)
+      return {
+        matches: Boolean(hit && (hit === element || element.contains(hit))),
+        point,
+        targetRect: rect.toJSON(),
+        hitClass: hit instanceof HTMLElement ? hit.className : "",
+        hitTag: hit?.tagName ?? null,
+        hitText: hit?.textContent?.trim().slice(0, 120) ?? null
+      }
+    })
+  await expect.poll(async () => (await readHitTest()).matches).toBe(true)
+  const hitTest = await readHitTest()
+  const point = hitTest.point
+  await page.mouse.click(point.x, point.y)
+}
+
+const expectLayoutNeutralFeedback = async (
+  page: Page,
+  feedback: Locator,
+  input: Locator,
+  sendCluster: Locator,
+  initialCluster: { width: number; height: number }
+) => {
+  const [feedbackBox, inputBox, clusterBox, viewport] = await Promise.all([
+    feedback.boundingBox(),
+    input.boundingBox(),
+    sendCluster.boundingBox(),
+    page.evaluate(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight
+    }))
+  ])
+  expect(feedbackBox).not.toBeNull()
+  expect(inputBox).not.toBeNull()
+  expect(clusterBox).not.toBeNull()
+  expect(feedbackBox!.x).toBeGreaterThanOrEqual(0)
+  expect(feedbackBox!.y).toBeGreaterThanOrEqual(0)
+  expect(feedbackBox!.x + feedbackBox!.width).toBeLessThanOrEqual(
+    viewport.width
+  )
+  expect(feedbackBox!.y + feedbackBox!.height).toBeLessThanOrEqual(
+    viewport.height
+  )
+  const intersects = (
+    a: { x: number; y: number; width: number; height: number },
+    b: { x: number; y: number; width: number; height: number }
+  ) =>
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
+  expect(intersects(feedbackBox!, inputBox!)).toBe(false)
+  expect(intersects(feedbackBox!, clusterBox!)).toBe(false)
+  expect(clusterBox!.width).toBe(initialCluster.width)
+  expect(clusterBox!.height).toBe(initialCluster.height)
+}
+
 const assertPromptRequest = (
   request: RecordedRequest,
   expected: { target: "system" | "user_message"; text: string }
@@ -900,6 +965,62 @@ test.describe("Packaged extension prompt improvement parity", () => {
     }
   })
 
+  test("640px options chat keeps both review and recipe drawers full width", async () => {
+    test.setTimeout(120_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "options", {
+        viewport: { width: 640, height: 844 }
+      })
+      context = launched.context
+      const page = launched.chatPage
+      const input = await ensureChatInput(page)
+      await input.fill("640px {{topic}} drawer draft.")
+
+      const expectFullWidthDrawer = async (name: string) => {
+        const dialog = page.getByRole("dialog", { name })
+        await expect(dialog).toBeVisible()
+        const readDrawer = () =>
+          dialog.evaluate((element) => {
+            const wrapper =
+              element.closest(".ant-drawer-content-wrapper") ?? element
+            const rect = wrapper.getBoundingClientRect()
+            return { left: rect.left, right: rect.right, width: rect.width }
+          })
+        await expect
+          .poll(async () => Math.round((await readDrawer()).width))
+          .toBe(640)
+        await expect
+          .poll(async () => Math.round((await readDrawer()).left))
+          .toBe(0)
+        const box = await readDrawer()
+        expect(Math.round(box.right)).toBe(640)
+      }
+
+      const review = await openPromptActions(page)
+      await clickThroughPaintedCenter(
+        page,
+        review.actions.getByRole("button", { name: /Review changes/ })
+      )
+      await expectFullWidthDrawer("Prompt improvement")
+      await page.keyboard.press("Escape")
+      await expect(
+        page.getByRole("dialog", { name: "Prompt improvement" })
+      ).not.toBeVisible()
+
+      const recipe = await openPromptActions(page)
+      await clickThroughPaintedCenter(
+        page,
+        recipe.actions.getByRole("button", { name: /Build from recipe/ })
+      )
+      await expectFullWidthDrawer("Build from recipe")
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
   test("sidepanel never overwrites typing committed while Improve now is pending", async () => {
     test.setTimeout(120_000)
     const mock = await startPromptMockServer()
@@ -1052,9 +1173,10 @@ test.describe("Packaged extension prompt improvement parity", () => {
       })
       await expect(input).toHaveValue("Improved user request for {{topic}}.")
       const appliedStatus = page
-        .getByTestId("chat-messages")
         .getByRole("status")
-        .filter({ hasText: "Improvement applied." })
+        .filter({ hasText: /^Improvement applied\.$/ })
+        .filter({ visible: true })
+        .first()
       await expect(appliedStatus).toBeVisible()
       await expect(
         appliedStatus
@@ -1188,6 +1310,245 @@ test.describe("Packaged extension prompt improvement parity", () => {
         await expect(actions).toBeFocused()
       }
       expect(mock.improveRequests()).toHaveLength(0)
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("narrow V3 and V5 activate every Prompt Assist menu action through the painted overlay", async () => {
+    test.setTimeout(180_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel", {
+        mode: "pro",
+        nextgen: true,
+        variant: "v3",
+        viewport: { width: 390, height: 844 }
+      })
+      context = launched.context
+      const page = launched.chatPage
+
+      for (const variant of ["v3", "v5"] as const) {
+        for (const action of [
+          "Improve now",
+          "Review changes",
+          "Build from recipe"
+        ] as const) {
+          await page.evaluate((nextVariant) => {
+            localStorage.setItem("tldw:nextgenComposerEnabled", "1")
+            localStorage.setItem("tldw:composerVariant", nextVariant)
+          }, variant)
+          await page.reload({ waitUntil: "domcontentloaded" })
+          await waitForConnectionStore(
+            page,
+            `prompt-improvement:painted-overlay:${variant}:${action}`
+          )
+          await forceConnected(page, { serverUrl: mock.baseUrl })
+          const input = await ensureChatInput(page)
+          await seedExcludedContext(page)
+          await input.fill(`Painted ${variant} ${action} {{topic}} draft.`)
+
+          const { actions } = await openPromptActions(page)
+          expect(
+            await actions.evaluate((menu) => {
+              const menuRect = menu.getBoundingClientRect()
+              let ancestor = menu.parentElement
+              while (ancestor && ancestor !== document.body) {
+                const style = window.getComputedStyle(ancestor)
+                const clips = [
+                  style.overflow,
+                  style.overflowX,
+                  style.overflowY
+                ].some((value) => value === "hidden" || value === "clip")
+                if (clips) {
+                  const rect = ancestor.getBoundingClientRect()
+                  if (
+                    menuRect.left < rect.left ||
+                    menuRect.right > rect.right ||
+                    menuRect.top < rect.top ||
+                    menuRect.bottom > rect.bottom
+                  ) {
+                    return false
+                  }
+                }
+                ancestor = ancestor.parentElement
+              }
+              return true
+            })
+          ).toBe(true)
+          const target = actions.getByRole("button", {
+            name: new RegExp(action)
+          })
+          await clickThroughPaintedCenter(page, target)
+
+          if (action === "Improve now") {
+            await expect(input).toHaveValue(
+              "Improved user request for {{topic}}."
+            )
+          } else if (action === "Review changes") {
+            await expect(
+              page.getByRole("dialog", { name: "Prompt improvement" })
+            ).toBeVisible()
+          } else {
+            await expect(
+              page.getByRole("dialog", { name: "Build from recipe" })
+            ).toBeVisible()
+          }
+        }
+
+        await page.reload({ waitUntil: "domcontentloaded" })
+        await waitForConnectionStore(
+          page,
+          `prompt-improvement:painted-overlay:${variant}:reposition`
+        )
+        await forceConnected(page, { serverUrl: mock.baseUrl })
+        await ensureChatInput(page)
+        await seedExcludedContext(page)
+        const repositioned = await openPromptActions(page)
+        await page.setViewportSize({ width: 400, height: 800 })
+        await page.evaluate(() => window.dispatchEvent(new Event("scroll")))
+        const repositionedBox = await repositioned.actions.boundingBox()
+        expect(repositionedBox).not.toBeNull()
+        expect(repositionedBox!.x).toBeGreaterThanOrEqual(0)
+        expect(repositionedBox!.y).toBeGreaterThanOrEqual(0)
+        expect(repositionedBox!.x + repositionedBox!.width).toBeLessThanOrEqual(
+          400
+        )
+        expect(
+          repositionedBox!.y + repositionedBox!.height
+        ).toBeLessThanOrEqual(800)
+        await page.setViewportSize({ width: 390, height: 844 })
+      }
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("narrow V3 and V5 keep improvement and recipe feedback pointer-usable without covering composer controls", async () => {
+    test.setTimeout(180_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel", {
+        mode: "pro",
+        nextgen: true,
+        variant: "v3",
+        viewport: { width: 390, height: 844 }
+      })
+      context = launched.context
+      const page = launched.chatPage
+
+      for (const variant of ["v3", "v5"] as const) {
+        await page.evaluate((nextVariant) => {
+          localStorage.setItem("tldw:nextgenComposerEnabled", "1")
+          localStorage.setItem("tldw:composerVariant", nextVariant)
+        }, variant)
+        await page.reload({ waitUntil: "domcontentloaded" })
+        await waitForConnectionStore(
+          page,
+          `prompt-improvement:feedback:${variant}`
+        )
+        await forceConnected(page, { serverUrl: mock.baseUrl })
+        const input = await ensureChatInput(page)
+        await seedExcludedContext(page)
+        const originalDraft = `Exact ${variant} {{topic}} draft.`
+        await input.fill(originalDraft)
+        const sendCluster = page.getByTestId("sidepanel-send-action-cluster")
+        const initialClusterBox = await sendCluster.boundingBox()
+        expect(initialClusterBox).not.toBeNull()
+        const initialCluster = {
+          width: initialClusterBox!.width,
+          height: initialClusterBox!.height
+        }
+
+        const improvementMenu = await openPromptActions(page)
+        await clickThroughPaintedCenter(
+          page,
+          improvementMenu.actions.getByRole("button", {
+            name: /Review changes/
+          })
+        )
+        const candidate = page.getByRole("textbox", {
+          name: "Improved prompt candidate"
+        })
+        await expect(candidate).toBeVisible()
+        await candidate.fill(`Reviewed ${variant} {{topic}} candidate.`)
+        const applyImprovement = page.getByRole("button", {
+          name: "Apply to draft"
+        })
+        await applyImprovement.scrollIntoViewIfNeeded()
+        await clickThroughPaintedCenter(page, applyImprovement)
+        await expect(input).toHaveValue(
+          `Reviewed ${variant} {{topic}} candidate.`
+        )
+        const improvementStatus = page
+          .locator('[role="status"]')
+          .filter({ hasText: /^Improvement applied\.$/ })
+          .filter({ visible: true })
+          .first()
+        const improvementFeedback = improvementStatus.locator("..")
+        await expectLayoutNeutralFeedback(
+          page,
+          improvementFeedback,
+          input,
+          sendCluster,
+          initialCluster
+        )
+        const viewChanges = improvementFeedback.getByRole("button", {
+          name: "View changes"
+        })
+        await clickThroughPaintedCenter(page, viewChanges)
+        const inspection = page.getByRole("dialog", {
+          name: "Prompt improvement"
+        })
+        await expect(inspection).toBeVisible()
+        await page.keyboard.press("Escape")
+        await expect(inspection).not.toBeVisible()
+        const undoImprovement = page.getByRole("button", {
+          name: "Undo improvement"
+        })
+        await clickThroughPaintedCenter(page, undoImprovement)
+        await expect(input).toHaveValue(originalDraft)
+
+        const recipeMenu = await openPromptActions(page)
+        await clickThroughPaintedCenter(
+          page,
+          recipeMenu.actions.getByRole("button", {
+            name: /Build from recipe/
+          })
+        )
+        const runtimeValue = page.getByLabel(
+          "Current value for Task (not saved)"
+        )
+        await expect(runtimeValue).toBeVisible()
+        await runtimeValue.fill(`Recipe ${variant} task`)
+        const applyRecipe = page.getByRole("button", {
+          name: "Apply to user message"
+        })
+        await applyRecipe.scrollIntoViewIfNeeded()
+        await clickThroughPaintedCenter(page, applyRecipe)
+        const recipeStatus = page
+          .locator('[role="status"]')
+          .filter({ hasText: /^Recipe applied\.$/ })
+          .filter({ visible: true })
+          .first()
+        const recipeFeedback = recipeStatus.locator("..")
+        await expectLayoutNeutralFeedback(
+          page,
+          recipeFeedback,
+          input,
+          sendCluster,
+          initialCluster
+        )
+        await clickThroughPaintedCenter(
+          page,
+          recipeFeedback.getByRole("button", { name: "Undo recipe" })
+        )
+        await expect(input).toHaveValue(originalDraft)
+      }
     } finally {
       await context?.close()
       await stopPromptMockServer(mock)

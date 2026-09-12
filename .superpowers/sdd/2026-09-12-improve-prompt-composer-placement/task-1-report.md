@@ -64,3 +64,64 @@ An early relative `apply_patch` mistake temporarily replaced three tracked files
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/e2e/workflows/prompt-improvement.spec.ts`
 
 Work stopped immediately. The root coordinator restored and verified all three tracked main-checkout paths byte-for-byte against main HEAD; only the pre-existing untracked TTS spec/task remained there. The same three isolated-worktree files were restored to `ed682abb47`, then only semantic task hunks were reapplied with absolute paths. Broad Prettier churn was removed, and normal versus whitespace-ignored diff stats were audited before verification.
+
+## Fix round 1 — responsive overlay and drawer corrections
+
+Independent review at `5ae32a3049` found that the nominally upward disclosure and absolutely positioned feedback could still be clipped by narrow V3/V5 composer ancestors, and that the WebUI/options mount no longer passed the existing mobile drawer signal at 640 px. The correction keeps all Prompt Assist state and actions unchanged while moving only transient presentation into viewport-aware body portals.
+
+### Fix-round RED evidence
+
+1. Packaged narrow V3/V5 action hit-testing:
+
+   ```text
+   bunx playwright test tests/e2e/prompt-improvement.spec.ts --reporter=line --workers=1 --grep "narrow V3 and V5 activate every Prompt Assist menu action"
+   ```
+
+   Result: **failed** because the real menu extended beyond an `overflow-hidden` composer ancestor. The test uses `elementFromPoint` plus real `page.mouse.click` activation for Improve now, Review changes, and Build from recipe rather than visibility alone.
+
+2. Portaled disclosure component contract:
+
+   ```text
+   bunx vitest run src/components/Common/PromptAssist/__tests__/PromptAssistMenu.test.tsx --maxWorkers=1 --no-file-parallelism
+   ```
+
+   Result: **1 failed, 12 passed** because the upward disclosure remained `absolute bottom-full` inside its composer ancestor instead of a fixed body-level overlay.
+
+3. Packaged narrow V3/V5 feedback geometry and pointer access:
+
+   ```text
+   bunx playwright test tests/e2e/prompt-improvement.spec.ts --reporter=line --workers=1 --grep "narrow V3 and V5 keep improvement and recipe feedback"
+   ```
+
+   Result: **failed** with feedback `x = -164`. The test exercises Apply, View changes, improvement Undo, recipe Apply, and recipe Undo with painted-center pointer hit-testing; it also checks full viewport containment, no overlap with the draft or required send controls, and unchanged send-cluster dimensions.
+
+4. WebUI 640 px drawer presentation:
+
+   ```text
+   bunx playwright test e2e/workflows/prompt-improvement.spec.ts --config=e2e/prompt-improvement.playwright.config.ts --reporter=line --workers=1 --grep "640px review and recipe drawers"
+   ```
+
+   Result: **failed** because both drawers were 480 px rather than the 640 px viewport width.
+
+### Fix-round implementation
+
+- Upward composer disclosures now render in a fixed body portal with 8 px horizontal/vertical clamping and available-height limits. Resize and capture-phase scroll events schedule a single animation-frame reposition; cleanup removes listeners and cancels the frame.
+- The portal preserves trigger/disclosure focus as one logical interaction: focus may move into the portal, Tab and Shift+Tab traverse across the portal boundary, outside focus closes it, and Escape closes it and returns focus to the real trigger. The default non-composer/system-prompt downward presentation remains inline and unchanged.
+- Improvement and recipe feedback now share a fixed, collision-aware body overlay anchored above the visible draft rather than participating in composer layout. Semantic color tokens, action handlers, lifecycle timing, and exact Undo state are unchanged; the overlay z-index keeps its real buttons above drawer close layers.
+- Restored `narrow={isMobileViewport}` at the WebUI/options composer mount, preserving the established `<767 px` full-width drawer behavior.
+- Test hit-testing waits only for the painted center to become the target before issuing the real mouse click, avoiding animation sampling flakes without weakening clipping or geometry assertions.
+
+### Fix-round GREEN verification
+
+- Focused Vitest: **4 files, 121 tests passed**.
+- Complete WebUI prompt-improvement Playwright: **13 passed**, including desktop/mobile placement, body-portaled status geometry, and 640 px improvement/recipe drawers.
+- Self-contained packaged-extension prompt-improvement Playwright: **16 passed** against a freshly built production Chrome artifact, including real narrow V3/V5 activation for every menu action, resize/scroll containment, improvement Apply/View/Undo, recipe Apply/Undo, stable toolbar geometry, 640 px options drawers, system-prompt behavior, and Quick Chat exclusion. The separately environment-gated real-local-server smoke remains excluded because server/API-key configuration was not supplied; its fail-closed harness coverage passed.
+- Extension TypeScript compile: `bun run compile` — **passed**.
+- Scoped ESLint via the WebUI flat config: **exit 0**, with only out-of-base warnings for shared-package paths and no errors. Extension has no local ESLint flat config.
+- Explicit extension Prettier config check on changed non-legacy components/tests: **passed** after hand-formatting only the new snippets. No whole-file formatter was run on legacy sources during final cleanup.
+- `git diff --check`: **passed**.
+- Bandit: **N/A** — fix-round implementation and tests are TypeScript/TSX only.
+
+During fix-round verification, an extension test still scoped the applied status to its former `chat-messages` ancestor and a Web test scoped it to the former send-cluster ancestor. Those stale locators failed after the intentional body portal; they were changed to select the visible exact status globally while retaining layout and pointer assertions. One painted-center check sampled during drawer motion once; the same production artifact passed unchanged after the helper waited for stable hit-testing. No third production layout approach was attempted.
+
+The main checkout was not touched during fix round 1. An accidental formatter invocation with the wrong discovered config caused semicolon-only churn in four task-owned isolated-worktree files; those exact paths were restored and the semantic changes reapplied with absolute `apply_patch` paths. A subsequent check used the extension's explicit `.prettierrc.cjs`; remaining normal-versus-whitespace-ignored diff differences are localized to the body-portal JSX nesting rather than repository-wide formatting.

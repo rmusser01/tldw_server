@@ -4938,6 +4938,7 @@ export const PlaygroundForm = ({
       promptAssistAuthorizationRevision={promptAssistAuthorizationRevision}
       sending={isSending}
       surfaceOpen
+      narrow={isMobileViewport}
       onSelectModel={() =>
         openModelSelector({
           returnFocusSelector: "[aria-label='Improve prompt']",
