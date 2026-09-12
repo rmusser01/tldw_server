@@ -14,4 +14,4 @@ Preflight interaction map:
 | Prompt Assist popup/feedback | viewport and composer layout | Menu/feedback must remain visible without permanent reflow | Open upward and anchor transient feedback; test desktop/mobile geometry and focus. |
 | Quick Chat pop-out | `QuickChatInput` | No recipe-capable adapter | Remains excluded and must not be relabeled. |
 
-Task 1: in progress from Track B approved HEAD; strict TDD must prove the old standalone/wide placement fails before production changes.
+Task 1: complete. TASK-12984.3 moves the single compact 44 px Improve action immediately before Send in WebUI `/chat`, extension `/options.html#/chat`, and sidepanel legacy/v1/v3/v5; the upward menu is viewport-clamped, feedback is layout-neutral above the action, and Quick Chat remains excluded. Evidence: 119 focused Vitest tests, 12 WebUI Playwright tests, 13 self-contained packaged-extension Playwright tests, extension compile, scoped ESLint/Prettier, and `git diff --check` passed. Full details: `task-1-report.md`.

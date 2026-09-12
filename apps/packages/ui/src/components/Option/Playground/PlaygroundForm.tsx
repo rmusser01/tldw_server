@@ -2,6 +2,7 @@ import {
   ChatComposer,
   useComposerVariantPreference,
 } from "@/components/Chat/composer/ChatComposer";
+import { PromptAssistComposerAction } from "@/components/Chat/composer/PromptAssistComposerAction";
 import { useComposerEnabledPreference } from "@/components/Chat/composer/hooks/useComposerEnabledPreference";
 import { AudioSourcePicker } from "@/components/Common/AudioSourcePicker";
 import { BetaTag } from "@/components/Common/Beta";
@@ -202,6 +203,7 @@ import {
 } from "./PlaygroundSendControl";
 import { SidepanelImportedContextBanner } from "./SidepanelImportedContextBanner";
 import { PlaygroundToolsPopover } from "./PlaygroundToolsPopover";
+import { openModelSelector } from "./playground-cockpit-actions";
 import type { RolePlaySetupApplyPayload } from "./RolePlaySetupDrawer";
 import { TokenProgressBar } from "./TokenProgressBar";
 import { VoiceChatIndicator } from "./VoiceChatIndicator";
@@ -4915,6 +4917,35 @@ export const PlaygroundForm = ({
       t={t}
     />
   );
+  const promptAssistAction = (
+    <PromptAssistComposerAction
+      form={form}
+      messageRevision={messageRevision}
+      promptAssistMutation={promptAssistMutation}
+      promptAssistSavedAttemptId={promptAssistSavedAttemptId}
+      modelSelection={selectedModel?.trim()
+        ? {
+            selected_model: selectedModel,
+            provider_hint: currentChatModelSettings.apiProvider,
+          }
+        : null}
+      promptAssistContextKey={serverChatId
+        ? `server:${serverChatId}`
+        : historyId
+          ? `local:${historyId}`
+          : "local:playground-draft"}
+      promptAssistBackendKey={promptAssistBackendKey}
+      promptAssistAuthorizationRevision={promptAssistAuthorizationRevision}
+      sending={isSending}
+      surfaceOpen
+      onSelectModel={() =>
+        openModelSelector({
+          returnFocusSelector: "[aria-label='Improve prompt']",
+        })
+      }
+      onReturnFocus={textAreaFocus}
+    />
+  );
 
   const startupTemplatePromptResolution = startupTemplatePreview
     ? resolveStartupTemplatePrompt(startupTemplatePreview, promptLibrary)
@@ -5759,10 +5790,11 @@ export const PlaygroundForm = ({
                                 data-testid="composer-inline-send-control"
                                 className={
                                   isMobileViewport
-                                    ? "col-span-2 flex shrink-0 justify-end self-end"
-                                    : "flex shrink-0 items-end self-end"
+                                    ? "col-span-2 flex shrink-0 items-end justify-end gap-2 self-end"
+                                    : "flex shrink-0 items-end gap-2 self-end"
                                 }
                               >
+                                {promptAssistAction}
                                 {sendControl}
                               </div>
                             </div>
@@ -6065,29 +6097,6 @@ export const PlaygroundForm = ({
                                 promptAssistAuthorizationRevision={
                                   promptAssistAuthorizationRevision
                                 }
-                                promptAssistComposer={{
-                                  form,
-                                  messageRevision,
-                                  promptAssistMutation,
-                                  promptAssistSavedAttemptId,
-                                  modelSelection: selectedModel?.trim()
-                                    ? {
-                                        selected_model: selectedModel,
-                                        provider_hint:
-                                          currentChatModelSettings.apiProvider,
-                                      }
-                                    : null,
-                                  promptAssistContextKey: serverChatId
-                                    ? `server:${serverChatId}`
-                                    : historyId
-                                      ? `local:${historyId}`
-                                      : "local:playground-draft",
-                                  promptAssistBackendKey,
-                                  promptAssistAuthorizationRevision,
-                                  sending: isSending,
-                                  surfaceOpen: true,
-                                  onReturnFocus: textAreaFocus,
-                                }}
                                 showServerPersistenceHint={
                                   showServerPersistenceHint
                                 }

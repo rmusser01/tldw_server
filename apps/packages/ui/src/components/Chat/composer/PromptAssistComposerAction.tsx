@@ -381,7 +381,7 @@ export function PromptAssistComposerAction({
   if (!surfaceOpen) return null
 
   return (
-    <div className="min-w-0">
+    <div className="relative min-w-0">
       <PromptAssistMenu
         triggerRef={promptAssistTriggerRef}
         draft={form.values.message}
@@ -392,10 +392,12 @@ export function PromptAssistComposerAction({
         onBuildFromRecipe={openRecipeBuilder}
         onSelectModel={onSelectModel}
         disabled={sending || promptAssist.state.status === "analyzing"}
+        compact
+        placement="top"
       />
 
       {promptAssist.state.status === "applied" ? (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="absolute bottom-full right-0 z-40 mb-2 flex w-max max-w-[calc(100vw-1rem)] flex-wrap items-center gap-2 rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-lg">
           <span role="status" className="text-xs text-muted-foreground">
             {t("common:promptAssist.applied", "Improvement applied.")}
           </span>
@@ -417,7 +419,7 @@ export function PromptAssistComposerAction({
       ) : null}
 
       {recipeUndo ? (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="absolute bottom-full right-0 z-40 mb-2 flex w-max max-w-[calc(100vw-1rem)] flex-wrap items-center gap-2 rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-lg">
           <span role="status" className="text-xs text-muted-foreground">
             {t("common:promptAssist.recipeApplied", "Recipe applied.")}
           </span>
@@ -456,7 +458,10 @@ export function PromptAssistComposerAction({
             <React.Suspense
               fallback={
                 <p role="status">
-                  {t("common:promptAssist.recipeLoading", "Loading recipe builder…")}
+                  {t(
+                    "common:promptAssist.recipeLoading",
+                    "Loading recipe builder…"
+                  )}
                 </p>
               }>
               <PromptRecipeBuilder

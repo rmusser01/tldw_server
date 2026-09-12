@@ -420,6 +420,21 @@ describe("PromptAssistComposerAction entry and request contract", () => {
     )
   })
 
+  it("uses the compact upward composer trigger", async () => {
+    const user = userEvent.setup()
+    renderHarness()
+
+    const trigger = screen.getByRole("button", { name: "Improve prompt" })
+    expect(trigger).toHaveAttribute("title", "Improve prompt")
+    expect(trigger).toHaveClass("h-11", "w-11")
+    expect(trigger).not.toHaveTextContent("Improve my prompt")
+
+    await user.click(trigger)
+    expect(
+      screen.getByRole("group", { name: "Prompt improvement actions" })
+    ).toHaveClass("bottom-full", "mb-2")
+  })
+
   it("keeps local recipe work usable when the real extension owner facade rejects", async () => {
     vi.spyOn(serverOnline, "useServerOnline").mockReturnValue(true)
     vi.mocked(recipeAuthority.resolveRecipePersistenceOwnerView).mockRestore()
@@ -999,6 +1014,10 @@ describe("PromptAssistComposerAction entry and request contract", () => {
 
     expect(screen.getByLabelText("User draft")).toHaveValue(preview)
     expect(mocks.improvePrompt).not.toHaveBeenCalled()
+    expect(screen.getByText("Recipe applied.").parentElement).toHaveClass(
+      "absolute",
+      "bottom-full"
+    )
     await user.click(screen.getByRole("button", { name: "Undo recipe" }))
     expect(
       (screen.getByLabelText("User draft") as HTMLTextAreaElement).value
@@ -1465,6 +1484,10 @@ describe("PromptAssistComposerAction review application", () => {
     expect(
       screen.getByRole("button", { name: "Undo improvement" })
     ).toBeInTheDocument()
+    expect(screen.getByText("Improvement applied.").parentElement).toHaveClass(
+      "absolute",
+      "bottom-full"
+    )
   })
 
   it("requires confirmation before replacing a draft edited after review began", async () => {

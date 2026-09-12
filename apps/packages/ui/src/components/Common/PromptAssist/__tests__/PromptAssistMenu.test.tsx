@@ -19,6 +19,33 @@ vi.mock("react-i18next", () => ({
 }))
 
 describe("PromptAssistMenu", () => {
+  it("renders the composer presentation as an icon-only 44px action that opens upward", async () => {
+    const user = userEvent.setup()
+    render(
+      <PromptAssistMenu
+        draft="Draft"
+        capability="supported"
+        modelSelection={{ selected_model: "auto" }}
+        onImproveNow={vi.fn()}
+        onReviewChanges={vi.fn()}
+        compact
+        placement="top"
+      />
+    )
+
+    const trigger = screen.getByRole("button", { name: "Improve prompt" })
+    expect(trigger).toHaveAttribute("title", "Improve prompt")
+    expect(trigger).toHaveClass("h-11", "w-11")
+    expect(trigger).not.toHaveTextContent("Improve my prompt")
+
+    await user.click(trigger)
+    const actions = screen.getByRole("group", {
+      name: "Prompt improvement actions"
+    })
+    expect(actions).toHaveClass("bottom-full", "mb-2")
+    expect(actions).not.toHaveClass("top-full", "mt-2")
+  })
+
   it("adds recipe building as the third PromptAssist action", async () => {
     const user = userEvent.setup()
     const onBuildFromRecipe = vi.fn()
@@ -60,7 +87,9 @@ describe("PromptAssistMenu", () => {
     )
 
     await user.click(screen.getByRole("button", { name: "Improve prompt" }))
-    const recipeAction = screen.getByRole("button", { name: /Build from recipe/ })
+    const recipeAction = screen.getByRole("button", {
+      name: /Build from recipe/
+    })
     expect(recipeAction).toBeEnabled()
     await user.click(recipeAction)
     expect(onBuildFromRecipe).toHaveBeenCalledTimes(1)

@@ -363,6 +363,66 @@ function expectIsolatedRequest(
 }
 
 test.describe("WebUI prompt improvement parity", () => {
+  for (const viewport of [
+    { label: "desktop", width: 1280, height: 800 },
+    { label: "mobile", width: 390, height: 844 },
+  ] as const) {
+    test(`keeps one compact Improve action beside Send with an upward in-viewport menu on ${viewport.label}`, async ({ page }) => {
+      await page.setViewportSize(viewport)
+      await prepareChat(page)
+      await page.evaluate(() => {
+        localStorage.setItem("playgroundComposerOptionsExpanded", "false")
+      })
+      await page.reload({ waitUntil: "domcontentloaded" })
+
+      const cluster = page.getByTestId("composer-inline-send-control")
+      const trigger = cluster.getByRole("button", { name: "Improve prompt" })
+      const send = cluster.getByRole("button", { name: "Send message" })
+      await expect(trigger).toHaveCount(1)
+      await expect(send).toBeVisible()
+      const triggerBox = await trigger.boundingBox()
+      expect(triggerBox?.width).toBe(44)
+      expect(triggerBox?.height).toBe(44)
+      expect(
+        await cluster.evaluate((element) => {
+          const improve = element.querySelector('[aria-label="Improve prompt"]')
+          const sendButton = element.querySelector('[aria-label="Send message"]')
+          return Boolean(
+            improve &&
+              sendButton &&
+              (improve.compareDocumentPosition(sendButton) &
+                Node.DOCUMENT_POSITION_FOLLOWING) !==
+                0,
+          )
+        }),
+      ).toBe(true)
+
+      const clusterHeight = await cluster.evaluate((element) => element.offsetHeight)
+      await page.getByTestId("chat-input").first().fill(USER_DRAFT)
+      await trigger.click()
+      const menu = page.getByRole("group", {
+        name: "Prompt improvement actions",
+      })
+      await expect(menu).toBeVisible()
+      const menuBox = await menu.boundingBox()
+      const openTriggerBox = await trigger.boundingBox()
+      expect(menuBox).not.toBeNull()
+      expect(openTriggerBox).not.toBeNull()
+      expect(menuBox!.x).toBeGreaterThanOrEqual(0)
+      expect(menuBox!.y).toBeGreaterThanOrEqual(0)
+      expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewport.width)
+      expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(
+        openTriggerBox!.y + 1,
+      )
+
+      await page.getByRole("button", { name: /Improve now/ }).click()
+      await expect(cluster.getByText("Improvement applied.")).toBeVisible()
+      await expect.poll(() => cluster.evaluate((element) => element.offsetHeight)).toBe(
+        clusterHeight,
+      )
+    })
+  }
+
   test("system Improve now preserves template identity and supports exact Undo", async ({ page }) => {
     const requests = await prepareChat(page)
     await seedTemplate(page)
@@ -378,7 +438,7 @@ test.describe("WebUI prompt improvement parity", () => {
     await expect(editor).toHaveValue(SYSTEM_DRAFT)
     const editorDialog = page.getByRole("dialog", { name: "Edit system prompt" })
     await openPromptActions(page, editorDialog)
-    await expect(page.getByText("Build from recipe", { exact: true })).toHaveCount(0)
+    await expect(page.getByText("Build from recipe", { exact: true })).toBeVisible()
     await page.getByRole("button", { name: /Improve now/ }).click()
 
     await expect(editor).toHaveValue(SYSTEM_CANDIDATE)
@@ -507,14 +567,14 @@ test.describe("WebUI prompt improvement parity", () => {
   })
 
   for (const capability of ["false", "404", "offline"] as const) {
-    test(`capability ${capability} fails closed without exposing Track B`, async ({ page }) => {
+    test(`capability ${capability} fails closed while preserving the local recipe action`, async ({ page }) => {
       const requests = await prepareChat(page, { capability })
       await page.getByTestId("chat-input").first().fill(USER_DRAFT)
       await openPromptActions(page)
 
       await expect(page.getByRole("button", { name: /Improve now/ })).toBeDisabled()
       await expect(page.getByRole("button", { name: /Review changes/ })).toBeDisabled()
-      await expect(page.getByText("Build from recipe", { exact: true })).toHaveCount(0)
+      await expect(page.getByText("Build from recipe", { exact: true })).toBeVisible()
       await expect(
         page.getByText(
           capability === "false"

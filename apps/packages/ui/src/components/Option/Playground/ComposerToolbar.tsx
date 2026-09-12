@@ -2,10 +2,6 @@ import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
 import { Button as TldwButton } from "@/components/Common/Button"
 import { PromptSelect } from "@/components/Common/PromptSelect"
-import {
-  PromptAssistComposerAction,
-  type PromptAssistComposerActionProps
-} from "@/components/Chat/composer/PromptAssistComposerAction"
 import { ConnectionStatus } from "@/components/Layouts/ConnectionStatus"
 import { PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY } from "@/utils/output-formatting-guide"
 import { Modal, Tooltip } from "antd"
@@ -105,10 +101,6 @@ export type ComposerToolbarProps = {
   promptAssistContextKey?: string
   promptAssistBackendKey?: string | null
   promptAssistAuthorizationRevision?: string | null
-  promptAssistComposer?: Omit<
-    PromptAssistComposerActionProps,
-    "narrow" | "onSelectModel"
-  >
   showServerPersistenceHint: boolean
   onDismissServerPersistenceHint: () => void
   onFocusConnectionCard: () => void
@@ -193,7 +185,6 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     promptAssistContextKey,
     promptAssistBackendKey,
     promptAssistAuthorizationRevision,
-    promptAssistComposer,
     showServerPersistenceHint,
     onDismissServerPersistenceHint,
     onFocusConnectionCard,
@@ -202,18 +193,6 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   } = props
   const toolbarSendControl =
     sendControlPlacement === "toolbar" ? sendControl : null
-  const promptAssistComposerAction = promptAssistComposer ? (
-    <PromptAssistComposerAction
-      {...promptAssistComposer}
-      narrow={isMobile}
-      onSelectModel={() =>
-        openModelSelector({
-          returnFocusSelector: "[aria-label='Improve prompt']"
-        })
-      }
-    />
-  ) : null
-
   const ephemeralDisabled = privateChatLocked || isFireFoxPrivateMode
   const [advancedControlsOpen, setAdvancedControlsOpen] = useStorage(
     "playgroundComposerAdvancedControlsOpen",
@@ -1143,7 +1122,6 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         className="generation-style-modal">
         <ParameterPresetsDropdown onChange={() => setGenerationStyleOpen(false)} />
       </Modal>
-      {promptAssistComposerAction}
       {optionsExpanded ? (
         <>
           {isMobile

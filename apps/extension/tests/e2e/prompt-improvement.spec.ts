@@ -523,7 +523,7 @@ const openPromptActions = async (page: Page, scope: Page | Locator = page) => {
     name: "Prompt improvement actions"
   })
   await expect(actions).toBeVisible()
-  await expect(actions).not.toContainText(/Build from recipe/i)
+  await expect(actions).toContainText(/Build from recipe/i)
   return { trigger, actions }
 }
 
@@ -726,7 +726,9 @@ test.describe("Packaged extension prompt improvement parity", () => {
     }
   })
 
-  test("narrow options chat reviews, edits, applies, restores focus, and exposes an accessible full-width sheet", async ({}, testInfo) => {
+  test("narrow options chat reviews, edits, applies, restores focus, and exposes an accessible full-width sheet", async ({
+    page: _page
+  }, testInfo) => {
     test.setTimeout(120_000)
     const mock = await startPromptMockServer()
     const originalDraft = "Clarify {{topic}} for a new reader."
@@ -748,7 +750,43 @@ test.describe("Packaged extension prompt improvement parity", () => {
       const input = await ensureChatInput(page)
       await input.fill(originalDraft)
 
+      const sendCluster = page.getByTestId("composer-inline-send-control")
+      const compactTrigger = sendCluster.getByRole("button", {
+        name: "Improve prompt"
+      })
+      const send = sendCluster.getByRole("button", { name: "Send message" })
+      await expect(compactTrigger).toBeVisible()
+      await expect(send).toBeVisible()
+      const compactBox = await compactTrigger.boundingBox()
+      expect(compactBox?.width).toBe(44)
+      expect(compactBox?.height).toBe(44)
+      expect(
+        await sendCluster.evaluate((cluster) => {
+          const improve = cluster.querySelector('[aria-label="Improve prompt"]')
+          const sendButton = cluster.querySelector(
+            '[aria-label="Send message"]'
+          )
+          return Boolean(
+            improve &&
+              sendButton &&
+              (improve.compareDocumentPosition(sendButton) &
+                Node.DOCUMENT_POSITION_FOLLOWING) !==
+                0
+          )
+        })
+      ).toBe(true)
+
       const firstMenu = await openPromptActions(page)
+      const firstMenuBox = await firstMenu.actions.boundingBox()
+      const firstTriggerBox = await firstMenu.trigger.boundingBox()
+      expect(firstMenuBox).not.toBeNull()
+      expect(firstTriggerBox).not.toBeNull()
+      expect(firstMenuBox!.y).toBeGreaterThanOrEqual(0)
+      expect(firstMenuBox!.x).toBeGreaterThanOrEqual(0)
+      expect(firstMenuBox!.x + firstMenuBox!.width).toBeLessThanOrEqual(390)
+      expect(firstMenuBox!.y + firstMenuBox!.height).toBeLessThanOrEqual(
+        firstTriggerBox!.y + 1
+      )
       await firstMenu.trigger.press("Escape")
       await expect(firstMenu.actions).not.toBeVisible()
       await expect(firstMenu.trigger).toBeFocused()
@@ -1030,7 +1068,7 @@ test.describe("Packaged extension prompt improvement parity", () => {
   })
 
   for (const capabilityMode of ["false", "404", "offline"] as const) {
-    test(`capability ${capabilityMode} fails closed and exposes no recipe action`, async () => {
+    test(`capability ${capabilityMode} fails closed while preserving the local recipe action`, async () => {
       test.setTimeout(120_000)
       const mock = await startPromptMockServer(capabilityMode)
       let context: BrowserContext | null = null
@@ -1050,7 +1088,7 @@ test.describe("Packaged extension prompt improvement parity", () => {
         await expect(
           actions.getByRole("button", { name: /Review changes/ })
         ).toBeDisabled()
-        await expect(actions).not.toContainText(/Build from recipe/i)
+        await expect(actions).toContainText(/Build from recipe/i)
         expect(mock.improveRequests()).toHaveLength(0)
       } finally {
         await context?.close()
@@ -1059,7 +1097,7 @@ test.describe("Packaged extension prompt improvement parity", () => {
     })
   }
 
-  test("casual and pro legacy, V1, V3, and V5 composers render exactly one actionable entry", async () => {
+  test("casual and pro legacy, V1, V3, and V5 composers render one compact upward action immediately before Send", async () => {
     test.setTimeout(180_000)
     const mock = await startPromptMockServer()
     let context: BrowserContext | null = null
@@ -1103,14 +1141,77 @@ test.describe("Packaged extension prompt improvement parity", () => {
         const actions = page.getByRole("button", { name: "Improve prompt" })
         await expect(actions).toHaveCount(1)
         await expect(actions).toBeVisible()
-        await actions.click()
+        const sendCluster = page.getByTestId("sidepanel-send-action-cluster")
+        const send = sendCluster.getByRole("button", { name: "Send message" })
         await expect(
-          page.getByRole("group", { name: "Prompt improvement actions" })
-        ).toBeVisible()
+          sendCluster.getByRole("button", { name: "Improve prompt" })
+        ).toHaveCount(1)
+        await expect(send).toBeVisible()
+        expect(
+          await sendCluster.evaluate((cluster) => {
+            const improve = cluster.querySelector(
+              '[aria-label="Improve prompt"]'
+            )
+            const sendButton = cluster.querySelector(
+              '[aria-label="Send message"]'
+            )
+            return Boolean(
+              improve &&
+                sendButton &&
+                (improve.compareDocumentPosition(sendButton) &
+                  Node.DOCUMENT_POSITION_FOLLOWING) !==
+                  0
+            )
+          })
+        ).toBe(true)
+        const actionBox = await actions.boundingBox()
+        expect(actionBox?.width).toBe(44)
+        expect(actionBox?.height).toBe(44)
+        await actions.click()
+        const menu = page.getByRole("group", {
+          name: "Prompt improvement actions"
+        })
+        await expect(menu).toBeVisible()
+        const menuBox = await menu.boundingBox()
+        const openActionBox = await actions.boundingBox()
+        expect(menuBox).not.toBeNull()
+        expect(openActionBox).not.toBeNull()
+        expect(menuBox!.y).toBeGreaterThanOrEqual(0)
+        expect(menuBox!.x).toBeGreaterThanOrEqual(0)
+        expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(
+          await page.evaluate(() => window.innerWidth)
+        )
+        expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(
+          openActionBox!.y + 1
+        )
         await actions.press("Escape")
         await expect(actions).toBeFocused()
       }
       expect(mock.improveRequests()).toHaveLength(0)
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("Quick Chat remains outside the recipe-capable Improve action contract", async () => {
+    test.setTimeout(120_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "options")
+      context = launched.context
+      const page = launched.chatPage
+      await page.goto(
+        `chrome-extension://${launched.extensionId}/options.html#/quick-chat-popout`,
+        { waitUntil: "domcontentloaded" }
+      )
+      await expect(
+        page.getByRole("textbox", { name: "Ask a quick question..." })
+      ).toBeVisible({ timeout: 20_000 })
+      await expect(
+        page.getByRole("button", { name: "Improve prompt" })
+      ).toHaveCount(0)
     } finally {
       await context?.close()
       await stopPromptMockServer(mock)
@@ -1160,7 +1261,7 @@ test.describe("Packaged extension prompt improvement parity", () => {
         await expect(improveNow).toBeDisabled()
         await expect(reviewChanges).toBeDisabled()
       }
-      await expect(actions).not.toContainText(/Build from recipe/i)
+      await expect(actions).toContainText(/Build from recipe/i)
     } finally {
       await context.close()
     }
