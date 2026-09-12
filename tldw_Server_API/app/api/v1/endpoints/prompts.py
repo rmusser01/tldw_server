@@ -9,6 +9,7 @@ import contextlib
 import json
 import os
 import re
+import traceback
 from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Any, Optional, Union
@@ -1223,10 +1224,24 @@ async def _reject_persisted_recipe_runtime_values(request: Request) -> None:
 
 
 def _validate_request_text(system_prompt: Any, user_prompt: Any, *, is_recipe: bool = False) -> None:
+    """Validate supplied text limits; raise content-free InputError on invalid fields."""
     try:
         validate_prompt_text_fields(system_prompt, user_prompt, is_recipe=is_recipe)
     except ValueError:
         raise InputError("invalid_prompt_text") from None
+
+
+def _log_prompt_persistence_error(operation: str, error: Exception) -> None:
+    """Log the operation, error type, and traceback locations without private values.
+
+    Do not attach the exception to Loguru: exception text, source lines, and
+    diagnostic locals can contain authored prompts or credentials.
+    """
+    frames = " -> ".join(
+        f"{os.path.basename(frame.f_code.co_filename)}:{line} in {frame.f_code.co_name}"
+        for frame, line in traceback.walk_tb(error.__traceback__)
+    )
+    logger.error("Prompt persistence {} failed ({}); frames: {}", operation, type(error).__name__, frames)
 
 
 def _validate_structured_transport(payload: Any, request_model: type[BaseModel]) -> None:
@@ -1673,13 +1688,13 @@ async def create_prompt(
         return schemas.PromptResponse(**created_prompt_dict)
 
     except (InputError, ConflictError, DatabaseError) as e:
-        logger.error("Database error creating prompt: {}", type(e).__name__)
+        _log_prompt_persistence_error("create", e)
         raise map_db_error_to_http(
             e,
             default_detail="Database error during prompt creation.",
         ) from e
     except _PROMPTS_DB_OPERATION_EXCEPTIONS as e:  # Catch-all for other unexpected errors
-        logger.error("Unexpected error creating prompt: {}", type(e).__name__)
+        _log_prompt_persistence_error("create", e)
         # Avoid leaking the raw 'msg' variable if it was a NameError
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred.") from e
 
@@ -1927,7 +1942,7 @@ async def update_prompt(
         return schemas.PromptResponse(**final_updated_prompt)
 
     except (InputError, ConflictError, DatabaseError) as e:
-        logger.error("Database error updating prompt: {}", type(e).__name__)
+        _log_prompt_persistence_error("update", e)
         raise map_db_error_to_http(
             e,
             default_detail="Database error during prompt update.",
@@ -1935,7 +1950,7 @@ async def update_prompt(
     except HTTPException:  # Re-raise
         raise
     except _PROMPTS_DB_OPERATION_EXCEPTIONS as e:
-        logger.error("Unexpected error updating prompt: {}", type(e).__name__)
+        _log_prompt_persistence_error("update", e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="An unexpected error occurred during prompt update.") from e
 

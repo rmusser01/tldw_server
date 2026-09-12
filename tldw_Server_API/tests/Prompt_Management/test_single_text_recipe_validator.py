@@ -10,6 +10,8 @@ from tldw_Server_API.app.core.Prompt_Management.structured_prompts.validator imp
     validate_prompt_definition,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def valid_recipe() -> dict:
     """Return an independently editable recipe with all required discriminants."""

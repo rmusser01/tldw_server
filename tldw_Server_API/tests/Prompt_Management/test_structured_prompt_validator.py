@@ -1,9 +1,13 @@
 # test_structured_prompt_validator.py
 # Unit tests for structured prompt definition validation
 
+import pytest
+
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts.validator import (
     validate_prompt_definition,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _make_definition(**overrides):

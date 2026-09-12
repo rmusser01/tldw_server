@@ -12,6 +12,8 @@ from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
     parse_stored_prompt_definition,
 )
 
+pytestmark = pytest.mark.unit
+
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[3] / "Docs" / "fixtures" / "single-text-recipes" / "v1-transport-cases.json"
 )

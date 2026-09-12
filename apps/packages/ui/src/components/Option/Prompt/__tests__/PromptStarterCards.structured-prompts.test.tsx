@@ -1,16 +1,23 @@
 import React from "react"
-import { describe, expect, it, vi } from "vitest"
+import { beforeAll, describe, expect, it, vi } from "vitest"
+import { createInstance } from "i18next"
+import { initReactI18next } from "react-i18next"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { PromptStarterCards } from "../PromptStarterCards"
+
+beforeAll(async () => {
+  await createInstance().use(initReactI18next).init({
+    lng: "en",
+    resources: {}
+  })
+})
 
 describe("PromptStarterCards structured templates", () => {
   it("emits a structured starter prompt with preconfigured blocks", () => {
     const onUse = vi.fn()
     render(<PromptStarterCards onUse={onUse} />)
 
-    fireEvent.click(
-      screen.getByTestId("starter-use-code-review-assistant")
-    )
+    fireEvent.click(screen.getByTestId("starter-use-code-review-assistant"))
 
     expect(onUse).toHaveBeenCalledWith(
       expect.objectContaining({

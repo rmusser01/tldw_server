@@ -97,6 +97,7 @@ def interop_manager(tmp_path):
             os.remove(db_file)
 
 
+@pytest.mark.integration
 def test_interop_initialization_and_shutdown(interop_manager):
 
     assert is_initialized() is True
@@ -113,6 +114,7 @@ def test_interop_initialization_and_shutdown(interop_manager):
     initialize_interop(db_path=interop_manager, client_id=TEST_INTEROP_CLIENT_ID)
 
 
+@pytest.mark.integration
 def test_interop_add_prompt_via_global_instance(interop_manager):
 
     assert is_initialized() is True  # Ensure interop_manager fixture worked
@@ -125,6 +127,7 @@ def test_interop_add_prompt_via_global_instance(interop_manager):
     assert details["name"] == "Interop Prompt"
 
 
+@pytest.mark.integration
 def test_interop_add_prompt_preserves_legacy_keyword_positionals(interop_manager):
 
     p_id, p_uuid, msg = interop_add_prompt(
@@ -145,6 +148,7 @@ def test_interop_add_prompt_preserves_legacy_keyword_positionals(interop_manager
     assert "legacy_kw" in details["keywords"]
 
 
+@pytest.mark.integration
 def test_interop_add_prompt_passes_structured_fields_and_keywords(interop_manager):
 
     prompt_definition = {
@@ -185,6 +189,7 @@ def test_interop_add_prompt_passes_structured_fields_and_keywords(interop_manage
     assert "structured_kw" in details["keywords"]
 
 
+@pytest.mark.integration
 def test_interop_add_prompt_preserves_recipe_identity(interop_manager):
     definition = _make_recipe_definition()
     canonical_definition = parse_stored_prompt_definition(definition).model_dump()
@@ -209,6 +214,7 @@ def test_interop_add_prompt_preserves_recipe_identity(interop_manager):
     assert details["user_prompt"] == "## Objective\n\nExplain {{topic}}."
 
 
+@pytest.mark.integration
 def test_interop_json_export_import_round_trip_preserves_recipe_identity(tmp_path):
     source = PromptsInteropService(str(tmp_path / "source"), "interop-source")
     destination = PromptsInteropService(str(tmp_path / "destination"), "interop-destination")
@@ -253,6 +259,7 @@ def test_interop_json_export_import_round_trip_preserves_recipe_identity(tmp_pat
         destination.close()
 
 
+@pytest.mark.integration
 def test_interop_json_import_rejects_runtime_values_without_partial_write(tmp_path):
     service = PromptsInteropService(str(tmp_path / "guard"), "interop-guard")
     unsafe_definition = _make_recipe_definition()
@@ -299,6 +306,7 @@ def _interop_state(service: PromptsInteropService) -> str:
 
 @pytest.mark.parametrize("runtime_key", ["runtime_values", "variable_values", "resolved_values"])
 @pytest.mark.parametrize("unsafe_index", [0, 1])
+@pytest.mark.integration
 def test_interop_json_import_rejects_runtime_maps_on_every_record_before_first_mutation(
     tmp_path,
     runtime_key: str,
@@ -339,6 +347,7 @@ def test_interop_json_import_rejects_runtime_maps_on_every_record_before_first_m
         service.close()
 
 
+@pytest.mark.integration
 def test_interop_json_import_allows_runtime_key_words_inside_authored_strings(tmp_path) -> None:
     service = PromptsInteropService(str(tmp_path / "authored-words"), "interop-words")
     try:
@@ -360,6 +369,7 @@ def test_interop_json_import_allows_runtime_key_words_inside_authored_strings(tm
         service.close()
 
 
+@pytest.mark.integration
 def test_interop_json_import_rejects_recipe_without_identity_metadata(tmp_path):
     service = PromptsInteropService(str(tmp_path / "missing-identity"), "interop-identity")
     try:
@@ -396,6 +406,7 @@ def test_interop_json_import_rejects_recipe_without_identity_metadata(tmp_path):
     ],
 )
 @pytest.mark.parametrize("unsafe_index", [0, 1])
+@pytest.mark.integration
 def test_interop_json_import_requires_exact_v2_outer_identity_before_any_write(
     tmp_path,
     identity_case: str,
@@ -458,6 +469,7 @@ def test_interop_json_import_requires_exact_v2_outer_identity_before_any_write(
         service.close()
 
 
+@pytest.mark.integration
 def test_interop_json_import_retains_supported_v1_missing_outer_schema(tmp_path) -> None:
     service = PromptsInteropService(str(tmp_path / "v1-identity"), "interop-v1-identity")
     try:
@@ -488,6 +500,7 @@ def test_interop_json_import_retains_supported_v1_missing_outer_schema(tmp_path)
 
 
 @pytest.mark.parametrize("export_format", ["csv", "markdown"])
+@pytest.mark.integration
 def test_interop_lossy_formats_reject_recipe_export(interop_manager, export_format):
     interop_add_prompt(
         name="Non-lossy Recipe",
@@ -509,6 +522,7 @@ def test_interop_lossy_formats_reject_recipe_export(interop_manager, export_form
 # The functions like `add_or_update_prompt_interop` DO use `get_db_instance()`.
 
 
+@pytest.mark.integration
 def test_interop_standalone_add_or_update_prompt(interop_manager):
 
     p_id, _, msg = add_or_update_prompt_interop(name="Interop SU Prompt", author="SU", details="Details")
@@ -521,6 +535,7 @@ def test_interop_standalone_add_or_update_prompt(interop_manager):
     assert fetched["author"] == "SU"
 
 
+@pytest.mark.integration
 def test_interop_standalone_export_formatted(interop_manager):
 
     add_or_update_prompt_interop(name="Export Me Interop", author="Exporter", details="...")
@@ -538,6 +553,7 @@ def test_interop_standalone_export_formatted(interop_manager):
         pytest.fail(f"Exported file {file_path_str} not found.")
 
 
+@pytest.mark.integration
 def test_interop_error_propagation(interop_manager):
 
     # Try to add a prompt with an empty name, should raise InputError from DB layer
@@ -546,6 +562,7 @@ def test_interop_error_propagation(interop_manager):
 
 
 # Test calling get_db_instance when not initialized (outside fixture)
+@pytest.mark.unit
 def test_get_db_instance_not_initialized():
     # Ensure it's shutdown if a previous test didn't clean up fully in some error case
     if is_initialized():

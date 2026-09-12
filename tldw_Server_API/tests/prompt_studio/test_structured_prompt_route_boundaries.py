@@ -16,6 +16,8 @@ from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_pro
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import SecurityConfig
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
 
+pytestmark = pytest.mark.integration
+
 
 def _recipe_definition(marker: str = "route-boundary") -> dict:
     return {

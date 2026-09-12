@@ -367,7 +367,8 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
           promptFormat: promptRecord?.promptFormat ?? "legacy",
           promptSchemaVersion: promptRecord?.promptSchemaVersion ?? null,
           structuredPromptDefinition:
-            promptRecord?.structuredPromptDefinition != null
+            promptRecord?.structuredPromptDefinition !== null &&
+            promptRecord?.structuredPromptDefinition !== undefined
               ? structuredClone(promptRecord.structuredPromptDefinition)
               : null,
           syncStatus: promptRecord?.syncStatus,

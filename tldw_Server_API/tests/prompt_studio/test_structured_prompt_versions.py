@@ -5,6 +5,8 @@ from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
 )
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import InputError, PromptStudioDatabase
 
+pytestmark = pytest.mark.integration
+
 
 def _make_prompt_definition_payload(task_text: str = "Evaluate {{input}}") -> dict:
     return {

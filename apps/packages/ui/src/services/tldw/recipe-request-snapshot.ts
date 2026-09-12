@@ -321,7 +321,8 @@ export const resolveRecipeRequestSnapshot = (
     }
   } else if (!hostedMode && !shouldSkipAuth) {
     const authSourceSupported =
-      config.authSource == null ||
+      config.authSource === null ||
+      config.authSource === undefined ||
       config.authSource === "" ||
       config.authSource === "manual" ||
       config.authSource === "cookie-session"

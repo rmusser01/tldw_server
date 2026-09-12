@@ -1,8 +1,20 @@
 import React from "react"
-import { describe, expect, it, vi } from "vitest"
+import { beforeAll, describe, expect, it, vi } from "vitest"
+import { createInstance } from "i18next"
+import { initReactI18next } from "react-i18next"
 import { fireEvent, render, screen, within } from "@testing-library/react"
 
 import { StructuredPromptEditor } from "../StructuredPromptEditor"
+
+beforeAll(async () => {
+  await createInstance()
+    .use(initReactI18next)
+    .init({
+      lng: "en",
+      resources: {},
+      interpolation: { escapeValue: false }
+    })
+})
 
 describe("StructuredPromptEditor", () => {
   it("preserves assembly_config and block metadata when editing blocks", () => {

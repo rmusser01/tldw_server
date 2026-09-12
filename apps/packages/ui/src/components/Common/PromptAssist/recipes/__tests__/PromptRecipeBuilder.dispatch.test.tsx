@@ -193,11 +193,12 @@ vi.mock("@/db/dexie/helpers", () => ({
 }));
 vi.mock("@/hooks/useServerOnline", () => ({ useServerOnline: () => true }));
 vi.mock("@/utils/is-private-mode", () => ({ isFireFoxPrivateMode: false }));
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key,
-  }),
-}));
+vi.mock("react-i18next", async () => {
+  const { createInstance } = await import("i18next");
+  const i18n = createInstance();
+  await i18n.init({ lng: "en", resources: {}, interpolation: { escapeValue: false } });
+  return { useTranslation: () => ({ t: i18n.t.bind(i18n) }) };
+});
 
 const config = (serverUrl: string, sub: string, exp = 1) => ({
   serverUrl,

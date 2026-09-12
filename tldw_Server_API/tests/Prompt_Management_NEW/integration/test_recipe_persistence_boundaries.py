@@ -63,6 +63,38 @@ def db_state(db):
     )
 
 
+@pytest.mark.parametrize("operation", ["create", "update"])
+@pytest.mark.parametrize("error_type", [prompts.DatabaseError, RuntimeError])
+def test_persistence_failure_logs_frames_without_prompt_values(boundary_client, monkeypatch, operation, error_type):
+    client, db = boundary_client
+    prompt_id, _, _ = db.add_prompt("Existing", None, None, system_prompt="Keep")
+
+    def failing_database_operation(*args, **kwargs):
+        private_value = "PRIVATE_PERSISTENCE_ERROR"
+        raise error_type(private_value)
+
+    monkeypatch.setattr(db, "add_prompt" if operation == "create" else "update_prompt_by_id", failing_database_operation)
+    messages = []
+    sink = logger.add(messages.append, format="{message}", diagnose=True, backtrace=True)
+    try:
+        payload = recipe()
+        response = (
+            client.post("/api/v1/prompts", json=payload)
+            if operation == "create"
+            else client.put(f"/api/v1/prompts/{prompt_id}", json=payload)
+        )
+    finally:
+        logger.remove(sink)
+
+    assert response.status_code == 500
+    output = "".join(str(message) for message in messages)
+    assert "failing_database_operation" in output
+    assert "test_recipe_persistence_boundaries.py:" in output
+    assert error_type.__name__ in output
+    assert "PRIVATE_PERSISTENCE_ERROR" not in output + response.text
+    assert all(message.record["exception"] is None for message in messages)
+
+
 @pytest.mark.parametrize(
     "identity",
     [

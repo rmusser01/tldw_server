@@ -1,4 +1,5 @@
 import React from "react"
+import { useTranslation } from "react-i18next"
 import { Code, FileText, Layers, Search } from "lucide-react"
 import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/built-in-recipes"
 import type { PromptFormat, StructuredPromptDefinition } from "@/db/dexie/types"
@@ -153,6 +154,7 @@ type Props = {
 }
 
 export const PromptStarterCards: React.FC<Props> = ({ onUse }) => {
+  const { t } = useTranslation("settings")
   const recipeFields = buildRecipePromptFields(CLEAR_TASK_RECIPE.definition)
 
   return (
@@ -163,11 +165,15 @@ export const PromptStarterCards: React.FC<Props> = ({ onUse }) => {
       <div className="flex flex-col rounded-lg border border-primary/40 bg-primary/5 p-4 transition-colors hover:border-primary/60">
         <div className="mb-2 flex items-center gap-2">
           <Layers className="size-5 text-primary" />
-          <h4 className="text-sm font-medium text-text">Structured recipe</h4>
+          <h4 className="text-sm font-medium text-text">
+            {t("managePrompts.recipe.starterTitle", "Structured recipe")}
+          </h4>
         </div>
         <p className="mb-3 flex-1 text-xs text-text-muted">
-          Start with ordered blocks, labels, variables, and editable default
-          instructions.
+          {t(
+            "managePrompts.recipe.starterDescription",
+            "Start with ordered blocks, labels, variables, and editable default instructions."
+          )}
         </p>
         <button
           type="button"
@@ -182,7 +188,7 @@ export const PromptStarterCards: React.FC<Props> = ({ onUse }) => {
           className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90"
           data-testid="starter-use-structured-recipe"
         >
-          Build a recipe
+          {t("managePrompts.recipe.starterAction", "Build a recipe")}
         </button>
       </div>
       {STARTER_PROMPTS.map((sp) => (

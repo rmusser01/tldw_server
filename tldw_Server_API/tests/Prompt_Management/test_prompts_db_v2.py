@@ -116,6 +116,7 @@ def _hostile_structure(kind):
     "kind", ["mapping_cycle", "list_cycle", "dag", "deep", "wide", "json_depth", "unsupported_type"]
 )
 @pytest.mark.parametrize("operation", ["create", "overwrite", "update", "serialize", "parse"])
+@pytest.mark.integration
 def test_structural_inputs_are_bounded_and_never_mutate_storage(memory_db, kind, operation):
     _run_structural_probe(kind, operation, memory_db.db_path)
 
@@ -157,6 +158,7 @@ def _check_structural_input(memory_db, kind, operation):
     assert memory_db.get_prompt_by_name("New") is None
 
 
+@pytest.mark.unit
 def test_guard_rejects_shared_containers_even_without_a_cycle():
     _run_structural_probe("shared", "guard")
 
@@ -169,6 +171,7 @@ def _check_shared_containers():
         reject_recipe_runtime_values([shared, shared])
 
 
+@pytest.mark.integration
 def test_structural_probe_runs_without_posix_timer_apis(memory_db, monkeypatch):
     for name in ("SIGALRM", "ITIMER_REAL", "setitimer"):
         monkeypatch.delattr(signal, name, raising=False)
@@ -198,6 +201,7 @@ def _recipe_definition(target="system"):
 
 @pytest.mark.parametrize("target", ["system", "user"])
 @pytest.mark.parametrize("as_json", [False, True])
+@pytest.mark.integration
 def test_recipe_db_round_trip_reopen_update_search_and_delete(tmp_path, target, as_json):
     path = tmp_path / "recipes.db"
     definition = _recipe_definition(target)
@@ -239,6 +243,7 @@ def test_recipe_db_round_trip_reopen_update_search_and_delete(tmp_path, target, 
 @pytest.mark.parametrize("operation", ["create", "overwrite", "update"])
 @pytest.mark.parametrize("key", ["runtime_values", "variable_values", "resolved_values"])
 @pytest.mark.parametrize("as_json", [False, True])
+@pytest.mark.integration
 def test_recipe_db_rejects_nested_runtime_values_without_any_write(memory_db, operation, key, as_json):
     prompt_id, _, _ = memory_db.add_prompt("Good", None, None, system_prompt="Keep")
     before = memory_db.get_prompt_by_id(prompt_id)
@@ -269,6 +274,7 @@ def test_recipe_db_rejects_nested_runtime_values_without_any_write(memory_db, op
 
 
 @pytest.mark.parametrize("failure", ["future", "mismatch", "role", "format", "snapshot_only", "envelope"])
+@pytest.mark.integration
 def test_recipe_db_rejects_invalid_partial_updates_without_corruption(memory_db, failure):
     definition = _recipe_definition()
     prompt_id, _, _ = memory_db.add_prompt(
@@ -299,6 +305,7 @@ def test_recipe_db_rejects_invalid_partial_updates_without_corruption(memory_db,
         assert memory_db.get_prompt_by_id(prompt_id) == before
 
 
+@pytest.mark.integration
 def test_recipe_db_authored_strings_are_not_runtime_maps(memory_db):
     definition = _recipe_definition()
     definition["blocks"][0]["content"] = '{"runtime_values": {"variable_values": "resolved_values"}}'
@@ -312,6 +319,7 @@ def test_recipe_db_authored_strings_are_not_runtime_maps(memory_db):
     )
 
 
+@pytest.mark.integration
 def test_mistagged_recipe_validation_does_not_echo_authored_fields(memory_db):
     definition = _recipe_definition()
     definition["schema_version"] = 1
@@ -325,6 +333,7 @@ def test_mistagged_recipe_validation_does_not_echo_authored_fields(memory_db):
 
 
 @pytest.mark.parametrize("version", [1, 1.0, True, "1", "1.0", "01", "+1"])
+@pytest.mark.integration
 def test_v1_definition_json_bytes_and_legacy_snapshots_survive_metadata_update(memory_db, version):
     raw = ' { "schema_version": ' + json.dumps(version) + ', "blocks": [] } '
     prompt_id, _, _ = memory_db.add_prompt(
@@ -446,6 +455,7 @@ class _BeginFailingConnection:
 # --- Test PromptsDatabase Class ---
 
 
+@pytest.mark.integration
 def test_database_initialization_memory(memory_db):
 
     assert memory_db is not None
@@ -457,6 +467,7 @@ def test_database_initialization_memory(memory_db):
     assert cursor.fetchone()["version"] == PromptsDatabase._CURRENT_SCHEMA_VERSION
 
 
+@pytest.mark.integration
 def test_database_initialization_file(file_db):
 
     assert file_db is not None
@@ -468,6 +479,7 @@ def test_database_initialization_file(file_db):
     assert cursor.fetchone()["version"] == PromptsDatabase._CURRENT_SCHEMA_VERSION
 
 
+@pytest.mark.integration
 def test_schema_v1_migrates_to_v2_with_collections(tmp_path):
     db_file = tmp_path / "test_prompts_v1.db"
 
@@ -505,6 +517,7 @@ def test_schema_v1_migrates_to_v2_with_collections(tmp_path):
         migrated_db.close_connection()
 
 
+@pytest.mark.integration
 def test_fresh_database_schema_v6_includes_service_prompt_overrides(memory_db):
     conn = memory_db.get_connection()
 
@@ -515,6 +528,7 @@ def test_fresh_database_schema_v6_includes_service_prompt_overrides(memory_db):
     assert table is not None
 
 
+@pytest.mark.integration
 def test_schema_v5_migrates_to_v6_preserving_prompt(tmp_path, monkeypatch):
     db_file = tmp_path / "test_prompts_v5.db"
     monkeypatch.setattr(PromptsDatabase, "_CURRENT_SCHEMA_VERSION", 5)
@@ -555,6 +569,7 @@ def test_schema_v5_migrates_to_v6_preserving_prompt(tmp_path, monkeypatch):
         migrated_db.close_connection()
 
 
+@pytest.mark.integration
 def test_service_prompt_override_raw_read_is_absent_then_preserves_stored_row(memory_db):
     definition_id = "chat.rag.answer"
     assert memory_db.get_service_prompt_override(definition_id) is None
@@ -579,6 +594,7 @@ def test_service_prompt_override_raw_read_is_absent_then_preserves_stored_row(me
     assert row.revision == revision
 
 
+@pytest.mark.integration
 def test_service_prompt_override_first_insert_uses_deterministic_json_and_uuid(memory_db):
     parts = {"user_template": "Translate {text}", "system": "Be exact."}
 
@@ -596,6 +612,7 @@ def test_service_prompt_override_first_insert_uses_deterministic_json_and_uuid(m
         row.revision = "changed"
 
 
+@pytest.mark.integration
 def test_service_prompt_override_identical_save_is_no_op(memory_db):
     parts = {"template": "Answer from {context}: {question}"}
     first = memory_db.save_service_prompt_override("chat.rag.answer", parts, None)
@@ -609,6 +626,7 @@ def test_service_prompt_override_identical_save_is_no_op(memory_db):
     assert repeated == first
 
 
+@pytest.mark.integration
 def test_service_prompt_override_identical_stale_retry_returns_current_row(memory_db):
     first = memory_db.save_service_prompt_override(
         "chat.rag.answer",
@@ -631,6 +649,7 @@ def test_service_prompt_override_identical_stale_retry_returns_current_row(memor
     assert retried == current
 
 
+@pytest.mark.integration
 def test_service_prompt_override_content_change_uses_cas_and_new_uuid(memory_db):
     first = memory_db.save_service_prompt_override(
         "chat.rag.answer",
@@ -650,6 +669,7 @@ def test_service_prompt_override_content_change_uses_cas_and_new_uuid(memory_db)
 
 
 @pytest.mark.parametrize("expected_revision", [None, str(uuid.uuid4())])
+@pytest.mark.integration
 def test_service_prompt_override_changed_save_conflicts_with_current_revision(
     memory_db,
     expected_revision,
@@ -680,6 +700,7 @@ def test_service_prompt_override_changed_save_conflicts_with_current_revision(
         ({"template": "Competing {context} {question}"}, True),
     ],
 )
+@pytest.mark.integration
 def test_service_prompt_override_insert_race_refetches_and_classifies(
     memory_db,
     monkeypatch,
@@ -708,10 +729,12 @@ def test_service_prompt_override_insert_race_refetches_and_classifies(
         assert json.loads(row.parts_json) == requested_parts
 
 
+@pytest.mark.integration
 def test_service_prompt_override_absent_reset_without_revision_is_idempotent(memory_db):
     assert memory_db.reset_service_prompt_override("chat.rag.answer", None) is None
 
 
+@pytest.mark.integration
 def test_service_prompt_override_matching_reset_deletes_row(memory_db):
     current = memory_db.save_service_prompt_override(
         "chat.rag.answer",
@@ -723,6 +746,7 @@ def test_service_prompt_override_matching_reset_deletes_row(memory_db):
     assert memory_db.get_service_prompt_override("chat.rag.answer") is None
 
 
+@pytest.mark.integration
 def test_service_prompt_override_stale_and_already_reset_revision_conflict(memory_db):
     current = memory_db.save_service_prompt_override(
         "chat.rag.answer",
@@ -742,6 +766,7 @@ def test_service_prompt_override_stale_and_already_reset_revision_conflict(memor
     assert already_reset.value.current_revision is None
 
 
+@pytest.mark.integration
 def test_service_prompt_override_corrupt_json_is_readable_and_resettable(memory_db):
     definition_id = "chat.rag.answer"
     assert memory_db.get_service_prompt_override(definition_id) is None
@@ -766,6 +791,7 @@ def test_service_prompt_override_corrupt_json_is_readable_and_resettable(memory_
     assert memory_db.get_service_prompt_override(definition_id) is None
 
 
+@pytest.mark.integration
 def test_service_prompt_override_undecodable_text_can_be_reset_without_reading_content(memory_db):
     definition_id = "chat.rag.answer"
     revision = str(uuid.uuid4())
@@ -789,6 +815,7 @@ def test_service_prompt_override_undecodable_text_can_be_reset_without_reading_c
     )
 
 
+@pytest.mark.integration
 def test_service_prompt_override_undecodable_text_preserves_revision_for_resolver_and_reset(file_db):
     definition_id = "chat.rag.answer"
     revision = str(uuid.uuid4())
@@ -817,6 +844,7 @@ def test_service_prompt_override_undecodable_text_preserves_revision_for_resolve
     assert file_db.get_service_prompt_override(definition_id) is None
 
 
+@pytest.mark.integration
 def test_service_prompt_override_failed_save_rolls_back_without_leaking_content(memory_db):
     definition_id = "chat.rag.answer"
     original = memory_db.save_service_prompt_override(
@@ -864,6 +892,7 @@ def test_service_prompt_override_failed_save_rolls_back_without_leaking_content(
         ("reset", "Failed to reset Service Prompt override."),
     ],
 )
+@pytest.mark.integration
 def test_service_prompt_override_begin_immediate_failure_is_wrapped_without_mutation_or_sensitive_logs(
     memory_db,
     monkeypatch,
@@ -912,6 +941,7 @@ def test_service_prompt_override_begin_immediate_failure_is_wrapped_without_muta
         ("reset", "Failed to reset Service Prompt override."),
     ],
 )
+@pytest.mark.integration
 def test_service_prompt_override_commit_failure_is_wrapped_and_rolled_back(
     memory_db,
     monkeypatch,
@@ -955,6 +985,7 @@ def test_service_prompt_override_commit_failure_is_wrapped_and_rolled_back(
         ("reset", "Failed to reset Service Prompt override."),
     ],
 )
+@pytest.mark.integration
 def test_service_prompt_override_rollback_failure_retires_connection_and_discards_transaction(
     file_db,
     operation,
@@ -1012,12 +1043,14 @@ def test_service_prompt_override_rollback_failure_retires_connection_and_discard
         raw_connection.execute("SELECT 1")
 
 
+@pytest.mark.unit
 def test_initialization_empty_client_id():
 
     with pytest.raises(ValueError, match="Client ID cannot be empty or None."):
         PromptsDatabase(db_path=":memory:", client_id="")
 
 
+@pytest.mark.integration
 def test_add_keyword(memory_db: PromptsDatabase):
     kw_id, kw_uuid = memory_db.add_keyword("test_keyword")
     assert kw_id is not None
@@ -1041,6 +1074,7 @@ def test_add_keyword(memory_db: PromptsDatabase):
         memory_db.add_keyword("  ")
 
 
+@pytest.mark.integration
 def test_add_prompt(memory_db: PromptsDatabase):
     p_id, p_uuid, msg = memory_db.add_prompt(
         name="My Test Prompt",
@@ -1077,6 +1111,7 @@ def test_add_prompt(memory_db: PromptsDatabase):
     assert updated_prompt["author"] == "Updated Author"
 
 
+@pytest.mark.integration
 def test_create_and_get_prompt_collection(memory_db: PromptsDatabase):
     p1_id, _, _ = memory_db.add_prompt(name="Collection Prompt A", author="Tester", details="A")
     p2_id, _, _ = memory_db.add_prompt(name="Collection Prompt B", author="Tester", details="B")
@@ -1098,6 +1133,7 @@ def test_create_and_get_prompt_collection(memory_db: PromptsDatabase):
     assert fetched["prompt_ids"] == [p1_id, p2_id]
 
 
+@pytest.mark.integration
 def test_create_prompt_collection_validates_prompt_ids(memory_db: PromptsDatabase):
     p1_id, _, _ = memory_db.add_prompt(name="Collection Prompt Existing", author="Tester", details="A")
     with pytest.raises(InputError, match=r"Prompt\(s\) not found or deleted"):
@@ -1108,6 +1144,7 @@ def test_create_prompt_collection_validates_prompt_ids(memory_db: PromptsDatabas
         )
 
 
+@pytest.mark.integration
 def test_soft_delete_and_undelete_prompt(memory_db: PromptsDatabase):
     p_id, _, _ = memory_db.add_prompt(name="Deletable Prompt", author="Test", details="Details")
     assert p_id is not None
@@ -1130,6 +1167,7 @@ def test_soft_delete_and_undelete_prompt(memory_db: PromptsDatabase):
     assert restored_prompt["details"] == "Restored"
 
 
+@pytest.mark.integration
 def test_soft_delete_keyword_and_links(memory_db: PromptsDatabase):
     memory_db.add_prompt(name="Prompt With Keyword", author="Test", details="...", keywords=["deletable_kw"])
     kw_info = memory_db.execute_query("SELECT id FROM PromptKeywordsTable WHERE keyword='deletable_kw'").fetchone()
@@ -1155,6 +1193,7 @@ def test_soft_delete_keyword_and_links(memory_db: PromptsDatabase):
     assert memory_db.execute_query("SELECT * FROM PromptKeywordLinks WHERE keyword_id=?", (kw_id,)).fetchone() is None
 
 
+@pytest.mark.integration
 def test_update_keywords_for_prompt(memory_db: PromptsDatabase):
     p_id, _, _ = memory_db.add_prompt(
         name="Keyword Update Prompt", author="Test", details="...", keywords=["initial1", "initial2"]
@@ -1169,6 +1208,7 @@ def test_update_keywords_for_prompt(memory_db: PromptsDatabase):
     assert memory_db.fetch_keywords_for_prompt(p_id) == []
 
 
+@pytest.mark.integration
 def test_search_prompts_fts(memory_db: PromptsDatabase):
     memory_db.add_prompt(
         name="Alpha Search", author="AuthorA", details="Unique detail alpha", keywords=["common", "alpha_k"]
@@ -1206,6 +1246,7 @@ def test_search_prompts_fts(memory_db: PromptsDatabase):
     assert results_sys[0]["name"] == "SysUserPrompt"
 
 
+@pytest.mark.integration
 def test_sync_log(memory_db: PromptsDatabase):
     p_id, p_uuid, _ = memory_db.add_prompt(name="Sync Log Test Prompt", author="Sync", details="...")
     kw_id, kw_uuid = memory_db.add_keyword("sync_keyword")
@@ -1234,6 +1275,7 @@ def test_sync_log(memory_db: PromptsDatabase):
     assert len(remaining_entries) == len(log_entries) - deleted_count
 
 
+@pytest.mark.integration
 def test_versioning_and_conflict(memory_db: PromptsDatabase):
     p_id, p_uuid, _ = memory_db.add_prompt(name="Version Test", author="V1", details="Initial")
     prompt_v1 = memory_db.get_prompt_by_id(p_id)
@@ -1268,6 +1310,7 @@ def test_versioning_and_conflict(memory_db: PromptsDatabase):
 # --- Test Standalone Functions ---
 
 
+@pytest.mark.integration
 def test_standalone_add_or_update_prompt(memory_db: PromptsDatabase):
     p_id, p_uuid, msg = standalone_add_or_update_prompt(
         memory_db, name="Standalone Prompt", author="Standalone", details="Details"
@@ -1284,6 +1327,7 @@ def test_standalone_add_or_update_prompt(memory_db: PromptsDatabase):
     assert updated_prompt["author"] == "Standalone Updated"
 
 
+@pytest.mark.integration
 def test_standalone_load_prompt_details_for_ui(memory_db: PromptsDatabase):
     standalone_add_or_update_prompt(
         memory_db,
@@ -1307,6 +1351,7 @@ def test_standalone_load_prompt_details_for_ui(memory_db: PromptsDatabase):
     assert name_nf == ""
 
 
+@pytest.mark.integration
 def test_standalone_export_functions(memory_db: PromptsDatabase, tmp_path: Path):
     memory_db.add_prompt("Export Prompt 1", "Export Author", "Details1", keywords=["export_kw", "common_kw"])
     memory_db.add_prompt("Export Prompt 2", "Export Author", "Details2", keywords=["another_kw", "common_kw"])
@@ -1351,6 +1396,7 @@ def test_standalone_export_functions(memory_db: PromptsDatabase, tmp_path: Path)
     assert "common_kw (2 active prompts)" in md_output  # Check count
 
 
+@pytest.mark.integration
 def test_get_next_version_logic(memory_db: PromptsDatabase):
     # This is an internal helper, but its logic is critical
     p_id, _, _ = memory_db.add_prompt(name="Version Helper Test", author="Test", details="...")

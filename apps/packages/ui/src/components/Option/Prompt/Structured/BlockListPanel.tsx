@@ -1,4 +1,5 @@
 import React, { useRef } from "react"
+import { useTranslation } from "react-i18next"
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react"
 
 type StructuredPromptBlock = {
@@ -36,6 +37,7 @@ export const BlockListPanel: React.FC<BlockListPanelProps> = ({
   description = "Ordered prompt sections assembled by the backend.",
   addButtonRef
 }) => {
+  const { t } = useTranslation("settings")
   const draggedBlockId = useRef<string | null>(null)
 
   return (
@@ -100,7 +102,11 @@ export const BlockListPanel: React.FC<BlockListPanelProps> = ({
                 type="button"
                 onClick={() => onSelect(block.id)}
                 aria-pressed={isSelected}
-                aria-label={`Edit ${block.name} block`}
+                aria-label={t(
+                  "managePrompts.structured.blockList.edit",
+                  "Edit {{name}} block",
+                  { name: block.name }
+                )}
                 className="flex min-h-11 w-full min-w-0 items-start justify-between gap-3 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <div className="min-w-0">
@@ -108,8 +114,19 @@ export const BlockListPanel: React.FC<BlockListPanelProps> = ({
                     {block.name}
                   </div>
                   <div className="text-xs uppercase tracking-wide text-text-muted">
-                    {showRole ? block.role : `Block ${index + 1}`}
-                    {!block.enabled ? " • disabled" : ""}
+                    {showRole
+                      ? block.role
+                      : t(
+                          "managePrompts.structured.blockList.number",
+                          "Block {{index}}",
+                          { index: index + 1 }
+                        )}
+                    {!block.enabled
+                      ? t(
+                          "managePrompts.structured.blockList.disabled",
+                          " • disabled"
+                        )
+                      : ""}
                   </div>
                 </div>
                 <div className="line-clamp-2 min-w-0 max-w-[10rem] break-words text-xs text-text-muted">
@@ -122,7 +139,11 @@ export const BlockListPanel: React.FC<BlockListPanelProps> = ({
                   type="button"
                   onClick={() => onMoveBlock(block.id, "up")}
                   disabled={index === 0}
-                  aria-label={`Move ${block.name} up`}
+                  aria-label={t(
+                    "managePrompts.structured.blockList.moveUp",
+                    "Move {{name}} up",
+                    { name: block.name }
+                  )}
                   data-testid={`structured-block-move-up-${block.id}`}
                   className="inline-flex min-h-11 min-w-11 items-center justify-center rounded border border-border text-text-muted disabled:opacity-40"
                 >
@@ -132,7 +153,11 @@ export const BlockListPanel: React.FC<BlockListPanelProps> = ({
                   type="button"
                   onClick={() => onMoveBlock(block.id, "down")}
                   disabled={index === blocks.length - 1}
-                  aria-label={`Move ${block.name} down`}
+                  aria-label={t(
+                    "managePrompts.structured.blockList.moveDown",
+                    "Move {{name}} down",
+                    { name: block.name }
+                  )}
                   data-testid={`structured-block-move-down-${block.id}`}
                   className="inline-flex min-h-11 min-w-11 items-center justify-center rounded border border-border text-text-muted disabled:opacity-40"
                 >
@@ -141,7 +166,11 @@ export const BlockListPanel: React.FC<BlockListPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => onRemoveBlock(block.id)}
-                  aria-label={`Remove ${block.name}`}
+                  aria-label={t(
+                    "managePrompts.structured.blockList.remove",
+                    "Remove {{name}}",
+                    { name: block.name }
+                  )}
                   data-testid={`structured-block-remove-${block.id}`}
                   className="inline-flex min-h-11 min-w-11 items-center justify-center rounded border border-border text-danger hover:bg-danger/5"
                 >

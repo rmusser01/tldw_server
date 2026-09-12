@@ -638,6 +638,13 @@ const expectLayoutNeutralFeedback = async (
   initialCluster: { width: number; height: number },
   allowHidden = false
 ) => {
+  // The exiting review drawer briefly contains the same applied status and
+  // actions. Wait for it to leave before resolving the feedback locator, or
+  // its translated, off-screen panel can be mistaken for the composer portal.
+  await expect(
+    page.getByRole("dialog", { name: "Prompt improvement", exact: true })
+  ).not.toBeVisible()
+  if (!allowHidden) await expect(feedback).toBeVisible()
   const [feedbackBox, inputBox, clusterBox, viewport] = await Promise.all([
     feedback.boundingBox(),
     input.boundingBox(),

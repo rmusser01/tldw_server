@@ -420,6 +420,11 @@ class PromptsInteropService:
         }
 
     def _export_prompt_record(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """Build a JSON export record, preserving validated structured identity.
+
+        Raise InputError for malformed stored definitions instead of flattening
+        them into legacy text. The source record is not mutated.
+        """
         exported = {
             "name": prompt.get("name"),
             "content": prompt.get("content") if "content" in prompt else prompt.get("details"),

@@ -63,7 +63,8 @@ const isRecipeLike = (prompt: Record<string, unknown>): boolean => {
       prompt.promptSchemaVersion !== 1) ||
     inner?.schema_version === 2 ||
     inner?.definition_kind === "single_text_recipe" ||
-    (inner?.assembly_config != null &&
+    (inner?.assembly_config !== null &&
+      inner?.assembly_config !== undefined &&
       typeof inner.assembly_config === "object" &&
       (inner.assembly_config as Record<string, unknown>).assembly_mode ===
         "single_text")

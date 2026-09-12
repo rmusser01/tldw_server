@@ -10,6 +10,8 @@ from pydantic import ValidationError
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts import assembler, single_text_renderer
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts.models import parse_prompt_definition
 
+pytestmark = pytest.mark.unit
+
 FIXTURES = Path(__file__).resolve().parents[3] / "Docs/fixtures/single-text-recipes"
 RENDER_CASES = json.loads((FIXTURES / "render-cases.json").read_text())
 ERROR_CASES = json.loads((FIXTURES / "error-cases.json").read_text())

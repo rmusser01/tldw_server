@@ -1,4 +1,5 @@
 import React from "react"
+import { useTranslation } from "react-i18next"
 import { Plus, Trash2 } from "lucide-react"
 
 type StructuredPromptVariable = {
@@ -48,6 +49,7 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
   onVariableNameDraftChange,
   onVariableNameCommit
 }) => {
+  const { t } = useTranslation("settings")
   const updateVariable = (
     index: number,
     updates: Partial<StructuredPromptVariable>
@@ -136,12 +138,29 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
           >
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="text-xs font-medium uppercase tracking-wide text-text-muted">
-                Variable {index + 1}
+                {t(
+                  "managePrompts.structured.variables.number",
+                  "Variable {{index}}",
+                  { index: index + 1 }
+                )}
               </span>
               <button
                 type="button"
                 onClick={() => removeVariable(index)}
-                aria-label={`Remove ${variable.label || variable.name || `variable ${index + 1}`}`}
+                aria-label={t(
+                  "managePrompts.structured.variables.remove",
+                  "Remove {{name}}",
+                  {
+                    name:
+                      variable.label ||
+                      variable.name ||
+                      t(
+                        "managePrompts.structured.variables.unnamed",
+                        "variable {{index}}",
+                        { index: index + 1 }
+                      )
+                  }
+                )}
                 className="inline-flex min-h-11 min-w-11 items-center justify-center rounded border border-border text-danger hover:bg-danger/5"
               >
                 <Trash2 className="size-3" />
@@ -155,7 +174,10 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                 </span>
                 <input
                   type="text"
-                  aria-label="Variable name"
+                  aria-label={t(
+                    "managePrompts.structured.variables.nameLabel",
+                    "Variable name"
+                  )}
                   aria-invalid={Boolean(variableNameErrors?.[variable.name])}
                   aria-describedby={
                     variableNameErrors?.[variable.name]
@@ -193,7 +215,10 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                   Input type
                 </span>
                 <select
-                  aria-label="Variable input type"
+                  aria-label={t(
+                    "managePrompts.structured.variables.inputTypeLabel",
+                    "Variable input type"
+                  )}
                   value={variable.input_type || "text"}
                   onChange={(event) =>
                     updateVariable(index, { input_type: event.target.value })
@@ -214,11 +239,14 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
-                    Label
+                    {t("managePrompts.structured.variables.label", "Label")}
                   </span>
                   <input
                     type="text"
-                    aria-label="Variable label"
+                    aria-label={t(
+                      "managePrompts.structured.variables.labelLabel",
+                      "Variable label"
+                    )}
                     value={variable.label ?? ""}
                     onChange={(event) =>
                       updateVariable(index, {
@@ -230,12 +258,18 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
-                    Maximum length
+                    {t(
+                      "managePrompts.structured.variables.maxLength",
+                      "Maximum length"
+                    )}
                   </span>
                   <input
                     type="number"
                     min={1}
-                    aria-label="Variable maximum length"
+                    aria-label={t(
+                      "managePrompts.structured.variables.maxLengthLabel",
+                      "Variable maximum length"
+                    )}
                     value={variable.max_length ?? ""}
                     onChange={(event) =>
                       updateVariable(index, {
@@ -249,11 +283,17 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                 </label>
                 <label className="block sm:col-span-2">
                   <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
-                    Description
+                    {t(
+                      "managePrompts.structured.variables.description",
+                      "Description"
+                    )}
                   </span>
                   <input
                     type="text"
-                    aria-label="Variable description"
+                    aria-label={t(
+                      "managePrompts.structured.variables.descriptionLabel",
+                      "Variable description"
+                    )}
                     value={variable.description ?? ""}
                     onChange={(event) =>
                       updateVariable(index, {
@@ -265,11 +305,17 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                 </label>
                 <label className="block sm:col-span-2">
                   <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
-                    Options, one per line
+                    {t(
+                      "managePrompts.structured.variables.options",
+                      "Options, one per line"
+                    )}
                   </span>
                   <textarea
                     rows={2}
-                    aria-label="Variable options"
+                    aria-label={t(
+                      "managePrompts.structured.variables.optionsLabel",
+                      "Variable options"
+                    )}
                     value={(variable.options ?? []).join("\n")}
                     onChange={(event) =>
                       updateVariable(index, {
@@ -285,24 +331,42 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                 <label className="flex items-center gap-2 text-sm text-text sm:col-span-2">
                   <input
                     type="checkbox"
-                    aria-label={`Use a saved starter default for ${variable.label || variable.name}`}
-                    checked={variable.default_value != null}
+                    aria-label={t(
+                      "managePrompts.structured.variables.savedDefaultToggleLabel",
+                      "Use a saved starter default for {{name}}",
+                      { name: variable.label || variable.name }
+                    )}
+                    checked={
+                      variable.default_value !== null &&
+                      variable.default_value !== undefined
+                    }
                     onChange={(event) =>
                       updateVariable(index, {
                         default_value: event.target.checked ? "" : null
                       })
                     }
                   />
-                  Save a starter default
+                  {t(
+                    "managePrompts.structured.variables.saveDefault",
+                    "Save a starter default"
+                  )}
                 </label>
-                {variable.default_value != null ? (
+                {variable.default_value !== null &&
+                variable.default_value !== undefined ? (
                   <label className="block sm:col-span-2">
                     <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
-                      Starter default (saved)
+                      {t(
+                        "managePrompts.structured.variables.savedDefault",
+                        "Starter default (saved)"
+                      )}
                     </span>
                     <textarea
                       rows={2}
-                      aria-label={`Starter default for ${variable.label || variable.name} (saved)`}
+                      aria-label={t(
+                        "managePrompts.structured.variables.savedDefaultLabel",
+                        "Starter default for {{name}} (saved)",
+                        { name: variable.label || variable.name }
+                      )}
                       value={
                         typeof variable.default_value === "string"
                           ? variable.default_value
@@ -323,7 +387,10 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
             <label className="mt-3 flex items-center gap-2 text-sm text-text">
               <input
                 type="checkbox"
-                aria-label="Variable required"
+                aria-label={t(
+                  "managePrompts.structured.variables.requiredLabel",
+                  "Variable required"
+                )}
                 checked={!!variable.required}
                 onChange={(event) =>
                   updateVariable(index, { required: event.target.checked })
@@ -341,21 +408,35 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
             <h4 className="text-sm font-semibold text-text">Preview inputs</h4>
             <p className="text-xs text-text-muted">
               {runtimeValues
-                ? "Current inputs used only for this preview. They are not saved."
-                : "Sample values passed to the backend preview endpoint."}
+                ? t(
+                    "managePrompts.structured.variables.runtimeDescription",
+                    "Current inputs used only for this preview. They are not saved."
+                  )
+                : t(
+                    "managePrompts.structured.variables.previewDescription",
+                    "Sample values passed to the backend preview endpoint."
+                  )}
             </p>
           </div>
           {variables.map((variable) => (
             <label key={`preview-${variable.name}`} className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
                 {runtimeValues
-                  ? `${variable.label || variable.name} current value (not saved)`
+                  ? t(
+                      "managePrompts.structured.variables.currentValue",
+                      "{{name}} current value (not saved)",
+                      { name: variable.label || variable.name }
+                    )
                   : variable.name}
               </span>
               {variable.input_type === "textarea" ? (
                 <textarea
                   rows={2}
-                  aria-label={`Current value for ${variable.label || variable.name} (not saved)`}
+                  aria-label={t(
+                    "managePrompts.structured.variables.currentValueLabel",
+                    "Current value for {{name}} (not saved)",
+                    { name: variable.label || variable.name }
+                  )}
                   value={currentValues[variable.name] || ""}
                   onChange={(event) =>
                     updateCurrentValue(variable.name, event.target.value)
@@ -368,7 +449,11 @@ export const VariableEditorPanel: React.FC<VariableEditorPanelProps> = ({
                   type="text"
                   aria-label={
                     runtimeValues
-                      ? `Current value for ${variable.label || variable.name} (not saved)`
+                      ? t(
+                          "managePrompts.structured.variables.currentValueLabel",
+                          "Current value for {{name}} (not saved)",
+                          { name: variable.label || variable.name }
+                        )
                       : undefined
                   }
                   value={currentValues[variable.name] || ""}

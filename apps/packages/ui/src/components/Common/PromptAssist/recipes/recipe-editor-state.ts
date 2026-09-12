@@ -40,7 +40,9 @@ const canonicalizeRecipeDefinition = (
     ),
     input_type: variable.input_type ?? "text",
     options:
-      variable.options == null ? null : structuredClone(variable.options),
+      variable.options === null || variable.options === undefined
+        ? null
+        : structuredClone(variable.options),
     max_length: variable.max_length ?? null,
   })),
   blocks: (definition.blocks ?? []).map((recipeBlock) => ({

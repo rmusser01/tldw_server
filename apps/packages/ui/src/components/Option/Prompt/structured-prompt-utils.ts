@@ -382,7 +382,7 @@ export const renderSingleTextRecipe = (
     let value: unknown
     if (runtimeValues && Object.prototype.hasOwnProperty.call(runtimeValues, variable.name)) {
       value = runtimeValues[variable.name]
-    } else if (variable.default_value != null) {
+    } else if (variable.default_value !== null && variable.default_value !== undefined) {
       value = variable.default_value
     } else if (variable.required) {
       throw new SingleTextRecipeRenderError("missing_required_variable", variable.name)

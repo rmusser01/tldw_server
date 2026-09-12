@@ -1,4 +1,5 @@
 import React from "react"
+import { useTranslation } from "react-i18next"
 
 type StructuredPromptBlock = {
   id: string
@@ -41,6 +42,7 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
   sectionKeyError,
   nameInputRef
 }) => {
+  const { t } = useTranslation("settings")
   if (!block) {
     return (
       <section className="rounded-xl border border-border bg-surface p-4">
@@ -70,7 +72,10 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
           <input
             ref={nameInputRef}
             type="text"
-            aria-label="Block name"
+            aria-label={t(
+              "managePrompts.structured.blockEditor.nameLabel",
+              "Block name"
+            )}
             value={block.name}
             onChange={(event) => onChange({ name: event.target.value })}
             data-testid="structured-block-name"
@@ -84,7 +89,10 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
               Role
             </span>
             <select
-              aria-label="Block role"
+              aria-label={t(
+                "managePrompts.structured.blockEditor.roleLabel",
+                "Block role"
+              )}
               value={block.role}
               onChange={(event) =>
                 onChange({
@@ -106,11 +114,17 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
         {onSectionKeyChange ? (
           <label className="block">
             <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-text-muted">
-              Section key
+              {t(
+                "managePrompts.structured.blockEditor.sectionKey",
+                "Section key"
+              )}
             </span>
             <input
               type="text"
-              aria-label="Section key"
+              aria-label={t(
+                "managePrompts.structured.blockEditor.sectionKey",
+                "Section key"
+              )}
               aria-invalid={Boolean(sectionKeyError)}
               aria-describedby={
                 sectionKeyError ? "recipe-section-key-error" : undefined
@@ -136,7 +150,10 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
             Content
           </span>
           <textarea
-            aria-label="Block content"
+            aria-label={t(
+              "managePrompts.structured.blockEditor.contentLabel",
+              "Block content"
+            )}
             value={block.content}
             onChange={(event) => onChange({ content: event.target.value })}
             rows={8}
@@ -150,7 +167,10 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
             <input
               type="checkbox"
               checked={block.enabled}
-              aria-label="Block enabled"
+              aria-label={t(
+                "managePrompts.structured.blockEditor.enabledLabel",
+                "Block enabled"
+              )}
               onChange={(event) => onChange({ enabled: event.target.checked })}
               data-testid="structured-block-enabled"
             />
@@ -160,7 +180,10 @@ export const BlockEditorPanel: React.FC<BlockEditorPanelProps> = ({
             <input
               type="checkbox"
               checked={block.is_template}
-              aria-label="Block uses variables"
+              aria-label={t(
+                "managePrompts.structured.blockEditor.templateLabel",
+                "Block uses variables"
+              )}
               onChange={(event) =>
                 onChange({ is_template: event.target.checked })
               }
