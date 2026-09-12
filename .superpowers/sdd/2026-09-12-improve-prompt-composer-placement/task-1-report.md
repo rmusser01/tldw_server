@@ -192,3 +192,37 @@ Production was unchanged while each real packaged-browser behavior failed:
 - Same-operation inspection close returns feedback and exact Undo; the V3 test proves both. A reopened V5 Review changes starts a new operation, so the prior feedback correctly does not reappear after cancel.
 - Draft discovery is limited to actual editor surfaces rather than generic auxiliary inputs. Collision candidates are conservative across the draft and required send cluster, remain layout-neutral, and use a non-painting fallback if the viewport cannot physically fit the feedback.
 - Window and visual-viewport listeners are paired in cleanup, and pending animation frames remain cancelled on teardown. No prompt action, backend/capability contract, dependency, placement, persistence, system-prompt behavior, or Quick Chat scope changed.
+
+## Fix round 3 — complete V3 composer collision ownership
+
+Independent re-review at `0a9546c1b4` reproduced one remaining short-viewport obstruction: at 360 x 240 after a real V3 composer scroll, feedback fit between the draft and final send cluster but covered the intermediate Save chat to history, Select a Prompt, and scroll-to-latest controls. The root cause was the placement policy's two-rectangle ownership model, not overlay stacking or viewport clamping.
+
+### Fix-round 3 RED evidence
+
+Before production changes, a packaged V3 regression was added that repeats the review's 390 x 844 apply flow, shrinks to 360 x 240, scrolls the real draft to the viewport top, derives the composer surface from the real input/send ancestry, and enumerates every visible enabled interactive control. It requires every control rectangle to avoid painted feedback and every center `elementFromPoint` result to belong to that control for both improvement and recipe feedback. It also shrinks to 360 x 50, requires the feedback to become unpainted while state persists, restores the viewport, and activates the real Undo button.
+
+The packaged test could not reach application behavior in this host session. Exactly three unchanged attempts were made, then retries stopped per the three-attempt cap. Each failed in `probePackagedRuntime` while starting `launchPersistentContext`: Chromium exited with `SIGABRT` and `Target page, context or browser has been closed` (PIDs 11335, 11355, and 11450; cleanup also reported `kill EPERM`). No extension page or mock server was reached. The independent review already supplies the corresponding real-browser production RED; the new packaged test remains committed for independent re-review.
+
+To retain strict local TDD, a focused real-component geometry test was then added before production edits. It renders `PromptAssistComposerAction` in a marked composer surface and supplies literal rectangles for the 360 x 240 viewport, draft, intermediate control, send cluster, trigger, and 344 x 82 feedback. RED was **1 failed**: the feedback remained painted at `top: 70px` and `visibility: ""` where the intermediate control occupied the only apparent gap; the test expected the safe hidden fallback.
+
+### Fix-round 3 implementation
+
+- The sidepanel form now marks its exact interactive composer ownership boundary with `data-prompt-assist-collision-surface`.
+- Feedback placement queries only that marked surface for standard interactive elements. Zero-sized, `display:none`, `visibility:hidden`, `aria-hidden`, `aria-disabled`, and disabled controls are excluded; no document-wide or label-specific production selector is used.
+- Every visible control rectangle joins the existing draft/send blocked rectangles, and placement candidates include both edges of every owned control. Existing visual-viewport bounds, horizontal clamping, menu/drawer suppression, capture-scroll/resize scheduling, and deterministic hidden fallback remain unchanged.
+- Both improvement and recipe feedback use the same corrected overlay. Hidden fallback changes only paint visibility; the existing operation and exact Undo state are retained and return when a later resize/scroll creates space.
+
+### Fix-round 3 GREEN verification
+
+- Exact component geometry/Undo case: **1 passed**. It proves hidden fallback at 360 x 240, retained Undo state in the DOM, resize-driven return at 360 x 500, and exact draft restoration through the real Undo handler.
+- Focused Vitest: **4 files, 122 tests passed**.
+- Extension TypeScript compile and fresh production Chrome build: **passed**. Build output contained only the established duplicate-import and stale Browserslist warnings.
+- Complete WebUI prompt-improvement Playwright: **13 passed** against a temporary webpack dev server, including desktop/mobile placement, feedback geometry, focus, accessibility, and 640 px improvement/recipe drawers. The server was stopped afterward and port 18091 was closed.
+- Packaged extension browser verification, including the new V3 case and four prior regressions: **environment-blocked after the required three-launch cap**, as detailed above. No post-fix packaged retry was made; independent re-review must execute the committed proof.
+- Explicit extension Prettier check for the three changed non-legacy component/test files: **passed**. The one-line legacy sidepanel marker was hand-applied; no whole-file legacy formatter ran.
+- Scoped ESLint with the repository's installed frontend version: **exit 0**, with existing warnings only and no errors. `git diff --check` passed; normal and whitespace-ignored stats differ only in the focused test-harness JSX wrapping, not legacy formatting churn.
+- Bandit: **N/A** — fix-round implementation and tests are TypeScript/TSX only.
+
+### Fix-round 3 self-review
+
+Collision discovery is bounded to the owning composer form, so unrelated page controls neither affect placement nor incur query work. The query runs only while transient feedback is mounted and only on the existing initial/resize/capture-scroll/visual-viewport schedule. Whole control rectangles are protected, so nested icon/text descendants do not weaken the hit target; duplicate semantic matches are harmless conservative rectangles. Hidden and zero-sized inputs do not consume space. No lifecycle, request, capability, persistence, menu/drawer coordination, V5 placement, system-prompt presentation, dependency, backend, or Quick Chat code changed.

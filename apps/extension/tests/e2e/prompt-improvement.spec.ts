@@ -637,6 +637,128 @@ const expectLayoutNeutralFeedback = async (
   expect(clusterBox!.height).toBe(initialCluster.height)
 }
 
+const expectVisibleComposerControlsRemainUsable = async (
+  page: Page,
+  feedback: Locator
+) => {
+  const result = await page.evaluate(() => {
+    const input = document.querySelector<HTMLElement>(
+      '[data-testid="chat-input"]'
+    )
+    const sendCluster = document.querySelector<HTMLElement>(
+      '[data-testid="sidepanel-send-action-cluster"]'
+    )
+    const feedbackElement = Array.from(
+      document.body.querySelectorAll<HTMLElement>("body > div.fixed")
+    ).find((candidate) =>
+      candidate
+        .querySelector('[role="status"]')
+        ?.textContent?.includes("applied.")
+    )
+    if (!input || !sendCluster || !feedbackElement) {
+      throw new Error("Could not resolve composer or feedback geometry")
+    }
+
+    const inputAncestors = new Set<HTMLElement>()
+    let ancestor: HTMLElement | null = input
+    while (ancestor) {
+      inputAncestors.add(ancestor)
+      ancestor = ancestor.parentElement
+    }
+    ancestor = sendCluster
+    while (ancestor && !inputAncestors.has(ancestor)) {
+      ancestor = ancestor.parentElement
+    }
+    if (!ancestor) throw new Error("Composer controls have no shared surface")
+
+    const visualViewport = window.visualViewport
+    const viewport = {
+      left: visualViewport?.offsetLeft ?? 0,
+      top: visualViewport?.offsetTop ?? 0,
+      right:
+        (visualViewport?.offsetLeft ?? 0) +
+        (visualViewport?.width ?? window.innerWidth),
+      bottom:
+        (visualViewport?.offsetTop ?? 0) +
+        (visualViewport?.height ?? window.innerHeight)
+    }
+    const feedbackStyle = window.getComputedStyle(feedbackElement)
+    const feedbackRect = feedbackElement.getBoundingClientRect()
+    const feedbackPainted =
+      feedbackStyle.display !== "none" &&
+      feedbackStyle.visibility !== "hidden" &&
+      Number.parseFloat(feedbackStyle.opacity || "1") > 0
+    const controls = Array.from(
+      ancestor.querySelectorAll<HTMLElement>(
+        'button, input, textarea, select, a[href], [contenteditable="true"], [role="button"], [role="checkbox"], [role="combobox"], [role="switch"]'
+      )
+    )
+      .filter((control) => {
+        const rect = control.getBoundingClientRect()
+        const style = window.getComputedStyle(control)
+        const centerX = rect.left + rect.width / 2
+        const centerY = rect.top + rect.height / 2
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          control.getAttribute("aria-hidden") !== "true" &&
+          control.getAttribute("aria-disabled") !== "true" &&
+          !control.matches(":disabled") &&
+          centerX >= viewport.left &&
+          centerX <= viewport.right &&
+          centerY >= viewport.top &&
+          centerY <= viewport.bottom
+        )
+      })
+      .map((control) => {
+        const rect = control.getBoundingClientRect()
+        const center = {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2
+        }
+        const hit = document.elementFromPoint(center.x, center.y)
+        return {
+          name:
+            control.getAttribute("aria-label") ||
+            control.getAttribute("title") ||
+            control.dataset.testid ||
+            control.textContent?.trim().slice(0, 80) ||
+            control.tagName,
+          rect: rect.toJSON(),
+          intersectsFeedback:
+            feedbackPainted &&
+            rect.left < feedbackRect.right &&
+            rect.right > feedbackRect.left &&
+            rect.top < feedbackRect.bottom &&
+            rect.bottom > feedbackRect.top,
+          centerHitMatches: Boolean(
+            hit && (hit === control || control.contains(hit))
+          ),
+          hitTag: hit?.tagName ?? null,
+          hitText: hit?.textContent?.trim().slice(0, 80) ?? null
+        }
+      })
+
+    return {
+      controls,
+      feedbackPainted,
+      feedbackRect: feedbackRect.toJSON(),
+      viewport
+    }
+  })
+
+  await expect(feedback).toBeAttached()
+  expect(result.controls.length).toBeGreaterThan(3)
+  expect(
+    result.controls.filter(
+      (control) => control.intersectsFeedback || !control.centerHitMatches
+    ),
+    JSON.stringify(result)
+  ).toEqual([])
+}
+
 const assertPromptRequest = (
   request: RecordedRequest,
   expected: { target: "system" | "user_message"; text: string }
@@ -1823,6 +1945,85 @@ test.describe("Packaged extension prompt improvement parity", () => {
         )
         await expect(input).toHaveValue(originalDraft)
         await page.setViewportSize({ width: 390, height: 844 })
+      }
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("V3 short viewport keeps every visible composer control usable around improvement and recipe feedback", async () => {
+    test.setTimeout(180_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel", {
+        mode: "pro",
+        nextgen: true,
+        variant: "v3",
+        viewport: { width: 390, height: 844 }
+      })
+      context = launched.context
+      const page = launched.chatPage
+
+      for (const operation of ["improvement", "recipe"] as const) {
+        await page.reload({ waitUntil: "domcontentloaded" })
+        await waitForConnectionStore(
+          page,
+          `prompt-improvement:all-v3-controls:${operation}`
+        )
+        await forceConnected(page, { serverUrl: mock.baseUrl })
+        const input = await ensureChatInput(page)
+        await seedExcludedContext(page)
+        const originalDraft = "Retain exact {{topic}} draft."
+        await input.fill(originalDraft)
+
+        const menu = await openPromptActions(page)
+        if (operation === "improvement") {
+          await clickThroughPaintedCenter(
+            page,
+            menu.actions.getByRole("button", { name: /Improve now/ })
+          )
+        } else {
+          await clickThroughPaintedCenter(
+            page,
+            menu.actions.getByRole("button", { name: /Build from recipe/ })
+          )
+          const runtimeValue = page.getByLabel(
+            "Current value for Task (not saved)"
+          )
+          await expect(runtimeValue).toBeVisible()
+          await runtimeValue.fill("Retain recipe task")
+          const applyRecipe = page.getByRole("button", {
+            name: "Apply to user message"
+          })
+          await applyRecipe.scrollIntoViewIfNeeded()
+          await clickThroughPaintedCenter(page, applyRecipe)
+        }
+
+        const feedback = getPromptAssistFeedback(
+          page,
+          operation === "improvement"
+            ? "Improvement applied."
+            : "Recipe applied."
+        )
+        await expect(feedback).toBeVisible()
+        await page.setViewportSize({ width: 360, height: 240 })
+        await scrollDraftNearViewportTop(input)
+        await expectVisibleComposerControlsRemainUsable(page, feedback)
+
+        await page.setViewportSize({ width: 360, height: 50 })
+        await expect(feedback).not.toBeVisible()
+        await page.setViewportSize({ width: 390, height: 844 })
+        await expect(feedback).toBeVisible()
+        await clickThroughPaintedCenter(
+          page,
+          feedback.getByRole("button", {
+            name:
+              operation === "improvement" ? "Undo improvement" : "Undo recipe"
+          })
+        )
+        await expect(input).toHaveValue(originalDraft)
       }
     } finally {
       await context?.close()

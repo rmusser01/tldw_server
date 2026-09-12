@@ -242,6 +242,7 @@ type HarnessProps = {
   onSelectModel?: () => void
   draftEnabled?: boolean
   strictMode?: boolean
+  collisionGeometry?: boolean
 }
 
 function Harness({
@@ -258,7 +259,8 @@ function Harness({
   narrow = false,
   onSubmit,
   onSelectModel,
-  draftEnabled = false
+  draftEnabled = false,
+  collisionGeometry = false
 }: HarnessProps) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const initializedRef = React.useRef(false)
@@ -279,6 +281,7 @@ function Harness({
 
   return (
     <form
+      data-prompt-assist-collision-surface={collisionGeometry ? "" : undefined}
       onSubmit={(event) => {
         event.preventDefault()
         onSubmit?.()
@@ -337,21 +340,31 @@ function Harness({
         }}>
         Finish queued send
       </button>
-      <PromptAssistComposerAction
-        form={composer.form}
-        messageRevision={composer.messageRevision}
-        promptAssistMutation={composer.promptAssistMutation}
-        promptAssistSavedAttemptId={composer.promptAssistSavedAttemptId}
-        modelSelection={modelSelection}
-        promptAssistContextKey={promptAssistContextKey}
-        promptAssistBackendKey={promptAssistBackendKey}
-        promptAssistAuthorizationRevision={promptAssistAuthorizationRevision}
-        sending={sending || sendPending}
-        surfaceOpen={surfaceOpen}
-        narrow={narrow}
-        onSelectModel={onSelectModel}
-        onReturnFocus={composer.textAreaFocus}
-      />
+      {collisionGeometry ? (
+        <button type="button" aria-label="Intermediate composer control">
+          Intermediate composer control
+        </button>
+      ) : null}
+      <div
+        data-testid={
+          collisionGeometry ? "sidepanel-send-action-cluster" : undefined
+        }>
+        <PromptAssistComposerAction
+          form={composer.form}
+          messageRevision={composer.messageRevision}
+          promptAssistMutation={composer.promptAssistMutation}
+          promptAssistSavedAttemptId={composer.promptAssistSavedAttemptId}
+          modelSelection={modelSelection}
+          promptAssistContextKey={promptAssistContextKey}
+          promptAssistBackendKey={promptAssistBackendKey}
+          promptAssistAuthorizationRevision={promptAssistAuthorizationRevision}
+          sending={sending || sendPending}
+          surfaceOpen={surfaceOpen}
+          narrow={narrow}
+          onSelectModel={onSelectModel}
+          onReturnFocus={composer.textAreaFocus}
+        />
+      </div>
     </form>
   )
 }
@@ -1543,6 +1556,88 @@ describe("PromptAssistComposerAction review application", () => {
     expect(
       screen.getByRole("button", { name: "Undo improvement" })
     ).toBeInTheDocument()
+  })
+})
+
+describe("PromptAssistComposerAction feedback collision ownership", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.clearAllMocks()
+    mocks.fetchPromptCapabilities.mockResolvedValue(availableCapabilities)
+    mocks.improvePrompt.mockImplementation(async (request) =>
+      improvementResponse(request.operation_id)
+    )
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("hides feedback when an intermediate composer control consumes the only gap, then restores the same Undo", async () => {
+    const makeRect = (x: number, y: number, width: number, height: number) =>
+      ({
+        x,
+        y,
+        width,
+        height,
+        top: y,
+        right: x + width,
+        bottom: y + height,
+        left: x,
+        toJSON: () => ({ x, y, width, height })
+      }) as DOMRect
+    let viewportHeight = 240
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(360)
+    vi.spyOn(window, "innerHeight", "get").mockImplementation(
+      () => viewportHeight
+    )
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function () {
+        if (this.classList.contains("fixed")) {
+          return makeRect(8, 0, 344, 82)
+        }
+        if (this.getAttribute("aria-label") === "User draft") {
+          return makeRect(8, 0, 344, 60)
+        }
+        if (
+          this.getAttribute("aria-label") === "Intermediate composer control"
+        ) {
+          return makeRect(117, 89, 44, 44)
+        }
+        if (this.dataset.testid === "sidepanel-send-action-cluster") {
+          return makeRect(250, 160, 102, 44)
+        }
+        if (this.getAttribute("aria-label") === "Improve prompt") {
+          return makeRect(250, 160, 44, 44)
+        }
+        return makeRect(0, 0, 0, 0)
+      }
+    )
+
+    const user = userEvent.setup()
+    renderHarness({
+      initialDraft: "Exact draft before collision",
+      collisionGeometry: true
+    })
+    await openActions(user)
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Improve now/ })).toBeEnabled()
+    )
+    await user.click(screen.getByRole("button", { name: /Improve now/ }))
+    await screen.findByText("Improved user draft", { selector: "output" })
+
+    const feedback = screen.getByText("Improvement applied.")
+      .parentElement as HTMLElement
+    await waitFor(() => expect(feedback.style.visibility).toBe("hidden"))
+    expect(screen.getByText("Undo improvement")).toBeInTheDocument()
+
+    viewportHeight = 500
+    fireEvent(window, new Event("resize"))
+    await waitFor(() => expect(feedback.style.visibility).toBe(""))
+    await user.click(screen.getByRole("button", { name: "Undo improvement" }))
+    expect(screen.getByLabelText("Committed user draft")).toHaveTextContent(
+      "Exact draft before collision"
+    )
   })
 })
 

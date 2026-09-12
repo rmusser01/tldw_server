@@ -3096,6 +3096,7 @@ export const SidepanelForm = ({
               )}
               <div className="flex">
                 <form
+                  data-prompt-assist-collision-surface
                   onSubmit={(event) => {
                     event.preventDefault()
                     void submitForm()

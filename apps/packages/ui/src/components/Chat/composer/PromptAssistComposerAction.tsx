@@ -106,6 +106,30 @@ function PromptAssistFeedbackOverlay({
           '[data-testid="sidepanel-send-action-cluster"], [data-testid="composer-inline-send-control"]'
         )
         ?.getBoundingClientRect()
+      const composerSurface = anchor.closest<HTMLElement>(
+        "[data-prompt-assist-collision-surface]"
+      )
+      const composerControlRects = composerSurface
+        ? Array.from(
+            composerSurface.querySelectorAll<HTMLElement>(
+              'button, input, textarea, select, a[href], [contenteditable="true"], [role="button"], [role="checkbox"], [role="combobox"], [role="switch"]'
+            )
+          )
+            .filter((control) => {
+              const rect = control.getBoundingClientRect()
+              const style = window.getComputedStyle(control)
+              return (
+                rect.width > 0 &&
+                rect.height > 0 &&
+                style.display !== "none" &&
+                style.visibility !== "hidden" &&
+                control.getAttribute("aria-hidden") !== "true" &&
+                control.getAttribute("aria-disabled") !== "true" &&
+                !control.matches(":disabled")
+              )
+            })
+            .map((control) => control.getBoundingClientRect())
+        : []
       overlay.style.maxWidth = `${Math.max(
         0,
         viewportRight - viewportLeft - inset * 2
@@ -113,9 +137,12 @@ function PromptAssistFeedbackOverlay({
       const overlayRect = overlay.getBoundingClientRect()
       const minimumTop = viewportTop + inset
       const maximumBottom = viewportBottom - inset
-      const blockedRects = [draftRect, controlsRect].filter(
-        (rect): rect is DOMRect =>
-          Boolean(rect && rect.bottom > minimumTop && rect.top < maximumBottom)
+      const blockedRects = [
+        draftRect,
+        controlsRect,
+        ...composerControlRects
+      ].filter((rect): rect is DOMRect =>
+        Boolean(rect && rect.bottom > minimumTop && rect.top < maximumBottom)
       )
       const fitsAt = (top: number) =>
         top >= minimumTop &&
@@ -130,6 +157,10 @@ function PromptAssistFeedbackOverlay({
         controlsRect ? controlsRect.top - gap - overlayRect.height : null,
         draftRect ? draftRect.bottom + gap : null,
         controlsRect ? controlsRect.bottom + gap : null,
+        ...composerControlRects.flatMap((rect) => [
+          rect.top - gap - overlayRect.height,
+          rect.bottom + gap
+        ]),
         minimumTop,
         maximumBottom - overlayRect.height
       ].filter((top): top is number => top !== null)
