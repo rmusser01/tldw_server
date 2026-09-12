@@ -29,6 +29,10 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas impor
     ScheduledTaskRunNowResponse,
     ScheduledTaskRunResponse,
 )
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    apply_llm_provider_overrides_to_listing,
+    validate_provider_override,
+)
 from tldw_Server_API.app.core.AuthNZ.permissions import TASKS_CONTROL
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     AuditEventRow,
@@ -36,6 +40,9 @@ from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     PreviewRow,
     ScheduledTasksDatabase,
     ScheduledTasksTransaction,
+)
+from tldw_Server_API.app.core.Scheduled_Tasks.automation_executors import (
+    _config_section as _automation_config_section,
 )
 from tldw_Server_API.app.core.Scheduled_Tasks.execution_certification import (
     AgentAutomationAdmission,
@@ -106,6 +113,162 @@ def _canonical_hash(payload: dict[str, Any]) -> str:
 
 def _field_error(field: str, code: str, message: str) -> dict[str, Any]:
     return {"field": field, "code": code, "message": message}
+
+
+def _usable_provider_listing() -> dict[str, Any] | None:
+    """Return the provider listing scheduled runs can actually use, or None.
+
+    Scheduled execution resolves credentials from server config only (the
+    executor threads no owner/BYOK context), so the authoring bound is the
+    server's configured listing under admin-override policy -- the same
+    surface ``GET /llm/providers`` reports. Deferred import: the listing
+    lives in the API layer and importing it at module scope would cycle
+    through the router. A failure to READ the listing must not brick
+    authoring (the run-time failure semantics are unchanged), hence None.
+    """
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.llm_providers import (
+            get_configured_providers,
+        )
+
+        listing = apply_llm_provider_overrides_to_listing(
+            get_configured_providers(include_deprecated=True)
+        )
+    except Exception:  # noqa: BLE001
+        from loguru import logger as _logger
+
+        _logger.exception("Automation target-bound provider listing read failed")
+        return None
+    if listing.get("error"):
+        # get_configured_providers converts its own read failures into an
+        # error payload (empty providers, 'error' key) instead of raising;
+        # treating that as a real listing would classify every pinned
+        # provider as unusable and fail authoring CLOSED on a config
+        # problem. Unavailable, not empty.
+        from loguru import logger as _logger
+
+        _logger.warning(
+            "Automation target-bound provider listing unavailable: {}",
+            listing.get("error"),
+        )
+        return None
+    return listing
+
+
+def _bound_execution_target_findings(
+    input_map: Any,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Bound a definition's pinned execution target (TASK-13234, ADR-077 AC#7).
+
+    ``input.provider``/``input.model`` ride the definition payload and the
+    executor honors them per run. This check bounds them at AUTHORING time
+    so a typo or an admin-policy violation surfaces in the preview instead
+    of as a failed run after the schedule fires.
+
+    Severity: an unusable pinned provider (not configured on this server),
+    an admin-disabled provider, or a model outside the admin override's
+    ``allowed_models`` are ERRORS; a model merely absent from the resolved
+    provider's known list is a WARNING (model lists drift and passthrough
+    providers accept new names -- the run may still succeed).
+
+    Args:
+        input_map: The normalized definition ``input`` mapping (or anything
+            else, coerced safely).
+
+    Returns:
+        ``(errors, warnings)`` in the shared ``_field_error`` / preview
+        warning-string shapes.
+    """
+    errors: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+    def _nonempty(value: Any) -> str | None:
+        if value is None or isinstance(value, bool):
+            return None
+        text = str(value).strip()
+        return text or None
+
+    source = input_map if isinstance(input_map, dict) else {}
+    provider = _nonempty(source.get("provider"))
+    model = _nonempty(source.get("model"))
+    if provider is None and model is None:
+        # Blank keys keep today's behavior: the server's fallback chain
+        # (automation-config executor defaults, then server default).
+        return errors, warnings
+
+    listing = _usable_provider_listing()
+    if listing is None:
+        return errors, warnings
+    # Runtime routing normalizes provider names (normalize_provider =
+    # strip + lower), so the bound must compare on the normalized form --
+    # a cased alias the executor would happily run must not be rejected.
+    providers = {
+        str(entry.get("name")).strip().lower(): entry
+        for entry in listing.get("providers", [])
+        if isinstance(entry, dict) and entry.get("name")
+    }
+    provider_key = provider.strip().lower() if provider is not None else None
+
+    if provider_key is not None and provider_key not in providers:
+        errors.append(
+            _field_error(
+                "input.provider",
+                "unusable",
+                (
+                    f"Provider '{provider}' is not configured on this server; "
+                    "scheduled runs use server credentials only."
+                ),
+            )
+        )
+        return errors, warnings
+
+    # Admin hard policy (disabled provider / model outside allowed_models)
+    # applies whether or not the provider was pinned; for a model-only pin,
+    # resolve the provider with the EXECUTOR's precedence (automation-config
+    # executor_provider first, then the listing default) so the check and
+    # the run agree on whose model list governs.
+    resolved = provider_key or _nonempty(
+        _automation_config_section().get("executor_provider")
+    ) or _nonempty(listing.get("default_provider"))
+    if resolved is not None:
+        resolved = resolved.strip().lower()
+    if resolved is not None:
+        override_error = validate_provider_override(resolved, model)
+        if override_error is not None:
+            error_code = str(override_error.get("error_code") or "provider_disabled")
+            # Attribute the finding to the key the policy actually rejects:
+            # a disabled provider to input.provider, a blocked model to
+            # input.model (falling back to the provider when the model rode
+            # the resolved default, since nothing was pinned there).
+            if error_code == "model_not_allowed" and model is not None:
+                field = "input.model"
+            else:
+                field = "input.provider"
+            errors.append(
+                _field_error(
+                    field,
+                    error_code,
+                    (
+                        f"Provider '{resolved}' is blocked by server policy "
+                        f"({error_code})."
+                    ),
+                )
+            )
+            return errors, warnings
+
+    if model is not None and resolved is not None:
+        entry = providers.get(resolved) or {}
+        known = {
+            str(name)
+            for name in (entry.get("models") or [])
+            if isinstance(name, str) and name.strip()
+        }
+        if known and model not in known:
+            warnings.append(
+                f"input.model: unknown_model — '{model}' is not in the known "
+                f"model list for provider '{resolved}'; it may still work."
+            )
+    return errors, warnings
 
 
 def _redact_agent_message(message: str) -> dict[str, Any]:
@@ -345,6 +508,31 @@ class ScheduledTaskAutomationService:
             reason=admission.reason,
             recovery_action=admission.recovery_action,
         )
+
+    def _require_execution_target_bound(self, input_map: Any) -> None:
+        """Refuse an authoring surface whose pinned target cannot run.
+
+        Definition create/update consume previews that were already bound
+        at preview time; this re-check closes the window for previews
+        authored before the bound existed (TASK-13234) -- the same hard
+        codes the preview reports, surfaced as one service error.
+        """
+
+        errors, _warnings = _bound_execution_target_findings(input_map)
+        hard_codes = {"unusable", "provider_disabled", "model_not_allowed"}
+        hard = [error for error in errors if error.get("code") in hard_codes]
+        if hard:
+            detail = "; ".join(
+                f"{error.get('field')}: {error.get('message')}" for error in hard
+            )
+            raise ScheduledTaskAutomationError(
+                "execution_target_unusable",
+                reason=detail,
+                recovery_action=(
+                    "Pin a provider/model this server can run, or clear both "
+                    "keys to use the server default."
+                ),
+            )
 
     def get_capabilities(self) -> ScheduledTaskAutomationCapabilitiesResponse:
         """Return additive per-family capability and feasibility truth."""
@@ -1052,6 +1240,7 @@ class ScheduledTaskAutomationService:
         if preview.mode != "create" or preview.definition_id is not None:
             raise ScheduledTaskAutomationError("preview_mode_mismatch")
         normalized = preview.normalized_config
+        self._require_execution_target_bound(normalized.get("input"))
         normalized_config = normalized.get("config", {})
         definition = tx.create_definition(
             owner_id=owner_id,
@@ -1110,6 +1299,7 @@ class ScheduledTaskAutomationService:
         if preview.definition_version != current.version:
             raise ScheduledTaskAutomationError("definition_version_mismatch")
         normalized = preview.normalized_config
+        self._require_execution_target_bound(normalized.get("input"))
         normalized_config = normalized.get("config", {})
         updated = tx.update_definition(
             owner_id=owner_id,
@@ -1340,6 +1530,11 @@ class ScheduledTaskAutomationService:
             raise ScheduledTaskAutomationError("definition_archived")
         if source.lifecycle == "disabled" and source.disabled_lock_kind in {"admin", "security"}:
             raise ScheduledTaskAutomationError("definition_disabled_locked")
+        # Duplicate bypasses preview authoring (an auto-valid preview is
+        # synthesized below), so the bound must be applied here explicitly
+        # -- otherwise copying a legacy definition whose target became
+        # unusable would mint another unrunnable one (review F6).
+        self._require_execution_target_bound(source.input)
         copy_name = request.name or f"{source.name} copy"
         copy_description = request.description if request.description is not None else source.description
         normalized = {
@@ -1504,7 +1699,14 @@ class ScheduledTaskAutomationService:
         normalized["family"] = request.family
         normalized["schedule"] = schedule
         normalized["visibility_policy"] = base["visibility_policy"]
-        return normalized, [*mode_errors, *errors, *schedule_errors], [*warnings, *schedule_warnings]
+        bound_errors, bound_warnings = _bound_execution_target_findings(
+            normalized.get("input")
+        )
+        return (
+            normalized,
+            [*mode_errors, *errors, *schedule_errors, *bound_errors],
+            [*warnings, *schedule_warnings, *bound_warnings],
+        )
 
     def _preview_hash_payload(self, request: ScheduledTaskPreviewCreateRequest) -> dict[str, Any]:
         payload = request.model_dump(mode="json")
