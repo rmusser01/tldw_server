@@ -586,13 +586,22 @@ async function updateExistingFromServer(
       true
     )
   } catch {
+    const reconciliationError = "Recipe uncertainty authority is unavailable"
     // A missing release acknowledgement is ambiguous. Restore the durable
     // lock first, then abort the token before reasserting scoped evidence so a
-    // late committed finish cannot erase the compensation marker.
-    await db.prompts.update(local.id, {
-      syncStatus: "error",
-      lastSyncedAt: null
-    })
+    // late committed finish cannot erase the compensation marker. Durable
+    // restoration is best effort: its failure must not skip authority cleanup.
+    try {
+      if (
+        (await db.prompts.update(local.id, {
+          syncStatus: "error",
+          lastSyncedAt: null
+        })) === 0
+      )
+        throw new Error("Local prompt disappeared during reconciliation")
+    } catch {
+      // The scoped marker below remains the fail-closed evidence.
+    }
     await finishRecipePersistenceReconciliation(
       local.id,
       ownerId,
@@ -602,7 +611,7 @@ async function updateExistingFromServer(
     await markRecipePersistenceScoped(local.id, ownerId).catch(() => undefined)
     return {
       safe: false,
-      error: "Recipe uncertainty authority is unavailable"
+      error: reconciliationError
     }
   }
   return { safe: true }

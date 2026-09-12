@@ -696,6 +696,47 @@ describe("owner-aware sync and exact reconciliation", () => {
     }
   })
 
+  it("pull remains blocked and restores scoped evidence when durable release compensation fails", async () => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "error"
+    await registry.markRecipePersistenceScoped("exact-id", ownerB)
+    mocks.reconcile
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("local durable write failed"))
+    const finish = vi
+      .spyOn(registry, "finishRecipePersistenceReconciliation")
+      .mockRejectedValueOnce(new Error("authority disconnected"))
+
+    try {
+      expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({
+        success: false,
+        syncStatus: "error",
+        serverId: 101,
+        recipeWriteBlocked: true,
+        error: "Recipe uncertainty authority is unavailable"
+      })
+      expect(mocks.rows.get("exact-id")).toMatchObject({
+        name: "Reconciled",
+        syncStatus: "synced",
+        serverId: 101
+      })
+      expect(
+        await registry.readRecipePersistenceUncertainty("exact-id", ownerB)
+      ).toBe("scoped")
+      const reconciliationOperationId = finish.mock.calls[0][2]
+      expect(finish).toHaveBeenNthCalledWith(
+        2,
+        "exact-id",
+        ownerB,
+        reconciliationOperationId,
+        false
+      )
+    } finally {
+      finish.mockRestore()
+    }
+  })
+
   it("a trustworthy pull reconciles a restarted durable-only lock", async () => {
     seed(true)
     mocks.rows.get("exact-id").syncStatus = "error"
