@@ -16,6 +16,7 @@ import pytest
 from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas import (
     ScheduledTaskDefinitionCreateRequest,
     ScheduledTaskDefinitionUpdateRequest,
+    ScheduledTaskDuplicateRequest,
 )
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     ScheduledTasksDatabase,
@@ -39,13 +40,17 @@ _LISTING: dict[str, Any] = {
 }
 
 
-def _service(tmp_path) -> tuple[ScheduledTaskAutomationService, ScheduledTasksDatabase]:
+def _service(
+    tmp_path: Any,
+) -> tuple[ScheduledTaskAutomationService, ScheduledTasksDatabase]:
     repo = ScheduledTasksDatabase(tmp_path / "scheduled_tasks_bound.db")
     repo.ensure_schema()
     return ScheduledTaskAutomationService(repository=repo), repo
 
 
-def _bound(monkeypatch: pytest.MonkeyPatch, listing: dict[str, Any] | None) -> None:
+def _bound(
+    monkeypatch: pytest.MonkeyPatch, listing: dict[str, Any] | None
+) -> None:
     monkeypatch.setattr(service_module, "_usable_provider_listing", lambda: listing)
 
 
@@ -269,5 +274,102 @@ def test_update_hard_fails_for_newly_unusable_target(tmp_path, monkeypatch):
             actor=ACTOR,
             definition_id=definition.id,
             payload=ScheduledTaskDefinitionUpdateRequest(preview_id=update_preview.id),
+        )
+    assert excinfo.value.code == "execution_target_unusable"  # nosec B101
+
+
+def test_listing_error_payload_fails_open(tmp_path, monkeypatch):
+    """A config-read failure (error payload, not an exception) must not brick authoring."""
+    from tldw_Server_API.app.api.v1.endpoints import llm_providers as listing_module
+
+    _no_admin_policy(monkeypatch)
+    monkeypatch.setattr(
+        listing_module,
+        "get_configured_providers",
+        lambda **kwargs: {
+            "providers": [],
+            "default_provider": "openai",
+            "total_configured": 0,
+            "error": "internal error reading config",
+        },
+    )
+    service, _repo = _service(tmp_path)
+
+    preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_preview_payload("openai", "gpt-4o"),
+    )
+
+    assert preview.status == "valid"  # nosec B101
+    assert preview.validation_errors == []  # nosec B101
+
+
+def test_cased_provider_alias_is_accepted(tmp_path, monkeypatch):
+    """Runtime routing normalizes provider casing; the bound must too."""
+    _bound(monkeypatch, _LISTING)
+    _no_admin_policy(monkeypatch)
+    service, _repo = _service(tmp_path)
+
+    preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_preview_payload("OpenAI", None),
+    )
+
+    assert preview.status == "valid"  # nosec B101
+    assert preview.validation_errors == []  # nosec B101
+
+
+def test_model_only_pin_checks_automation_config_executor_provider(tmp_path, monkeypatch):
+    """A model-only pin resolves the provider with the executor's precedence."""
+    _bound(monkeypatch, _LISTING)
+    _no_admin_policy(monkeypatch)
+    monkeypatch.setattr(
+        service_module,
+        "_automation_config_section",
+        lambda: {"executor_provider": "anthropic"},
+    )
+    service, _repo = _service(tmp_path)
+
+    preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_preview_payload(None, "gpt-4o"),
+    )
+
+    # gpt-4o is unknown for anthropic (the automation-config provider),
+    # not for the listing default (openai) -- the warning names anthropic.
+    assert preview.status == "valid"  # nosec B101
+    assert len(preview.warnings) == 1  # nosec B101
+    assert "anthropic" in str(preview.warnings[0])  # nosec B101
+
+
+def test_duplicate_hard_fails_when_target_became_unusable(tmp_path, monkeypatch):
+    """Duplicate synthesizes an auto-valid preview; the bound must apply there too."""
+    _bound(monkeypatch, _LISTING)
+    _no_admin_policy(monkeypatch)
+    service, _repo = _service(tmp_path)
+
+    preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_preview_payload("openai", None),
+    )
+    definition = service.create_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=ScheduledTaskDefinitionCreateRequest(preview_id=preview.id),
+    )
+
+    # The provider disappears from the server before the duplicate.
+    _bound(monkeypatch, {"providers": [], "default_provider": None, "total_configured": 0})
+
+    with pytest.raises(ScheduledTaskAutomationError) as excinfo:
+        service.duplicate_definition(
+            owner_id=OWNER_ID,
+            actor=ACTOR,
+            definition_id=definition.id,
+            payload=ScheduledTaskDuplicateRequest(),
         )
     assert excinfo.value.code == "execution_target_unusable"  # nosec B101

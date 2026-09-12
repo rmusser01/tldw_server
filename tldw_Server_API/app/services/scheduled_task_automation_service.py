@@ -41,6 +41,9 @@ from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     ScheduledTasksDatabase,
     ScheduledTasksTransaction,
 )
+from tldw_Server_API.app.core.Scheduled_Tasks.automation_executors import (
+    _config_section as _automation_config_section,
+)
 from tldw_Server_API.app.core.Scheduled_Tasks.execution_certification import (
     AgentAutomationAdmission,
     AgentExecutionDispatchReadiness,
@@ -128,11 +131,28 @@ def _usable_provider_listing() -> dict[str, Any] | None:
             get_configured_providers,
         )
 
-        return apply_llm_provider_overrides_to_listing(
+        listing = apply_llm_provider_overrides_to_listing(
             get_configured_providers(include_deprecated=True)
         )
     except Exception:  # noqa: BLE001
+        from loguru import logger as _logger
+
+        _logger.exception("Automation target-bound provider listing read failed")
         return None
+    if listing.get("error"):
+        # get_configured_providers converts its own read failures into an
+        # error payload (empty providers, 'error' key) instead of raising;
+        # treating that as a real listing would classify every pinned
+        # provider as unusable and fail authoring CLOSED on a config
+        # problem. Unavailable, not empty.
+        from loguru import logger as _logger
+
+        _logger.warning(
+            "Automation target-bound provider listing unavailable: {}",
+            listing.get("error"),
+        )
+        return None
+    return listing
 
 
 def _bound_execution_target_findings(
@@ -179,13 +199,17 @@ def _bound_execution_target_findings(
     listing = _usable_provider_listing()
     if listing is None:
         return errors, warnings
+    # Runtime routing normalizes provider names (normalize_provider =
+    # strip + lower), so the bound must compare on the normalized form --
+    # a cased alias the executor would happily run must not be rejected.
     providers = {
-        str(entry.get("name")): entry
+        str(entry.get("name")).strip().lower(): entry
         for entry in listing.get("providers", [])
         if isinstance(entry, dict) and entry.get("name")
     }
+    provider_key = provider.strip().lower() if provider is not None else None
 
-    if provider is not None and provider not in providers:
+    if provider_key is not None and provider_key not in providers:
         errors.append(
             _field_error(
                 "input.provider",
@@ -199,9 +223,15 @@ def _bound_execution_target_findings(
         return errors, warnings
 
     # Admin hard policy (disabled provider / model outside allowed_models)
-    # applies whether or not the provider was pinned; resolve it from the
-    # listing default otherwise so a pinned model still gets checked.
-    resolved = provider or _nonempty(listing.get("default_provider"))
+    # applies whether or not the provider was pinned; for a model-only pin,
+    # resolve the provider with the EXECUTOR's precedence (automation-config
+    # executor_provider first, then the listing default) so the check and
+    # the run agree on whose model list governs.
+    resolved = provider_key or _nonempty(
+        _automation_config_section().get("executor_provider")
+    ) or _nonempty(listing.get("default_provider"))
+    if resolved is not None:
+        resolved = resolved.strip().lower()
     if resolved is not None:
         override_error = validate_provider_override(resolved, model)
         if override_error is not None:
@@ -1500,6 +1530,11 @@ class ScheduledTaskAutomationService:
             raise ScheduledTaskAutomationError("definition_archived")
         if source.lifecycle == "disabled" and source.disabled_lock_kind in {"admin", "security"}:
             raise ScheduledTaskAutomationError("definition_disabled_locked")
+        # Duplicate bypasses preview authoring (an auto-valid preview is
+        # synthesized below), so the bound must be applied here explicitly
+        # -- otherwise copying a legacy definition whose target became
+        # unusable would mint another unrunnable one (review F6).
+        self._require_execution_target_bound(source.input)
         copy_name = request.name or f"{source.name} copy"
         copy_description = request.description if request.description is not None else source.description
         normalized = {
