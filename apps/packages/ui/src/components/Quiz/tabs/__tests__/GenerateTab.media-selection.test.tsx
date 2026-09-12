@@ -27,6 +27,7 @@ import {
   type QuestionUpdate,
   type QuizImportQuestion,
 } from "@/services/quizzes";
+import { advancedQuizFixtureMatrix } from "./advancedQuizFixtureMatrix";
 
 const navigationMocks = {
   navigate: vi.fn(),
@@ -169,6 +170,82 @@ describe("GenerateTab scalable media selection and generation flow", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("keeps available fallback profiles aligned with shared contract fixtures", () => {
+    const availableProfiles = QUIZ_GENERATION_PROFILES.filter(
+      (profile) => profile.status === "available",
+    );
+    const fallbackProfileIds = availableProfiles
+      .map((profile) => profile.id)
+      .sort();
+    const fixtureProfileIds = Object.keys(
+      advancedQuizFixtureMatrix.profiles,
+    ).sort();
+
+    expect(advancedQuizFixtureMatrix.schema_version).toBe(1);
+    expect(fixtureProfileIds).toEqual(fallbackProfileIds);
+    for (const profile of availableProfiles) {
+      const fixture = advancedQuizFixtureMatrix.profiles[profile.id];
+      expect(fixture.catalog).toEqual(profile);
+      expect(
+        fixture.request.generation_profile,
+      ).toBe(profile.id);
+      expect(fixture.output.output_kind).toBe(profile.output_kind);
+    }
+
+    const malformedCases = advancedQuizFixtureMatrix.malformed_output_cases;
+    expect(new Set(malformedCases.map((fixture) => fixture.profile))).toEqual(
+      new Set(fallbackProfileIds),
+    );
+    expect(malformedCases.map((fixture) => fixture.id)).toEqual(
+      expect.arrayContaining([
+        "question_count_mismatch",
+        "invalid_citation",
+        "best_of_five_wrong_option_count",
+        "best_of_five_too_many_options",
+        "best_of_five_invalid_answer",
+        "best_of_five_ambiguous_answer",
+        "best_of_five_duplicate_answer_label",
+        "best_of_five_non_multiple_choice",
+        "emq_incomplete_group",
+        "emq_inconsistent_option_bank",
+        "assertion_reasoning_missing_reason",
+        "assertion_reasoning_invalid_answer",
+        "assertion_reasoning_noncanonical_options",
+        "assertion_reasoning_unlabeled_question_text",
+        "reserved_tag_leakage",
+        "osce_missing_rubric",
+      ]),
+    );
+    for (const fixture of malformedCases) {
+      expect(fallbackProfileIds).toContain(fixture.profile);
+      expect([
+        "normalize_reject",
+        "normalize_expect",
+        "assertion_schema_reject",
+        "planned_reject",
+        "provenance_reject",
+        "osce_schema_reject",
+      ]).toContain(fixture.mode);
+      expect(
+        Object.values(fixture.output).some(
+          (value) => Array.isArray(value) && value.length > 0,
+        ),
+      ).toBe(true);
+      if (fixture.mode.endsWith("_reject")) {
+        expect(fixture.error).toEqual(expect.any(String));
+      }
+      if (fixture.mode === "normalize_expect") {
+        expect(Object.keys(fixture.expected ?? {})).not.toHaveLength(0);
+      }
+      if (fixture.mode === "planned_reject") {
+        expect(fixture.question_plan).not.toHaveLength(0);
+      }
+      if (fixture.mode === "provenance_reject") {
+        expect(fixture.selected_sources).not.toHaveLength(0);
+      }
+    }
   });
 
   it("loads media in pages and keeps selection stable while loading more", async () => {

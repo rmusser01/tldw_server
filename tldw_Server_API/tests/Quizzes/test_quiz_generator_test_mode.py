@@ -446,12 +446,14 @@ def test_normalize_questions_preserves_legacy_mcq_answer_fallback() -> None:
 def test_normalize_questions_clears_group_metadata_for_non_emq_profiles(
     generation_profile: str,
 ) -> None:
+    """Ungroup valid non-EMQ questions without altering their profile behavior."""
     options = ["A", "B", "C", "D", "E"] if generation_profile == "best_of_five" else ["A", "B"]
     questions = _normalize_questions(
         [
             {
                 "question_type": "multiple_choice",
                 "question_text": "Ordinary multiple choice question",
+                "explanation": "The first option is supported by the source.",
                 "group_id": "llm-supplied-group",
                 "group_prompt": "LLM-supplied group prompt",
                 "options": options,
@@ -517,11 +519,13 @@ def test_normalize_questions_marks_best_of_five_with_existing_tags() -> None:
 
 
 def test_normalize_questions_rejects_any_invalid_best_of_five_option_count() -> None:
+    """Reject a malformed option count even after a valid question in the batch."""
     valid_question = {
         "question_type": "multiple_choice",
         "question_text": "Which answer is best supported?",
         "options": ["A", "B", "C", "D", "E"],
         "correct_answer": 0,
+        "explanation": "The first option is supported by the source.",
     }
     invalid_question = {
         **valid_question,

@@ -118,13 +118,13 @@ export const QUIZ_GENERATION_PROFILES: QuizGenerationProfileDefinition[] = [
   {
     id: "osce_scenario",
     label: "OSCE Scenario",
-    description: "Source-grounded clinical practice stations.",
+    description: "Scenario practice with checklist and rubric feedback.",
     status: "available",
     output_kind: "osce_stations",
     default_num_stations: 1,
     default_num_questions: 1,
     default_difficulty: "mixed",
-    default_question_types: []
+    default_question_types: ["fill_blank"]
   }
 ]
 export type AnswerValue = number | string | number[] | Record<string, string>

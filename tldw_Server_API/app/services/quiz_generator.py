@@ -21,7 +21,7 @@ from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
 )
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.exceptions import BadRequestError, OsceVerificationError
+from tldw_Server_API.app.core.exceptions import BadRequestError, OsceVerificationError, QuizMalformedOutputError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
@@ -453,6 +453,42 @@ def _normalize_emq_mc_answer(raw: Any, options: list[str]) -> int:
     if candidates:
         raise ValueError("EMQ correct_answer is ambiguous")
     raise ValueError("EMQ correct_answer must be a valid option index, letter, or exact label")
+
+
+def _normalize_best_of_five_answer(raw: Any, options: list[str]) -> int:
+    """Return a strict zero-based answer index for a Best-of-Five question."""
+    if isinstance(raw, bool):
+        raise QuizMalformedOutputError(
+            "Best-of-Five correct_answer must be an integer, A-E letter, or exact option label"
+        )
+    if isinstance(raw, int):
+        if 0 <= raw < len(options):
+            return raw
+        raise QuizMalformedOutputError("Best-of-Five correct_answer index is out of range")
+    if not isinstance(raw, str):
+        raise QuizMalformedOutputError(
+            "Best-of-Five correct_answer must be an integer, A-E letter, or exact option label"
+        )
+
+    text = raw.strip()
+    candidates: set[int] = set()
+    if text.isdigit():
+        index = int(text)
+        if 0 <= index < len(options):
+            candidates.add(index)
+    if len(text) == 1 and "A" <= text.upper() <= "E":
+        candidates.add(ord(text.upper()) - ord("A"))
+    candidates.update(
+        index for index, option in enumerate(options) if option.casefold() == text.casefold()
+    )
+
+    if len(candidates) == 1:
+        return candidates.pop()
+    if candidates:
+        raise QuizMalformedOutputError("Best-of-Five correct_answer is ambiguous")
+    raise QuizMalformedOutputError(
+        "Best-of-Five correct_answer must be an integer, A-E letter, or exact option label"
+    )
 
 
 def _normalize_assertion_reasoning_answer(raw: Any) -> int:
@@ -990,6 +1026,7 @@ def _normalize_questions(
     profile_id = _normalize_generation_profile(generation_profile)
     is_emq = profile_id == "emq"
     is_assertion_reasoning = profile_id == ASSERTION_REASONING_TAG
+    is_best_of_five = profile_id == "best_of_five"
     mc_option_count = None if is_emq else 5 if profile_id == "best_of_five" else 4
     normalized: list[dict[str, Any]] = []
     for raw in raw_questions:
@@ -1000,6 +1037,8 @@ def _normalize_questions(
         q_type = _normalize_question_type(raw.get("question_type"))
         if is_assertion_reasoning and q_type != "multiple_choice":
             raise ValueError("Assertion / Reasoning questions must use the multiple_choice question type")
+        if is_best_of_five and q_type != "multiple_choice":
+            raise QuizMalformedOutputError("Best-of-Five questions must use the multiple_choice question type")
         if q_type not in DEFAULT_QUESTION_TYPES and not is_emq:
             continue
         if is_assertion_reasoning:
@@ -1042,14 +1081,28 @@ def _normalize_questions(
                 options = list(ASSERTION_REASONING_OPTIONS)
                 correct_answer = _normalize_assertion_reasoning_answer(raw.get("correct_answer"))
             else:
-                options = _coerce_options(raw.get("options"), max_options=mc_option_count)
-                if profile_id == "best_of_five" and len(options) != 5:
-                    raise ValueError("Best-of-Five questions must include exactly 5 options")
-                correct_answer = (
-                    raw.get("correct_answer")
-                    if is_emq
-                    else _normalize_mc_answer(raw.get("correct_answer"), options)
+                options = _coerce_options(
+                    raw.get("options"),
+                    max_options=None if profile_id == "best_of_five" else mc_option_count,
                 )
+                if profile_id == "best_of_five" and len(options) != 5:
+                    raise QuizMalformedOutputError("Best-of-Five questions must include exactly 5 options")
+                if profile_id == "best_of_five" and len(
+                    {option.casefold() for option in options}
+                ) != len(options):
+                    raise QuizMalformedOutputError("Best-of-Five questions must not include duplicate option labels")
+                if is_emq:
+                    correct_answer = raw.get("correct_answer")
+                elif profile_id == "best_of_five":
+                    correct_answer = _normalize_best_of_five_answer(
+                        raw.get("correct_answer"), options
+                    )
+                    if not isinstance(raw.get("explanation"), str) or not explanation:
+                        raise QuizMalformedOutputError("Best-of-Five questions must include a nonempty explanation")
+                else:
+                    correct_answer = _normalize_mc_answer(
+                        raw.get("correct_answer"), options
+                    )
         elif q_type == "true_false":
             correct_answer = _normalize_tf_answer(raw.get("correct_answer"))
         elif q_type == "fill_blank":
