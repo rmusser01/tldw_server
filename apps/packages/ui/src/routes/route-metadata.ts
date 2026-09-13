@@ -424,6 +424,17 @@ export const ROUTE_METADATA = [
     rationale: "Research workspace and source orchestration route."
   }),
   defineRoute({
+    path: "/explainer",
+    label: "Explainer",
+    group: "workspace",
+    surface: "labs_beta",
+    availability: webAndExtension,
+    commandPalette: "show",
+    nav: "secondary",
+    requiresBackend: true,
+    rationale: "Persistent branching explanations of topics and selected sources."
+  }),
+  defineRoute({
     path: "/document-workspace",
     label: "Document Workspace",
     group: "workspace",

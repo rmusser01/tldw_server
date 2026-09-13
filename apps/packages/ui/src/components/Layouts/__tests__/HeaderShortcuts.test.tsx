@@ -302,6 +302,29 @@ describe("HeaderShortcuts launcher modal", () => {
     expect(screen.getByText("No pages match your search")).toBeInTheDocument()
   })
 
+  it.each(["current", "legacy"] as const)(
+    "finds Explainer by search in the %s launcher view",
+    (view) => {
+      mockState.launcherView = view
+      renderWithRouter(
+        <HeaderShortcuts expanded={true} onExpandedChange={vi.fn()} />
+      )
+
+      if (view === "current") {
+        fireEvent.click(
+          within(screen.getByLabelText("Categories")).getByText("Research")
+        )
+      }
+      fireEvent.change(screen.getByPlaceholderText("Search pages..."), {
+        target: { value: "explainer" }
+      })
+
+      expect(
+        getShortcutLink(screen.getByRole("listbox"), "Explainer")
+      ).toHaveAttribute("href", "/explainer")
+    }
+  )
+
   it("calls onExpandedChange(false) when Escape is pressed", () => {
     const onExpandedChange = vi.fn()
     renderWithRouter(

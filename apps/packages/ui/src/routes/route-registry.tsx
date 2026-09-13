@@ -207,6 +207,7 @@ const OptionRepo2Txt = lazy(() => import("./option-repo2txt"))
 const OptionSetup = lazy(() => import("./option-setup"))
 const OptionOnboardingTest = lazy(() => import("./option-onboarding-test"))
 const OptionResearchWorkspace = lazy(() => import("./option-research-workspace"))
+const OptionExplainer = lazy(() => import("./option-explainer"))
 const OptionWorkspaces = lazy(() => import("./option-workspaces"))
 const OptionChatWorkspace = lazy(() => import("./option-chat-workspace"))
 const OptionPrototypeWorkspaces = lazy(() => import("./option-prototype-workspaces"))
@@ -532,6 +533,11 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
     kind: "options",
     path: RESEARCH_WORKSPACE_PATH,
     element: <OptionResearchWorkspace />,
+  },
+  {
+    kind: "options",
+    path: "/explainer",
+    element: <OptionExplainer />,
   },
   {
     kind: "options",

@@ -200,6 +200,8 @@
     "skills": "Skills",
     "modelPlayground": "Model Playground",
     "researchWorkspace": "Research Workspace",
+    "explainer": "Explainer",
+    "explainerDesc": "Explore topics and sources through branching explanations",
     "modeKanban": "Kanban",
     "modeShortcutHint": "{{shortcut}} to switch",
     "quickIngest": "Quick Ingest",
