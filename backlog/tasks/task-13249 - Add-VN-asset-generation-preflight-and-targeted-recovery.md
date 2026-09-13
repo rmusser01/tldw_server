@@ -1,10 +1,10 @@
 ---
 id: TASK-13249
 title: Add VN asset generation preflight and targeted recovery
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-13 18:27'
-updated_date: '2026-09-13 19:30'
+updated_date: '2026-09-13 19:36'
 labels:
   - vn-assets
 dependencies: []
@@ -42,14 +42,14 @@ Requester supplied the human-written Change summary and authorized rebase, all P
 PR #2954 Qodo review: fixed pack-scoped command locking, finite authenticated preflight rate policy, shared adapter/default-model resolution, direct core tests, and missing type/doc annotations. Matrix refresh finding disproven by a regression that passed before production changes; successful matrix application already replaces selectedPack. Regenerated omitted OpenAPI fingerprint with CI-compatible schema libraries; exporter --check passes exact CI hash. Verification: 86 preflight/model/API + 46 adapter/jobs + 9 catalog tests; 33 frontend tests; 3 Chromium desktop/mobile scenarios; scoped ESLint and Bandit clean. Typecheck retains exactly the 90 baseline diagnostics. Detailed disposition is in Docs/Evidence/VN_Generation_Readiness_2026_09_13.md. Awaiting final independent review, push, refreshed Qodo review and required CI before authorized merge.
 
 Independent review also found JWT and API-key principals could receive separate preflight budgets for one user. Added opt-in per_user buckets to the shared RBAC factory/enforcer, enabled only for VN preflight; legacy endpoint semantics remain unchanged. Reproduced with failing API identity assertions, then verified 136 auth-hardening/VN API/core/model tests passing, including frozen-clock aggregate-budget and cross-user isolation tests. Scoped production Ruff and expanded Bandit both clean; final OpenAPI check still passes. All original required PR checks except the repaired fingerprint passed.
+
+Qodo re-reviewed code head cad6d3b465 and confirmed zero active findings, seven implemented dispositions and the matrix/preflight finding dismissed based on code and regression evidence: https://github.com/rmusser01/tldw_server/pull/2954#issuecomment-5655592729 . All eight review threads are resolved. Independent follow-up review also found no further issue. Task acceptance/verification/documentation are complete; PR merge remains gated on final-head CI. The requester has explicitly authorized merge after checks, without bypassing protection.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed the bounded generation-readiness and targeted-recovery implementation for #2021. All scoped tests pass. Issues #2021-#2027 were reconciled and registered as children of #1391. Recipe snapshots, reload recovery and worker crash replay remain outside this slice; #2021 stays open. No live provider/GPU/worker deployment or extension build was exercised.
-
-Delivery: https://github.com/rmusser01/tldw_server/pull/2954 (draft). No merge performed.
+Completed the bounded generation-readiness and targeted-recovery slice for #2021, including Qodo review repairs, finite user-wide preflight rate limits, shared model resolution, and the generated OpenAPI fingerprint. Verification: 136 auth/VN/core/model tests, 46 adapter/jobs tests, 9 catalog tests, 33 frontend tests, and 3 desktop/mobile Chromium scenarios passed; scoped Ruff, ESLint and Bandit clean. Full typecheck retains exactly 90 baseline diagnostics. Human-written Change summary is present verbatim. Qodo and independent review have no active findings. Delivery: PR #2954, ready and awaiting required final-head CI before the authorized merge. Recipe snapshots, reload recovery, worker crash replay and cluster-wide quotas remain outside this slice; #2021 stays open. Issues #2021-#2027 were reconciled and linked under #1391. No live provider/GPU/external worker or extension build was exercised.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
