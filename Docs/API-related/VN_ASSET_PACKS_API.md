@@ -165,10 +165,17 @@ Do not log full prompt previews in production logs; world-book and scenario cont
 ## Generation Lifecycle
 
 Before queuing work, `GET /packs/{pack_id}/generation/preflight` reports the
-effective backend/model for each slot (slot override, then pack default, then
-the configured server backend). Each slot reports `configured`,
+effective backend/model for each slot. Backend selection uses the slot override,
+then pack default, then configured server backend. Model selection uses the slot
+override, then pack default, then the adapter's environment/configured/built-in
+default, using the same resolver as generation. Backends without a determinable
+public model identifier return `null`; local model file paths are not exposed.
+Each slot reports `configured`,
 `missing_configuration`, `unavailable`, or `unknown`, with guidance when needed.
 This read requires pack ownership and creates no jobs.
+The named `vn_assets.preflight` policy applies the standard per-user rate class
+(120 requests/minute, burst 240 per API process); stricter user or role limits still apply.
+Rate-limited responses use HTTP 429 with `Retry-After`.
 
 The response has `scope: "api_process_configuration"` and
 `worker_health: "unknown"`. `local_workers_enabled` only reports the two local

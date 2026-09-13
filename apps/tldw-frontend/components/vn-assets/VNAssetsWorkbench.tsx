@@ -60,8 +60,8 @@ export default function VNAssetsWorkbench() {
   const [preflightError, setPreflightError] = useState<string | null>(null);
   const [preflightRevision, setPreflightRevision] = useState(0);
   const [loadedPackId, setLoadedPackId] = useState<number | null>(null);
-  const [retryingSlotId, setRetryingSlotId] = useState<number | null>(null);
-  const generationCommandPending = useRef(false);
+  const generationCommandPending = useRef(new Set<number>());
+  const [pendingCommands, setPendingCommands] = useState<Record<number, { kind: 'start' | 'retry' | 'cancel'; slotId?: number }>>({});
   const generationKeys = useRef(new Map<string, string>());
   const selectedPackIdRef = useRef<number | null>(null);
   const refreshRevision = useRef(0);
@@ -72,13 +72,24 @@ export default function VNAssetsWorkbench() {
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [isApplyingMatrix, setIsApplyingMatrix] = useState(false);
-  const [isStartingGeneration, setIsStartingGeneration] = useState(false);
-  const [isCancellingGeneration, setIsCancellingGeneration] = useState(false);
+  const selectedCommand = selectedPack ? pendingCommands[selectedPack.id] : undefined;
+  const isStartingGeneration = selectedCommand?.kind === 'start';
+  const isCancellingGeneration = selectedCommand?.kind === 'cancel';
+  const retryingSlotId = selectedCommand?.kind === 'retry' ? selectedCommand.slotId ?? null : null;
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState('Untitled VN asset pack');
   const [primaryCharacterId, setPrimaryCharacterId] = useState('1');
 
   const starterMatrix = starterMatrices[0] ?? null;
+
+  const finishGenerationCommand = useCallback((packId: number): void => {
+    generationCommandPending.current.delete(packId);
+    setPendingCommands((previous) => {
+      const next = { ...previous };
+      delete next[packId];
+      return next;
+    });
+  }, []);
 
   const readinessBadge = useMemo(() => {
     if (!readiness) return 'Setup';
@@ -208,7 +219,7 @@ export default function VNAssetsWorkbench() {
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        if (!generationCommandPending.current) await refreshPackDetails(selectedPack);
+        if (!generationCommandPending.current.has(selectedPack.id)) await refreshPackDetails(selectedPack);
       } catch {
         if (!cancelled) setError('Could not refresh generation progress. Refresh to try again.');
       } finally {
@@ -220,7 +231,7 @@ export default function VNAssetsWorkbench() {
   }, [selectedPack, loadedPackId, generation?.status, refreshPackDetails]);
 
   const handleRefreshGeneration = useCallback(async () => {
-    if (!selectedPack || generationCommandPending.current) return;
+    if (!selectedPack || generationCommandPending.current.has(selectedPack.id)) return;
     setPreflightRevision((revision) => revision + 1);
     setError(null);
     try {
@@ -288,15 +299,14 @@ export default function VNAssetsWorkbench() {
   }, [selectedPack, starterMatrix]);
 
   const runGeneration = useCallback(async (slotId?: number) => {
-    if (!selectedPack || loadedPackId !== selectedPack.id || generationCommandPending.current) return;
-    generationCommandPending.current = true;
+    if (!selectedPack || loadedPackId !== selectedPack.id || generationCommandPending.current.has(selectedPack.id)) return;
+    generationCommandPending.current.add(selectedPack.id);
     ++refreshRevision.current;
     const packId = selectedPack.id;
     const operation = `${packId}:${slotId ?? 'start'}`;
     const idempotencyKey = generationKeys.current.get(operation) ?? createVNAssetIdempotencyKey('vn-generation');
     generationKeys.current.set(operation, idempotencyKey);
-    if (slotId === undefined) setIsStartingGeneration(true);
-    else setRetryingSlotId(slotId);
+    setPendingCommands((previous) => ({ ...previous, [packId]: { kind: slotId === undefined ? 'start' : 'retry', slotId } }));
     setError(null);
     try {
       const request = { idempotency_key: idempotencyKey };
@@ -313,17 +323,15 @@ export default function VNAssetsWorkbench() {
         setError(startError instanceof Error ? startError.message : 'Generation could not be started. Retry to check the same request.');
       }
     } finally {
-      generationCommandPending.current = false;
-      setIsStartingGeneration(false);
-      setRetryingSlotId(null);
+      finishGenerationCommand(packId);
     }
-  }, [selectedPack, loadedPackId]);
+  }, [selectedPack, loadedPackId, finishGenerationCommand]);
 
   const handleCancelGeneration = useCallback(async () => {
-    if (!selectedPack || generationCommandPending.current) return;
-    generationCommandPending.current = true;
+    if (!selectedPack || generationCommandPending.current.has(selectedPack.id)) return;
+    generationCommandPending.current.add(selectedPack.id);
     ++refreshRevision.current;
-    setIsCancellingGeneration(true);
+    setPendingCommands((previous) => ({ ...previous, [selectedPack.id]: { kind: 'cancel' } }));
     setError(null);
     try {
       const nextGeneration = await cancelVNAssetGeneration(selectedPack.id);
@@ -333,10 +341,9 @@ export default function VNAssetsWorkbench() {
         setError(cancelError instanceof Error ? cancelError.message : 'Failed to cancel generation');
       }
     } finally {
-      generationCommandPending.current = false;
-      setIsCancellingGeneration(false);
+      finishGenerationCommand(selectedPack.id);
     }
-  }, [selectedPack]);
+  }, [selectedPack, finishGenerationCommand]);
 
   const handleBulkReview = useCallback(async (request: VNAssetBulkReviewRequest) => {
     if (!selectedPack) return;

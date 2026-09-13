@@ -3,7 +3,7 @@ from collections.abc import Generator, Iterator
 from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -140,15 +140,16 @@ def test_create_pack_endpoint_returns_pack(
     ],
 )
 def test_generation_preflight_reports_effective_configuration(
-    client,
-    service,
-    character_id,
-    monkeypatch,
-    override,
-    configured,
-    expected_backend,
-    expected_status,
+    client: TestClient,
+    service: VNAssetPackService,
+    character_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+    override: str | None,
+    configured: bool,
+    expected_backend: str | None,
+    expected_status: str,
 ) -> None:
+    """Expose effective backend diagnostics without creating generation batches."""
     from tldw_Server_API.app.core.VN_Assets import preflight
 
     monkeypatch.setattr(
@@ -195,11 +196,12 @@ def test_generation_preflight_reports_effective_configuration(
 
 
 def test_generation_preflight_uses_server_default_without_claiming_worker_health(
-    client,
-    service,
-    character_id,
-    monkeypatch,
+    client: TestClient,
+    service: VNAssetPackService,
+    character_id: int,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Keep local worker configuration distinct from actual worker health."""
     from tldw_Server_API.app.core.VN_Assets import preflight
 
     monkeypatch.setattr(
@@ -227,12 +229,13 @@ def test_generation_preflight_uses_server_default_without_claiming_worker_health
 
 
 def test_generation_preflight_checks_ownership_before_reading_configuration(
-    client,
-    service,
-    character_id,
-    current_user_id,
-    monkeypatch,
+    client: TestClient,
+    service: VNAssetPackService,
+    character_id: int,
+    current_user_id: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Reject another owner's pack before inspecting image configuration."""
     from tldw_Server_API.app.core.VN_Assets import preflight
     from unittest.mock import Mock
 
@@ -243,6 +246,46 @@ def test_generation_preflight_checks_ownership_before_reading_configuration(
     response = client.get(f"/api/v1/vn/vn-assets/packs/{pack.id}/generation/preflight")
     assert response.status_code == 404
     registry.assert_not_called()
+
+
+@pytest.mark.parametrize("auth_kind", ["user", "api_key"])
+def test_generation_preflight_enforces_finite_per_user_limit(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    auth_kind: str,
+) -> None:
+    """Authenticate before applying the catalog limit and preserve retry guidance."""
+    from unittest.mock import AsyncMock, Mock
+
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+
+    async def authenticated_user(request: Request) -> User:
+        """Match the request identity populated by production authentication."""
+        request.state.user_id = 42
+        request.state.auth = AuthContext(principal=AuthPrincipal(kind=auth_kind, user_id=42))
+        return User(id=42, username="user-42")
+
+    async def no_custom_limits() -> SimpleNamespace:
+        """Use catalog defaults without accessing an authentication database."""
+        return SimpleNamespace(pool=True, fetchone=AsyncMock(return_value=None), fetchall=AsyncMock(return_value=[]))
+
+    consume = Mock(return_value=(False, 30))
+    monkeypatch.setattr(auth_deps, "_consume_auth_deps_fallback_rate_token", consume)
+    client.app.dependency_overrides[get_request_user] = authenticated_user
+    client.app.dependency_overrides[auth_deps.get_db_pool] = no_custom_limits
+
+    response = client.get("/api/v1/vn/vn-assets/packs/7/generation/preflight")
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "30"
+    consume.assert_called_once_with(
+        dependency="rbac_rate_limit:vn_assets.preflight",
+        identifier="user:42:vn_assets.preflight",
+        limit=120,
+        burst=240,
+        window_seconds=60.0,
+    )
 
 
 def test_old_top_level_vn_assets_route_is_absent(client: TestClient) -> None:
