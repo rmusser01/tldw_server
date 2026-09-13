@@ -145,9 +145,10 @@ def search(client, query: str):
     return response.json()["items"]
 
 
+@pytest.mark.parametrize("same_body", [False, True])
 @pytest.mark.parametrize("container", ["eml", "zip", "mbox"])
-def test_synthetic_upload_search_detail_and_reimport(offline_client, tmp_path, container):
-    messages = [synthetic_message(1), synthetic_message(2)]
+def test_synthetic_upload_search_detail_and_reimport(offline_client, tmp_path, container, same_body):
+    messages = [synthetic_message(1, same_body=same_body), synthetic_message(2, same_body=same_body)]
     if container == "eml":
         uploads = [(f"synthetic-{index}.eml", msg.as_bytes()) for index, msg in enumerate(messages)]
         options = {}
@@ -180,7 +181,11 @@ def test_synthetic_upload_search_detail_and_reimport(offline_client, tmp_path, c
         response = offline_client.get(f"/api/v1/email/messages/{row['email_message_id']}")
         assert response.status_code == 200, response.text
         detail = response.json()
-        assert detail["body_text"] in {"Uniquequartz synthetic body 1.", "Uniquequartz synthetic body 2."}
+        assert detail["body_text"] in (
+            {"Uniquequartz synthetic body."}
+            if same_body
+            else {"Uniquequartz synthetic body 1.", "Uniquequartz synthetic body 2."}
+        )
         assert detail["message_id"] in {"<synthetic-1@example.test>", "<synthetic-2@example.test>"}
         assert detail["subject"].startswith("Synthetic café report")
         for role, address in [("from", "sender"), ("to", "reader"), ("cc", "copy"), ("bcc", "hidden")]:
@@ -207,20 +212,17 @@ def test_html_only_synthetic_email_is_searchable(offline_client):
     assert detail["body_text"] == "Uniquequartz synthetic body 3."
 
 
-def test_same_body_upload_collision_characterization(offline_client):
-    """Record a known limitation, not acceptance of FR-INGEST-001 (TASK-13251).
-
-    The initial acceptance probe expected two rows and failed for EML/ZIP/MBOX.
-    This diagnostic preserves the current reproducible evidence until identity
-    dedupe is fixed; then replace it with a two-message regression assertion.
-    """
+@pytest.mark.parametrize("filename", ["first.eml", "second.eml"])
+def test_same_body_distinct_ids_preserve_both_messages(offline_client, filename):
+    """Neither filename nor identical body may override distinct RFC identity."""
     first = upload(offline_client, "first.eml", synthetic_message(1, same_body=True).as_bytes())
-    second = upload(offline_client, "second.eml", synthetic_message(2, same_body=True).as_bytes())
-    assert first["db_id"] == second["db_id"]
+    second = upload(offline_client, filename, synthetic_message(2, same_body=True).as_bytes())
+    assert first["db_id"] != second["db_id"]
     rows = search(offline_client, "uniquequartz")
-    assert len(rows) == 1
-    detail = offline_client.get(f"/api/v1/email/messages/{rows[0]['email_message_id']}").json()
-    assert detail["message_id"] == "<synthetic-2@example.test>"
+    assert len(rows) == 2
+    details = [offline_client.get(f"/api/v1/email/messages/{row['email_message_id']}").json() for row in rows]
+    assert {detail["message_id"] for detail in details} == {"<synthetic-1@example.test>", "<synthetic-2@example.test>"}
+    assert {detail["media"]["id"] for detail in details} == {first["db_id"], second["db_id"]}
 
 
 def test_process_only_endpoint_does_not_persist(offline_client):
@@ -236,3 +238,62 @@ def test_process_only_endpoint_does_not_persist(offline_client):
     assert result["db_id"] is None
     assert result["analysis"] is None
     assert search(offline_client, "uniquequartz") == []
+
+
+@pytest.mark.parametrize("container", ["eml", "zip", "mbox"])
+@pytest.mark.parametrize("overwrite", [False, True])
+@pytest.mark.parametrize("native_first", [False, True])
+def test_email_reimport_graph_matches_persisted_media(
+    offline_client,
+    tmp_path,
+    monkeypatch,
+    container,
+    overwrite,
+    native_first,
+):
+    """Declined writes cannot replace native content, including first graph backfill."""
+    original = synthetic_message(1)
+    changed = synthetic_message(99)
+    changed.replace_header("Message-ID", original["Message-ID"])
+    changed.replace_header("From", "Changed Sender <changed@example.test>")
+    attachment = next(changed.iter_attachments())
+    attachment.replace_header("Content-Disposition", 'attachment; filename="changed.bin"')
+
+    def submit(message):
+        options = {"overwrite_existing": str(overwrite).lower()}
+        if container == "eml":
+            data = message.as_bytes()
+        elif container == "zip":
+            output = BytesIO()
+            with zipfile.ZipFile(output, "w") as archive:
+                archive.writestr("original.eml", message.as_bytes())
+            data = output.getvalue()
+            options["accept_archives"] = "true"
+        else:
+            path = tmp_path / "iteration.mbox"
+            archive = mailbox.mbox(str(path))
+            try:
+                archive.clear()
+                archive.add(message)
+                archive.flush()
+            finally:
+                archive.close()
+            data = path.read_bytes()
+            options["accept_mbox"] = "true"
+        return upload(offline_client, f"reimport.{container}", data, **options)
+
+    monkeypatch.setitem(persistence.settings, "EMAIL_NATIVE_PERSIST_ENABLED", native_first)
+    submit(original)
+    monkeypatch.setitem(persistence.settings, "EMAIL_NATIVE_PERSIST_ENABLED", True)
+    submit(changed)
+    rows = search(offline_client, "uniquequartz")
+    assert len(rows) == 1, rows
+    detail = offline_client.get(f"/api/v1/email/messages/{rows[0]['email_message_id']}").json()
+    stored = offline_client.app.dependency_overrides[get_media_db_for_user]().get_media_by_id(rows[0]["media_id"])
+    expected_number = 99 if overwrite else 1
+    assert detail["body_text"] == stored["content"] == f"Uniquequartz synthetic body {expected_number}."
+    assert detail["subject"] == f"Synthetic café report {expected_number}"
+    assert detail["participants"]["from"][0]["email"] == (
+        "changed@example.test" if overwrite else "sender@example.test"
+    )
+    assert detail["attachments"][0]["filename"] == ("changed.bin" if overwrite else "synthetic.bin")

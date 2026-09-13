@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
     normalize_media_dedupe_url,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.email_identity import email_identity_url
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     ConflictError,
     DatabaseError,
@@ -74,7 +75,7 @@ class MediaRepository:
         """
         db = self.session
         (
-            collections_db_cls,
+            _collections_db_cls,
             noncritical_exceptions,
             media_dedupe_url_candidates,
             normalize_media_dedupe_url,
@@ -117,6 +118,22 @@ class MediaRepository:
             url = normalize_media_dedupe_url(raw_url_input) or raw_url_input
         else:
             url = f"local://{media_type}/{content_hash}"
+            dedupe_url_candidates = (url,)
+
+        email_metadata: dict[str, Any] | None = None
+        email_tenant = str(owner_user_id if owner_user_id is not None else client_id)
+        original_dedupe_candidates = dedupe_url_candidates
+        if media_type == "email":
+            try:
+                decoded_metadata = json.loads(safe_metadata) if safe_metadata else {}
+            except (TypeError, ValueError) as exc:
+                raise InputError("Invalid email metadata JSON") from exc  # noqa: TRY003
+            if not isinstance(decoded_metadata, dict):
+                raise InputError("Email metadata must be an object")  # noqa: TRY003
+            url, email_metadata = email_identity_url(
+                metadata=decoded_metadata, source_url=raw_url_input, content_hash=content_hash, tenant_id=email_tenant
+            )
+            safe_metadata = json.dumps(email_metadata, ensure_ascii=False)
             dedupe_url_candidates = (url,)
 
         final_chunk_status = "completed" if chunks is not None else "pending"
@@ -280,6 +297,67 @@ class MediaRepository:
                     return db._fetchone_with_connection(conn, query, params)
 
                 def _fetch_existing_by_url(select_columns: str):
+                    if email_metadata is not None:
+                        selected = ", ".join(f"m.{column.strip()}" for column in select_columns.split(","))
+                        row = _fetchone(
+                            f"SELECT {selected} FROM Media m WHERE m.url = ? "  # nosec B608
+                            "AND m.type = 'email' AND m.deleted = 0 AND m.system_operation_id IS NULL "
+                            "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1",
+                            (url, email_tenant),
+                        )
+                        if row:
+                            return row
+                        email = email_metadata.get("email")
+                        email = email if isinstance(email, dict) else {}
+                        # Reuse normalized identities created before identity URLs,
+                        # including the RFC secondary collision key for providers.
+                        for field, value in (
+                            ("source_message_id", email.get("source_message_id") or email.get("id") or email_metadata.get("source_message_id")),
+                            ("message_id", email.get("message_id") or email_metadata.get("message_id")),
+                        ):
+                            if not value:
+                                continue
+                            row = _fetchone(
+                                f"SELECT {selected} FROM Media m "  # nosec B608
+                                "JOIN email_messages e ON e.media_id = m.id "
+                                "JOIN email_sources s ON s.id = e.source_id AND s.tenant_id = e.tenant_id "
+                                "WHERE e.tenant_id = ? AND s.provider = ? AND s.source_key = ? "
+                                f"AND e.{field} = ? AND m.type = 'email' AND m.deleted = 0 "
+                                "AND m.system_operation_id IS NULL "
+                                "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1",
+                                (email_tenant, email_metadata["email_source_provider"], email_metadata["source_key"],
+                                 str(value).strip(), email_tenant),
+                            )
+                            if row:
+                                return row
+                        # Legacy-only imports may have no normalized row. Inspect
+                        # only the original URL's candidates, never a mailbox scan.
+                        for old_url in original_dedupe_candidates:
+                            candidates = db._fetchall_with_connection(
+                                conn,
+                                f"SELECT {selected}, m.content_hash AS identity_content_hash, "  # nosec B608
+                                "m.url AS identity_source_url, (SELECT dv.safe_metadata FROM DocumentVersions dv "
+                                "WHERE dv.media_id = m.id AND dv.deleted = 0 "
+                                "ORDER BY dv.version_number DESC LIMIT 1) AS identity_metadata "
+                                "FROM Media m WHERE m.url = ? AND m.type = 'email' AND m.deleted = 0 "
+                                "AND m.system_operation_id IS NULL "
+                                "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ?",
+                                (old_url, email_tenant),
+                            )
+                            for candidate in candidates:
+                                try:
+                                    old_metadata = json.loads(candidate["identity_metadata"] or "{}")
+                                except (TypeError, ValueError):
+                                    continue
+                                if not isinstance(old_metadata, dict):
+                                    continue
+                                old_identity, _ = email_identity_url(
+                                    metadata=old_metadata, source_url=candidate["identity_source_url"],
+                                    content_hash=candidate["identity_content_hash"], tenant_id=email_tenant,
+                                )
+                                if old_identity == url:
+                                    return candidate
+                        return None
                     if len(dedupe_url_candidates) == 1:
                         return _fetchone(
                             f"SELECT {select_columns} "  # nosec B608
@@ -300,11 +378,11 @@ class MediaRepository:
                     "id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id"
                 )
 
-                if not row:
+                if not row and media_type != "email":
                     if owner_lookup_value:
                         row = _fetchone(
                             "SELECT id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id "
-                            "FROM Media WHERE content_hash = ? AND deleted = 0 "
+                            "FROM Media WHERE content_hash = ? AND deleted = 0 AND type != 'email' "
                             "AND system_operation_id IS NULL "
                             "AND COALESCE(CAST(owner_user_id AS TEXT), client_id) = ? LIMIT 1",
                             (content_hash, owner_lookup_value),
@@ -312,7 +390,7 @@ class MediaRepository:
                     else:
                         row = _fetchone(
                             "SELECT id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id "
-                            "FROM Media WHERE content_hash = ? AND deleted = 0 "
+                            "FROM Media WHERE content_hash = ? AND deleted = 0 AND type != 'email' "
                             "AND system_operation_id IS NULL LIMIT 1",
                             (content_hash,),
                         )
@@ -518,18 +596,19 @@ class MediaRepository:
                             content=content,
                             prompt=prompt,
                             analysis_content=analysis_content,
+                            safe_metadata=safe_metadata,
                         )
                         _persist_chunks(conn, media_id)
-                        try:
-                            if collections_db_cls is not None and client_id is not None:
-                                collections_db_cls.from_backend(
-                                    user_id=str(client_id),
-                                    backend=db.backend,
-                                ).mark_highlights_stale_if_content_changed(media_id, content_hash)
-                        except noncritical_exceptions as anchoring_error:
-                            logger.debug(
-                                f"Highlight re-anchoring hook failed (non-fatal): {anchoring_error}"
-                            )
+                        # This table is part of the Media schema. Reuse the write
+                        # connection: initializing Collections here can deadlock
+                        # SQLite through a second connection, including in nested
+                        # transactions. Highlight state must roll back with content.
+                        _exec(
+                            "UPDATE reading_highlights SET state = 'stale' "
+                            "WHERE user_id = ? AND item_id = ? "
+                            "AND content_hash_ref IS NOT NULL AND content_hash_ref <> ?",
+                            (str(client_id), media_id, content_hash),
+                        )
                         try:
                             from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
                                 invalidate_intra_doc_vectors,

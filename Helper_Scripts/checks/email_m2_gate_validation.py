@@ -8,6 +8,9 @@ Focuses on the staging lag SLO requirement:
 Supports either:
 1) Live metrics fetch from a server endpoint, optionally with a sampling window.
 2) Offline metric files (before/after) for repeatable dry-runs.
+
+Passing checks apply only to the supplied metrics. Offline fixtures do not
+validate staging, and endpoint mode does not establish deployment provenance.
 """
 
 from __future__ import annotations
@@ -359,7 +362,15 @@ def main(argv: list[str]) -> int:
     lag_slo_pass = lag_p50 is not None and lag_p50 <= float(args.max_median_lag_seconds)
     success_runs_pass = success_runs >= int(args.min_success_runs)
 
-    print(f"[INFO] mode={sample_mode} provider={provider}")
+    if args.metrics_file:
+        evidence_source = "offline_fixture"
+        evidence_note = "Offline fixture threshold checks only; staging evidence remains unverified."
+    else:
+        evidence_source = "live_endpoint"
+        evidence_note = "Live endpoint metrics; confirm deployment provenance before using as staging evidence."
+
+    print(f"[INFO] mode={sample_mode} provider={provider} evidence_source={evidence_source}")
+    print(f"[INFO] {evidence_note}")
     print(
         f"[INFO] runs: success={success_runs:.0f} failed={failed_runs:.0f} "
         f"skipped={skipped_runs:.0f} total={total_runs:.0f}"
@@ -384,11 +395,13 @@ def main(argv: list[str]) -> int:
     if not lag_slo_pass:
         print("[FAIL] median lag SLO not satisfied")
     if success_runs_pass and lag_slo_pass:
-        print("[PASS] staging lag SLO validated for Email M2 gate")
+        print(f"[PASS] Email M2 lag threshold checks passed for {evidence_source} ({sample_mode})")
 
     output = {
         "provider": provider,
         "mode": sample_mode,
+        "evidence_source": evidence_source,
+        "evidence_note": evidence_note,
         "runs": {
             "success": int(success_runs),
             "failed": int(failed_runs),

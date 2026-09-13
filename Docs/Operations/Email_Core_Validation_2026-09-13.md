@@ -1,5 +1,9 @@
 # Synthetic Email Core Validation — 2026-09-13
 
+This first section preserves the initial audit at TASK-13250. Its reproduced
+identity/cursor defects are addressed by the follow-up recorded below; the audit
+counts and characterization describe the earlier revision, not current behavior.
+
 Owner: Project owner / maintainer
 Validation task: TASK-13250
 Starting revision: `c70387f496` (local `dev`)
@@ -144,3 +148,87 @@ only its processing of these fixture values was validated.
   provider tests do not prove live provider behavior.
 - The release checklist retains separate open core and optional Gmail owner gates.
   Only the owner decides actual rollout after the selected scope's evidence is met.
+
+## Correctness Follow-up — TASK-13251, TASK-13253, TASK-13254
+
+The owner authorized addressing the audit defects. The same-body characterization
+has been replaced with strict correctness regressions. The follow-up changes:
+
+- Preserve the parsed email object and attachment descriptors in safe metadata for
+  primary and child messages. Distinct IDs with identical bodies receive separate
+  Media rows using tenant/provider/source identity; provider ID precedes RFC ID,
+  with body hash only when both are missing. Non-email hash dedupe excludes emails.
+- Reuse compatible legacy rows when identity evidence is available; reject normalized
+  media-ID fallback that would replace another tenant/source/message identity.
+  Source names retain their existing filename/container-member convention. Renaming
+  the source can produce a separate import. Lost historical content is not repaired.
+- Populate email search from accepted persisted content on reimport, including when
+  overwrite is disabled and the normalized graph is first being backfilled. Keep
+  metadata in new versions on accepted overwrite; preserve richer normalized
+  metadata for legacy versions whose allowlist dropped it. Mocked Gmail deliveries
+  refresh labels independently. Highlight updates reuse the Media transaction
+  connection to avoid SQLite lock contention and remain atomic on rollback.
+- Normalize provider ISO timestamps and RFC dates to UTC. Reject unrepresentable
+  UTC dates and relative-window overflow without internal server errors.
+- Add opt-in cursor pagination ordered by date descending, nulls last, then ID
+  descending. Omitted cursor retains the offset contract. Query/tenant/deleted
+  scope is bound to the token; relative windows use the first page's clock. This
+  remains live traversal, not a snapshot when messages change their sort date.
+- Label metrics checker inputs as `offline_fixture` or `live_endpoint`. Fixture
+  success explicitly leaves staging unverified.
+
+Design and API contract: `Docs/Design/email-core-correctness-13251.md`,
+`Docs/Design/email-search-cursor-pagination.md`, and
+`Docs/API-related/Email_Processing_API.md`.
+
+### Follow-up Evidence
+
+| Check | Result | Scope |
+| --- | --- | --- |
+| Final expanded offline regression run | 218 passed, 2 skipped, 8 warnings; zero outbound attempts | Core import/search/detail, reimports with overwrite on/off, all email DB runtime suites, general Media regressions, parser/process endpoints, checker tests and mocked connector tests. Native PST tests skipped. |
+| Review date-boundary regressions | 46 passed, 4 warnings; zero outbound attempts | Identity and cursor suites, including UTC overflow, cursor reference underflow and oversized relative windows. |
+| Final mocked Gmail slice | 25 passed, 4 warnings; zero outbound attempts | Existing connector behavior plus saved-content/live-label consistency, empty-body and literal-placeholder regressions. |
+| Legacy saved-metadata regression | 1 passed, 4 warnings; zero outbound attempts | Real legacy stripped-version metadata is retained; another tenant cannot supply fallback metadata. |
+| Additional Media/Collections compatibility | 22 passed, 4 warnings; zero outbound attempts | Media updates, synced updates, version rollback and schema bootstrap. |
+| Bandit | Zero production findings; zero findings in new/expanded focused tests with B101 excluded | Existing large mocked-provider fixture retains its 20 baseline dummy-token findings; no new findings. |
+| Ruff | Changed email modules/new tests pass; no new diagnostics in legacy files | Existing checker/persistence/service/test files retain 65 baseline diagnostics in total, verified against HEAD. |
+| Independent review | No remaining blockers | Follow-up review confirmed metadata recovery, transaction atomicity and placeholder handling. |
+| 1,000-message SQLite benchmark | Warm p50 4.982 ms / p95 6.441 ms over 200 measurements | 10 query shapes, 20 runs each after 3 warmups; all query plans used indexes. Two shapes returned no matches in this small fixture. |
+| Cold benchmark observations | p50 5.593 ms / p95 7.989 ms over 10 observations | One observation per query shape. |
+| Synthetic fixture writes | 1,000 in 11.38 s, approximately 87.87/second | Direct Media/graph fixture persistence, not full upload parsing/API throughput. |
+| PostgreSQL migration | Skipped by official `pg_database_config` fixture | Explicit local test DSN; localhost PostgreSQL unavailable, Docker disabled. No alternate database setup. |
+| Native PST | Two selected tests skipped | `pypff` and `readpst` unavailable; no genuine PST fixture supplied. Mocked traversal is not binary-parser certification. |
+
+The offline regression command extends the initial command with
+`test_email_identity_dedupe.py`, `test_email_search_cursor.py`,
+`test_email_search_cursor_endpoint.py`, `test_email_m2_gate_validation.py`,
+`test_process_emails_endpoint.py`, all `test_media_db_email_*.py` files,
+`test_media_db_v2_regressions.py`, and the full mocked `test_policy_and_connectors.py`.
+The final run also includes `test_persistence_chunk_consistency.py` and
+`test_gmail_reimport_consistency.py`. After collection, the literal-placeholder
+regression and marker fix were checked in the final mocked Gmail slice; the legacy
+helper test ran separately. Counts overlap and should not be summed.
+Task-local logs: `/tmp/email_combined_13251_final.log`,
+`/tmp/email_gmail_consistency_final.log`, `/tmp/email_persisted_content_final.log`,
+`/tmp/email_media_compat_final.log` and `/tmp/email_review_fixes.log`.
+Security reports: `/tmp/bandit_email_core_final.json`,
+`/tmp/bandit_email_tests_final.json` and `/tmp/bandit_email_gmail_final.json`.
+
+Benchmark reproduction (fresh temporary output/database path):
+
+```bash
+source .venv/bin/activate
+python Helper_Scripts/benchmarks/email_search_bench.py \
+  --ensure-fixture --fixture-messages 1000 --seed 42 \
+  --capture-query-plans --runs 20 --warmup-runs 3 \
+  --db-path /tmp/email-search-small-4wy1q280/email.sqlite \
+  --out /tmp/email-search-small-4wy1q280/report.json
+```
+
+The recorded benchmark's report and run log are in
+`/tmp/email-search-small-4wy1q280/`; optional backend results are in
+`/tmp/email-optional-validation-5up_7fz_/run.log`. These are local diagnostic
+artifacts. The small benchmark does not satisfy the 1M-message or full-ingestion
+throughput gates. Target deployment, real auth/startup, production-scale parity and
+cutover readiness remain unverified. Optional live Gmail remains deferred; no
+personal mailbox, OAuth flow or external model was accessed.
