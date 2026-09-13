@@ -102,6 +102,240 @@ triage issue.
 
 ## Latest Evidence
 
+### 2026-09-13: PR #2955 review verification
+
+- Rebased onto `dev` at `b6cf7fd1d5`; the rebase introduced no changes to the
+  helper, guest, or sandbox runtime sources. Review fixes change test fixtures
+  and documentation, not the production cancellation/drain implementation.
+- The revised host test uses public `SandboxService.macos_diagnostics()`
+  reconciliation to observe healthy, stale, and removed session controls,
+  rather than reading the private orchestrator. Generation persistence remains
+  covered by the focused runner tests; the host drill checks helper generation
+  change, VM replacement, and replacement reuse through supported observations.
+- Fresh disposable clone from the preceding `source-bundle-final`: **1 passed,
+  0 skipped, 0 errors**, 14.05 seconds. The first VM was
+  `40c207d3-19ef-472d-8bbf-ba8bbc668c47`; replacement and third-command reuse used
+  `4c05cb1b-cd1c-416c-8cf7-681ad0d87a2a`. All three commands returned exact stdout
+  and exit 0. Cleanup reported zero persisted controls/live VMs, destroyed
+  session, absent LaunchAgent, unavailable socket, and removed runtime.
+- Evidence root: `$HOME/Library/Logs/tldw/vz-launchd-recovery/20260913-pr2955-review`.
+  `host.xml`, `host.log`, and
+  `host-pytest/test_vz_linux_session_recovers0/launchd-recovery.json` contain the
+  acceptance results. Source rootfs SHA256 remains
+  `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`.
+- Linux tests now use test-owned release files instead of signaling saved
+  numeric PIDs. A fresh liveness acknowledgement proves the escaped child
+  still holds the pipes after `Exec` returns; cleanup then releases it.
+  Completion and acknowledgements replace five-second elapsed assertions;
+  a one-minute watchdog only detects deadlocks. Both waiting-parent and
+  exited-parent timeout cases are covered. No production timer injection was
+  needed. Ten repetitions of `TestGuestServerExec*` passed in the disposable
+  Linux VM (`linux-final/guest-review.test.stdout.log`), including 1,000 fast
+  output commands. Test-binary SHA256:
+  `85e9162e67d841ae51430753cc54a1fa2ab1da2ab1bc37e594c2311973e8164a`.
+- A temporary Go overlay removed only the cancellation pipe-close callback,
+  leaving repository production code unchanged. Its escaped-output-limit test
+  failed as intended at the deadlock watchdog (60.06 seconds, exit 1), then
+  cooperatively released the child. This confirms natural child expiry cannot
+  mask a missing drain bound. `linux-final/guest-no-drain.test.stdout.log` and
+  `linux-final/linux-review.json` retain the negative result and cleanup receipt.
+  Negative-binary SHA256:
+  `e44af3a1d601770a5276faa4f332f232e70b221d3456107d51bb20c7b0088d27`.
+- Native Go suite/race checks and native/Linux guest vet passed. Focused Python
+  suites passed 224 tests with the one manual drill intentionally opted out.
+  Bandit passed with the documented B108 exception; no additional suppression
+  was added. No host reboot or broader descendant-containment claim is made.
+
+### 2026-09-13: live-session recovery after a launchd restart
+
+- Scope: `TASK-13243.1` and `TASK-13243.2`, on
+  `codex/vz-launchd-vm-validation` based on local dev `c70387f496d8`.
+  Same Apple Silicon host as the launchd smoke below, macOS 26.5.2 (25F84),
+  helper version `0.1.0`, protocol `1`. No host reboot was performed.
+- Durable private artifacts:
+  `$HOME/Library/Logs/tldw/vz-launchd-recovery/20260913-1905`.
+  The final accepted packet is `final.xml`, `final.log`, `final.exit`, and
+  `final-pytest/test_vz_linux_session_recovers0/launchd-recovery.json`, with the
+  generated plist and helper/serial logs beside the receipt.
+- The new manual test is
+  `tldw_Server_API/tests/sandbox/test_vz_linux_launchd_recovery_host_gated.py`.
+  It uses `TLDW_SANDBOX_VZ_LINUX_E2E=1` and
+  `TLDW_SANDBOX_VZ_LINUX_LAUNCHD_RESTART_DRILL=1`, an explicitly selected signed
+  helper binary, and a disposable bundle from `prepare-smoke-bundle.py`.
+  The repeatable command is in the helper README's
+  **Live-Session Launchd Restart** section. Default/scheduled smoke selection
+  and helper startup behavior are unchanged.
+- Accepted result: **1 passed, 0 skipped, 0 errors**, pytest exit `0`, in
+  15.56 seconds. All three `/bin/echo` commands returned their exact stdout
+  tokens and exit `0`. Launchd restarted the helper only after the first
+  successful session command, not merely before VM creation.
+- Helper generation changed from `96271C27-C7AA-48A1-A743-B312E70CC1B7` to
+  `AF1778A8-FCFE-454E-8152-A384E3DF9A1B`. The stale session control was still
+  present immediately after restart. Normal service execution replaced VM
+  `130792b5-7cfd-41fc-8851-fea97b98602b` with
+  `ddfbd394-58db-4a5c-b450-79a3c2367f01`; the third command reused the latter.
+- Cleanup: session destruction succeeded, session control was removed, the
+  helper's VM registry was empty, the unique LaunchAgent was absent, its socket
+  was unavailable, and the private runtime directory was removed. Evidence and
+  disposable image-store disks were deliberately retained.
+- Negative control: temporarily replacing the live-session `kickstart` with
+  `status` produced the expected `helper_generation_unchanged` failure after
+  successful guest output. `review-negative.xml` records one failure and no
+  skips or errors; `review-negative-pytest/` records the original failure,
+  bootstrap/kickstart/bootout results, and cleanup. The callback preserves
+  exceptions until lifecycle results are returned, then re-raises them. The
+  checked-in test restores the real restart operation. The earlier
+  `diagnostic*` packet exposed missing lifecycle results on callback failure.
+- A real defect was found before acceptance: two attempts completed an echo
+  with exit `0` but empty output. Instrumentation showed the guest itself
+  reported zero observed stdout bytes, excluding Python stream loss. A
+  Linux-arm64 regression against the old code failed in all ten repetitions;
+  native macOS repetitions alone had not reproduced it. Those failed runs
+  remain in `negative*`, `accepted*`, and `linux-output-red*`; none is counted
+  as restart acceptance.
+- Fix: `runExecWithOutputLimit` now drains both output-pipe readers before
+  `cmd.Wait()` can close their pipes. On timeout or output-limit cancellation,
+  a one-second drain grace bounds readers retained by escaped descendants;
+  process-group cancellation remains active until draining finishes. The
+  corrected Linux regression passed
+  1,000 fast commands; ten repetitions also passed output-cap/UTF-8 checks and
+  both descendant-pipe timeout cases (parent waiting and parent already exited),
+  plus escaped-descendant timeout/output-limit cases. The latter completed in
+  approximately three seconds and one second, respectively, rather than the
+  eight-second failures recorded in `review-red/` against the ordering-only
+  fix. `final-build/linux-regressions.stdout.log` and
+  `final-build/offline-refresh.json` contain the final proof. An independent
+  second review found no remaining actionable findings after these fixes.
+  `linux-output-green*` is an earlier diagnostic run with passing guest tests
+  but a Python fixture teardown error, not the final acceptance packet.
+- Bundle provenance: a private offline APFS clone was refreshed with the new
+  agent, then checked with `e2fsck -fn` and an extracted-binary `cmp`. Kernel,
+  initrd, and manifest were unchanged. Original source rootfs SHA-256 remained
+  `1083decfb5089e904440d2506e40be78645bdb687e8ce1d220f1b57ba27f7cca`;
+  refreshed rootfs SHA-256 is
+  `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`.
+  Installed agent SHA-256 is
+  `4e4d1186f0e4830769999951ba5566815f6d4733f9c7e688474b21086c226a3f`.
+  `source-bundle-final/build-info.json` records the dirty worktree build
+  provenance; only `final-image-store/runs/launchd-recovery-final/bundle` was
+  booted for final acceptance. The source bundle was not booted or mutated.
+  The earlier `source-bundle` and `fixed*` packet retain the ordering-only
+  build and its ordinary restart pass, not the final bounded-drain build.
+  Go 1.26.2 embedded the outer checkout's revision `1600d9b8c8`, while the
+  module and Git worktree were verified at `d9d936b612` plus the retained
+  `final-build/guest-source.patch`. Use this explicit worktree provenance,
+  binary hash, and `final-build/guest-build-info.txt`, not the embedded revision
+  alone, to identify the tested build.
+- Supporting verification: focused helperctl/runner suites passed 224 tests,
+  with only the explicitly disabled real restart test skipped. Native Go
+  `go test ./...` and guest race checks passed. Correction during PR preparation:
+  the retained Bandit report contains one B108 warning for the short `/tmp`
+  parent, not zero findings. `mkdtemp` atomically creates a random, owner-only
+  directory (mode `0700`); the test now documents a line-specific B108 exception
+  for that reviewed false positive. This evidence does not prove host reboot recovery,
+  arbitrary helper/guest crash classes, escaped-descendant containment, or
+  broader network policy enforcement.
+
+### 2026-09-13: real VM smoke through a launchd-managed helper
+
+- Evidence source: local operator run, authorized for launchd-managed real VM
+  validation after PR `#2628`. Branch `codex/vz-launchd-vm-validation` started
+  from local `dev` at `c70387f496d82fcee92926bf3715bf5cd240ba88`;
+  this slice changes evidence documentation and Backlog only.
+- Host: Apple silicon `arm64`, macOS `26.5.2` build `25F84`, Darwin `25.5.0`;
+  shared developer host. Capture time was approximately 11:29 PDT.
+- Durable artifact root:
+  `$HOME/Library/Logs/tldw/vz-launchd-vm-validation/20260913-1817`.
+  The evidence root, helper log directory, serial directory, image store, and
+  short runtime directory were private to the operator (`0700`). No raw logs
+  or disk images are committed to the repository.
+- Helper: freshly built from the worktree with `swift build`; signed using
+  `tools/macos-vz-helper/macos-vz-helper.entitlements`. `codesign --verify
+  --strict` passed and the signed binary contained
+  `com.apple.security.virtualization=true`. Live ping reported helper
+  `0.1.0`, protocol `1`.
+- Guest provenance: the durable June Debian bookworm arm64 bundle was preserved.
+  A separate copy of its rootfs received the current Linux arm64 guest built
+  with `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath`; the guest
+  includes buffered-reader fix `dfa67a49927cef63e80bf0903d55109ec283254b`.
+  The kernel and initrd were unchanged. This was an offline guest refresh,
+  not a fresh Debian distribution build. The copied image's pending ext4
+  journal was recovered, its final `e2fsck -fn` passed, and extraction plus
+  `cmp` verified the installed executable exactly matched the new binary.
+  `source-bundle/build-info.json` records this provenance.
+- Image-store preparation: `prepare-smoke-bundle.py` registered the refreshed
+  source and materialized run `launchd-13243` beneath
+  `<artifact-root>/image-store/runs/launchd-13243/bundle`. Only that disposable
+  bundle was passed to VM execution. Relevant SHA-256 values:
+
+  | Artifact | SHA-256 |
+  | --- | --- |
+  | Original source rootfs, unchanged | `e52c82e96667f6daa8f7e1d40be8a655aad110cd2c5acedb0a9fb5fa01118cbf` |
+  | Refreshed source rootfs, unchanged during smoke | `1083decfb5089e904440d2506e40be78645bdb687e8ce1d220f1b57ba27f7cca` |
+  | Disposable rootfs after smoke | `1e31e380439d702b580314eac8da68f23dd917551dc8f795cc08ee8dc5188427` |
+  | Installed guest executable | `56e21f6ece89ec94832277bf309dd64d9b21d6dec674a1aa765317117eb61012` |
+
+- Main command, from the isolated worktree, after clone preparation:
+
+  ```bash
+  evidence_dir="$HOME/Library/Logs/tldw/vz-launchd-vm-validation/20260913-1817"
+  runtime_dir="/private/tmp/tvz-13243.bwB1Gg"
+  repo_python="/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python"
+  export PYTEST_ADDOPTS="--junitxml=$evidence_dir/pytest.xml --basetemp=$evidence_dir/pytest-data -o junit_logging=all"
+
+  "$repo_python" tools/macos-vz-helper/scripts/vz-helperctl.py launchd-drill \
+    --bundle "$evidence_dir/image-store/runs/launchd-13243/bundle" \
+    --helper "$PWD/tools/macos-vz-helper/.build/debug/macos-vz-helper" \
+    --socket "$runtime_dir/helper.sock" \
+    --log-dir "$evidence_dir/helper-logs" \
+    --plist-output "$runtime_dir/launchd.plist" \
+    --label org.tldw.macos-vz-helper.drill.task13243 \
+    --python "$repo_python" \
+    --entitlements tools/macos-vz-helper/macos-vz-helper.entitlements \
+    --write-plist --create-dirs
+  ```
+
+  This is the recorded invocation, not a rerun recipe: the temporary runtime
+  directory has been removed. A repeat must allocate a new private runtime,
+  image-store run ID, pytest output directory, and unused LaunchAgent label.
+- Results: drill exit `0`; launchd preflight, signing, bootstrap, status,
+  kickstart, helper readiness, VM smoke, and bootout passed. Real pytest
+  results were **3 passed, 11 deselected, 0 skipped**, in 5.83 seconds:
+  ephemeral command stdout/exit assertions, two successful same-session
+  commands with identical VM IDs, and recovery diagnostics/dry-run repair.
+  The reuse test also asserted session destruction and removal of session
+  control. The managed-socket smoke did not start a second direct helper.
+- Cleanup: post-drill `launchctl print` returned `113` (service absent);
+  no process held the drill helper executable open. Helper status reported
+  `helper_not_running` and failed ping, as expected after shutdown. Bootout
+  left an inactive socket (`0755` beneath its `0700` parent); the operator
+  explicitly removed it and the temporary runtime directory. Automatic
+  socket unlink on launchd termination is not claimed. Generic helper status
+  additionally reported the pre-existing default `launchd_plist_mismatch`;
+  that default plist was outside this isolated drill and was not changed.
+- Preparation incident: the existing Fusion builder had an inactive disk lock
+  dated June 15. After checking that no VM process or open disk handle existed,
+  the lock was moved into the evidence directory. A persistent launcher
+  session kept the builder alive; its verified address was `192.168.241.128`.
+  After image preparation, task-owned guest staging files were removed and
+  the builder was shut down with `vmrun stop ... soft`; `vmrun list` reported
+  zero running VMs.
+- Artifacts: `helper-build.log`, `guest-inspection.log`, `guest-refresh.log`,
+  `guest-filesystem-recovery.log`, source/run checksums, bundle provenance,
+  `prepare-clone.log`, `launchd-drill.log`, `launchd-drill.exit`, `pytest.xml`,
+  `pytest-data/`, retained `launchd.plist`, `path-permissions.log`,
+  `launchd-after.log`, `helper-after.json`, and helper/serial logs. The private
+  artifact root also retains the tested helper and guest binaries, refreshed
+  source and disposable run bundle, and verified `artifact-checksums.sha256`.
+- Supporting portable verification: 22 launchd/helper-smoke contract tests
+  passed, and `go test ./internal/guest` passed. No runtime source changed.
+- Residual scope: kickstart preceded VM creation; this packet does not prove
+  recovery of a live VM across helper restart. Host reboot, live mismatch
+  injection, stuck boot/readiness injection, and scheduled CI remain separate
+  evidence items. No new runtime regression was observed in this drill.
+- Follow-up owner: `TASK-13243`, under issue `#1442`. Repeat this acceptance
+  slice when the helper lifecycle, guest transport, or image preparation changes.
+
 ### 2026-07-03: local-operator launchd drill on `codex/vz-launchd-drill-evidence`
 
 - Evidence source: local operator run on the same prepared Apple silicon macOS
@@ -712,7 +946,7 @@ triage issue.
 | --- | --- | --- |
 | Prepared-host default smoke evidence | Recorded locally on 2026-06-16 with helper daemon smoke, real ephemeral execution, same-session reuse, and recovery diagnostics/dry-run repair smoke passing. | Repeat periodically through a trusted local or host-gated run and add newer evidence packets as needed. |
 | Failure-drill evidence | Recorded locally on 2026-06-16 with drill-owned stale VM replacement and smoke-owned helper restart drill passing. | Repeat when runtime/helper recovery behavior changes; keep manual opt-in only. |
-| Launchd-drill evidence | Manual launchd lifecycle evidence was recorded locally on 2026-07-03 with isolated LaunchAgent bootstrap, kickstart, helper readiness, protocol/version check, and drill-owned bootout passing under `--skip-smoke`. | Repeat when launchd scaffolding, helper signing, or plist generation behavior changes. Run launchd-managed real VM smoke only when explicitly requested. |
+| Launchd-drill evidence | Recorded real VM smoke on 2026-09-13 (3 tests, no skips), plus a separate live-session restart test (1 passed, no skips/errors) proving changed helper generation, stale-VM replacement, replacement reuse, and cleanup. The latter exposed and fixed guest capped-output loss before acceptance. Durable artifacts and failed attempts are recorded above. | Repeat both bounded drills when helper lifecycle, signing, guest transport, or image preparation changes. Keep launchd validation explicitly operator-requested; host reboot remains separate. |
 | Host reboot recovery | Manual `host-reboot-drill pre/post` procedure only and out of scheduled CI. | Record results when a maintainer explicitly runs the reboot drill on a prepared host that can tolerate disruptive reboot testing and preserve logs. |
 | Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver failure cleanup, guest-readiness failure cleanup, and no reusable session state after create failure. The default prepared-host smoke still does not inject real boot faults. | Record manual prepared-host evidence only after a separate reviewed fault-injection plan; diagnostics/evidence should report stable reason codes and artifact pointers, not raw serial log contents. |
 | Guest-agent mismatch | Not covered by the default smoke. | Use `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md` to guide narrow tests or diagnostics checks before considering automated coverage. |
