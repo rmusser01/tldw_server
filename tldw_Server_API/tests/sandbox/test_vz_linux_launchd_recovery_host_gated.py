@@ -54,8 +54,9 @@ def test_vz_linux_session_recovers_after_launchd_restart(
     monkeypatch.setitem(sys.modules, spec.name, helperctl)
     spec.loader.exec_module(helperctl)
 
-    # Use a short AF_UNIX path; keep logs and receipts in pytest's artifact tree.
-    runtime_dir = Path(tempfile.mkdtemp(prefix="tvz-lr.", dir="/tmp")).resolve()
+    # Short AF_UNIX parent; mkdtemp atomically creates a random 0700 directory.
+    runtime_parent = "/tmp"  # nosec B108
+    runtime_dir = Path(tempfile.mkdtemp(prefix="tvz-lr.", dir=runtime_parent)).resolve()
     socket_path = runtime_dir / "helper.sock"
     launchd_options = {
         "helper_path": helper_path,

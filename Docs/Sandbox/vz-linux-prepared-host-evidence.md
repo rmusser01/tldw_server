@@ -184,8 +184,11 @@ triage issue.
   alone, to identify the tested build.
 - Supporting verification: focused helperctl/runner suites passed 224 tests,
   with only the explicitly disabled real restart test skipped. Native Go
-  `go test ./...` and guest race checks passed; Bandit reported no findings in
-  the new Python host test. This evidence does not prove host reboot recovery,
+  `go test ./...` and guest race checks passed. Correction during PR preparation:
+  the retained Bandit report contains one B108 warning for the short `/tmp`
+  parent, not zero findings. `mkdtemp` atomically creates a random, owner-only
+  directory (mode `0700`); the test now documents a line-specific B108 exception
+  for that reviewed false positive. This evidence does not prove host reboot recovery,
   arbitrary helper/guest crash classes, escaped-descendant containment, or
   broader network policy enforcement.
 
