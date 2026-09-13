@@ -28,6 +28,11 @@ certification. The 2026-09-13 follow-up fixes the identical-body identity collis
 now require separate identities. See the follow-up section of the validation record
 for fresh results and remaining environment gates.
 
+TASK-13255 additionally validates real API-key authentication and per-user SQLite
+isolation, including main-app test-mode request middleware and route registration. See
+`Docs/Operations/Email_Authenticated_Validation_2026-09-13.md`; startup, authenticated
+upload quotas, JWT login and PostgreSQL isolation remain separate unverified paths.
+
 Current evidence does not certify a running deployment, PostgreSQL parity, enabled
 PST/OST parsing, full-scale performance, staging sync lag or live OAuth/provider
 behavior. See the separate core and optional Gmail checklists in

@@ -22,7 +22,8 @@ The owner's personal Gmail and personal email are excluded.
 - [x] Validate synthetic EML, ZIP and MBOX messages with distinct bodies, attachment metadata, repeat import, search and detail using temporary SQLite.
 - [x] Resolve distinct-message same-body merging (TASK-13251). Strict EML/ZIP/MBOX regressions now require distinct stored/searchable identities; existing corrupted data requires separate recovery.
 - [x] Implement FR-SEARCH-004 cursor pagination (TASK-13253); omitted cursor preserves offset behavior. See `Docs/Design/email-search-cursor-pagination.md` for traversal semantics.
-- [ ] Validate chosen deployment, auth/tenant boundaries, database backend and target scale. Focused endpoint tests override auth infrastructure; no current live server readiness was established.
+- [x] Validate real API-key authentication and per-user SQLite isolation, including main-app route registration/test-mode request middleware (TASK-13255; `Docs/Operations/Email_Authenticated_Validation_2026-09-13.md`).
+- [ ] Validate chosen deployment/startup, authenticated upload quotas, production database backend and target scale. Local ASGI tests do not establish live server readiness or PostgreSQL isolation.
 - [ ] Record actual performance/parity evidence for the intended cutover scope. Small fixtures and checker unit tests do not certify the 1M-message benchmark or production parity.
 - [ ] Configure and verify core rollout flags in the chosen environment:
   - `EMAIL_NATIVE_PERSIST_ENABLED=true`
@@ -53,6 +54,7 @@ prevent downstream model processing. No live Gmail work was performed for TASK-1
 ## Release Evidence
 
 Current validation: `Docs/Operations/Email_Core_Validation_2026-09-13.md`.
+Authenticated-access follow-up: `Docs/Operations/Email_Authenticated_Validation_2026-09-13.md`.
 
 For an actual rollout record:
 - Scope: core / optional Gmail

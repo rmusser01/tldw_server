@@ -232,3 +232,12 @@ artifacts. The small benchmark does not satisfy the 1M-message or full-ingestion
 throughput gates. Target deployment, real auth/startup, production-scale parity and
 cutover readiness remain unverified. Optional live Gmail remains deferred; no
 personal mailbox, OAuth flow or external model was accessed.
+
+## Authenticated-access follow-up — TASK-13255
+
+`Docs/Operations/Email_Authenticated_Validation_2026-09-13.md` extends this evidence
+with real API-key validation, per-user SQLite routing, revoked-key rejection,
+cross-user message/cursor checks, concurrent requests and main-app test-mode request
+middleware. Earlier dependency-substituted results remain historical evidence for
+their stated scope. The follow-up does not run lifespan or certify deployed startup,
+upload quota enforcement, password/JWT login or PostgreSQL isolation.

@@ -64,6 +64,12 @@ Record both successful paths and defects. TASK-13251 now preserves separate
 identities for identical-body messages; TASK-13253 adds optional cursor pagination.
 These local regression results do not close the deployment and scale checks.
 
+TASK-13255 adds real API-key authentication and per-user SQLite isolation coverage
+without overriding auth or DB dependencies. See
+`Docs/Operations/Email_Authenticated_Validation_2026-09-13.md` for the test command,
+negative credential checks, main-app test-mode routing evidence and remaining
+startup/upload-quota/PostgreSQL limits.
+
 ## Optional Gmail Validation — Deferred
 
 Nothing below is a prerequisite for core file-upload validation. Before future
