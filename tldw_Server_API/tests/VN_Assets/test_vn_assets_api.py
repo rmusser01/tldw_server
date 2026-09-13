@@ -249,12 +249,12 @@ def test_generation_preflight_checks_ownership_before_reading_configuration(
 
 
 @pytest.mark.parametrize("auth_kind", ["user", "api_key"])
-def test_generation_preflight_enforces_finite_per_user_limit(
+def test_generation_preflight_returns_retry_guidance_when_rate_limited(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     auth_kind: str,
 ) -> None:
-    """Authenticate before applying the catalog limit and preserve retry guidance."""
+    """Both authentication kinds receive the public rate-limit recovery response."""
     from unittest.mock import AsyncMock, Mock
 
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
@@ -279,13 +279,6 @@ def test_generation_preflight_enforces_finite_per_user_limit(
 
     assert response.status_code == 429
     assert response.headers["Retry-After"] == "30"
-    consume.assert_called_once_with(
-        dependency="rbac_rate_limit:vn_assets.preflight",
-        identifier="user:42:vn_assets.preflight",
-        limit=120,
-        burst=240,
-        window_seconds=60.0,
-    )
 
 
 def test_old_top_level_vn_assets_route_is_absent(client: TestClient) -> None:

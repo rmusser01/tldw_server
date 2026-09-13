@@ -73,7 +73,7 @@ copied verbatim into the PR before it was marked ready.
 | Qodo finding | Disposition and regression evidence |
 | --- | --- |
 | 1: stalled request blocks another pack | Pending commands and their busy state are now keyed by pack. A regression starts pack B while A remains pending, then proves A's completion cannot unlock B. |
-| 2: preflight lacks finite rate limit | Authentication precedes the named `vn_assets.preflight` RBAC dependency. Its catalog entry uses standard limits; HTTP regressions verify the same user-specific key for JWT/API-key principals, finite limits, 429 and `Retry-After`. |
+| 2: preflight lacks finite rate limit | Authentication precedes the named `vn_assets.preflight` RBAC dependency. Its catalog entry uses standard limits; HTTP regressions verify 429 and `Retry-After` for JWT/API-key principals. A frozen-clock limiter test verifies shared user budgets and a public catalog test verifies a finite policy. |
 | 3: missing test docstrings | Added concise behavior descriptions to all three preflight integration tests. |
 | 4: missing test argument types | Added concrete fixture and parametrized argument annotations to the same tests. |
 | 5: missing helper return type | Declared the TypeScript setup helper's `void` return contract. |
@@ -96,11 +96,13 @@ and independent budgets for different users.
 The follow-up review found no further issue. Buckets remain process-local, as
 with the existing shared limiter; this is not a cluster-wide quota guarantee.
 
-Qodo [re-reviewed code head `cad6d3b465`](https://github.com/rmusser01/tldw_server/pull/2954#issuecomment-5655592729)
-and confirmed zero active findings. Seven findings were implemented and the
-matrix/preflight claim was dismissed after checking the existing state update
-and the new regression. All eight review threads are resolved. Merge remains
-subject to final-head required CI; no protected-branch bypass is authorized.
+Qodo's [chat response for code head `cad6d3b465`](https://github.com/rmusser01/tldw_server/pull/2954#issuecomment-5655592729)
+reported zero active findings after discussing the eight original dispositions.
+This was not a new full code scan. Seven findings were implemented and the
+matrix/preflight claim was dismissed based on the existing state update and new
+regression. Those eight threads are resolved, but the subsequent explicit full
+review found the additional issues below. Merge requires final-head review and
+required CI; no protected-branch bypass is authorized.
 
 Review verification:
 
@@ -127,6 +129,45 @@ The first browser attempt timed out during cold compilation; a subsequent Bun
 startup error coincided with only 227 MB of free disk space. Once space recovered
 to 21 GB, the warmed-route rerun passed without changing code or tests. The
 rebased head still requires its own Qodo/CI confirmation before merge.
+
+### Full Qodo Re-Review
+
+The explicit [`/agentic_review` request](https://github.com/rmusser01/tldw_server/pull/2954#issuecomment-5655822495)
+scanned rebased head `c3c0f6a577` and completed at 20:16 UTC on September 13.
+It reported two configuration defects and two brittle test assertions. Follow-up
+tracking uses TASK-13258 because the rebase introduced two TASK-13249 records
+from independently authored branches. No unrelated task content was changed.
+
+| Finding | Fix and verification contract |
+| --- | --- |
+| False worker-disabled warning with unset flags | The default-enabled premise does not match active startup: `provide_content_jobs_worker_specs` uses `route_enabled_predicate`, which requires explicit truthy flags and enabled routes. Worker entry points also require explicit flags. Preflight now includes the missing route gates through `worker_route_default` with the same route callback, without changing enablement defaults. Two disabled-route regressions failed before the fix; unset/blank flags stay false, and explicit flags plus enabled routes are true. Worker health remains unknown. |
+| Invalid preferred Stable Diffusion path hidden by a valid legacy path | Validate the selected preferred path, just as the adapter does. The missing-preferred/existing-legacy regression failed before the one-line fix; valid preferred and legacy-only configurations remain covered. |
+| Exact registry call sequence in the safety test | Assert the returned preflight response and guard external generation/job boundaries without prescribing registry call order. |
+| Exact private limiter arguments in the HTTP test | Retain controlled rate exhaustion and assert 429 plus Retry-After. Verify finite policy through the public catalog; retain behavioral per-user aggregation and isolation coverage. |
+
+The VN lifecycle predicates do not suppress explicitly enabled workers based on
+test-mode or sidecar environment flags. The diagnostics preserve that existing
+behavior; this fix does not change worker orchestration policy. Regression cases
+cover those modes so the advisory does not silently adopt an unused legacy
+startup helper's defaults.
+
+Final local verification of these four dispositions:
+
+- 174 combined VN preflight/API, image catalog/model/Stable Diffusion adapter,
+  privilege-catalog and authorization tests passed in 42.69 seconds.
+- Production Ruff, targeted Black checks and `git diff --check` passed.
+- Bandit reported zero findings across all production Python files in the PR.
+- The OpenAPI exporter check still matches the committed fingerprint.
+- No frontend behavior changed in this follow-up. The rebased 33-test VN suite
+  and three desktop/mobile browser scenarios above remain applicable.
+- Pytest emitted existing dependency warnings and temporary-directory cleanup
+  warnings for unrelated older artifacts; no tests failed.
+
+Independent read-only review of the combined follow-up found no further issue
+and traced the worker behavior from the active `main.py` lifecycle bootstrap.
+Implementation tracking is complete; delivery still requires a full Qodo scan
+and all seven required checks on the pushed head. PR #2954 is the authoritative
+record of those external gates and the eventual merge outcome.
 
 ## Limits And Remaining Work
 
