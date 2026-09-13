@@ -66,6 +66,31 @@ describe("header shortcut defaults", () => {
     expect(normalized).not.toContain("sources")
   })
 
+  it("preserves an explicitly selected Explainer shortcut", () => {
+    expect(
+      normalizeSettingValue(HEADER_SHORTCUT_SELECTION_SETTING, [
+        "chat",
+        "explainer"
+      ])
+    ).toContain("explainer")
+  })
+
+  it("keeps Explainer optional for saved custom selections", () => {
+    expect(
+      normalizeSettingValue(HEADER_SHORTCUT_SELECTION_SETTING, ["chat", "notes"])
+    ).not.toContain("explainer")
+  })
+
+  it("still migrates Sources for full selections saved before Explainer existed", () => {
+    const previousSelection = DEFAULT_HEADER_SHORTCUT_SELECTION.filter(
+      (id: string) => id !== "sources" && id !== "explainer"
+    )
+
+    expect(
+      normalizeSettingValue(HEADER_SHORTCUT_SELECTION_SETTING, previousSelection)
+    ).toContain("sources")
+  })
+
   it("adds Companion Home to persisted filtered selections", () => {
     const normalized = normalizeSettingValue(
       HEADER_SHORTCUT_SELECTION_SETTING,

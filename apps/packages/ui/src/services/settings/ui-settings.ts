@@ -444,6 +444,7 @@ export const HEADER_SHORTCUT_IDS = [
   "chat-dictionaries",
   "world-books",
   "deep-research",
+  "explainer",
   "knowledge-qa",
   "media",
   "sources",
@@ -507,6 +508,9 @@ const HEADER_SHORTCUT_IDS_WITHOUT_SOURCES = HEADER_SHORTCUT_IDS.filter(
   (id) => id !== "sources"
 )
 
+const PRE_EXPLAINER_HEADER_SHORTCUT_IDS_WITHOUT_SOURCES =
+  HEADER_SHORTCUT_IDS_WITHOUT_SOURCES.filter((id) => id !== "explainer")
+
 const hasExactHeaderShortcutIds = (
   ids: Set<HeaderShortcutId>,
   expected: readonly HeaderShortcutId[]
@@ -535,7 +539,13 @@ const coerceHeaderShortcutSelection = (
   for (const requiredId of required) {
     unique.add(requiredId)
   }
-  if (hasExactHeaderShortcutIds(unique, HEADER_SHORTCUT_IDS_WITHOUT_SOURCES)) {
+  if (
+    hasExactHeaderShortcutIds(unique, HEADER_SHORTCUT_IDS_WITHOUT_SOURCES) ||
+    hasExactHeaderShortcutIds(
+      unique,
+      PRE_EXPLAINER_HEADER_SHORTCUT_IDS_WITHOUT_SOURCES
+    )
+  ) {
     unique.add("sources")
   }
   return HEADER_SHORTCUT_IDS.filter((id) => unique.has(id))
