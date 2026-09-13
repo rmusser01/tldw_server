@@ -1,4 +1,10 @@
-"""Manual proof of live-session recovery through a drill-owned LaunchAgent."""
+"""Manual Apple Silicon proof of session recovery through an owned LaunchAgent.
+
+Explicit opt-in loads the helper-control module, creates a private runtime and
+LaunchAgent, boots disposable Linux VMs, and restarts only that helper. Sessions,
+VMs, the LaunchAgent, and its socket are cleaned up; receipts and logs remain in
+pytest's artifact directory. Failed cleanup retains the runtime for inspection.
+"""
 
 from __future__ import annotations
 
@@ -28,13 +34,33 @@ from tldw_Server_API.tests.sandbox.test_vz_linux_real_host_e2e import (
 )
 
 
+# TASK-13243.1 / #1442: disruptive drill, intentionally manual and Apple Silicon-only.
+@pytest.mark.integration
 @pytest.mark.vz_linux_host_failure_drill
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS host only")
 def test_vz_linux_session_recovers_after_launchd_restart(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Reject stale VM reuse after launchd replaces a helper with a live session."""
+    """Reject stale VM reuse after replacing the drill-owned helper.
+
+    Args:
+        monkeypatch: Restore helper environment and guest-reply interception.
+        tmp_path: Retain helper logs, the generated plist, and JSON evidence.
+
+    Returns:
+        None after execution, replacement, reuse, and cleanup are verified.
+
+    Raises:
+        pytest.fail.Exception: A prerequisite, execution, or cleanup check fails.
+        pytest.skip.Exception: The host or explicit opt-in is unsupported/absent.
+        Exception: Helper, filesystem, or service operations fail. Failure
+            evidence is retained and owned-resource cleanup is attempted.
+
+    Side Effects:
+        Creates VMs and a private LaunchAgent, force-restarts its helper, and
+        removes owned resources. Never restarts the default helper or the host.
+    """
     if not is_truthy(os.getenv("TLDW_SANDBOX_VZ_LINUX_LAUNCHD_RESTART_DRILL")):
         pytest.skip("Set TLDW_SANDBOX_VZ_LINUX_LAUNCHD_RESTART_DRILL=1 for this manual drill")
     if platform.machine() != "arm64":
@@ -84,6 +110,7 @@ def test_vz_linux_session_recovers_after_launchd_restart(
         original_exec = VZLinuxRunner.helper_client_cls.exec_guest
 
         def record_exec(client: Any, **kwargs: Any) -> Any:
+            """Capture real guest replies without changing execution behavior."""
             reply = original_exec(client, **kwargs)
             observations.setdefault("guest_replies", []).append(
                 {
@@ -103,8 +130,14 @@ def test_vz_linux_session_recovers_after_launchd_restart(
             raw_body={"runtime": "vz_linux", "base_image": base_image},
         )
 
+        def session_reconciliation() -> dict[str, Any]:
+            """Read persisted/live session state through public diagnostics."""
+            report = service.macos_diagnostics()["reconciliation"]
+            _expect(report["computed"], f"Reconciliation unavailable: {report}")
+            return report
+
         def run_command(token: str) -> dict[str, Any]:
-            """Check real stdout and exit status, then record the current VM control."""
+            """Check real output and record the publicly diagnosed session VM."""
             command = ["/bin/echo", token]
             result = service.start_run_scaffold(
                 user_id="e2e-user",
@@ -121,7 +154,8 @@ def test_vz_linux_session_recovers_after_launchd_restart(
             )
             frames = get_hub().get_buffer_snapshot(result.id)
             stdout = "".join(str(frame.get("data", "")) for frame in frames if frame.get("type") == "stdout")
-            control = service._orch.get_vz_session_control(session.id)
+            report = session_reconciliation()
+            items = [item for item in report["items"] if item.get("session_id") == session.id]
             observations["runs"].append(
                 {
                     "token": token,
@@ -129,14 +163,15 @@ def test_vz_linux_session_recovers_after_launchd_restart(
                     "exit_code": result.exit_code,
                     "stdout": stdout,
                     "frames": frames,
-                    "control": dict(control) if control else None,
+                    "reconciliation": report,
                 }
             )
             _expect(result.phase == RunPhase.completed, f"Run failed: {result}")
             _expect(result.exit_code == 0, f"Unexpected exit status: {result.exit_code}")
             _expect(stdout.strip() == token, f"Missing guest output: {stdout!r}")
-            _expect(isinstance(control, dict) and bool(control.get("vm_id")), "Missing session VM control")
-            return dict(control)
+            _expect(len(items) == 1, f"Expected one diagnosed session VM: {items}")
+            _expect(items[0]["status"] == "healthy" and bool(items[0].get("vm_id")), f"Unhealthy session: {items}")
+            return items[0]
 
         try:
             before = run_command("launchd-before-restart")
@@ -161,20 +196,31 @@ def test_vz_linux_session_recovers_after_launchd_restart(
             new_instance = replacement.details["helper_instance_id"]
             observations["helper_instance_after"] = new_instance
             _expect(not helper.get_vm_status(before["vm_id"]).healthy, "Old VM survived helper replacement")
+            stale_report = session_reconciliation()
+            observations["reconciliation_after_restart"] = stale_report
             _expect(
-                service._orch.get_vz_session_control(session.id) == before, "Restart bypassed stale control recovery"
+                any(
+                    item.get("session_id") == session.id
+                    and item.get("vm_id") == before["vm_id"]
+                    and item["status"] == "stale_session"
+                    for item in stale_report["items"]
+                ),
+                "Restart bypassed stale session recovery",
             )
 
             after = run_command("launchd-after-restart")
             _expect(after["vm_id"] != before["vm_id"], "Stale VM was reused after helper restart")
-            _expect(after.get("helper_instance_id") == new_instance, "Replacement generation was not persisted")
+            _expect(helper.ping().details.get("helper_instance_id") == new_instance, "Replacement helper changed")
             reused = run_command("launchd-replacement-reuse")
             _expect(reused["vm_id"] == after["vm_id"], "Healthy replacement VM was not reused")
         finally:
             destroyed = service.destroy_session(session.id)
             observations["session_destroyed"] = destroyed
             _expect(destroyed, "Session destruction failed")
-            _expect(service._orch.get_vz_session_control(session.id) is None, "Session control remained")
+            _expect(service.get_session(session.id) is None, "Session remained after destruction")
+            cleanup_report = session_reconciliation()
+            observations["reconciliation_after_cleanup"] = cleanup_report
+            _expect(cleanup_report["persisted_sessions"] == 0, "Session control remained")
             remaining = helper.list_vms().vms
             observations["remaining_vm_ids"] = [vm.vm_id for vm in remaining]
             _expect(not remaining, "Drill left VMs in its helper registry")
@@ -183,6 +229,7 @@ def test_vz_linux_session_recovers_after_launchd_restart(
     failure: BaseException | None = None
 
     def record_session_failure() -> Any:
+        """Preserve the session failure while the driver records cleanup evidence."""
         nonlocal failure
         try:
             return exercise_session()

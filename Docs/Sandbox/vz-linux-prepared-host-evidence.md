@@ -102,6 +102,50 @@ triage issue.
 
 ## Latest Evidence
 
+### 2026-09-13: PR #2955 review verification
+
+- Rebased onto `dev` at `b6cf7fd1d5`; the rebase introduced no changes to the
+  helper, guest, or sandbox runtime sources. Review fixes change test fixtures
+  and documentation, not the production cancellation/drain implementation.
+- The revised host test uses public `SandboxService.macos_diagnostics()`
+  reconciliation to observe healthy, stale, and removed session controls,
+  rather than reading the private orchestrator. Generation persistence remains
+  covered by the focused runner tests; the host drill checks helper generation
+  change, VM replacement, and replacement reuse through supported observations.
+- Fresh disposable clone from the preceding `source-bundle-final`: **1 passed,
+  0 skipped, 0 errors**, 14.05 seconds. The first VM was
+  `40c207d3-19ef-472d-8bbf-ba8bbc668c47`; replacement and third-command reuse used
+  `4c05cb1b-cd1c-416c-8cf7-681ad0d87a2a`. All three commands returned exact stdout
+  and exit 0. Cleanup reported zero persisted controls/live VMs, destroyed
+  session, absent LaunchAgent, unavailable socket, and removed runtime.
+- Evidence root: `$HOME/Library/Logs/tldw/vz-launchd-recovery/20260913-pr2955-review`.
+  `host.xml`, `host.log`, and
+  `host-pytest/test_vz_linux_session_recovers0/launchd-recovery.json` contain the
+  acceptance results. Source rootfs SHA256 remains
+  `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`.
+- Linux tests now use test-owned release files instead of signaling saved
+  numeric PIDs. A fresh liveness acknowledgement proves the escaped child
+  still holds the pipes after `Exec` returns; cleanup then releases it.
+  Completion and acknowledgements replace five-second elapsed assertions;
+  a one-minute watchdog only detects deadlocks. Both waiting-parent and
+  exited-parent timeout cases are covered. No production timer injection was
+  needed. Ten repetitions of `TestGuestServerExec*` passed in the disposable
+  Linux VM (`linux-final/guest-review.test.stdout.log`), including 1,000 fast
+  output commands. Test-binary SHA256:
+  `85e9162e67d841ae51430753cc54a1fa2ab1da2ab1bc37e594c2311973e8164a`.
+- A temporary Go overlay removed only the cancellation pipe-close callback,
+  leaving repository production code unchanged. Its escaped-output-limit test
+  failed as intended at the deadlock watchdog (60.06 seconds, exit 1), then
+  cooperatively released the child. This confirms natural child expiry cannot
+  mask a missing drain bound. `linux-final/guest-no-drain.test.stdout.log` and
+  `linux-final/linux-review.json` retain the negative result and cleanup receipt.
+  Negative-binary SHA256:
+  `e44af3a1d601770a5276faa4f332f232e70b221d3456107d51bb20c7b0088d27`.
+- Native Go suite/race checks and native/Linux guest vet passed. Focused Python
+  suites passed 224 tests with the one manual drill intentionally opted out.
+  Bandit passed with the documented B108 exception; no additional suppression
+  was added. No host reboot or broader descendant-containment claim is made.
+
 ### 2026-09-13: live-session recovery after a launchd restart
 
 - Scope: `TASK-13243.1` and `TASK-13243.2`, on
