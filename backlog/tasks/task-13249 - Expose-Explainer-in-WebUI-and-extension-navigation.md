@@ -1,10 +1,10 @@
 ---
 id: TASK-13249
 title: Expose Explainer in WebUI and extension navigation
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-09-13 18:22'
-updated_date: '2026-09-13 18:35'
+updated_date: '2026-09-13 19:02'
 labels:
   - frontend
   - explainer
@@ -45,6 +45,16 @@ Implementation complete: shared Research launcher entry and persisted shortcut I
 Extension compile passed: bun run compile (tsc --noEmit -p tsconfig.compile.json). Self-review found no remaining issues in the changed scope. New route test formatted using the shared UI style; git diff --check passed. Follow-up runtime limitation: browser preview at http://127.0.0.1:8091/explainer requires a ready local backend; no backend settings changed.
 
 Published draft PR #2953 against dev: https://github.com/rmusser01/tldw_server/pull/2953. Fetched origin/dev before publishing; the branch was current with no rebase needed. Reverified 106 tests across 11 suites under each WebUI and extension configuration, extension compile, and diff checks. Draft remains pending the human-written Change summary required by repository merge policy; browser verification limitations are documented in the PR.
+
+User requested latest-dev rebase, resolution of PR comments and issues after Qodo review, and merge. Initial review readback shows no Qodo/inline review yet and a draft PR. User provided Change summary: Fixes navigation for explainer page. Requested the missing human-authored implementation rationale required before merge; review and verification continue independently.
+
+Latest origin/dev rebase returned already up to date. Qodo completed its review of 228195c0e0 with zero bugs, zero rule violations, and zero requirement gaps: https://github.com/rmusser01/tldw_server/pull/2953#issuecomment-5655313750. GraphQL reviewThreads inventory is empty. No code review fixes were required. Reported required checks are passing; GitHub still reports BLOCKED while frontend unit shard 8/8 and remaining smoke jobs finish. Human implementation rationale remains pending before merge.
+
+Frontend shard 8/8 failed: all 22 assertions also failed on exact dev, but one SkillsManager message differed and triggered full-context replay. The trusted replay refused the newly added option-explainer.route.test.tsx filename because it is absent from base. Consolidating the same real-router regression into the existing ExplainerWorkspace suite with shared fixtures; no test or gate will be disabled and no workflow policy changed.
+
+Deeper investigation found the context replay also requires identical test identities, so test consolidation is not a sufficient root fix and will be reverted. CI Skills live-region test asserts Loading skills before async scope resolution starts the query; when it fails, clearAllMocks leaves its unconsumed mockImplementationOnce for the next empty-state test. The different Ant Design css-var IDs in that subsequent failure produce the ratchet mismatch. Fix only the live-region test synchronization, preserving all assertions and production behavior.
+
+Verified the final CI fix: replaced only the premature Loading skills assertion with waitFor; original Explainer route test layout restored. All 83 SkillsManager tests pass (116.98s); 106 navigation tests pass in both WebUI and extension configs; extension compile passes; git diff --check passes. Shared UI ESLint uses the repository-pinned frontend binary: zero errors, 18 pre-existing no-explicit-any warnings on unchanged Skills test lines. Bandit remains not applicable to TS/TSX/JSON. Latest origin/dev remains c70387f496. No application behavior or CI gate policy was changed by this follow-up; awaiting new-head CI/Qodo and human rationale before merge.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
