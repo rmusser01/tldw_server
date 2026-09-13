@@ -4,12 +4,13 @@ title: Add VN asset generation preflight and targeted recovery
 status: In Progress
 assignee: []
 created_date: '2026-09-13 18:27'
-updated_date: '2026-09-13 18:56'
+updated_date: '2026-09-13 18:57'
 labels:
   - vn-assets
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/2021'
+  - 'https://github.com/rmusser01/tldw_server/pull/2954'
 documentation:
   - Docs/Design/2026-09-13-vn-generation-readiness.md
   - Docs/Evidence/VN_Generation_Readiness_2026_09_13.md
@@ -33,12 +34,16 @@ First productization slice for issue 2021: expose server-owned generation prefli
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented advisory owner-scoped preflight, stable generation keys, targeted retry, active progress polling and pack-switch guards. Mobile browser QA found and fixed implicit grid overflow. Independent review identified four refresh races; failing regressions reproduced each and all are fixed. Final re-review found no remaining issues in those fixes. Verification: 90 backend tests, 31 frontend tests, 3 Chromium smoke tests; touched ESLint and Bandit clean. Full typecheck fails identically on unchanged dev (90 existing diagnostics). See evidence document for commands, before/after observations and limits. Draft PR packaging in progress; human-written Change summary required before merge.
+
+Draft PR #2954 opened against dev. Implementation and verification complete; task remains In Progress pending PR review/merge. Required human-written Change summary is explicitly outstanding in the draft. Temporary execution plan removed after all four stages completed; design and verification evidence are retained.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Completed the bounded generation-readiness and targeted-recovery implementation for #2021. All scoped tests pass. Issues #2021-#2027 were reconciled and registered as children of #1391. Recipe snapshots, reload recovery and worker crash replay remain outside this slice; #2021 stays open. No live provider/GPU/worker deployment or extension build was exercised.
+
+Delivery: https://github.com/rmusser01/tldw_server/pull/2954 (draft). No merge performed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

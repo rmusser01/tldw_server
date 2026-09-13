@@ -1,6 +1,7 @@
 # VN Generation Readiness Verification
 
 Task: TASK-13249. Parent work: [#2021](https://github.com/rmusser01/tldw_server/issues/2021).
+Delivery: [draft PR #2954](https://github.com/rmusser01/tldw_server/pull/2954).
 Baseline: `dev` at `c70387f496d82fcee92926bf3715bf5cd240ba88`.
 Design: [generation readiness and recovery](../Design/2026-09-13-vn-generation-readiness.md).
 
