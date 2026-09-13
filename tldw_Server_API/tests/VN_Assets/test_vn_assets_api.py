@@ -130,6 +130,121 @@ def test_create_pack_endpoint_returns_pack(
     assert response.json()["primary_character_id"] == character_id
 
 
+@pytest.mark.parametrize(
+    ("override", "configured", "expected_backend", "expected_status"),
+    [
+        (None, True, "swarmui", "configured"),
+        ("openrouter", False, "openrouter", "missing_configuration"),
+        ("disabled", True, None, "unavailable"),
+        ("custom", True, "custom", "unknown"),
+    ],
+)
+def test_generation_preflight_reports_effective_configuration(
+    client,
+    service,
+    character_id,
+    monkeypatch,
+    override,
+    configured,
+    expected_backend,
+    expected_status,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets import preflight
+
+    monkeypatch.setattr(
+        preflight,
+        "get_registry",
+        lambda: SimpleNamespace(
+            resolve_backend=lambda name: None if name == "disabled" else name or "swarmui",
+        ),
+    )
+    monkeypatch.setattr(
+        preflight,
+        "list_image_models_for_catalog",
+        lambda: [{"name": name, "is_configured": configured} for name in ("swarmui", "openrouter")],
+    )
+    monkeypatch.setenv("VN_ASSET_JOBS_WORKER_ENABLED", "false")
+    monkeypatch.setenv("VN_ASSET_GENERATION_JOBS_WORKER_ENABLED", "false")
+    pack = service.create_pack(
+        VNAssetPackCreate(
+            title="Preflight",
+            primary_character_id=character_id,
+            default_backend="swarmui",
+        )
+    )
+    slot = service.create_slot(
+        pack.id,
+        VNAssetSlotCreate(
+            asset_type="sprite",
+            slot_key="neutral",
+            backend_override=override,
+        ),
+    )
+
+    response = client.get(f"/api/v1/vn/vn-assets/packs/{pack.id}/generation/preflight")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["scope"] == "api_process_configuration"
+    assert data["worker_health"] == "unknown"
+    assert data["slots"][0]["slot_id"] == slot.id
+    assert data["slots"][0]["backend"] == expected_backend
+    assert data["slots"][0]["status"] == expected_status
+    assert data["warnings"]
+    assert service.repo.list_batches(pack.id) == []
+
+
+def test_generation_preflight_uses_server_default_without_claiming_worker_health(
+    client,
+    service,
+    character_id,
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets import preflight
+
+    monkeypatch.setattr(
+        preflight,
+        "get_registry",
+        lambda: SimpleNamespace(
+            resolve_backend=lambda name: name or "swarmui",
+        ),
+    )
+    monkeypatch.setattr(
+        preflight,
+        "list_image_models_for_catalog",
+        lambda: [
+            {"name": "swarmui", "is_configured": True},
+        ],
+    )
+    monkeypatch.setenv("VN_ASSET_JOBS_WORKER_ENABLED", "true")
+    monkeypatch.setenv("VN_ASSET_GENERATION_JOBS_WORKER_ENABLED", "true")
+    pack = service.create_pack(VNAssetPackCreate(title="Default", primary_character_id=character_id))
+    service.create_slot(pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="neutral"))
+    data = client.get(f"/api/v1/vn/vn-assets/packs/{pack.id}/generation/preflight").json()
+    assert data["slots"][0]["backend"] == "swarmui"
+    assert data["worker_health"] == "unknown"
+    assert data["local_workers_enabled"] is True
+
+
+def test_generation_preflight_checks_ownership_before_reading_configuration(
+    client,
+    service,
+    character_id,
+    current_user_id,
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets import preflight
+    from unittest.mock import Mock
+
+    registry = Mock()
+    monkeypatch.setattr(preflight, "get_registry", registry)
+    pack = service.create_pack(VNAssetPackCreate(title="Private", primary_character_id=character_id))
+    current_user_id["value"] = 43
+    response = client.get(f"/api/v1/vn/vn-assets/packs/{pack.id}/generation/preflight")
+    assert response.status_code == 404
+    registry.assert_not_called()
+
+
 def test_old_top_level_vn_assets_route_is_absent(client: TestClient) -> None:
     response = client.get("/api/v1/vn-assets/packs")
 

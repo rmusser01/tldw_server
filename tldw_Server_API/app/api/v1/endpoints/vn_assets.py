@@ -23,6 +23,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetCleanupRequest,
     VNAssetCleanupResponse,
     VNAssetGenerationRequest,
+    VNAssetGenerationPreflightResponse,
     VNAssetGenerationStatusResponse,
     VNAssetItemResponse,
     VNAssetManifestResponse,
@@ -61,6 +62,7 @@ from tldw_Server_API.app.core.VN_Assets.matrix import expand_starter_matrix
 from tldw_Server_API.app.core.VN_Assets.portability.archive import DEFAULT_MAX_ARCHIVE_SIZE_BYTES
 from tldw_Server_API.app.core.VN_Assets.portability.constants import VNPACK_EXTENSION
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
+from tldw_Server_API.app.core.VN_Assets.preflight import generation_preflight
 from tldw_Server_API.app.core.VN_Assets.cleanup_blockers import VNAssetCleanupBlockerProvider
 from tldw_Server_API.app.core.VN_Assets.storage import (
     VN_ASSET_CONTENT_NOT_FOUND,
@@ -1788,6 +1790,20 @@ async def get_manifest(
 ) -> VNAssetManifestResponse:
     try:
         return service.build_manifest(pack_id)
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@router.get("/packs/{pack_id}/generation/preflight", response_model=VNAssetGenerationPreflightResponse)
+def get_generation_preflight(
+    pack_id: int,
+    service: VNAssetPackService = Depends(_service),
+) -> VNAssetGenerationPreflightResponse:
+    """Return owner-scoped configuration diagnostics without starting generation."""
+    try:
+        pack = service.get_pack(pack_id)
+        slots = service.list_slots(pack_id)
+        return generation_preflight(pack, slots)
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 

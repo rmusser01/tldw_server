@@ -242,6 +242,26 @@ class VNAssetGenerationRequest(BaseModel):
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
 
 
+class VNAssetSlotPreflight(BaseModel):
+    """API-process configuration check for an effective slot backend."""
+
+    slot_id: int
+    backend: str | None = None
+    model: str | None = None
+    status: Literal["configured", "missing_configuration", "unavailable", "unknown"]
+    message: str | None = None
+
+
+class VNAssetGenerationPreflightResponse(BaseModel):
+    """Advisory checks; local flags do not establish external worker health."""
+
+    scope: Literal["api_process_configuration"] = "api_process_configuration"
+    worker_health: Literal["unknown"] = "unknown"
+    local_workers_enabled: bool
+    warnings: list[str] = Field(default_factory=list)
+    slots: list[VNAssetSlotPreflight] = Field(default_factory=list)
+
+
 class VNAssetGenerationStatusResponse(BaseModel):
     """Serialized VN asset generation batch status."""
 
