@@ -2196,9 +2196,11 @@ def _catalog_rate_limit_for_resource(resource: str) -> tuple[int, int] | None:
 async def enforce_rbac_rate_limit(
     request: Request,
     resource: str,
-    db_pool: DatabasePool = Depends(get_db_pool)
+    db_pool: DatabasePool = Depends(get_db_pool),
+    *,
+    per_user: bool = False,
 ):
-    """Enforce the strictest catalog, user, or role per-minute limit."""
+    """Enforce configured limits, optionally sharing a user's budget across auth kinds."""
     user_id = getattr(request.state, "user_id", None)
     if not user_id:
         return
@@ -2293,7 +2295,7 @@ async def enforce_rbac_rate_limit(
     ]
     limit_per_min = min(per_minute_values)
     burst = min(burst_values) if burst_values else limit_per_min
-    identifier = _auth_deps_rate_limit_identifier(request, resource)
+    identifier = f"user:{user_id}:{resource}" if per_user else _auth_deps_rate_limit_identifier(request, resource)
     try:
         allowed, retry_after = _consume_auth_deps_fallback_rate_token(
             dependency=f"rbac_rate_limit:{resource}",
@@ -2320,11 +2322,14 @@ async def enforce_rbac_rate_limit(
         )
 
 
-def rbac_rate_limit(resource: str, *, detail: Any | None = None):
-    """Factory returning an enforcing RBAC resource-rate dependency."""
+def rbac_rate_limit(resource: str, *, detail: Any | None = None, per_user: bool = False):
+    """Build a rate dependency; opt into per-user buckets independent of auth kind."""
     async def _dep(request: Request, db_pool: DatabasePool = Depends(get_db_pool)):
         try:
-            await enforce_rbac_rate_limit(request, resource, db_pool)
+            if per_user:
+                await enforce_rbac_rate_limit(request, resource, db_pool, per_user=True)
+            else:
+                await enforce_rbac_rate_limit(request, resource, db_pool)
         except HTTPException as exc:
             if detail is None or exc.status_code != status.HTTP_429_TOO_MANY_REQUESTS:
                 raise

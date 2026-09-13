@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const mocks = vi.hoisted(() => ({
+  bulkReviewVNAssetItems: vi.fn(),
+  getVNAssetGenerationPreflight: vi.fn(),
+  retryVNAssetSlot: vi.fn(),
+  startVNAssetGeneration: vi.fn(),
+  cancelVNAssetGeneration: vi.fn(),
   applyVNAssetMatrix: vi.fn(),
   commitVNPackImport: vi.fn(),
   createVNAssetPack: vi.fn(),
@@ -18,6 +23,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@web/lib/api/vnAssets', () => ({
+  bulkReviewVNAssetItems: (...args: unknown[]) => mocks.bulkReviewVNAssetItems(...args),
+  getVNAssetGenerationPreflight: (...args: unknown[]) => mocks.getVNAssetGenerationPreflight(...args),
+  retryVNAssetSlot: (...args: unknown[]) => mocks.retryVNAssetSlot(...args),
+  startVNAssetGeneration: (...args: unknown[]) => mocks.startVNAssetGeneration(...args),
+  cancelVNAssetGeneration: (...args: unknown[]) => mocks.cancelVNAssetGeneration(...args),
   applyVNAssetMatrix: (...args: unknown[]) => mocks.applyVNAssetMatrix(...args),
   commitVNPackImport: (...args: unknown[]) => mocks.commitVNPackImport(...args),
   createVNAssetPack: (...args: unknown[]) => mocks.createVNAssetPack(...args),
@@ -36,7 +46,13 @@ import VNAssetsWorkbench from '@web/components/vn-assets/VNAssetsWorkbench';
 
 describe('VNAssetsWorkbench', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    mocks.getVNAssetGenerationPreflight.mockResolvedValue({
+      scope: 'api_process_configuration', worker_health: 'unknown',
+      local_workers_enabled: true, warnings: [], slots: [],
+    });
+    mocks.startVNAssetGeneration.mockResolvedValue({ status: 'queued' });
+    mocks.retryVNAssetSlot.mockResolvedValue({ status: 'queued' });
     mocks.applyVNAssetMatrix.mockResolvedValue([]);
     mocks.commitVNPackImport.mockResolvedValue({});
     mocks.createVNAssetPack.mockResolvedValue({
@@ -65,6 +81,234 @@ describe('VNAssetsWorkbench', () => {
     mocks.listVNAssetItems.mockResolvedValue([]);
     mocks.listVNAssetPacks.mockResolvedValue([]);
     mocks.listVNAssetSlots.mockResolvedValue([]);
+  });
+
+  function existingFailedPack(): void {
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+    ]);
+    mocks.listVNAssetSlots.mockResolvedValue([
+      { id: 12, pack_id: 7, asset_type: 'sprite', slot_key: 'sprite_neutral',
+        variant_count: 1, status: 'failed', last_error: 'image_backend_unavailable' },
+    ]);
+    mocks.getVNAssetGeneration.mockResolvedValue({ status: 'failed', failed_count: 1 });
+  }
+
+  it('reuses the required start key after an ambiguous transport failure', async () => {
+    existingFailedPack();
+    mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('Connection lost'));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await screen.findByText('Connection lost');
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(2));
+    const request = mocks.startVNAssetGeneration.mock.calls[0][1];
+    expect(request.idempotency_key).toEqual(expect.any(String));
+    expect(request.idempotency_key.length).toBeGreaterThan(0);
+    expect(mocks.startVNAssetGeneration.mock.calls[1]).toEqual([7, request]);
+  });
+
+  it('retries only the failed slot and reuses its key after connection loss', async () => {
+    existingFailedPack();
+    mocks.retryVNAssetSlot.mockRejectedValueOnce(new Error('Retry connection lost'));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Retry sprite_neutral' }));
+    await screen.findByText('Retry connection lost');
+    await user.click(screen.getByRole('button', { name: 'Retry sprite_neutral' }));
+    await waitFor(() => expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(2));
+    const request = mocks.retryVNAssetSlot.mock.calls[0][2];
+    expect(request.idempotency_key).toEqual(expect.any(String));
+    expect(mocks.retryVNAssetSlot.mock.calls[1]).toEqual([7, 12, request]);
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Retry sprite_neutral' })).toBeDisabled();
+  });
+
+  it('recovers an initial status failure through Refresh without starting work', async () => {
+    existingFailedPack();
+    mocks.getVNAssetGeneration.mockRejectedValueOnce(new Error('Offline'));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await screen.findByText('Could not load generation status. Refresh to try again.');
+    await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+    await screen.findByRole('button', { name: 'Retry sprite_neutral' });
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+  });
+
+  it('blocks generation commands while a start request is unresolved', async () => {
+    existingFailedPack();
+    let resolveStart!: (value: unknown) => void;
+    mocks.startVNAssetGeneration.mockImplementationOnce(() => new Promise((resolve) => { resolveStart = resolve; }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    const start = screen.getByRole('button', { name: 'Start generation' });
+    await waitFor(() => expect(start).toBeEnabled());
+    await user.dblClick(start);
+    expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Retry sprite_neutral' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Refresh generation status' })).toBeDisabled();
+    await act(async () => { resolveStart({ status: 'queued' }); });
+  });
+
+  it('allows another pack to start without an old pending command clearing its lock', async () => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+      { id: 8, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+    ]);
+    let resolveFirst!: (value: unknown) => void;
+    let resolveSecond!: (value: unknown) => void;
+    mocks.startVNAssetGeneration
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    const start = screen.getByRole('button', { name: 'Start generation' });
+    await waitFor(() => expect(start).toBeEnabled());
+    await user.click(start);
+    await user.click(screen.getByText('Moon Archive'));
+    await waitFor(() => expect(start).toBeEnabled());
+    await user.click(start);
+    await act(async () => { resolveFirst({ status: 'queued' }); });
+    expect(start).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Refresh generation status' })).toBeDisabled();
+    expect(mocks.startVNAssetGeneration.mock.calls.map(([id]) => id)).toEqual([7, 8]);
+    await act(async () => { resolveSecond({ status: 'queued' }); });
+  });
+
+  it('refreshes preflight after applying a matrix to the selected pack', async () => {
+    existingFailedPack();
+    mocks.getVNAssetGenerationPreflight
+      .mockResolvedValueOnce({ local_workers_enabled: false, warnings: ['Old configuration'], slots: [] })
+      .mockResolvedValueOnce({ local_workers_enabled: false, warnings: ['Fresh configuration'], slots: [] });
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await screen.findByText('Old configuration');
+    await user.click(screen.getByRole('button', { name: 'Apply starter matrix' }));
+    await screen.findByText('Fresh configuration');
+    expect(screen.queryByText('Old configuration')).not.toBeInTheDocument();
+    expect(mocks.getVNAssetGenerationPreflight).toHaveBeenCalledTimes(2);
+  });
+
+  it('loads final items after observing terminal generation status', async () => {
+    existingFailedPack();
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await screen.findByRole('button', { name: 'Retry sprite_neutral' });
+    let committed = false;
+    mocks.getVNAssetGeneration.mockImplementationOnce(async () => {
+      committed = true;
+      return { status: 'completed' };
+    });
+    mocks.listVNAssetSlots.mockImplementationOnce(async () => committed ? [] : [
+      { id: 12, slot_key: 'sprite_neutral', status: 'failed' },
+    ]);
+    mocks.listVNAssetItems.mockImplementationOnce(async () => committed ? [
+      { id: 11, slot_id: 12, variant_index: 0, review_status: 'draft', source: 'generated' },
+    ] : []);
+    await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('completed'));
+    expect(screen.queryByRole('button', { name: 'Retry sprite_neutral' })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Select item 11' })).toBeInTheDocument();
+  });
+
+  it('does not overlap refreshes while another detail request is still pending', async () => {
+    existingFailedPack();
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await screen.findByRole('button', { name: 'Retry sprite_neutral' });
+    mocks.listVNAssetSlots.mockRejectedValueOnce(new Error('Offline'));
+    let resolveItems!: (value: unknown[]) => void;
+    mocks.listVNAssetItems.mockImplementationOnce(() => new Promise((resolve) => { resolveItems = resolve; }));
+    await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+    await waitFor(() => expect(mocks.listVNAssetItems).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+    expect(mocks.listVNAssetItems).toHaveBeenCalledTimes(2);
+    await act(async () => { resolveItems([]); });
+    await screen.findByText('Could not refresh generation progress. Refresh to try again.');
+  });
+
+  it('does not let an old review refresh invalidate the selected pack load', async () => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+      { id: 8, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+    ]);
+    mocks.listVNAssetItems.mockResolvedValueOnce([
+      { id: 11, pack_id: 7, slot_id: 12, variant_index: 0, review_status: 'draft', source: 'generated' },
+    ]);
+    let resolveReview!: (value: unknown[]) => void;
+    let resolveGeneration!: (value: unknown) => void;
+    mocks.bulkReviewVNAssetItems.mockImplementationOnce(() => new Promise((resolve) => { resolveReview = resolve; }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select item 11' }));
+    await user.click(screen.getByRole('button', { name: 'Approve selected' }));
+    mocks.getVNAssetGeneration.mockImplementationOnce(() => new Promise((resolve) => { resolveGeneration = resolve; }));
+    await user.click(screen.getByText('Moon Archive'));
+    await waitFor(() => expect(mocks.getVNAssetGeneration).toHaveBeenCalledWith(8));
+    await act(async () => { resolveReview([]); });
+    await act(async () => { resolveGeneration({ status: 'idle' }); });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+  });
+
+  it('keeps a successful review when an earlier refresh finishes afterward', async () => {
+    existingFailedPack();
+    const draft = { id: 11, pack_id: 7, slot_id: 12, variant_index: 0, review_status: 'draft', source: 'generated' };
+    const approved = { ...draft, review_status: 'approved' };
+    mocks.listVNAssetItems.mockResolvedValue([draft]);
+    mocks.bulkReviewVNAssetItems.mockResolvedValue([approved]);
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select item 11' }));
+    let resolveReadiness!: (value: unknown) => void;
+    mocks.getVNAssetReadiness.mockImplementationOnce(() => new Promise((resolve) => { resolveReadiness = resolve; }));
+    await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+    await waitFor(() => expect(mocks.listVNAssetItems).toHaveBeenCalledTimes(2));
+    mocks.listVNAssetItems.mockResolvedValue([approved]);
+    await user.click(screen.getByRole('button', { name: 'Approve selected' }));
+    await screen.findByText('approved');
+    await act(async () => { resolveReadiness({ ready: false, status: 'not_ready', warnings: [], errors: [] }); });
+    await waitFor(() => expect(mocks.listVNAssetItems).toHaveBeenCalledTimes(3));
+    expect(screen.getByText('approved')).toBeInTheDocument();
+  });
+
+  it('clears old items and review selection when the next pack cannot load', async () => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+      { id: 8, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+    ]);
+    mocks.listVNAssetItems.mockResolvedValueOnce([
+      { id: 11, pack_id: 7, slot_id: 12, variant_index: 0, review_status: 'draft', source: 'generated' },
+    ]).mockRejectedValueOnce(new Error('Offline'));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select item 11' }));
+    await user.click(screen.getByText('Moon Archive'));
+    await screen.findByText('Could not load generation status. Refresh to try again.');
+    expect(screen.queryByRole('checkbox', { name: 'Select item 11' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve selected' })).toBeDisabled();
+  });
+
+  it('ignores a late generation response after switching to another pack', async () => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+      { id: 8, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+    ]);
+    let resolveStart!: (value: unknown) => void;
+    mocks.startVNAssetGeneration.mockImplementationOnce(() => new Promise((resolve) => { resolveStart = resolve; }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await user.click(screen.getByText('Moon Archive'));
+    await waitFor(() => expect(mocks.getVNAssetGeneration).toHaveBeenCalledWith(8));
+    await act(async () => { resolveStart({ status: 'queued' }); });
+    expect(screen.getByRole('status')).toHaveTextContent('failed');
   });
 
   it('renders loading, empty, setup, matrix preview, and placeholders', async () => {

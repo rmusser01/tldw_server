@@ -782,6 +782,35 @@ async def test_rbac_rate_limit_zero_rpm_or_burst_denies_without_bucket(
     assert auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS == {}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("per_user", [False, True])
+async def test_rbac_per_user_bucket_shares_budget_across_auth_kinds(
+    monkeypatch: pytest.MonkeyPatch,
+    per_user: bool,
+) -> None:
+    """User-wide buckets are opt-in and remain isolated from other users."""
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(auth_deps, "_AUTH_DEPS_FALLBACK_RATE_WINDOWS", {})
+    monkeypatch.setattr(auth_deps, "_catalog_rate_limit_for_resource", lambda _resource: (1, 1))
+    request = _DummyRequest()
+    request.state.user_id = 41
+    request.state.auth = AuthContext(principal=AuthPrincipal(kind="user", user_id=41))
+    dependency = auth_deps.rbac_rate_limit("vn_assets.preflight", per_user=per_user)
+
+    await dependency(request, _NoRbacOverridePool())
+    request.state.auth = AuthContext(principal=AuthPrincipal(kind="api_key", user_id=41, api_key_id=99))
+    if per_user:
+        with pytest.raises(HTTPException) as captured:
+            await dependency(request, _NoRbacOverridePool())
+        assert captured.value.status_code == 429
+    else:
+        await dependency(request, _NoRbacOverridePool())
+
+    request.state.user_id = 42
+    request.state.auth = AuthContext(principal=AuthPrincipal(kind="user", user_id=42))
+    await dependency(request, _NoRbacOverridePool())
+
+
 def test_fallback_rate_bucket_honors_burst_above_rpm_and_principal_isolation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

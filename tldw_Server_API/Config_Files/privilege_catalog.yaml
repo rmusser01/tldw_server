@@ -60,6 +60,21 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/prompts-capabilities
+  - id: vn_assets.preflight
+    description: Inspect owner-scoped VN asset generation configuration without generating images.
+    resource_tags:
+      - vn_assets
+      - discovery
+    sensitivity_tier: low
+    rate_limit_class: standard
+    default_roles:
+      - admin
+      - analyst
+      - developer
+      - user
+    feature_flag_id: null
+    ownership_predicates: []
+    doc_url: https://github.com/rmusser01/tldw_server/blob/dev/Docs/API-related/VN_ASSET_PACKS_API.md
   - id: rag.search
     description: Execute RAG searches across organization knowledge bases.
     resource_tags:

@@ -16,9 +16,9 @@ from tldw_Server_API.app.core.Image_Generation.adapters.image_format_utils impor
 )
 from tldw_Server_API.app.core.Image_Generation.config import (
     DEFAULT_TOGETHER_IMAGE_BASE_URL,
-    DEFAULT_TOGETHER_IMAGE_MODEL,
     DEFAULT_TOGETHER_IMAGE_TIMEOUT_SECONDS,
     get_image_generation_config,
+    resolve_image_generation_model,
 )
 from tldw_Server_API.app.core.Image_Generation.exceptions import ImageBackendUnavailableError, ImageGenerationError
 from tldw_Server_API.app.core.Image_Generation.request_validation import effective_inline_max_bytes
@@ -103,12 +103,7 @@ class TogetherImageAdapter:
 
     def _build_payload(self, request: ImageGenRequest) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "model": (
-                request.model
-                or os.getenv("TOGETHER_IMAGE_MODEL")
-                or self._config.together_image_default_model
-                or DEFAULT_TOGETHER_IMAGE_MODEL
-            ),
+            "model": resolve_image_generation_model(self.name, request.model, self._config),
             "prompt": request.prompt,
             "response_format": "b64_json",
         }
