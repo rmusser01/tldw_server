@@ -102,6 +102,47 @@ triage issue.
 
 ## Latest Evidence
 
+### 2026-09-13: Post-merge cleanup and guest-mismatch preparation (not acceptance)
+
+- PR #2955 merged as `beac8e9449`. Its clean worktree and local/remote branch
+  were removed after ancestry and active-process checks. The main checkout and
+  divergent local `dev` were left untouched.
+- The exact signed helper and local database artifacts were retained under
+  `$HOME/Library/Logs/tldw/vz-launchd-recovery/20260913-pr2955-review/worktree-retained`.
+  The helper SHA-256 is
+  `a4e988165f18c296dc88e7e80eaddaa0f935bbfb9812463ec0988d2cfa2bff85`;
+  the copied signature verified successfully.
+- TASK-13243.3 continues the existing guest-agent mismatch contract. The runner
+  already rejects explicit mismatches at create time and before session reuse;
+  this slice adds a manual real-host test, not another production policy layer.
+- Prepared a test-only guest using a Go build overlay that changes advertised
+  capabilities from `["exec", "output_cap_v1"]` to `["output_cap_v1"]` while
+  leaving the exec handler intact. A separate real VM installed it into an
+  offline image-store disposable clone. `e2fsck -fn` and installed-binary `cmp`
+  passed; the preparation VM/helper were stopped and their socket removed.
+- Preparation receipt and logs:
+  `$HOME/Library/Logs/tldw/vz-guest-mismatch/20260913/prepare`.
+  The unbooted test-only fault source is
+  `../image-store/runs/fault-source/bundle`; its build-info explicitly records
+  the overlay and parent hashes. Rootfs SHA-256:
+  `3406ae92718845dfbf52f8c89628ae237f853d3dd527536dfdc2c9611ab5405c`.
+- Canonical `source-bundle-final` rootfs stayed
+  `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`;
+  kernel, initrd, manifest, and build-info hashes also stayed unchanged.
+- **Live mismatch acceptance and its negative control have NOT run.** The host
+  reported `ENOSPC` while creating the next evidence directory, before starting
+  a test helper. Free sufficient host storage before resuming; never count the
+  successful offline installation as a successful rejection test.
+- Space cleanup removed only the inactive `preparer-boot` clone and PR #2955's
+  `public-diagnostics` / `linux-regressions` disposable run disks. Their source
+  bundles, logs, test binaries, and acceptance receipts remain. The PR #2955
+  disk hashes/manifests are retained in its evidence root under `postmerge-gc`;
+  the preparer manifest is retained as `prepare/preparer-run-manifest.json`.
+- Portable verification: 35 passed, 1 intentional host skip; Bandit zero
+  findings. Review added ownership-based cleanup for a lost create reply, with
+  a verified failing regression before the fix. Protocol-version mismatch,
+  missing-agent, stuck boot/readiness, and reboot remain separate live gaps.
+
 ### 2026-09-13: PR #2955 review verification
 
 - Rebased onto `dev` at `b6cf7fd1d5`; the rebase introduced no changes to the

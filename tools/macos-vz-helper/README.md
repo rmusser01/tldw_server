@@ -162,6 +162,44 @@ run's evidence directory after review when it is no longer needed. Hard host
 termination can bypass Python cleanup; inspect the receipt's unique label and
 plist before any manual cleanup. Do not add this opt-in to scheduled CI.
 
+### Guest Capability Mismatch Drill
+
+This manual test exercises the existing runner's required-capability gate. It
+requires an isolated, operator-owned helper and **two separate disposable
+bundles**: a healthy bundle and a test-only guest advertising
+`["output_cap_v1"]` without `exec`. Removing the capability from the host-side
+manifest is not fault injection: the metadata must arrive from the running
+guest's VSock handshake. Keep the test guest's exec handler intact so an
+accidental dispatch is observable.
+
+Never install a test agent in the canonical bundle. Build a purpose-specific
+test guest, install it into an offline image-store clone, then create another
+disposable run clone for each attempt. Keep source and installed-agent hashes,
+filesystem checks, and helper lifecycle receipts. Ensure adequate host free
+space before preparing or booting images.
+
+With that private helper already running:
+
+```bash
+TLDW_SANDBOX_VZ_LINUX_E2E=1 \
+TLDW_SANDBOX_VZ_LINUX_GUEST_MISMATCH_DRILL=1 \
+TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=/path/to/healthy/run/bundle \
+TLDW_SANDBOX_VZ_LINUX_MISMATCH_BASE_IMAGE=/path/to/missing-exec/run/bundle \
+TLDW_SANDBOX_MACOS_HELPER_SOCKET=/path/to/private/helper.sock \
+python -m pytest -q \
+  tldw_Server_API/tests/sandbox/test_vz_linux_guest_mismatch_host_gated.py::test_vz_linux_rejects_real_guest_missing_exec_then_runs_healthy_session
+```
+
+The test removes its own sessions/VMs and writes `guest-mismatch.json` under
+pytest's artifact directory. The caller remains responsible for stopping its
+helper and retaining the receipt. A passing run proves capability rejection,
+no dispatch or reusable state for that guest, followed by healthy execution and
+session reuse on the same helper. It does not prove protocol-version rejection
+or host reboot recovery. Missing prerequisites/skips are not acceptance.
+
+Initial live acceptance is pending host storage recovery; see
+`Docs/Sandbox/vz-linux-prepared-host-evidence.md` and TASK-13243.3.
+
 ### Host Reboot Validation Drill
 
 `host-reboot-drill` records bounded helper evidence before a manual host reboot
