@@ -1,10 +1,10 @@
 ---
 id: TASK-13245
 title: Persist Workspace Persona opt-out and conversation provenance
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-13 18:15'
-updated_date: '2026-09-13 18:22'
+updated_date: '2026-09-13 23:45'
 labels:
   - persona
   - workspaces
@@ -16,6 +16,7 @@ references:
 documentation:
   - >-
     Docs/superpowers/plans/2026-09-13-persona-workspace-parity-implementation-plan.md
+  - Docs/Design/2026-09-13-persona-workspace-choice-provenance-design.md
 priority: high
 ---
 
@@ -30,6 +31,14 @@ Distinguish unset defaults from an explicit None choice, preserve creation-time 
 - [ ] #1 Implement the linked stage contract with focused regression coverage and recorded verification; do not claim completion from documentation alone.
 - [ ] #2 Explicit None survives restart and provisioning; opt-in inheritance persists bounded provenance atomically; stale versions and accepted retries cannot change identity.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Stage 2 contract design underway in child TASK-13245.1; runtime not started. Corrected prior assessment: existing resolve_new_conversation_assistant already handles omitted identity inheritance and explicit-null opt-out;9 existing startup tests pass. Workspace chat create bypasses Sync v2; strict replay needs a DB-owned atomic path. Proposed design preserves legacy semantics and keeps Workspace Sync/Buddy/UI out of scope.
+
+Stage 2 prompt/memory baseline: 13 passed, 9 failed with HTTP 503 missing_provider_credentials before mocked dispatch. Persona fixture patches chat.API_KEYS but runtime now uses provider_credential_runtime.load_server_config_snapshot. Diagnostic-only in-memory fixture supplying the same dummy credential via that loader yielded 22 passed. No runtime/test edits made. Repair the existing fixture and rerun ordinary suites during implementation; tracked in the staged plan and design validation record.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
