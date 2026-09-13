@@ -115,6 +115,10 @@ export const ChatMacroEditor = ({
     (key: string, defaultValue: string) => t(`chatMacroEditor.${key}`, defaultValue),
     [t]
   )
+  const labelRef = React.useRef(label)
+  React.useEffect(() => {
+    labelRef.current = label
+  }, [label])
 
   const isBuiltin = selected?.source === "builtin" || selected?.immutable === true
   const isCreate = selected === null
@@ -173,7 +177,7 @@ export const ChatMacroEditor = ({
         setLoadedDetailName(selectedName)
       } catch (error) {
         if (generation === requestGeneration.current) {
-          setValidationError(error instanceof Error ? error.message : label("detailLoadError", "Unable to load macro details."))
+          setValidationError(error instanceof Error ? error.message : labelRef.current("detailLoadError", "Unable to load macro details."))
         }
       } finally {
         if (generation === requestGeneration.current) setLoading(false)
@@ -450,8 +454,8 @@ export const ChatMacroEditor = ({
         </div>
       </div>
 
-      <div className="grid gap-x-5 gap-y-4 py-4 xl:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
-        <section className="grid gap-3 sm:grid-cols-2 xl:col-span-2" aria-label={label("identity", "Macro identity")}>
+      <div className="grid gap-4 py-4">
+        <section className="grid gap-3 sm:grid-cols-2" aria-label={label("identity", "Macro identity")}>
           <label className="block text-xs font-medium text-text-muted" htmlFor="chat-macro-editor-name">
             {label("name", "Name")}
             <input
@@ -474,7 +478,7 @@ export const ChatMacroEditor = ({
               onChange={(event) => updateDraft("command", event.target.value)}
             />
           </label>
-          <label className="block text-xs font-medium text-text-muted xl:col-span-2" htmlFor="chat-macro-editor-description">
+          <label className="block text-xs font-medium text-text-muted sm:col-span-2" htmlFor="chat-macro-editor-description">
             {label("description", "Description")}
             <input
               id="chat-macro-editor-description"
@@ -488,7 +492,7 @@ export const ChatMacroEditor = ({
 
         {mode === "guided" ? (
           <>
-            <section className="space-y-3 border-t border-border pt-4 xl:border-t-0 xl:pt-0" aria-label={label("execution", "Execution settings")}>
+            <section className="space-y-3 border-t border-border pt-4" aria-label={label("execution", "Execution settings")}>
               <h3 className="text-sm font-semibold">{label("execution", "Execution settings")}</h3>
               <label className="block text-xs font-medium text-text-muted" htmlFor="chat-macro-editor-profile">
                 {label("outputProfile", "Output profile")}
@@ -573,7 +577,7 @@ export const ChatMacroEditor = ({
               </label>
             </section>
 
-            <section className="min-w-0 space-y-3 border-t border-border pt-4 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0" aria-label={label("branches", "Branches")}>
+            <section className="min-w-0 space-y-3 border-t border-border pt-4" aria-label={label("branches", "Branches")}>
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-sm font-semibold">{label("branches", "Branches")}</h3>
                 <button
@@ -663,7 +667,7 @@ export const ChatMacroEditor = ({
             </section>
           </>
         ) : (
-          <section className="min-w-0 xl:col-span-2" aria-label={label("source", "Macro source")}>
+          <section className="min-w-0" aria-label={label("source", "Macro source")}>
             <label className="block text-xs font-medium text-text-muted" htmlFor="chat-macro-editor-yaml">
               {label("sourceYaml", "Macro YAML")}
               <textarea

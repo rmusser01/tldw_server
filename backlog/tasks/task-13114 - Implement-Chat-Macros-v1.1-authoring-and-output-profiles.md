@@ -1,19 +1,19 @@
 ---
 id: TASK-13114
 title: Implement Chat Macros v1.1 authoring and output profiles
-status: Done
+status: In Progress
 assignee: []
-created_date: '2026-08-24 04:15'
-updated_date: '2026-08-24 08:17'
+created_date: 2026-08-24 04:15
+updated_date: 2026-09-13 18:10
 labels:
-  - chat-macros
-  - frontend
-  - backend
+- chat-macros
+- frontend
+- backend
 dependencies:
-  - TASK-12126
+- TASK-12126
 documentation:
-  - Docs/superpowers/specs/2026-07-03-chat-macros-design.md
-  - Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_authoring.md
+- Docs/superpowers/specs/2026-07-03-chat-macros-design.md
+- Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_authoring.md
 priority: medium
 ---
 
@@ -41,7 +41,6 @@ Detailed TDD plan: Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-08-23 baseline: backend Chat_Macros suite passed 134 tests with 2 warnings. ChatMacrosSettings frontend component suite passed 4 tests. The frontend service suite could not collect in this isolated worktree because wxt/browser was unresolved across the monorepo dependency roots; stop-after-three-attempts rule applied and the plan requires a complete workspace dependency layout before Task 2.
 
@@ -54,7 +53,6 @@ Verification: backend Chat_Macros plus Jobs startup suite 145 passed (2 warnings
 Known deferred minor improvements from scoped reviews: complete WAI-ARIA tab keyboard/tabpanel behavior; clarify README wording around standalone validation versus create/update identity checks; strengthen create ordering, delete-cancel/failure, stale-copy-error, and semantic save-label tests. None blocks the implemented contracts or verified workflows.
 2026-08-24 final-review fix round started at f7253b9b26. Scope is limited to the six verified findings: source-mode canonical-field affordances, dirty-draft/selection preservation across catalog refresh and toggles, one-shot import consumption, unknown settings preservation, stale copy-error clearing, and README validation wording. ARIA tabs remain deferred.
 Final-review TDD evidence: RED frontend run failed 4 targeted cases (source-mode controls, import replay, selection change/dirty draft loss, stale copy error) with 29 unrelated cases passing; RED backend run failed the unit and API unknown-key cases with 22 unrelated cases passing. GREEN: 63/63 focused frontend authoring/profile/service tests and 140/140 full Chat_Macros backend tests passed. Bandit scanned 44 LOC in settings.py with 0 findings and 0 errors. git diff --check passed. ARIA tabs remains deferred as requested.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Final review closeout: the independent whole-branch review identified four blocking authoring/persistence defects. Commit 58eaf7ccbfa fixed source-mode canonical-field affordances, stable catalog refresh/selection, import consumption, unknown top-level settings preservation, stale copy errors, and README validation wording. Scoped re-review confirmed three blockers resolved but correctly rejected losing the edited import on tab unmount. Commit cbb3a52657 then kept both panels mounted/hidden, added tabpanel relationships, and changed the regression to require the edited import to survive a full tab round trip. Live browser verification returned the exact edited YAML after Macros -> Output profiles -> Macros.
 
@@ -63,8 +61,9 @@ Final evidence: frontend 97 passed (63 authoring/profile/service, 33 workspace r
 Remaining non-blocking follow-ups: add roving Arrow/Home/End behavior to the tabs (tabpanel relationships are now present); strengthen deferred validation-order and delete failure/cancel cases; replace the existing global fixed N control behavior that overlaps lower mobile content in the wider settings shell. None is introduced as a functional blocker by this branch.
 
 Latest-dev closeout: rebased conflict-free onto origin/dev 21aed4cc0d after it advanced 66 commits. Rewritten review-fix commits are 330b940346 (final-review findings) and f45a82165a (preserve drafts across tabs); earlier SHA references in the chronological notes are their pre-rebase identities. Post-rebase verification repeated successfully: 96 UI-package tests plus 1 WebUI route test, 146 backend/Jobs tests with 2 existing warnings, Bandit 0 findings across 3,564 LOC, clean diff check, TypeScript baseline still 304 lines with no Chat Macros diagnostics, and branch 0 behind origin/dev.
-<!-- SECTION:NOTES:END -->
-
+2026-09-13: Resumed publication at user request. Rebased all 19 existing commits onto current origin/dev without conflicts. Next: verify rebased backend/frontend and Bandit, inspect final diff, push branch and create PR against dev. Prior verification results remain historical until rerun.
+2026-09-13 publication verification: rebased onto origin/dev c70387f496 without conflicts; range-diff retained all patches except the identical WebUI route already upstream. Backend/Jobs 146 passed (2 warnings); frontend 97 passed, then editor/manager 33 passed after final fixes. Bandit zero findings/errors across 3564 LOC. Fixed editor translation callback hook dependency using a ref so translation changes do not reload drafts. Browser QA exposed cramped desktop numeric labels inside the settings shell; stacked execution and branch sections and verified labels fit with no horizontal overflow at 1440x1000 and 390x844. Tab round-trip preserves draft. Screenshots: /tmp/chat-macros-v11-1440-final-20260913.png and /tmp/chat-macros-v11-390-final-20260913.png. Scoped ESLint passes with no source diagnostics (Next plugin root/pages discovery notice). TypeScript with 8GB heap exits 2, 192 diagnostics outside changed macro files; default heap initially exhausted. Browser authenticated save/reload not repeated: no API credential or backend listening on 8000; API/component coverage passed. Full repo E2E/build not run. PR prepared for publication; human-written v1.1 Change summary still needed before eventual merge.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
