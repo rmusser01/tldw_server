@@ -1,66 +1,90 @@
 # Email Release Checklist and Rollback
 
 Audience: Owner / maintainer
-Status: Pending live Gmail validation
+Status (2026-09-13): Core validation recorded; core release gate open. Optional live Gmail validation deferred.
 
 Related:
 - `Docs/Product/Email_Ingestion_Search_PRD.md`
 - `Docs/Operations/Email_Sync_Operations_Runbook.md`
+- `Docs/Operations/Email_Core_Validation_2026-09-13.md`
 - `Docs/Operations/Env_Vars.md`
 
 ## Single-Owner Workflow
 
-This checklist assumes one maintainer owns implementation, operations, and release approval. References to backend, ops, and product are collapsed into a single owner sign-off.
+One maintainer owns implementation, operations and release approval. Record approval
+for the scope actually enabled. Gmail is optional; unavailable Gmail access cannot
+block file-based ingestion/search. All development/validation uses synthetic mail.
+The owner's personal Gmail and personal email are excluded.
 
-## Release Checklist
+## Core File Ingestion and Search Gate
 
-- [ ] Offline evidence is up to date:
-  - endpoint and worker regression tests
-  - offline lag validation
-  - search parity / benchmark artifacts if being used for release evidence
-- [ ] Required flags are configured for validation:
+- [x] Trace upload parsing, persistence, indexing and optional model calls; record explicit offline options and interception evidence (TASK-13250).
+- [x] Validate synthetic EML, ZIP and MBOX messages with distinct bodies, attachment metadata, repeat import, search and detail using temporary SQLite.
+- [ ] Resolve distinct-message same-body merging (TASK-13251). A passing characterization test demonstrates this defect; it does not satisfy identity correctness.
+- [ ] Reconcile FR-SEARCH-004 cursor requirements with the current offset-only HTTP API.
+- [ ] Validate chosen deployment, auth/tenant boundaries, database backend and target scale. Focused endpoint tests override auth infrastructure; no current live server readiness was established.
+- [ ] Record actual performance/parity evidence for the intended cutover scope. Small fixtures and checker unit tests do not certify the 1M-message benchmark or production parity.
+- [ ] Configure and verify core rollout flags in the chosen environment:
   - `EMAIL_NATIVE_PERSIST_ENABLED=true`
   - `EMAIL_OPERATOR_SEARCH_ENABLED=true`
   - `EMAIL_MEDIA_SEARCH_DELEGATION_MODE=opt_in`
-  - `EMAIL_GMAIL_CONNECTOR_ENABLED=true`
-  - `CONNECTORS_WORKER_ENABLED=true`
-- [ ] A live Gmail account is connected and at least one Gmail source exists.
-- [ ] The live-source validation checklist in `Docs/Operations/Email_Sync_Operations_Runbook.md` has been executed.
-- [ ] `GET /api/v1/email/search` remains healthy.
-- [ ] `GET /api/v1/email/messages/{id}` remains healthy.
-- [ ] Existing `/api/v1/media/search` behavior remains healthy.
-- [ ] If delegation promotion is in scope, `EMAIL_MEDIA_SEARCH_DELEGATION_MODE=auto_email` has been validated separately.
-- [ ] Release evidence has been written below.
+  - `EMAIL_GMAIL_CONNECTOR_ENABLED=false`
+- [ ] Verify `GET /api/v1/email/search`, `GET /api/v1/email/messages/{id}`, and existing `POST /api/v1/media/search` behavior in that environment.
+- [ ] If delegation promotion is in scope, validate `EMAIL_MEDIA_SEARCH_DELEGATION_MODE=auto_email` separately.
+- [ ] Owner approves the core rollout and records date/environment/evidence below.
+
+Core validation does not require OAuth, a Gmail source or a connectors worker.
+For isolated core validation, keep `CONNECTORS_WORKER_ENABLED=false`; this is a
+shared worker flag, so do not disable unrelated connectors in an existing deployment.
+
+## Optional Gmail Enablement Gate — Deferred
+
+- [x] Run mocked Gmail parser, provider and worker regression tests; record their limits.
+- [ ] Explicitly authorize a dedicated synthetic test mailbox for future live validation. Do not use the owner's personal Gmail. Audit downstream analysis, claims, chunking and embeddings before account access.
+- [ ] Configure optional Gmail/worker flags and credentials in the chosen environment.
+- [ ] Validate real OAuth and a connected source; a `scaffold=1` URL is not successful authorization.
+- [ ] Execute the optional live-source checklist in the sync runbook: initial backfill, idempotent rerun, deltas, cursor recovery, provider failures and status.
+- [ ] Measure sync lag from real controlled-source monitoring samples. Fixture checker output is not staging SLO evidence.
+- [ ] Owner approves optional Gmail enablement separately from the core release.
+
+A label filter is not an OAuth access boundary. Read-only Gmail access does not
+prevent downstream model processing. No live Gmail work was performed for TASK-13250.
 
 ## Release Evidence
 
-- Validation date:
-- Environment:
-- Gmail source ID:
-- Job ID(s):
-- Final source state:
-- Notes:
+Current validation: `Docs/Operations/Email_Core_Validation_2026-09-13.md`.
+
+For an actual rollout record:
+- Scope: core / optional Gmail
+- Validation date and code revision:
+- Environment, DB backend and dataset:
+- Core test, parity and benchmark artifacts:
+- Open gaps and disposition:
+- Optional Gmail only: source ID, job IDs, cursor progression, monitoring window and final source state:
 
 ## Rollback Triggers
 
-Rollback immediately if any of the following are observed during live validation or release:
-- sustained source `failed` or `retrying` state without recovery
-- repeated invalid cursor escalation without successful bounded recovery
-- user-visible regression in email search or `/api/v1/media/search`
-- provider quota / throttling severe enough to make the rollout non-viable
+Core triggers: message loss/identity collisions, incorrect search/detail results,
+tenant isolation failures, migration failures or media-search regressions.
+
+Optional Gmail triggers: sustained failed/retrying state, unresolved invalid
+cursors, or provider quotas/throttling that prevent reliable sync. A connector
+failure calls for connector rollback; it does not automatically invalidate core uploads.
 
 ## Rollback Steps
 
-1. Set `EMAIL_MEDIA_SEARCH_DELEGATION_MODE=opt_in`.
-2. If needed, set `EMAIL_GMAIL_CONNECTOR_ENABLED=false`.
-3. If needed, set `CONNECTORS_WORKER_ENABLED=false`.
-4. Restart affected API / worker processes.
-5. Verify legacy email search and media search behavior is stable.
-6. Record rollback reason and outcome in this file.
+1. Pause affected ingestion/sync activity and preserve evidence. For identity corruption, preserve a DB backup before any repair; feature flags do not restore lost metadata.
+2. Return media delegation to `EMAIL_MEDIA_SEARCH_DELEGATION_MODE=opt_in` if promotion caused a regression.
+3. For a connector incident, set `EMAIL_GMAIL_CONNECTOR_ENABLED=false`. Disable `CONNECTORS_WORKER_ENABLED` only if stopping all connectors is intended.
+4. For core failures, disable affected native write/search flags as needed (`EMAIL_NATIVE_PERSIST_ENABLED`, `EMAIL_OPERATOR_SEARCH_ENABLED`). Record that new legacy-only imports then need reconciliation before native search is re-enabled.
+5. Restart affected processes and verify the remaining enabled surfaces with synthetic data. Legacy email search also needs correctness checks; it is not presumed safe from the dedupe defect.
+6. Record the cause, affected scope, outcome and any required recovery/backfill.
 
 ## Owner Sign-off
 
-- [ ] Owner release sign-off
+- [ ] Core release approved
+- [ ] Optional Gmail enablement approved (deferred)
 - Name:
 - Date:
-- Notes:
+- Environment / scope:
+- Evidence and notes:
