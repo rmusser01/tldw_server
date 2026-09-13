@@ -4,7 +4,7 @@ title: Implement Chat Macros v1.1 authoring and output profiles
 status: In Progress
 assignee: []
 created_date: 2026-08-24 04:15
-updated_date: 2026-09-13 18:10
+updated_date: 2026-09-13 18:11
 labels:
 - chat-macros
 - frontend
@@ -15,6 +15,8 @@ documentation:
 - Docs/superpowers/specs/2026-07-03-chat-macros-design.md
 - Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_authoring.md
 priority: medium
+references:
+- https://github.com/rmusser01/tldw_server/pull/2951
 ---
 
 ## Description
@@ -63,6 +65,7 @@ Remaining non-blocking follow-ups: add roving Arrow/Home/End behavior to the tab
 Latest-dev closeout: rebased conflict-free onto origin/dev 21aed4cc0d after it advanced 66 commits. Rewritten review-fix commits are 330b940346 (final-review findings) and f45a82165a (preserve drafts across tabs); earlier SHA references in the chronological notes are their pre-rebase identities. Post-rebase verification repeated successfully: 96 UI-package tests plus 1 WebUI route test, 146 backend/Jobs tests with 2 existing warnings, Bandit 0 findings across 3,564 LOC, clean diff check, TypeScript baseline still 304 lines with no Chat Macros diagnostics, and branch 0 behind origin/dev.
 2026-09-13: Resumed publication at user request. Rebased all 19 existing commits onto current origin/dev without conflicts. Next: verify rebased backend/frontend and Bandit, inspect final diff, push branch and create PR against dev. Prior verification results remain historical until rerun.
 2026-09-13 publication verification: rebased onto origin/dev c70387f496 without conflicts; range-diff retained all patches except the identical WebUI route already upstream. Backend/Jobs 146 passed (2 warnings); frontend 97 passed, then editor/manager 33 passed after final fixes. Bandit zero findings/errors across 3564 LOC. Fixed editor translation callback hook dependency using a ref so translation changes do not reload drafts. Browser QA exposed cramped desktop numeric labels inside the settings shell; stacked execution and branch sections and verified labels fit with no horizontal overflow at 1440x1000 and 390x844. Tab round-trip preserves draft. Screenshots: /tmp/chat-macros-v11-1440-final-20260913.png and /tmp/chat-macros-v11-390-final-20260913.png. Scoped ESLint passes with no source diagnostics (Next plugin root/pages discovery notice). TypeScript with 8GB heap exits 2, 192 diagnostics outside changed macro files; default heap initially exhausted. Browser authenticated save/reload not repeated: no API credential or backend listening on 8000; API/component coverage passed. Full repo E2E/build not run. PR prepared for publication; human-written v1.1 Change summary still needed before eventual merge.
+2026-09-13: Published codex/chat-macros-v1-1 and opened PR #2951 against dev: https://github.com/rmusser01/tldw_server/pull/2951 . Verification/fix commit abcb5d44f9. Task remains In Progress while remote CI/review and the human-authored v1.1 Change summary are outstanding.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
