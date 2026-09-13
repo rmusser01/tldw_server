@@ -1,6 +1,6 @@
 # Persona Workspace Defaults Parity Assessment
 
-Status: Assessment complete; implementation pending. Proposed decisions below require review as part of the implementation plan.
+Status: Assessment complete; Stage 1 implemented and locally verified, pending merge. Stages 2-5 remain pending. Proposed later-stage decisions below require review as part of the implementation plan.
 
 Tracking: [#2950](https://github.com/rmusser01/tldw_server/issues/2950), TASK-13243. Predecessor [#1911](https://github.com/rmusser01/tldw_server/issues/1911) remains closed for completed V1 scope.
 
@@ -48,7 +48,7 @@ Paths below are relative to the indicated repository and refer to the pinned com
 
 ## Parity Matrix
 
-"Aligned" below means matching inspected contracts, not newly certified runtime parity. Stage numbers refer to the linked plan.
+"Aligned" below means matching inspected contracts, not newly certified runtime parity. These rows describe the original pinned baseline; the Stage 1 implementation record below supersedes its resolver findings. Stage numbers refer to the linked plan.
 
 | Area | Server evidence | Chatbook evidence | Assessment and disposition |
 | --- | --- | --- | --- |
@@ -99,3 +99,21 @@ Existing server tests also cover Persona prompt assembly and read-only/read-writ
 - First implementation PR: Stage 1 only. It can be reviewed independently and does not need provisioning or UI work.
 - Later policy/provisioning stages must produce their focused design decisions before enabling behavior. A tracker or plan alone never closes their parity rows.
 - Close #2950 only with fresh baseline SHAs, passing behavioral evidence, and user-agreed disposition of any remaining cross-project difference.
+
+## Stage 1 Implementation Record
+
+TASK-13244 implements resolver hardening in [PR #2957](https://github.com/rmusser01/tldw_server/pull/2957) on `codex/persona-workspace-resolver-hardening`, stacked on planning PR #2952. Server dev was refreshed to `e157b6d1306a133e93595a8d457ecac76ac770fa`; Chatbook dev to `392ce191fd28953550f85154ea1f8e4eda4ab7f3`. Both were rechecked at local closeout on 2026-09-13. Scoped diffs since the assessment changed neither the server Stage 1 files nor the inspected Chatbook Workspace/default contracts.
+
+- Effective `permission_denied` and `persona_feature_disabled` responses redact identity; the settings-owner view retains references. Disabled reads skip profile lookup, non-null saves return 503, and clearing still works. Deleted/inactive distinctions and mapped lookup failures remain intact.
+- Raw storage that cannot decode as an object produces a computed private corruption flag, consumed by the API as `invalid_default`. SQL NULL remains unset; no new persistent/public field or Persona snapshot was introduced. Validation logs contain only fixed categories, known types, and Workspace-id presence.
+- The obsolete migration fixture was replaced by isolated v48-to-v49 coverage plus a real upgrade from the retained historical v4 schema. Disabling column creation fails the migration test; removing the corruption flag fails malformed-storage projection cases. Production migration guards were not changed.
+
+Final focused command, using the shared activated virtualenv:
+
+```bash
+python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py tldw_Server_API/tests/Chat/unit/test_chat_conversations_api.py -q --tb=short --disable-warnings
+```
+
+Result: **159 passed, 6 warnings**, no skips. Bandit on both production files returned zero findings/errors; the test scan also returned zero with expected test assertions excluded. Ruff was clean for the DB module and tests; the endpoint retains the same four pre-existing BLE001 warnings outside changed code. Both test files and changed production sections satisfy Black; full-file DB formatting still reports unrelated existing drift. API-only and whole-stage independent reviews found no actionable issues.
+
+An additional v59 migration suite run had **55 passes and three failures**: `test_sqlite_v59_initializer_serializes_on_one_schema_authority`, `test_sqlite_v58_to_v59_creates_empty_canonical_registry`, and `test_sqlite_fresh_and_v58_upgrade_registry_schema_are_identical`. All three reproduced with the original HEAD DB normalizer restored in memory, failing with `Notes task v59 SQLite source catalog drifted`; their version-rewound fixtures are outside this Persona change. They were not suppressed or silently counted as passing. Live PostgreSQL, Chatbook runtime tests, browser UAT, and the repository-wide suite were not run. This stage establishes the tested resolver contract, not full cross-client parity or Research Workspace adoption.

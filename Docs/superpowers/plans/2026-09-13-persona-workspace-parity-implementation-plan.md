@@ -1,6 +1,6 @@
 # Persona Workspace Parity Implementation Plan
 
-> **For agentic workers:** Use executing-plans or subagent-driven-development to implement one reviewable stage at a time. The current deliverable is this plan; none of the implementation stages below is complete.
+> **For agentic workers:** Use executing-plans or subagent-driven-development to implement one reviewable stage at a time. Stage 1 implementation and local verification are complete, pending PR merge; later stages remain pending.
 
 **Goal:** Bring Persona/Workspace defaults into reviewed behavioral parity with Chatbook dev and safely adopt them in personal Research Workspace conversations.
 
@@ -36,7 +36,7 @@
 **Goal:** Make the existing V1 effective-default API a reliable basis for parity.
 **Success Criteria:** Hidden references are redacted; malformed defaults remain distinguishable from unset; disabled/inactive states are explicit; transient DB failures retain existing error mapping; the regression baseline passes.
 **Tests:** Effective-state API matrix, log redaction, invalid persisted JSON, and historical migration coverage.
-**Status:** Not Started.
+**Status:** Complete (implementation and local verification; [PR #2957](https://github.com/rmusser01/tldw_server/pull/2957) pending merge after planning PR #2952).
 
 **Files:**
 - Modify `tldw_Server_API/app/api/v1/endpoints/workspaces.py` (existing parse/resolve/projection helpers).
@@ -46,8 +46,8 @@
 
 **Interfaces:** Keep `WorkspaceResponse.assistant_defaults` and `effective_assistant_default` wire shapes. Management-authorized stored defaults may retain their reference; effective `permission_denied` must have null kind/id/label/memory mode. Retain existing deleted-Persona management behavior unless a deliberate API change is tested and documented. Any DB-only corruption flag is computed on load and is neither persisted nor added to the public response.
 
-- [ ] Repair the baseline migration test first: replace the version-rewound modern DB setup with an actual v48 fixture or isolated v48-to-v49 migration unit case plus a valid historical full-upgrade fixture. Do not change production migration registry checks. Demonstrate that the test still fails if the assistant-default column migration is removed.
-- [ ] Add API tests in the existing fixture module. Start with a hidden/missing Persona id inserted via the DB helper; use `_install_workspace_overrides` and GET the Workspace. Assert only the effective view is redacted and that a legitimate settings owner still receives the stored reference.
+- [x] Repair the baseline migration test first: replace the version-rewound modern DB setup with an actual v48 fixture or isolated v48-to-v49 migration unit case plus a valid historical full-upgrade fixture. Do not change production migration registry checks. Demonstrate that the test still fails if the assistant-default column migration is removed.
+- [x] Add API tests in the existing fixture module. Start with a hidden/missing Persona id inserted via the DB helper; use `_install_workspace_overrides` and GET the Workspace. Assert only the effective view is redacted and that a legitimate settings owner still receives the stored reference.
 
 ```python
 def test_effective_default_redacts_permission_denied(workspace_app, db):
@@ -71,10 +71,12 @@ def test_effective_default_redacts_permission_denied(workspace_app, db):
         _clear_workspace_overrides(workspace_app)
 ```
 
-- [ ] Add log redaction coverage for `_parse_workspace_assistant_defaults` with a unique private marker in an invalid assistant_kind and an unknown key. Capture a Loguru warning sink and assert neither marker nor full payload appears. Exercise non-string dict keys as well: logging itself must not raise while sorting heterogeneous keys.
-- [ ] Add absent/null, invalid JSON string, non-object JSON, invalid object, inactive Persona, feature-disabled Persona, and DB-error cases. Use a dedicated test fixture for malformed storage; keep SQL in the existing DB test layer. Assert no profile lookup occurs when Persona support is disabled, and preserve mapped 5xx on DB failure.
-- [ ] Run the new regressions red. Apply the smallest changes: log only bounded error category/type and Workspace context; redact permission-denied effective identity; preserve a corruption indicator through DB normalization; consult the same Persona feature policy used by its existing endpoints. Do not import an API module into DB_Management.
-- [ ] Run both test files, `git diff --check`, and Bandit on the two touched production files. Record failures separately from skips. Commit as `fix: harden workspace persona default resolution` and link TASK-13244/#2950.
+- [x] Add log redaction coverage for `_parse_workspace_assistant_defaults` with a unique private marker in an invalid assistant_kind and an unknown key. Capture a Loguru warning sink and assert neither marker nor full payload appears. Exercise non-string dict keys as well: logging itself must not raise while sorting heterogeneous keys.
+- [x] Add absent/null, invalid JSON string, non-object JSON, invalid object, inactive Persona, feature-disabled Persona, and DB-error cases. Use a dedicated test fixture for malformed storage; keep SQL in the existing DB test layer. Assert no profile lookup occurs when Persona support is disabled, and preserve mapped 5xx on DB failure.
+- [x] Run the new regressions red. Apply the smallest changes: log only bounded error category/type and Workspace context; redact permission-denied effective identity; preserve a corruption indicator through DB normalization; consult the same Persona feature policy used by its existing endpoints. Do not import an API module into DB_Management.
+- [x] Run both test files, `git diff --check`, and Bandit on the two touched production files. Record failures separately from skips. Commit as `fix: harden workspace persona default resolution` and link TASK-13244/#2950.
+
+**Verification:** 159 tests passed across Workspace defaults DB/API, Workspace CRUD API, and chat conversation unit tests. Isolated v48-to-v49 migration plus the retained historical v4 schema full-upgrade path replace the invalid version rewind. Mutation checks fail when column creation or the corruption flag is removed. Bandit reports zero findings/errors for both production files and test scans (test assertions excluded). API-only and whole-stage independent reviews found no actionable issues. Expanded v59 coverage had 55 passes and three pre-existing source-catalog fixture failures, reproduced with the original DB normalizer restored; no migration guard changed. See the assessment's Stage 1 record for baselines and remaining validation limits.
 
 ## Stage 2: Durable Choices And Startup Provenance
 
@@ -171,7 +173,7 @@ def test_effective_default_redacts_permission_denied(workspace_app, db):
 
 ## Verification And Review Checklist
 
-- [ ] Before Stage 1, reproduce the recorded 32-pass/1-fail baseline and repair the historical migration fixture without suppressing its assertion.
+- [x] Before Stage 1, reproduce the recorded 32-pass/1-fail baseline and repair the historical migration fixture without suppressing its assertion.
 - [ ] Unit/API tests for a stage go red for the intended behavior before production changes and green afterward. Mock LLM/network work; use existing SQLite/PostgreSQL fixture infrastructure.
 - [ ] Preserve production-path test coverage: ordinary chat memory tests are not evidence that Research Workspace RAG memory already works.
 - [ ] Each runtime PR runs touched-scope Bandit and focused regressions, with exact results attached to its Backlog task. No production-code scan is needed for this documentation-only planning PR.

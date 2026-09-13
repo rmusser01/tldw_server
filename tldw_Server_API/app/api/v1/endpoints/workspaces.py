@@ -90,6 +90,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.exceptions import ResearchWorkspaceOutputJobError, WorkspaceArtifactExportStateError
+from tldw_Server_API.app.core.feature_flags import is_persona_enabled
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Research_Workspace.output_jobs import (
     get_research_workspace_output_job_status,
@@ -180,16 +181,13 @@ def _parse_workspace_assistant_defaults(
         return None, False
     try:
         return WorkspaceAssistantDefaults.model_validate(raw), False
-    except ValueError as exc:
-        payload_keys = sorted(raw.keys()) if isinstance(raw, dict) else None
+    except ValueError:
         logger.warning(
             "Ignoring invalid stored workspace assistant defaults "
-            "for workspace_id={workspace_id}: error={error}; "
-            "payload_type={payload_type}; payload_keys={payload_keys}",
-            workspace_id=workspace_id or "<unknown>",
-            error=str(exc),
-            payload_type=type(raw).__name__,
-            payload_keys=payload_keys,
+            "category=schema_validation; workspace_id_present={workspace_id_present}; "
+            "payload_type={payload_type}",
+            workspace_id_present=bool(workspace_id),
+            payload_type=type(raw).__name__ if type(raw) in (dict, list, str, int, float, bool) else "other",
         )
         return None, True
 
@@ -251,6 +249,13 @@ def _effective_workspace_assistant_default(
             degraded_reason="unsupported_assistant_kind",
         )
 
+    if not is_persona_enabled():
+        return WorkspaceEffectiveAssistantDefault(
+            status="unavailable",
+            source="workspace",
+            degraded_reason="persona_feature_disabled",
+        )
+
     profile = _get_workspace_persona_profile(
         db=db,
         assistant_id=stored.assistant_id,
@@ -284,18 +289,19 @@ def _effective_workspace_assistant_default(
         include_deleted=True,
         cache=persona_profile_cache,
     )
-    degraded_reason = (
-        "persona_deleted"
-        if deleted_profile is not None
-        else "permission_denied"
-    )
+    if deleted_profile is None:
+        return WorkspaceEffectiveAssistantDefault(
+            status="unavailable",
+            source="workspace",
+            degraded_reason="permission_denied",
+        )
     return WorkspaceEffectiveAssistantDefault(
         status="unavailable",
         source="workspace",
         assistant_kind="persona",
         assistant_id=stored.assistant_id,
         persona_memory_mode=stored.persona_memory_mode,
-        degraded_reason=degraded_reason,
+        degraded_reason="persona_deleted",
     )
 
 
@@ -310,6 +316,11 @@ def _validate_workspace_assistant_default_reference(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="assistant_defaults.assistant_kind is not supported",
+        )
+    if not is_persona_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Persona module is disabled",
         )
     profile = _get_workspace_persona_profile(
         db=db,
@@ -355,7 +366,7 @@ def _ws_to_response(
             db=db,
             stored=assistant_defaults,
             user_id=_user_id_for_workspace_scope(current_user),
-            invalid_stored_default=invalid_stored_default,
+            invalid_stored_default=invalid_stored_default or bool(ws.get("_assistant_defaults_invalid")),
             persona_profile_cache=persona_profile_cache,
         ),
         created_at=str(ws.get("created_at", "")),
