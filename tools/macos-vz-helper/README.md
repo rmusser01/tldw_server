@@ -111,6 +111,57 @@ These commands never run automatically from `plist`, `status`, `smoke`, or
 server startup. They are operator-owned scaffolding and do not validate host
 reboot behavior.
 
+### Live-Session Launchd Restart
+
+The manual host test below restarts its own LaunchAgent **after** a real guest
+command. It requires a changed helper generation, replaces the stale session
+VM, verifies guest stdout and exit status, then reuses the replacement VM for a
+third command. This is separate from `launchd-drill`, whose initial kickstart
+occurs before smoke execution. It does not reboot the host or restart an
+operator's existing helper.
+
+Run from the repository root on a prepared Apple Silicon macOS host with a
+logged-in GUI user. Set `SOURCE_BUNDLE` to a canonical bundle containing the
+current guest agent; never pass that source directly as the writable test image.
+The test skips unless both real-E2E and launchd-restart opt-ins are set.
+
+```bash
+(
+  set -eu
+  umask 077
+  source .venv/bin/activate
+  swift build --package-path tools/macos-vz-helper
+  python tools/macos-vz-helper/scripts/vz-helperctl.py sign \
+    --entitlements tools/macos-vz-helper/macos-vz-helper.entitlements
+
+  evidence_root="$HOME/Library/Logs/tldw/vz-launchd-recovery"
+  install -d -m 700 "$evidence_root"
+  evidence_dir="$(mktemp -d "$evidence_root/run.XXXXXX")"
+  printf 'Retaining evidence in %s\n' "$evidence_dir"
+  bundle="$(python tools/vz-linux-image/scripts/prepare-smoke-bundle.py \
+    --source-bundle "${SOURCE_BUNDLE:?Set SOURCE_BUNDLE to a prepared canonical bundle}" \
+    --store-root "$evidence_dir/image-store" --run-id launchd-recovery)"
+
+  TLDW_SANDBOX_VZ_LINUX_E2E=1 \
+  TLDW_SANDBOX_VZ_LINUX_LAUNCHD_RESTART_DRILL=1 \
+  TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE="$bundle" \
+  TLDW_SANDBOX_MACOS_HELPER_BINARY="$PWD/tools/macos-vz-helper/.build/debug/macos-vz-helper" \
+    python -m pytest \
+      tldw_Server_API/tests/sandbox/test_vz_linux_launchd_recovery_host_gated.py \
+      -q -rs --junitxml="$evidence_dir/pytest.xml" --basetemp="$evidence_dir/pytest"
+)
+```
+
+Acceptance requires **1 passed, 0 skipped, 0 errors**, not merely pytest exit 0.
+`launchd-recovery.json`, the generated plist, and helper/serial logs live under
+the pytest artifact tree. The receipt includes helper generations, VM IDs,
+command output, and cleanup checks. Only the short private socket directory is
+removed automatically after service absence and socket unavailability are
+confirmed. Evidence and disposable disks are retained deliberately; remove that
+run's evidence directory after review when it is no longer needed. Hard host
+termination can bypass Python cleanup; inspect the receipt's unique label and
+plist before any manual cleanup. Do not add this opt-in to scheduled CI.
+
 ### Host Reboot Validation Drill
 
 `host-reboot-drill` records bounded helper evidence before a manual host reboot

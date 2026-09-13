@@ -102,6 +102,93 @@ triage issue.
 
 ## Latest Evidence
 
+### 2026-09-13: live-session recovery after a launchd restart
+
+- Scope: `TASK-13243.1` and `TASK-13243.2`, on
+  `codex/vz-launchd-vm-validation` based on local dev `c70387f496d8`.
+  Same Apple Silicon host as the launchd smoke below, macOS 26.5.2 (25F84),
+  helper version `0.1.0`, protocol `1`. No host reboot was performed.
+- Durable private artifacts:
+  `$HOME/Library/Logs/tldw/vz-launchd-recovery/20260913-1905`.
+  The final accepted packet is `final.xml`, `final.log`, `final.exit`, and
+  `final-pytest/test_vz_linux_session_recovers0/launchd-recovery.json`, with the
+  generated plist and helper/serial logs beside the receipt.
+- The new manual test is
+  `tldw_Server_API/tests/sandbox/test_vz_linux_launchd_recovery_host_gated.py`.
+  It uses `TLDW_SANDBOX_VZ_LINUX_E2E=1` and
+  `TLDW_SANDBOX_VZ_LINUX_LAUNCHD_RESTART_DRILL=1`, an explicitly selected signed
+  helper binary, and a disposable bundle from `prepare-smoke-bundle.py`.
+  The repeatable command is in the helper README's
+  **Live-Session Launchd Restart** section. Default/scheduled smoke selection
+  and helper startup behavior are unchanged.
+- Accepted result: **1 passed, 0 skipped, 0 errors**, pytest exit `0`, in
+  15.56 seconds. All three `/bin/echo` commands returned their exact stdout
+  tokens and exit `0`. Launchd restarted the helper only after the first
+  successful session command, not merely before VM creation.
+- Helper generation changed from `96271C27-C7AA-48A1-A743-B312E70CC1B7` to
+  `AF1778A8-FCFE-454E-8152-A384E3DF9A1B`. The stale session control was still
+  present immediately after restart. Normal service execution replaced VM
+  `130792b5-7cfd-41fc-8851-fea97b98602b` with
+  `ddfbd394-58db-4a5c-b450-79a3c2367f01`; the third command reused the latter.
+- Cleanup: session destruction succeeded, session control was removed, the
+  helper's VM registry was empty, the unique LaunchAgent was absent, its socket
+  was unavailable, and the private runtime directory was removed. Evidence and
+  disposable image-store disks were deliberately retained.
+- Negative control: temporarily replacing the live-session `kickstart` with
+  `status` produced the expected `helper_generation_unchanged` failure after
+  successful guest output. `review-negative.xml` records one failure and no
+  skips or errors; `review-negative-pytest/` records the original failure,
+  bootstrap/kickstart/bootout results, and cleanup. The callback preserves
+  exceptions until lifecycle results are returned, then re-raises them. The
+  checked-in test restores the real restart operation. The earlier
+  `diagnostic*` packet exposed missing lifecycle results on callback failure.
+- A real defect was found before acceptance: two attempts completed an echo
+  with exit `0` but empty output. Instrumentation showed the guest itself
+  reported zero observed stdout bytes, excluding Python stream loss. A
+  Linux-arm64 regression against the old code failed in all ten repetitions;
+  native macOS repetitions alone had not reproduced it. Those failed runs
+  remain in `negative*`, `accepted*`, and `linux-output-red*`; none is counted
+  as restart acceptance.
+- Fix: `runExecWithOutputLimit` now drains both output-pipe readers before
+  `cmd.Wait()` can close their pipes. On timeout or output-limit cancellation,
+  a one-second drain grace bounds readers retained by escaped descendants;
+  process-group cancellation remains active until draining finishes. The
+  corrected Linux regression passed
+  1,000 fast commands; ten repetitions also passed output-cap/UTF-8 checks and
+  both descendant-pipe timeout cases (parent waiting and parent already exited),
+  plus escaped-descendant timeout/output-limit cases. The latter completed in
+  approximately three seconds and one second, respectively, rather than the
+  eight-second failures recorded in `review-red/` against the ordering-only
+  fix. `final-build/linux-regressions.stdout.log` and
+  `final-build/offline-refresh.json` contain the final proof. An independent
+  second review found no remaining actionable findings after these fixes.
+  `linux-output-green*` is an earlier diagnostic run with passing guest tests
+  but a Python fixture teardown error, not the final acceptance packet.
+- Bundle provenance: a private offline APFS clone was refreshed with the new
+  agent, then checked with `e2fsck -fn` and an extracted-binary `cmp`. Kernel,
+  initrd, and manifest were unchanged. Original source rootfs SHA-256 remained
+  `1083decfb5089e904440d2506e40be78645bdb687e8ce1d220f1b57ba27f7cca`;
+  refreshed rootfs SHA-256 is
+  `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`.
+  Installed agent SHA-256 is
+  `4e4d1186f0e4830769999951ba5566815f6d4733f9c7e688474b21086c226a3f`.
+  `source-bundle-final/build-info.json` records the dirty worktree build
+  provenance; only `final-image-store/runs/launchd-recovery-final/bundle` was
+  booted for final acceptance. The source bundle was not booted or mutated.
+  The earlier `source-bundle` and `fixed*` packet retain the ordering-only
+  build and its ordinary restart pass, not the final bounded-drain build.
+  Go 1.26.2 embedded the outer checkout's revision `1600d9b8c8`, while the
+  module and Git worktree were verified at `d9d936b612` plus the retained
+  `final-build/guest-source.patch`. Use this explicit worktree provenance,
+  binary hash, and `final-build/guest-build-info.txt`, not the embedded revision
+  alone, to identify the tested build.
+- Supporting verification: focused helperctl/runner suites passed 224 tests,
+  with only the explicitly disabled real restart test skipped. Native Go
+  `go test ./...` and guest race checks passed; Bandit reported no findings in
+  the new Python host test. This evidence does not prove host reboot recovery,
+  arbitrary helper/guest crash classes, escaped-descendant containment, or
+  broader network policy enforcement.
+
 ### 2026-09-13: real VM smoke through a launchd-managed helper
 
 - Evidence source: local operator run, authorized for launchd-managed real VM
@@ -812,7 +899,7 @@ triage issue.
 | --- | --- | --- |
 | Prepared-host default smoke evidence | Recorded locally on 2026-06-16 with helper daemon smoke, real ephemeral execution, same-session reuse, and recovery diagnostics/dry-run repair smoke passing. | Repeat periodically through a trusted local or host-gated run and add newer evidence packets as needed. |
 | Failure-drill evidence | Recorded locally on 2026-06-16 with drill-owned stale VM replacement and smoke-owned helper restart drill passing. | Repeat when runtime/helper recovery behavior changes; keep manual opt-in only. |
-| Launchd-drill evidence | Recorded real VM smoke on 2026-09-13: isolated LaunchAgent bootstrap/kickstart, real ephemeral execution, same-session VM reuse, diagnostics/dry-run repair, and bootout passed with 3 tests and no skips. Durable artifacts are recorded above; the inactive socket required explicit operator cleanup. | Repeat when helper lifecycle, signing, guest transport, or image preparation changes. Keep launchd validation explicitly operator-requested; live-VM restart recovery is a separate drill. |
+| Launchd-drill evidence | Recorded real VM smoke on 2026-09-13 (3 tests, no skips), plus a separate live-session restart test (1 passed, no skips/errors) proving changed helper generation, stale-VM replacement, replacement reuse, and cleanup. The latter exposed and fixed guest capped-output loss before acceptance. Durable artifacts and failed attempts are recorded above. | Repeat both bounded drills when helper lifecycle, signing, guest transport, or image preparation changes. Keep launchd validation explicitly operator-requested; host reboot remains separate. |
 | Host reboot recovery | Manual `host-reboot-drill pre/post` procedure only and out of scheduled CI. | Record results when a maintainer explicitly runs the reboot drill on a prepared host that can tolerate disruptive reboot testing and preserve logs. |
 | Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver failure cleanup, guest-readiness failure cleanup, and no reusable session state after create failure. The default prepared-host smoke still does not inject real boot faults. | Record manual prepared-host evidence only after a separate reviewed fault-injection plan; diagnostics/evidence should report stable reason codes and artifact pointers, not raw serial log contents. |
 | Guest-agent mismatch | Not covered by the default smoke. | Use `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md` to guide narrow tests or diagnostics checks before considering automated coverage. |
