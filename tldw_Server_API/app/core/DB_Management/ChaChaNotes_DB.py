@@ -27201,12 +27201,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     @classmethod
     def _workspace_row_to_dict(cls, row: Any) -> dict[str, Any]:
-        """Convert a workspace DB row to the public DB-layer dict shape."""
+        """Normalize stored defaults, retaining only a computed private corruption flag.
+
+        Missing/SQL NULL defaults are unset; any other value that cannot load as
+        an object is malformed. The flag is read-only and never a storage field.
+        """
         workspace = dict(row)
+        stored_defaults = workspace.get("assistant_defaults_json")
         if "assistant_defaults_json" in workspace:
-            workspace["assistant_defaults_json"] = cls._load_workspace_assistant_defaults_json(
-                workspace["assistant_defaults_json"]
-            )
+            workspace["assistant_defaults_json"] = cls._load_workspace_assistant_defaults_json(stored_defaults)
+        workspace["_assistant_defaults_invalid"] = (
+            stored_defaults is not None and workspace.get("assistant_defaults_json") is None
+        )
         return workspace
 
     def _get_workspace_internal(

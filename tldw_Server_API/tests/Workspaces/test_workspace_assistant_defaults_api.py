@@ -1,13 +1,16 @@
 """API coverage for Workspace Assistant Defaults effective state."""
+
 from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
@@ -17,12 +20,19 @@ from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_READ_RATE_LIMIT,
     WORKSPACES_WRITE_RATE_LIMIT,
 )
+from tldw_Server_API.app.core import feature_flags
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     InputError,
 )
+
+
+@pytest.fixture(autouse=True)
+def persona_feature_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep effective-default tests independent of deployment feature settings."""
+    monkeypatch.setattr(feature_flags, "settings", {"PERSONA_ENABLED": True})
 
 
 @pytest.fixture
@@ -222,11 +232,14 @@ def test_list_workspaces_caches_repeated_persona_default_lookups(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("fail_deleted_lookup", [False, True])
 def test_get_workspace_maps_persona_lookup_database_errors(
     workspace_app: FastAPI,
     db: CharactersRAGDB,
     monkeypatch: pytest.MonkeyPatch,
+    fail_deleted_lookup: bool,
 ) -> None:
+    """Both live and deleted-profile lookup failures remain mapped service errors."""
     workspace = db.upsert_workspace("ws-assistant", "Assistant Defaults")
     db.update_workspace(
         "ws-assistant",
@@ -235,6 +248,9 @@ def test_get_workspace_maps_persona_lookup_database_errors(
     )
 
     def _raise_get_persona_profile(*args: Any, **kwargs: Any) -> Any:
+        """Fail at the selected lookup boundary without returning an unset default."""
+        if fail_deleted_lookup and not kwargs.get("include_deleted"):
+            return None
         raise CharactersRAGDBError("lookup failed")
 
     monkeypatch.setattr(db, "get_persona_profile", _raise_get_persona_profile)
@@ -247,9 +263,7 @@ def test_get_workspace_maps_persona_lookup_database_errors(
         _clear_workspace_overrides(workspace_app)
 
     assert response.status_code == 500, response.text
-    assert response.json() == {
-        "detail": "Failed to resolve workspace assistant default"
-    }
+    assert response.json() == {"detail": "Failed to resolve workspace assistant default"}
 
 
 @pytest.mark.integration
@@ -347,3 +361,224 @@ def test_effective_default_redacts_deleted_persona_drift(
         "persona_memory_mode": "read_only",
         "degraded_reason": "persona_deleted",
     }
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("hidden_owner", [None, "another-user"])
+def test_effective_default_redacts_permission_denied(
+    workspace_app: FastAPI,
+    db: CharactersRAGDB,
+    hidden_owner: str | None,
+) -> None:
+    """Missing and other-owner Personas reveal no identity in the effective view."""
+    workspace = db.upsert_workspace("ws-private", "Private default")
+    if hidden_owner is not None:
+        _create_persona(db, persona_id="hidden-persona", user_id=hidden_owner)
+    db.update_workspace(
+        workspace["id"],
+        {"assistant_defaults_json": _assistant_defaults_payload("hidden-persona")},
+        workspace["version"],
+    )
+    _install_workspace_overrides(workspace_app, db)
+    try:
+        with TestClient(workspace_app) as client:
+            get_response = client.get("/api/v1/workspaces/ws-private")
+            list_response = client.get("/api/v1/workspaces/")
+    finally:
+        _clear_workspace_overrides(workspace_app)
+
+    assert get_response.status_code == list_response.status_code == 200
+    for payload in [get_response.json(), *list_response.json()["items"]]:
+        assert payload["assistant_defaults"]["assistant_id"] == "hidden-persona"
+        assert payload["effective_assistant_default"] == {
+            "status": "unavailable",
+            "source": "workspace",
+            "assistant_kind": None,
+            "assistant_id": None,
+            "label": None,
+            "persona_memory_mode": None,
+            "degraded_reason": "permission_denied",
+        }
+
+
+@pytest.mark.parametrize("mixed_keys", [False, True])
+def test_invalid_default_logs_omit_payload_values_and_keys(mixed_keys: bool) -> None:
+    """Validation logging never renders private input or sorts heterogeneous keys."""
+    private_marker = "PRIVATE-DEFAULT-CONTENT"
+    raw = {"assistant_kind": private_marker, private_marker: "private-value"}
+    if mixed_keys:
+        raw[42] = "private-numeric-key"
+    messages: list[str] = []
+    sink_id = logger.add(messages.append, level="WARNING", format="{message}")
+    try:
+        parsed, invalid = workspaces_endpoint._parse_workspace_assistant_defaults(
+            raw,
+            workspace_id="PRIVATE-WORKSPACE\n" + "x" * 1000,
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert parsed is None and invalid
+    assert len(messages) == 1
+    assert "invalid stored workspace assistant defaults" in messages[0]
+    assert private_marker not in messages[0]
+    assert "private-value" not in messages[0]
+    assert "private-numeric-key" not in messages[0]
+    assert "PRIVATE-WORKSPACE" not in messages[0]
+    assert len(messages[0]) < 256
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("defaults", [None, {}, {"assistant_kind": "invalid"}])
+def test_effective_default_distinguishes_unset_and_invalid_objects(
+    workspace_app: FastAPI,
+    db: CharactersRAGDB,
+    defaults: dict | None,
+) -> None:
+    """Unset defaults stay none while invalid objects degrade without a reference."""
+    workspace = db.upsert_workspace("ws-default-state", "Default state")
+    db.update_workspace(
+        workspace["id"],
+        {"assistant_defaults_json": defaults},
+        workspace["version"],
+    )
+    _install_workspace_overrides(workspace_app, db)
+    try:
+        with TestClient(workspace_app) as client:
+            response = client.get("/api/v1/workspaces/ws-default-state")
+    finally:
+        _clear_workspace_overrides(workspace_app)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assistant_defaults"] is None
+    assert payload["effective_assistant_default"] == {
+        "status": "none" if defaults is None else "unavailable",
+        "source": "none" if defaults is None else "workspace",
+        "assistant_kind": None,
+        "assistant_id": None,
+        "label": None,
+        "persona_memory_mode": None,
+        "degraded_reason": None if defaults is None else "invalid_default",
+    }
+
+
+def test_effective_default_preserves_db_corruption_diagnostic(db: CharactersRAGDB) -> None:
+    """A normalized corrupt row must not be projected as an unset default."""
+    workspace = db.upsert_workspace("ws-corrupt", "Corrupt defaults")
+    workspace["_assistant_defaults_invalid"] = True
+    lookup = Mock(side_effect=AssertionError("corrupt defaults must not resolve a Persona"))
+    db.get_persona_profile = lookup
+    payload = workspaces_endpoint._ws_to_response(
+        workspace,
+        db=db,
+        current_user=SimpleNamespace(id=1),
+    ).model_dump()
+
+    assert payload["effective_assistant_default"]["degraded_reason"] == "invalid_default"
+    assert payload["assistant_defaults"] is None
+    assert "_assistant_defaults_invalid" not in payload
+    lookup.assert_not_called()
+
+
+@pytest.mark.integration
+def test_effective_default_marks_inactive_persona_unavailable(
+    workspace_app: FastAPI,
+    db: CharactersRAGDB,
+) -> None:
+    """An inactive owned Persona retains its reference but cannot be effective."""
+    workspace = db.upsert_workspace("ws-inactive", "Inactive default")
+    persona_id = _create_persona(db)
+    db.update_workspace(
+        workspace["id"],
+        {"assistant_defaults_json": _assistant_defaults_payload(persona_id)},
+        workspace["version"],
+    )
+    db.update_persona_profile(persona_id=persona_id, user_id="1", update_data={"is_active": False})
+    _install_workspace_overrides(workspace_app, db)
+    try:
+        with TestClient(workspace_app) as client:
+            response = client.get("/api/v1/workspaces/ws-inactive")
+    finally:
+        _clear_workspace_overrides(workspace_app)
+
+    assert response.status_code == 200
+    assert response.json()["effective_assistant_default"] == {
+        "status": "unavailable",
+        "source": "workspace",
+        "assistant_kind": "persona",
+        "assistant_id": persona_id,
+        "label": None,
+        "persona_memory_mode": "read_only",
+        "degraded_reason": "persona_unavailable",
+    }
+
+
+@pytest.mark.integration
+def test_disabled_persona_feature_skips_lookup_and_allows_clearing(
+    workspace_app: FastAPI,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Disabling Persona hides effective identity but leaves settings clearable."""
+    workspace = db.upsert_workspace("ws-disabled", "Disabled default")
+    workspace = db.update_workspace(
+        workspace["id"],
+        {"assistant_defaults_json": _assistant_defaults_payload()},
+        workspace["version"],
+    )
+    monkeypatch.setattr(feature_flags, "settings", {"PERSONA_ENABLED": False})
+    lookup = Mock(side_effect=AssertionError("disabled Persona feature must not query profiles"))
+    monkeypatch.setattr(db, "get_persona_profile", lookup)
+    _install_workspace_overrides(workspace_app, db, write=True)
+    try:
+        with TestClient(workspace_app) as client:
+            get_response = client.get("/api/v1/workspaces/ws-disabled")
+            list_response = client.get("/api/v1/workspaces/")
+            clear_response = client.patch(
+                "/api/v1/workspaces/ws-disabled",
+                json={"version": workspace["version"], "assistant_defaults": None},
+            )
+    finally:
+        _clear_workspace_overrides(workspace_app)
+
+    assert get_response.status_code == list_response.status_code == clear_response.status_code == 200
+    for payload in [get_response.json(), *list_response.json()["items"]]:
+        assert payload["assistant_defaults"]["assistant_id"] == "persona-1"
+        assert payload["effective_assistant_default"] == {
+            "status": "unavailable",
+            "source": "workspace",
+            "assistant_kind": None,
+            "assistant_id": None,
+            "label": None,
+            "persona_memory_mode": None,
+            "degraded_reason": "persona_feature_disabled",
+        }
+    assert clear_response.json()["effective_assistant_default"]["status"] == "none"
+    lookup.assert_not_called()
+
+
+@pytest.mark.integration
+def test_disabled_persona_feature_rejects_new_default_without_lookup(
+    workspace_app: FastAPI,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Disabled Persona writes fail before lookup or Workspace mutation."""
+    workspace = db.upsert_workspace("ws-disabled", "Disabled default")
+    monkeypatch.setattr(feature_flags, "settings", {"PERSONA_ENABLED": False})
+    lookup = Mock(side_effect=AssertionError("disabled Persona feature must not query profiles"))
+    monkeypatch.setattr(db, "get_persona_profile", lookup)
+    _install_workspace_overrides(workspace_app, db, write=True)
+    try:
+        with TestClient(workspace_app) as client:
+            response = client.patch(
+                "/api/v1/workspaces/ws-disabled",
+                json={"version": workspace["version"], "assistant_defaults": _assistant_defaults_payload()},
+            )
+    finally:
+        _clear_workspace_overrides(workspace_app)
+
+    assert response.status_code == 503
+    assert db.get_workspace(workspace["id"])["version"] == workspace["version"]
+    lookup.assert_not_called()
