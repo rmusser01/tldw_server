@@ -4,11 +4,13 @@ title: Expose Explainer in WebUI and extension navigation
 status: Done
 assignee: []
 created_date: '2026-09-13 18:22'
-updated_date: '2026-09-13 18:31'
+updated_date: '2026-09-13 18:35'
 labels:
   - frontend
   - explainer
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2953'
 priority: medium
 ---
 
@@ -41,6 +43,8 @@ User explicitly requested WebUI and extension parity. Verified WXT resolves shar
 Implementation complete: shared Research launcher entry and persisted shortcut ID; default/Researcher presets; shared English label/description; command palette metadata; active extension route registration; WebUI and extension page inventories. Existing saved selections remain opt-in for Explainer via Show all features, and the previous Sources migration is preserved. Regression tests demonstrated missing launcher results and the extension Page not found state before the fix. WebUI and extension configurations each pass 106 focused tests across 11 suites. ESLint reports zero errors and six pre-existing no-explicit-any warnings on unchanged settings lines. Bandit is not applicable: touched code is TypeScript/TSX/JSON only. Next.js compiled /explainer and returned HTTP 200; live browser inspection stopped at the backend readiness guard because the local API was not ready. No live installed-extension E2E run or full production build performed.
 
 Extension compile passed: bun run compile (tsc --noEmit -p tsconfig.compile.json). Self-review found no remaining issues in the changed scope. New route test formatted using the shared UI style; git diff --check passed. Follow-up runtime limitation: browser preview at http://127.0.0.1:8091/explainer requires a ready local backend; no backend settings changed.
+
+Published draft PR #2953 against dev: https://github.com/rmusser01/tldw_server/pull/2953. Fetched origin/dev before publishing; the branch was current with no rebase needed. Reverified 106 tests across 11 suites under each WebUI and extension configuration, extension compile, and diff checks. Draft remains pending the human-written Change summary required by repository merge policy; browser verification limitations are documented in the PR.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
