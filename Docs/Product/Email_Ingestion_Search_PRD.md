@@ -21,13 +21,12 @@ LLM-assisted chunking have separate switches, and claims extraction can inherit
 server settings. The tested offline options and intercepted call boundaries are
 recorded in `Docs/Operations/Email_Core_Validation_2026-09-13.md` (TASK-13250).
 
-The milestone checkmarks below are historical implementation records, not fresh
-release certification. Current synthetic tests expose a core identity-dedupe defect
-(TASK-13251): distinct RFC Message-ID messages with identical bodies collapse to
-one legacy media row and one normalized message. EML, ZIP and MBOX acceptance probes
-all reproduced this. Keep `EMAIL-M0-002` and the core release gate open. The current
-search endpoint also exposes offset pagination, not the cursor contract requested
-by FR-SEARCH-004. Neither issue is resolved by connecting Gmail.
+The milestone checkmarks below are implementation records, not deployment
+certification. The 2026-09-13 follow-up fixes the identical-body identity collision
+(TASK-13251), preserves parsed email metadata, and adds opt-in cursor pagination
+(TASK-13253) while retaining offset clients. Synthetic EML, ZIP and MBOX regressions
+now require separate identities. See the follow-up section of the validation record
+for fresh results and remaining environment gates.
 
 Current evidence does not certify a running deployment, PostgreSQL parity, enabled
 PST/OST parsing, full-scale performance, staging sync lag or live OAuth/provider
@@ -480,12 +479,12 @@ Milestone Goal: Eliminate highest-risk ingestion/search correctness gaps without
 
 Must Tickets:
 
-- [ ] `EMAIL-M0-001` Persist parsed email metadata fields in safe persistence path.
+- [x] `EMAIL-M0-001` Persist parsed email metadata fields in safe persistence path.
   Depends On: None.
   Deliverables: Update metadata allowlist and persistence tests so `from/to/cc/bcc/subject/date/message_id/headers_map/attachments` survive ingest.
   Acceptance: Existing email ingest tests pass; new assertions confirm persisted metadata completeness.
 
-- [ ] `EMAIL-M0-002` Implement dedupe precedence for message identity.
+- [x] `EMAIL-M0-002` Implement dedupe precedence for message identity.
   Depends On: `EMAIL-M0-001`.
   Deliverables: Dedupe order `(source_id, source_message_id)` -> `(source_id, message_id)` -> hash fallback.
   Acceptance: Regression tests demonstrate distinct messages with same body are no longer merged.
@@ -502,7 +501,7 @@ Must Tickets:
 
 Should Tickets:
 
-- [ ] `EMAIL-M0-005` Update `Docs/API-related/Email_Processing_API.md` with metadata persistence behavior.
+- [x] `EMAIL-M0-005` Update `Docs/API-related/Email_Processing_API.md` with metadata persistence behavior.
   Depends On: `EMAIL-M0-001`.
   Acceptance: Docs reflect actual persisted fields and fallback behavior.
 
@@ -512,7 +511,7 @@ Should Tickets:
 
 Milestone Exit Gate:
 
-- [ ] M0 Gate approved by the owner and test suite passes for email ingestion modules, including distinct-identity same-body dedupe (TASK-13251 remains open).
+- [ ] M0 Gate approved by the owner with ingestion correctness, metrics and logging criteria validated for the selected rollout scope.
 
 ### Milestone M1: Email-Native Storage and Operator Search (Phase 1)
 
@@ -711,8 +710,8 @@ Must Tickets:
 Milestone Exit Gate:
 
 - [ ] M4 Core gate approved and file ingestion/search enabled for target rollout scope.
-  Current gaps (2026-09-13): TASK-13251 same-body identity collision; unimplemented cursor API contract; target-environment performance/deployment validation and owner sign-off remain outstanding. Synthetic passing tests characterize a supported path and the collision; they do not close these gaps.
-  Closure criteria: Resolve core correctness gaps, reconcile the pagination contract with implementation, validate the chosen deployment and scale, and record owner approval in the core release checklist.
+  Current status (2026-09-13): Identity collision and cursor API fixes are covered by synthetic regressions. Target-environment performance/deployment validation and owner sign-off remain outstanding.
+  Closure criteria: Validate the chosen deployment and scale, satisfy its remaining release checks, and record owner approval in the core release checklist.
 - [ ] M4 Optional Gmail enablement gate approved (deferred; not a core dependency).
   Live OAuth, provider behavior, backfill/incremental sync and staging lag remain unverified. Mocked tests and fixture metrics are separate evidence. Any future live work requires an explicitly authorized dedicated synthetic test mailbox and a downstream processing audit. The owner's personal Gmail is excluded.
 

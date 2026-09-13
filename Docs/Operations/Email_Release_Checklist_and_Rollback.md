@@ -20,8 +20,8 @@ The owner's personal Gmail and personal email are excluded.
 
 - [x] Trace upload parsing, persistence, indexing and optional model calls; record explicit offline options and interception evidence (TASK-13250).
 - [x] Validate synthetic EML, ZIP and MBOX messages with distinct bodies, attachment metadata, repeat import, search and detail using temporary SQLite.
-- [ ] Resolve distinct-message same-body merging (TASK-13251). A passing characterization test demonstrates this defect; it does not satisfy identity correctness.
-- [ ] Reconcile FR-SEARCH-004 cursor requirements with the current offset-only HTTP API.
+- [x] Resolve distinct-message same-body merging (TASK-13251). Strict EML/ZIP/MBOX regressions now require distinct stored/searchable identities; existing corrupted data requires separate recovery.
+- [x] Implement FR-SEARCH-004 cursor pagination (TASK-13253); omitted cursor preserves offset behavior. See `Docs/Design/email-search-cursor-pagination.md` for traversal semantics.
 - [ ] Validate chosen deployment, auth/tenant boundaries, database backend and target scale. Focused endpoint tests override auth infrastructure; no current live server readiness was established.
 - [ ] Record actual performance/parity evidence for the intended cutover scope. Small fixtures and checker unit tests do not certify the 1M-message benchmark or production parity.
 - [ ] Configure and verify core rollout flags in the chosen environment:

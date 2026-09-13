@@ -6,7 +6,7 @@ import json
 import logging
 import sqlite3
 from contextlib import contextmanager, nullcontext, suppress
-from datetime import timezone
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
@@ -1673,12 +1673,15 @@ class MediaDatabase:
         raw = str(value or "").strip()
         if not raw:
             return None
-        with suppress(MEDIA_NONCRITICAL_EXCEPTIONS):
-            dt = parsedate_to_datetime(raw)
-            if dt is not None:
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                return dt.astimezone(timezone.utc).isoformat()
+        for parser in (datetime.fromisoformat, parsedate_to_datetime):
+            try:
+                dt = parser(raw)
+                if dt is not None:
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt.astimezone(timezone.utc).isoformat()
+            except (ValueError, TypeError, OverflowError):
+                continue
         return None
 
     @staticmethod

@@ -60,9 +60,9 @@ It asserts zero attempted calls even if application error handling catches an
 interception exception. It excludes full application startup and auth/billing/quota
 integration. These limits apply to the evidence; request flags alone are not proof.
 
-Record both successful paths and defects. TASK-13251 reproduces identical-body
-messages losing their separate identities. The core gate remains open until its
-correctness criteria and other release checks are met.
+Record both successful paths and defects. TASK-13251 now preserves separate
+identities for identical-body messages; TASK-13253 adds optional cursor pagination.
+These local regression results do not close the deployment and scale checks.
 
 ## Optional Gmail Validation — Deferred
 
@@ -101,8 +101,9 @@ Preflight for explicitly authorized future live work:
 - [ ] Record source/job IDs, observations, evidence and owner approval in the optional Gmail checklist.
 
 Mocked Gmail tests verify code against simulated provider responses. The offline
-`email_m2_gate_validation.py` fixtures verify checker behavior only. Even if the
-checker prints “staging lag SLO validated”, fixture input does not prove that SLO.
+`email_m2_gate_validation.py` fixtures verify checker behavior only. Its output now
+labels `evidence_source=offline_fixture` and leaves staging unverified. Live endpoint
+sampling is labeled separately and still requires a representative monitoring window.
 
 ## Connector Incident Playbooks
 
