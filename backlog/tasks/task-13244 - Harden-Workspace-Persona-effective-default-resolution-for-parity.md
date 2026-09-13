@@ -4,14 +4,14 @@ title: Harden Workspace Persona effective-default resolution for parity
 status: Done
 assignee: []
 created_date: '2026-09-13 18:15'
-updated_date: '2026-09-13 20:30'
+updated_date: '2026-09-13 20:33'
 labels:
   - persona
   - workspaces
   - parity
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/issues/2950'
+  - 'https://github.com/rmusser01/tldw_server/pull/2957'
 documentation:
   - >-
     Docs/superpowers/plans/2026-09-13-persona-workspace-parity-implementation-plan.md
@@ -46,6 +46,8 @@ Full touched-production Bandit scan (workspaces.py and ChaChaNotes_DB.py): 0 fin
 Formatting caveat: Black --check --line-ranges on the large ChaChaNotes_DB.py reports only pre-existing whitespace/indentation outside the changed method (lines around 7732, 7774, 32373-34176). No broad formatting applied; changed method will be checked separately. Both focused test modules are Black-clean.
 
 DB implementation complete: 41 focused tests passed. Mutation evidence: disabling assistant-default column creation fails the isolated v48->49 test; removing corruption flag fails both malformed DB->API cases while SQL NULL passes. Extra v59 suite produced 55 passes and 3 failures (Notes task v59 SQLite source catalog drifted); all 3 reproduced with the original HEAD DB normalizer restored in memory via /tmp/persona-stage1-v59-baseline-check.py, confirming they are outside this change. No production migration logic changed. Final focused159-case suite still running. Test Bandit scan excluding expected B101 test assertions also zero findings/errors. Current dev SHAs rechecked unchanged from implementation start.
+
+Published draft PR #2957 stacked on #2952. Implementation commit d90d49ba55. Final parent verification:159 passed,6 warnings in86.78s; no skips. Whole-stage independent review found no actionable issues and reran41 DB tests. Human-written Change summary and planning PR merge remain required before implementation merge. Stages2-5 remain unstarted.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

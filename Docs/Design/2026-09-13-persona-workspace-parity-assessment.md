@@ -102,7 +102,7 @@ Existing server tests also cover Persona prompt assembly and read-only/read-writ
 
 ## Stage 1 Implementation Record
 
-TASK-13244 implements resolver hardening on `codex/persona-workspace-resolver-hardening`, stacked on planning PR #2952. Server dev was refreshed to `e157b6d1306a133e93595a8d457ecac76ac770fa`; Chatbook dev to `392ce191fd28953550f85154ea1f8e4eda4ab7f3`. Both were rechecked at local closeout on 2026-09-13. Scoped diffs since the assessment changed neither the server Stage 1 files nor the inspected Chatbook Workspace/default contracts.
+TASK-13244 implements resolver hardening in [PR #2957](https://github.com/rmusser01/tldw_server/pull/2957) on `codex/persona-workspace-resolver-hardening`, stacked on planning PR #2952. Server dev was refreshed to `e157b6d1306a133e93595a8d457ecac76ac770fa`; Chatbook dev to `392ce191fd28953550f85154ea1f8e4eda4ab7f3`. Both were rechecked at local closeout on 2026-09-13. Scoped diffs since the assessment changed neither the server Stage 1 files nor the inspected Chatbook Workspace/default contracts.
 
 - Effective `permission_denied` and `persona_feature_disabled` responses redact identity; the settings-owner view retains references. Disabled reads skip profile lookup, non-null saves return 503, and clearing still works. Deleted/inactive distinctions and mapped lookup failures remain intact.
 - Raw storage that cannot decode as an object produces a computed private corruption flag, consumed by the API as `invalid_default`. SQL NULL remains unset; no new persistent/public field or Persona snapshot was introduced. Validation logs contain only fixed categories, known types, and Workspace-id presence.
