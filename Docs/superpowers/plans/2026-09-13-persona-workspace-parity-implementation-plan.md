@@ -36,7 +36,7 @@
 **Goal:** Make the existing V1 effective-default API a reliable basis for parity.
 **Success Criteria:** Hidden references are redacted; malformed defaults remain distinguishable from unset; disabled/inactive states are explicit; transient DB failures retain existing error mapping; the regression baseline passes.
 **Tests:** Effective-state API matrix, log redaction, invalid persisted JSON, and historical migration coverage.
-**Status:** Complete (implementation and local verification; pending PR merge).
+**Status:** Complete (implementation and local verification; [PR #2957](https://github.com/rmusser01/tldw_server/pull/2957) pending merge after planning PR #2952).
 
 **Files:**
 - Modify `tldw_Server_API/app/api/v1/endpoints/workspaces.py` (existing parse/resolve/projection helpers).
