@@ -7,88 +7,37 @@
 
 ## Current release status
 
-### Continuation and explicit summary waiver (2026-09-11)
+### Requester-approved scope reduction (2026-09-14)
 
-The requester instructed: “continue, the human summary aint happening for this,
-this is too large of a pr for that to make sense”. This explicitly waives the
-human-written Change summary requirement **for PR2761 only**. Record the waiver
-as a requester decision; do not present agent prose as human-authored or change
-the repository-wide policy. It does not waive other release risks or approval
-of a materially changed publication scope.
+The requester explicitly instructed removal of the new container collector and
+its dedicated tests, retention of the requested CodeQL fixes, narrow DSR fix,
+Jobs test repair and frontend diagnostics, and deferral of broader certification.
 
-Verified head **08946442af85f58f8078c2e3df1e4dc42bb40876** has **75 passing
-checks, 38 skips, no failed or pending checks, and zero open CodeQL alerts**.
-All current required backend, security, coverage, frontend, E2E, container and
-trusted-license checks pass. CodeQL remediation TASK13013.3.1 is Done, with
-424 individually verified dispositions and source repairs. See
-[final CodeQL result](../../Evidence/PR2761-codeql-final-result.json).
+- Restore the container build workflow and existing release workflow tests to
+  their pre-collector state at `08946442af`. Existing image builds, isolated
+  package-import probes, checkout/admission checks and CI gates remain.
+- Retain the normalized embedding-storage fix and its five regression cases.
+  Interrupted-request recovery tests and the operator certification procedure
+  move out of this release; TASK-13013.8 retains their git history.
+- Keep supply-chain certification (TASK-13013.7), broader lifecycle certification
+  (TASK-13013.8), capacity/soak certification (TASK-13013.9), and remaining global
+  frontend strictness/compiler-lint work (TASK-12116) as separate follow-up work.
+  None is a prerequisite for PR2761. This resolves the pending lint scope question.
+- Existing required CI, requested CodeQL remediation, release version/source
+  consistency and publication verification remain required on the final head.
 
-The next candidate `d8002fd4b400a2148edaa7d8df929512263d399c` completed CI
-with **69 passes, 38 skips and six failed checks**; CodeQL passed. Three
-backend jobs failed scanner preparation because its container user could not
-write `/cache/db`, preventing vulnerability reports and failing the container
-aggregate. The SQLite Jobs batch test crossed a one-second lease boundary
-between acquisitions and correctly reclaimed an earlier job; normal test lease
-durations now pass 36 focused tests and independent review without changing
-production behavior. The
-frontend ratchet reported one regression among otherwise inherited admin-test
-failures. Its unretained full diagnostics prevent establishing the precise
-fingerprint difference; four existing reports will now upload on failure for
-the next run. All 18 focused frontend workflow tests and independent review
-pass; the strict comparison remains unchanged.
-These failures supersede the earlier candidate's passing CI for readiness.
+The human-written Change summary remains explicitly waived for PR2761. No
+existing deployment exists, per requester; deployed rollback certification is
+not applicable. Historical tests/scans below describe past work, not new release
+requirements or current-head verification. Deferred tasks are not marked complete
+and no new vulnerability, lifecycle or capacity certification is claimed.
 
-| Item | Current state |
-| --- | --- |
-| Frozen dev input | `6c4bdcbc48f4fe4bab7019d59ad8cf962ab240da` through PR2941; do not silently add later dev work |
-| Continuation application source | `bba4b8c8a8baf02ce2b6a5f2a544052aa0ed2c5f`; focused tests and independent review pass; fresh remote CI required |
-| Protected source record | `bba4b8c8a8baf02ce2b6a5f2a544052aa0ed2c5f`; 7,117 files; unchanged manifest `e38f39788bdbf6ee691a27cc91357e0d92a6b21a47355d745409938ea6e66f76`; 11 licensing tests pass |
-| Release / Countdown dates | Approved 2026-09-10 / 2028-09-10T12:00:00Z; final publication-date decision remains separate |
-| PR | `codex/release-main-0.1.42` → `main`; draft; no merge/tag/publication |
-| Human Change summary | Explicitly waived by requester for this PR |
-| Existing deployment | None, per requester; deployed-version rollback target is not applicable |
+Frozen dev remains `6c4bdcbc48f4fe4bab7019d59ad8cf962ab240da`. Version remains
+0.1.42. Existing protected-source record and approved dates are unchanged by
+this CI/test/documentation cleanup; protected frontend bytes are unchanged.
 
-Remaining work is assessed against a defined release profile, not assumed to
-require completion of every broad backlog initiative. TASK12116 explicitly
-allows incremental strictness; its remaining four-rule hook enforcement has
-265 unchanged inventoried findings, which do not by themselves establish 265
-runtime release regressions. Any decision to exclude the remaining enforcement
-contract must be recorded explicitly; current gates remain enabled.
-
-Current supply-chain PR2869 is `ee856c75839e9d2746127cec733b5b0ddd2bffb3`,
-substantially newer than the historical observations below. It has verified
-source scans and several image admissions, but app/audio image findings remain.
-Its five image artifacts were inspected read-only: app and audio-worker each
-have 155 unexcepted rows (153 FFmpeg and two libxml2); worker and both frontend
-images pass that branch's admission policy. Its exceptions and image results
-do not transfer automatically to this branch's floating dependencies. This
-continuation adds raw security inventory for the exact backend images built
-by this candidate, without accepting findings or changing publication policy.
-
-The lifecycle review reproduced a normalized embedding-storage false-success
-case in erasure; the minimal repair passed 61 tests and independent review under
-TASK13013.8. Selected notes recovery is demonstrated with real SQLite stores
-and the existing replacement-request API after original work has stopped,
-retaining conflict rejection and durable successful-request linkage. Operators
-must preserve an external recovery receipt before executing because failed
-execution may replace request notes. See
-[the tested recovery profile](../../Evidence/PR2761-dsr-recovery-profile.md).
-No automatic retry or universal-erasure claim is introduced.
-
-Publication inventory: 0.1.42 has no GitHub tag/release or PyPI files, and the
-public app container tag returns not found. Worker and audio-worker registry
-reads return authorization errors; the current GitHub token lacks
-`read:packages`, so those responses do not establish tag absence. Main merge
-triggers publication workflows and cannot serve as an intermediate staging
-step while artifact qualification remains open.
-
-Capacity still requires a final exact artifact. The old 7GiB disk stop is
-historical: the current host has 351GiB free and an ARM Docker VM. A native
-amd64 run remains preferable for the intended amd64 profile. Do not use old,
-different-source images or unexecuted preparation as a passing capacity result.
-
-This section supersedes stale current-head, CodeQL, deployment-baseline and
-summary-placeholder statements in the historical execution notes below.
+This section and the revised Stage 4 scope supersede conflicting historical
+blocker, pending-scope and collector requirements elsewhere in this plan.
 
 ## Stage 1: Recover and freeze
 **Goal:** Restore the existing release branch and identify the current inputs.
@@ -295,31 +244,33 @@ python -m mkdocs build --strict -f Docs/mkdocs.yml --site-dir /tmp/pr2761-docs-s
 
 **Exit evidence:** Candidate SHA, check name, conclusion, and run URL for each gate; standard docs-build success. Main's ruleset enforces only the trusted license context, whereas the six core gates are enforced on dev. That ruleset minimum does not replace the release-readiness requirements.
 
-### 4.2 Open readiness dependencies — agent, with requester ownership of scope decisions
+### 4.2 Deferred certification — separate follow-up work
 
-Inspect existing child work and merged evidence before starting duplicate implementation. Current task status alone does not prove either completion or absence of work.
+The requester approved the following scope reduction on 2026-09-14. These tasks
+remain open outside this release; their completion is not a PR2761 merge gate.
 
-| Owning task | Remaining work and required completion evidence |
+| Owning task | Deferred work |
 | --- | --- |
-| [TASK-13013.7](../../../backlog/tasks/task-13013.7%20-%20Close-dependency-and-software-supply-chain-release-gaps.md) | Prove the supported frontend security baseline; Bun dependency-update and SBOM coverage; reproducible Python production resolution; immutable base images/artifact provenance; vulnerability scans and explicit exceptions. Record exact versions, digests, reports, and tested source SHA. |
-| [TASK-13013.8](../../../backlog/tasks/task-13013.8%20-%20Prove-reusable-tenant-isolation-and-data-lifecycle-primitives.md) | Run cross-user and cross-organization negative tests for selected API/job/media/note/RAG/storage paths. Verify export, deletion, durable cleanup and partial-failure recovery, including logs/jobs/caches/backups. Record the tested profile and results. |
-| [TASK-13013.9](../../../backlog/tasks/task-13013.9%20-%20Create-a-reusable-release-capacity-and-soak-test-harness.md) | Supply and run the reproducible capacity/soak profile with datasets, duration, pass thresholds and artifact output. Measure authentication/workflow load, queue depth, database pools, storage and overload recovery against an exact artifact. Record the supported operating envelope. |
-| [TASK-12116](../../../backlog/tasks/task-12116%20-%20Re-enable-frontend-type-safety-and-lint-gates-harden-persisted-stores.md) | Reconcile TypeScript merge gating/strictness, React hooks enforcement, persisted Zustand version/migration contracts, and shared dependency majors. Link actual CI and migration-test evidence; a frontend build alone is insufficient. |
+| TASK-13013.7 | New container collector, SBOM/provenance qualification and broader dependency certification |
+| TASK-13013.8 | Broad tenant/lifecycle and interruption/recovery certification; retain only the narrow DSR repair and its regression tests |
+| TASK-13013.9 | Measured capacity/soak certification |
+| TASK-12116 | Broader frontend strictness and remaining global compiler-lint cleanup |
 
-- [ ] Close each dependency with its required evidence, or obtain an explicit requester decision specifying what is outside this release's supported scope, why, and what risk remains. Record decisions in both the owning task and this plan. None has been granted in this session.
+- [x] Record the requester-approved deferral in each owning task and this plan.
+- Existing CI gates and actual regressions in retained code remain in scope.
 
 ### 4.3 Distribution lineage, migration and rollback — agent
 
 - [ ] Reconcile repository 0.1.39–0.1.41 metadata with GitHub, PyPI and container publication inventories. Record each existing version, source commit, artifact digest, and publication status. Do not invent missing releases or recreate tags merely to match documentation.
 - [ ] Confirm 0.1.42 is unused across the intended publication targets before publication. If any artifact already exists, establish its provenance and follow recovery instead of overwriting it.
 - [x] Deployed rollback target is not applicable: requester confirms no existing deployment. Preserve same-image recovery and migration limitations; do not claim a working published0.1.38 baseline.
-- [ ] Assess authentication, conversation, notes-sync, presentation, personal-context and webhook schema changes from that target to the candidate; record configuration changes and incompatible downgrade paths.
-- [ ] Rehearse backup, upgrade/health verification, and restore using representative data. Cover databases, uploaded content and configuration. Record backup checksums, restore commands and results. Do not assume an older binary can read migrated databases.
-- [x] Complete a separately scoped candidate same-image SQLite/Redis backup/restore smoke: authenticated account/note/conversation/attachment checks, config-byte equality, Redis RDB→AOF recovery, and all 12 databases passing integrity before and after. [Evidence](../../Evidence/PR2761-candidate-recovery.md). The published 0.1.38 startup failure still blocks the cross-version item above.
+- [x] Deployment-specific cross-version qualification is not applicable: requester confirms no existing deployment. Broader migration certification is follow-up work.
+- [x] Additional backup/upgrade/restore certification is deferred by the requester. Retain the existing same-image smoke evidence without expanding its claims.
+- [x] Complete a separately scoped candidate same-image SQLite/Redis backup/restore smoke: authenticated account/note/conversation/attachment checks, config-byte equality, Redis RDB→AOF recovery, and all 12 databases passing integrity before and after. [Evidence](../../Evidence/PR2761-candidate-recovery.md). The published 0.1.38 startup limitation remains documented; it is not a rollback prerequisite without an existing deployment.
 
 Use [Production Reference Deployment](../../Deployment/Production_Reference_Deployment.md), [Admin Webhooks Migration Runbook](../../Admin_Webhooks_Migration_Runbook.md), and [Standalone HTML Presentations](../../Deployment/Standalone_HTML_Presentations.md). Keep standalone HTML generation disabled until its documented schema-v2 backup and rollout prerequisites are met.
 
-**Exit evidence:** Distribution inventory, approved version, exact rollback artifact, configuration/schema compatibility assessment, and successful backup/restore rehearsal linked here and from TASK-13013.3.
+**Exit evidence:** Distribution inventory and consistent version/source publication records. Existing recovery evidence remains historical; broader certification and a deployment-specific rollback artifact are not prerequisites for this release.
 
 ### 4.4 Human review — requester
 

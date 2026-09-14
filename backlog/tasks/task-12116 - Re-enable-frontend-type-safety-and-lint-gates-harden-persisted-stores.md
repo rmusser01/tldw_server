@@ -4,7 +4,7 @@ title: 'Re-enable frontend type-safety and lint gates, harden persisted stores'
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-09-11 14:42'
+updated_date: '2026-09-14 14:07'
 labels:
   - tech-debt
   - high
@@ -90,4 +90,6 @@ PR2761 bounded RAG hook boundary plan: reproduced exactly128 react-hooks/refs di
 PR2761 RAG input-ref boundary verified: moved the UI-only InputRef into RagSearchBar and removed it from useRagSearchState return, preserving focus effect/dependencies and all search state. Exactly128 scoped refs errors reproduced before; final component/hook/test four-rule lint exits0 with25 existing warnings. Four runtime characterizations plus seven existing RAG tests pass (11 total); full WebUI nonincremental typecheck and separate new-test typecheck pass; diff check passes. Bandit invoked from project venv reports three TypeScript AST parser errors, not a successful scan. Evidence: Docs/Evidence/PR2761-rag-input-ref.md. No suppressions, global rules, dependencies, release metadata, commits, or pushes changed; broader AC2/AC3 remain open. Source frozen for parent review/integration.
 
 PR2761 release-specific read-only reconciliation at08946442af: required lint, nonincremental typecheck, shared-hook and five-module strict-boundary gates pass. AC1 permits separate typechecking; AC2 requires incremental strictness plus tracked expansion, not blanket immediate strict:true. AC3 remains open: four compiler-era hook rules disabled,265 findings across138files; all source/config hashes match recordedinventory. Against frozen dev6c4bdcbc,257findings are in133untouchedfiles and8in5followupfiles; no new runtime defect demonstrated by this inventory. Proposed release scope decision (NOT YET APPROVED): retain all current gates, publish no frontend binaries, leave global four-rule enforcement in this owning task without claiming full compiler-rule compliance forv0.1.42. Release plan4.2 requires explicit requester acceptance before this dependency is scope-cleared.
+
+2026-09-14 requester explicitly moved broader certification work out of PR2761. Global frontend strictness and remaining265 compiler-lint findings stay in this follow-up task and no longer block this release. This resolves the earlier pending scope question; existing frontend CI gates and diagnostic retention remain unchanged. Task remains open.
 <!-- SECTION:NOTES:END -->
