@@ -362,6 +362,7 @@ def _ws_to_response(
         audio_voice=ws.get("audio_voice"),
         audio_speed=ws.get("audio_speed"),
         assistant_defaults=assistant_defaults,
+        assistant_defaults_explicit_none=ws.get("assistant_defaults_explicit_none", False),
         effective_assistant_default=_effective_workspace_assistant_default(
             db=db,
             stored=assistant_defaults,

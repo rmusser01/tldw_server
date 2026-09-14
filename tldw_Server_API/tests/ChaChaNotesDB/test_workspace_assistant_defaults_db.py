@@ -336,7 +336,9 @@ def test_workspace_mapping_row_computes_diagnostic_from_storage(
 def test_workspace_mapping_without_defaults_is_unset() -> None:
     """Treat a missing storage column as unset and discard any stale corruption diagnostic."""
     normalized = CharactersRAGDB._workspace_row_to_dict({"id": "ws-old", "_assistant_defaults_invalid": True})
-    assert normalized == {"id": "ws-old", "_assistant_defaults_invalid": False}
+    assert normalized == {
+        "id": "ws-old", "_assistant_defaults_invalid": False, "assistant_defaults_explicit_none": False,
+    }
 
 
 def test_workspace_update_rejects_private_diagnostic_only_payload(chacha_db: CharactersRAGDB) -> None:

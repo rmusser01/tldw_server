@@ -118,6 +118,183 @@ def _assistant_defaults_payload(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("initial_state", ["unset", "saved", "cleared"])
+@pytest.mark.parametrize("operation", ["save", "clear", "omit_patch", "omit_put"])
+def test_workspace_explicit_none_transitions_and_reads(
+    workspace_app: FastAPI,
+    db: CharactersRAGDB,
+    initial_state: str,
+    operation: str,
+) -> None:
+    """Writes derive durable choice and every management read preserves it."""
+    workspace = db.upsert_workspace("ws-choice", "Assistant choice")
+    persona_id = _create_persona(db)
+    if initial_state != "unset":
+        workspace = db.update_workspace(
+            workspace["id"],
+            {
+                "assistant_defaults_json": (
+                    _assistant_defaults_payload(persona_id) if initial_state == "saved" else None
+                )
+            },
+            workspace["version"],
+        )
+    body = {"version": workspace["version"]}
+    if operation == "save":
+        body["assistant_defaults"] = _assistant_defaults_payload(persona_id)
+    elif operation == "clear":
+        body["assistant_defaults"] = None
+    else:
+        body["name"] = "Renamed choice"
+    _install_workspace_overrides(workspace_app, db, write=True)
+    try:
+        with TestClient(workspace_app) as client:
+            response = client.request(
+                "PUT" if operation == "omit_put" else "PATCH",
+                "/api/v1/workspaces/ws-choice",
+                json={"name": "Renamed choice"} if operation == "omit_put" else body,
+            )
+            get_response = client.get("/api/v1/workspaces/ws-choice")
+            list_response = client.get("/api/v1/workspaces/")
+    finally:
+        _clear_workspace_overrides(workspace_app)
+
+    assert response.status_code == get_response.status_code == list_response.status_code == 200
+    expected_none = operation == "clear" or (operation.startswith("omit_") and initial_state == "cleared")
+    expected_saved = operation == "save" or (operation.startswith("omit_") and initial_state == "saved")
+    for payload in [response.json(), get_response.json(), *list_response.json()["items"]]:
+        assert payload["assistant_defaults_explicit_none"] is expected_none
+        assert payload["version"] == workspace["version"] + 1
+        if expected_saved:
+            assert payload["assistant_defaults"]["assistant_id"] == persona_id
+            assert payload["effective_assistant_default"]["status"] == "available"
+        else:
+            assert payload["assistant_defaults"] is None
+            assert payload["effective_assistant_default"]["status"] == "none"
+
+
+@pytest.mark.integration
+def test_upsert_workspace_creates_unset_explicit_none(
+    workspace_app: FastAPI,
+    db: CharactersRAGDB,
+) -> None:
+    """A newly created Workspace is unset, not a durable opt-out."""
+    _install_workspace_overrides(workspace_app, db, write=True)
+    try:
+        with TestClient(workspace_app) as client:
+            response = client.put("/api/v1/workspaces/ws-new", json={"name": "New choice"})
+            get_response = client.get("/api/v1/workspaces/ws-new")
+            list_response = client.get("/api/v1/workspaces/")
+    finally:
+        _clear_workspace_overrides(workspace_app)
+
+    assert response.status_code == get_response.status_code == list_response.status_code == 200
+    for payload in [response.json(), get_response.json(), *list_response.json()["items"]]:
+        assert payload["assistant_defaults_explicit_none"] is False
+        assert payload["assistant_defaults"] is None
+        assert payload["effective_assistant_default"]["status"] == "none"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("value", [True, False, None])
+@pytest.mark.parametrize("operation", ["create", "upsert", "patch"])
+def test_workspace_rejects_readonly_explicit_none_without_mutation(
+    workspace_app: FastAPI,
+    db: CharactersRAGDB,
+    value: bool | None,
+    operation: str,
+) -> None:
+    """Supplying the known read-only field always fails before any write."""
+    workspace = None
+    body = {"name": "Must not be written", "assistant_defaults_explicit_none": value}
+    if operation != "create":
+        workspace = db.upsert_workspace("ws-readonly", "Original name")
+        if operation == "patch":
+            body["version"] = workspace["version"]
+            body["assistant_defaults"] = None
+    _install_workspace_overrides(workspace_app, db, write=True)
+    try:
+        with TestClient(workspace_app) as client:
+            response = client.request(
+                "PATCH" if operation == "patch" else "PUT",
+                "/api/v1/workspaces/ws-readonly",
+                json=body,
+            )
+    finally:
+        _clear_workspace_overrides(workspace_app)
+
+    assert response.status_code == 422, response.text
+    assert "assistant_defaults_explicit_none" in response.text
+    assert db.get_workspace("ws-readonly") == workspace
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("method", ["PUT", "PATCH"])
+def test_workspace_explicit_none_validation_preserves_unrelated_extra_compatibility(
+    workspace_app: FastAPI,
+    db: CharactersRAGDB,
+    method: str,
+) -> None:
+    """Rejecting the derived choice does not globally forbid legacy extras."""
+    workspace = db.upsert_workspace("ws-extra", "Original name")
+    body = {"name": "Renamed", "legacy_extra": "ignored"}
+    if method == "PATCH":
+        body["version"] = workspace["version"]
+    _install_workspace_overrides(workspace_app, db, write=True)
+    try:
+        with TestClient(workspace_app) as client:
+            response = client.request(method, "/api/v1/workspaces/ws-extra", json=body)
+    finally:
+        _clear_workspace_overrides(workspace_app)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["name"] == "Renamed"
+    assert "legacy_extra" not in response.json()
+
+
+@pytest.mark.integration
+def test_workspace_inconsistent_explicit_none_is_unavailable_on_reads(
+    workspace_app: FastAPI,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A normalized non-null default plus opt-out fails closed on detail/list."""
+    workspace = db.upsert_workspace("ws-inconsistent", "Inconsistent choice")
+    persona_id = _create_persona(db)
+    workspace.update(
+        assistant_defaults_json=_assistant_defaults_payload(persona_id),
+        assistant_defaults_explicit_none=True,
+        _assistant_defaults_invalid=True,
+    )
+    monkeypatch.setattr(db, "get_workspace", Mock(return_value=workspace))
+    monkeypatch.setattr(db, "list_workspaces", Mock(return_value=[workspace]))
+    lookup = Mock(side_effect=AssertionError("inconsistent defaults must not resolve a Persona"))
+    monkeypatch.setattr(db, "get_persona_profile", lookup)
+    _install_workspace_overrides(workspace_app, db)
+    try:
+        with TestClient(workspace_app) as client:
+            get_response = client.get("/api/v1/workspaces/ws-inconsistent")
+            list_response = client.get("/api/v1/workspaces/")
+    finally:
+        _clear_workspace_overrides(workspace_app)
+
+    assert get_response.status_code == list_response.status_code == 200
+    for payload in [get_response.json(), *list_response.json()["items"]]:
+        assert payload["assistant_defaults_explicit_none"] is True
+        assert payload["effective_assistant_default"] == {
+            "status": "unavailable",
+            "source": "workspace",
+            "assistant_kind": None,
+            "assistant_id": None,
+            "label": None,
+            "persona_memory_mode": None,
+            "degraded_reason": "invalid_default",
+        }
+        assert "_assistant_defaults_invalid" not in payload
+    lookup.assert_not_called()
+
+
+@pytest.mark.integration
 def test_patch_workspace_returns_effective_default_for_existing_persona(
     workspace_app: FastAPI,
     db: CharactersRAGDB,

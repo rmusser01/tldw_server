@@ -83,7 +83,23 @@ def test_effective_default_redacts_permission_denied(workspace_app, db):
 **Goal:** Persist explicit None and the actual origin of a conversation's Persona before enabling provisioning or new consumers.
 **Success Criteria:** Clear survives restart/backfill; saved chats are independent of default changes; old API callers retain behavior; default resolution and provenance cannot be forged by a caller.
 **Tests:** Schema/DB/API round trips, create/retry/resume, stale Workspace version, identity selection precedence, and memory-mode behavior.
-**Status:** In Progress (contract design TASK-13245.1; no runtime implementation). Depends on Stage 1. Proposed details: [choice/provenance design](../../Design/2026-09-13-persona-workspace-choice-provenance-design.md), awaiting user approval.
+**Status:** In Progress. Contract design TASK-13245.1 is reviewed and approved; implementation starts with 2A only (TASK-13245.2), stacked on design PR #2958. Depends on Stage 1. Contract: [choice/provenance design](../../Design/2026-09-13-persona-workspace-choice-provenance-design.md).
+
+### Slice 2A Execution
+
+**Goal:** Persist and expose durable Workspace opt-out without adding startup provenance or provisioning.
+**Success Criteria:** Registered v68 migrations preserve legacy storage; defaults and opt-out update atomically; read-only API state survives lifecycle operations; new clone/import destinations conservatively opt out.
+**Tests:** SQLite/PostgreSQL fresh and genuine v67 upgrades, clear/set/omit/conflict/restart, clone/import, API read-only projection, cached-writer hazard and offline upgrade checks.
+**Status:** In Progress. Baseline: 60 Workspace defaults DB/API tests passed. Fetched server dev still uses schema v67; implementation branch `codex/persona-workspace-explicit-none` starts at reviewed design `0f227ffa1f4e496e6b040425bf82de476c3ef14e`.
+
+- [x] Write and observe failing persistence, migration, lifecycle, and API regressions.
+- [x] Implement paired storage writes and current registered migrations; protect clone/import choices without adding Persona-sharing authority.
+- [ ] Document offline upgrade/rollback limits, validate both supported backends, run touched-scope Bandit, and review independently.
+- [ ] Commit and open a draft implementation PR; keep 2B/2C/2D and the parent issue open.
+
+**2A verification:** Broad Workspace CRUD/defaults/creation/import/clone and migration regression: 246 passed, 16 PostgreSQL skips, zero failures. A further 21 historical migration tests passed. After the final compatible-initializer race guard, the targeted storage/bootstrap/historical rerun passed 37 tests; the independent review rerun passed six failure/rollback/interleaving cases with no remaining findings. Review found and fixed a real SQLite implicit-commit gap: all legacy and shared schema helpers now finish before the final migration transaction. A compatible competing initializer is rechecked under the transaction without rerunning the backfill. This deterministic interleaving test is not a live multiprocess certification. PostgreSQL remains unreachable even outside the sandbox; live fresh/upgrade/rollback tests must pass before a PostgreSQL rollout. Bandit production/test scopes: zero findings/errors (test assertions excluded); compilation succeeds. Ruff is clean on other touched files and retains four unchanged endpoint BLE001 findings, reproduced at HEAD. [Maintenance runbook](../../Code_Documentation/Workspace_Persona_Defaults.md) documents cached-writer hazards and unsupported mixed-version/old-binary rollback.
+
+**2A baseline refresh:** Server dev `beac8e9449b0e2fa90bdab89cf8cbf7905d2b915` and Chatbook dev `fbf374c9d32144d5dd23fd44c9adc0e77f00d58f` verified on 2026-09-13; scoped diffs from the assessment baselines show no changes to the relevant Workspace defaults implementation, tests, or Chatbook migration. This slice adds durable choice only, not full parity.
 
 **Files:**
 - Modify `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py` and `tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py`.
