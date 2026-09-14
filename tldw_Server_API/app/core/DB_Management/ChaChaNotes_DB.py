@@ -27421,19 +27421,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         workspace_id: str,
         *,
         include_deleted: bool = False,
+        conn: Any = None,
+        for_update: bool = False,
     ) -> dict[str, Any] | None:
-        """Retrieve a workspace by id, optionally including soft-deleted rows."""
-        if include_deleted:
-            cursor = self.execute_query(
-                "SELECT * FROM workspaces WHERE id = ? AND system_operation_state IS NULL",
-                (workspace_id,),
-            )
-        else:
-            cursor = self.execute_query(
-                "SELECT * FROM workspaces "
-                "WHERE id = ? AND deleted = 0 AND system_operation_state IS NULL",
-                (workspace_id,),
-            )
+        """Read a visible Workspace, optionally locking it in an existing transaction."""
+        if for_update and (
+            conn is None or not getattr(conn, "in_transaction", False)
+            or (self.backend_type == BackendType.POSTGRESQL and not getattr(self._local, "tx_depth", 0))
+        ):
+            raise InputError("Workspace locking reads require a transaction connection.")
+        query = "SELECT * FROM workspaces WHERE id = ? AND system_operation_state IS NULL"
+        if not include_deleted:
+            query += " AND deleted = 0"
+        if for_update and self.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE"
+        cursor = conn.execute(query, (workspace_id,)) if conn is not None else self.execute_query(query, (workspace_id,))
         row = cursor.fetchone()
         return self._workspace_row_to_dict(row) if row else None
 

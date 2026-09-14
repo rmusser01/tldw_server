@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 MAX_ASSISTANT_STARTUP_BYTES = 1024
+
+
+def reject_assistant_startup_input(value: object) -> object:
+    """Reject reserved origin keys without changing unrelated request-extra handling."""
+    if isinstance(value, Mapping) and {"assistant_startup", "assistant_startup_json"}.intersection(value):
+        raise ValueError("Assistant startup provenance is read-only")
+    return value
 
 
 class AssistantStartup(BaseModel):

@@ -4533,9 +4533,13 @@ async def create_chat_session(
     """
     try:
         scope = _resolve_chat_scope(session_data.scope_type, session_data.workspace_id)
-        from tldw_Server_API.app.core.Workspaces.assistant_defaults import resolve_new_conversation_assistant
+        from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
+        from tldw_Server_API.app.core.Workspaces.assistant_defaults import create_workspace_persona_conversation
 
-        session_data = resolve_new_conversation_assistant(db, user_id=str(current_user.id), request=session_data)
+        if scope.scope_type == "workspace":
+            workspace = db.get_workspace(scope.workspace_id)
+            if workspace is None or workspace.get("deleted"):
+                raise HTTPException(status_code=404, detail="Workspace not found")
         # Check rate limits
         rate_limiter = get_character_rate_limiter()
         await rate_limiter.check_rate_limit(current_user.id, "chat_create")
@@ -4702,6 +4706,9 @@ async def create_chat_session(
                 seed_first_message=seed_first_message,
                 greeting_strategy=greeting_strategy,
                 greeting_alternate_index=alternate_index,
+                **({"assistant_startup": AssistantStartup(
+                    source="fork" if validated_parent_id else "explicit",
+                )} if scope.scope_type == "workspace" else {}),
             )
             if seed_first_message:
                 created_state = db.get_roleplay_resume_state(created_id)
@@ -4721,6 +4728,11 @@ async def create_chat_session(
                     else "no_greeting"
                 )
             created_with_factory = True
+        elif scope.scope_type == "workspace":
+            created_id = create_workspace_persona_conversation(
+                db, user_id=str(current_user.id), request=session_data,
+                conversation_data=conv_data, title_timestamp=timestamp,
+            )
         else:
             # Add to database
             created_id = db.add_conversation(conv_data)

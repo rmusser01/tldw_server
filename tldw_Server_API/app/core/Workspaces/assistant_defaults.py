@@ -186,3 +186,46 @@ def resolve_new_conversation_assistant(
 ) -> ChatSessionCreate:
     """Compatibility preflight returning only the selected request, not trusted origin."""
     return resolve_workspace_assistant_startup(db, user_id=user_id, request=request).request
+
+
+def create_workspace_persona_conversation(
+    db: CharactersRAGDB, *, user_id: str, request: ChatSessionCreate,
+    conversation_data: Mapping[str, Any], title_timestamp: str,
+) -> str:
+    """Atomically select and persist non-Character Workspace identity and origin.
+
+    Scope, quota and parent/message admission belong to the caller. The internal
+    payload must retain that validated authority; only its preflight identity and
+    derived title are replaced. Workspace then Persona locks cover the INSERT.
+    """
+    if request.scope_type != "workspace" or request.assistant_kind == "character":
+        raise InputError("Workspace Persona creation requires a non-Character Workspace request")
+    if user_id != str(db.client_id) or conversation_data.get("client_id") != user_id:
+        raise InputError("Conversation owner must match the scoped database owner")
+    for field in ("scope_type", "workspace_id", "parent_conversation_id", "forked_from_message_id"):
+        if conversation_data.get(field) != (getattr(request, field) or None):
+            raise InputError("Conversation scope and lineage must match the validated request")
+    parent = db.get_conversation_by_id(request.parent_conversation_id) if request.parent_conversation_id else None
+    if request.parent_conversation_id and (
+        parent is None or str(parent.get("client_id", "")).strip() != user_id.strip()
+        or parent.get("scope_type") != "workspace" or parent.get("workspace_id") != request.workspace_id
+    ):
+        raise InputError("Conversation parent must match the validated scope and owner")
+    root_id = (parent.get("root_id") or parent["id"]) if parent else conversation_data.get("id")
+    if conversation_data.get("root_id") != root_id:
+        raise InputError("Conversation root must match the validated lineage")
+    with db.transaction() as conn:
+        resolved = resolve_workspace_assistant_startup(db, user_id=user_id, request=request, conn=conn)
+        payload = dict(conversation_data)
+        payload.update(
+            assistant_kind=resolved.request.assistant_kind,
+            assistant_id=resolved.request.assistant_id,
+            character_id=resolved.request.character_id,
+            persona_memory_mode=resolved.request.persona_memory_mode,
+        )
+        payload["title"] = request.title or (
+            f"{resolved.display_name} Chat ({title_timestamp})"
+            if resolved.request.assistant_kind in {"persona", "character"}
+            else f"Chat ({title_timestamp})"
+        )
+        return db.add_conversation(payload, conn=conn, assistant_startup=resolved.startup)
