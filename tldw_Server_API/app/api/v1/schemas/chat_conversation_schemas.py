@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from tldw_Server_API.app.core.Chat.assistant_startup import reject_assistant_startup_input
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, reject_assistant_startup_input
 
 ALLOWED_CONVERSATION_STATES = ("in-progress", "resolved", "backlog", "non-viable")
 
@@ -28,6 +28,9 @@ class ConversationScopeParams(BaseModel):
 
 
 class ConversationListItem(BaseModel):
+    """Owned conversation summary with visibility-checked local startup history."""
+
+    assistant_startup: AssistantStartup = Field(default_factory=AssistantStartup, json_schema_extra={"readOnly": True})
     id: str = Field(..., description="Conversation ID")
     scope_type: Literal["global", "workspace"] = Field(
         "global",
@@ -124,6 +127,9 @@ class ConversationUpdateRequest(BaseModel):
 
 
 class ConversationMetadata(BaseModel):
+    """Conversation tree metadata without message or resume authority."""
+
+    assistant_startup: AssistantStartup = Field(default_factory=AssistantStartup, json_schema_extra={"readOnly": True})
     id: str = Field(..., description="Conversation ID")
     scope_type: Literal["global", "workspace"] = Field(
         "global",

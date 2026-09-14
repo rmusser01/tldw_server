@@ -16,10 +16,35 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceEffectiveAssistantDefault,
 )
 from tldw_Server_API.app.core import feature_flags
-from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, decode_assistant_startup
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 
 WorkspacePersonaProfileCache = dict[tuple[str, str, bool], dict[str, Any] | None]
+
+
+def project_assistant_startup(
+    db: CharactersRAGDB, *, raw: object, user_id: str,
+    workspace_visibility_cache: dict[str, bool] | None = None,
+) -> AssistantStartup:
+    """Project local history through origin visibility without changing storage.
+
+    Callers may share a cache only within one authenticated response. Archived
+    Workspaces remain visible history; storage errors deliberately propagate.
+    """
+    startup = decode_assistant_startup(raw)
+    if startup.workspace_id is None:
+        return startup
+    if user_id != str(db.client_id):
+        raise InputError("Startup projection owner must match the scoped database owner")
+    origin = startup.workspace_id
+    if workspace_visibility_cache is not None and origin in workspace_visibility_cache:
+        visible = workspace_visibility_cache[origin]
+    else:
+        workspace = db.get_workspace(origin)
+        visible = workspace is not None and not workspace.get("deleted")
+        if workspace_visibility_cache is not None:
+            workspace_visibility_cache[origin] = visible
+    return startup if visible else AssistantStartup()
 
 
 def parse_workspace_assistant_defaults(

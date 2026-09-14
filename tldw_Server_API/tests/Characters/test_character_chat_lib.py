@@ -1,3 +1,5 @@
+"""Character library behavior, import safety, and public conversation boundaries."""
+
 # test_character_chat_lib.py
 #
 #
@@ -5,6 +7,7 @@
 import logging
 import copy
 import re
+from typing import Any
 
 import hypothesis
 import pytest
@@ -169,6 +172,174 @@ def db():
     db_instance = CharactersRAGDB(":memory:", client_id="pytest_client")
     yield db_instance
     db_instance.close_connection()
+
+
+@pytest.mark.parametrize("surface", ["metadata", "list", "search"])
+@pytest.mark.parametrize("hidden", [False, True])
+def test_public_library_projects_local_startup_without_exposing_raw_column(
+    db: CharactersRAGDB, surface: str, hidden: bool,
+) -> None:
+    """All public library reads redact inaccessible origin and retain ordinary metadata."""
+    from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
+
+    db.upsert_workspace("private-origin-marker", "Origin")
+    char_id = db.add_character_card({"name": "Library Persona", "system_prompt": "Help."})
+    cid = db.add_conversation(
+        {"character_id": char_id, "title": "Provenance library fixture", "rating": 4, "client_id": db.client_id},
+        assistant_startup=AssistantStartup(
+            source="workspace_default", workspace_id="private-origin-marker", workspace_version=1,
+        ),
+    )
+    stored = db.get_conversation_by_id(cid)
+    if hidden:
+        db.delete_workspace("private-origin-marker", expected_version=1)
+    if surface == "metadata":
+        result = get_conversation_metadata(db, cid)
+    elif surface == "list":
+        result = list_character_conversations(db, char_id, client_id=db.client_id)[0]
+    else:
+        result = search_conversations_by_title_query(db, "Provenance", character_id=char_id, client_id=db.client_id)[0]
+
+    assert "assistant_startup_json" not in result
+    assert (result["id"], result["title"], result["rating"]) == (cid, "Provenance library fixture", 4)
+    assert result["assistant_startup"] == {
+        "schema_version": 1, "source": "unknown" if hidden else "workspace_default",
+        "workspace_id": None if hidden else "private-origin-marker", "workspace_version": None if hidden else 1,
+    }
+    assert db.get_conversation_by_id(cid) == stored
+
+
+@pytest.mark.parametrize("surface", ["metadata", "list", "search"])
+def test_library_startup_projection_copies_the_returned_database_row(
+    db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, surface: str,
+) -> None:
+    """Sanitizing a public result must not remove internal data from its source row."""
+    from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
+
+    cid = db.add_conversation({"title": "Copy boundary"}, assistant_startup=AssistantStartup(source="explicit"))
+    row = db.get_conversation_by_id(cid)
+    snapshot = copy.deepcopy(row)
+    if surface == "metadata":
+        monkeypatch.setattr(db, "get_conversation_by_id", lambda conversation_id: row if conversation_id == cid else None)
+        projected = get_conversation_metadata(db, cid)
+    elif surface == "list":
+        monkeypatch.setattr(db, "get_conversations_for_character", lambda *args, **kwargs: [row])
+        projected = list_character_conversations(db, 1)[0]
+    else:
+        monkeypatch.setattr(db, "search_conversations_by_title", lambda *args, **kwargs: [row])
+        projected = search_conversations_by_title_query(db, "Copy")[0]
+    assert "assistant_startup_json" not in projected
+    assert row == snapshot
+    assert projected is not row
+    assert {key: value for key, value in projected.items() if key != "assistant_startup"} == {
+        key: value for key, value in snapshot.items() if key != "assistant_startup_json"
+    }
+
+
+@pytest.mark.parametrize("surface", ["metadata", "list", "search"])
+def test_library_startup_visibility_failure_retains_wrapper_error_boundary(
+    db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, surface: str,
+) -> None:
+    """A projector failure reaches the established None/empty-list error result."""
+    from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
+
+    char_id = db.add_character_card({"name": "Boundary"})
+    cid = db.add_conversation({"title": "Boundary", "character_id": char_id}, assistant_startup=AssistantStartup(
+        source="workspace_default", workspace_id="private-origin", workspace_version=1,
+    ))
+    raw = db.get_conversation_by_id(cid)["assistant_startup_json"]
+
+    def unavailable(*args: Any, **kwargs: Any) -> None:
+        """Fail only the visibility boundary after real conversation loading."""
+        raise CharactersRAGDBError("Workspace storage unavailable")
+
+    monkeypatch.setattr(db, "get_workspace", unavailable)
+    if surface == "metadata":
+        assert get_conversation_metadata(db, cid) is None
+    elif surface == "list":
+        assert list_character_conversations(db, char_id) == []
+    else:
+        assert search_conversations_by_title_query(db, "Boundary") == []
+    assert db.get_conversation_by_id(cid)["assistant_startup_json"] == raw
+
+
+@pytest.mark.parametrize("surface", ["list", "search"])
+def test_library_startup_cache_is_per_call_and_preserves_client_filter(
+    db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, surface: str,
+) -> None:
+    """Repeated rows share visibility only for this call, with no caller-filter widening."""
+    from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
+
+    db.upsert_workspace("library-cache-origin", "Origin")
+    char_id = db.add_character_card({"name": "Cache"})
+    for title in ("Cache first", "Cache second"):
+        db.add_conversation({"title": title, "character_id": char_id}, assistant_startup=AssistantStartup(
+            source="system_fallback", workspace_id="library-cache-origin", workspace_version=1,
+        ))
+    lookup = db.get_workspace
+    reads: list[str] = []
+
+    def counted_lookup(workspace_id: str, **kwargs: Any) -> dict[str, Any] | None:
+        """Count genuine visibility queries for a repeated origin."""
+        reads.append(workspace_id)
+        return lookup(workspace_id, **kwargs)
+
+    def read(client_id: str) -> list[dict[str, Any]]:
+        """Exercise both public wrappers through their existing client filters."""
+        if surface == "list":
+            return list_character_conversations(db, char_id, client_id=client_id)
+        return search_conversations_by_title_query(db, "Cache", character_id=char_id, client_id=client_id)
+
+    monkeypatch.setattr(db, "get_workspace", counted_lookup)
+    assert read("other-user") == []
+    assert reads == []
+    assert [row["assistant_startup"]["source"] for row in read(db.client_id)] == ["system_fallback"] * 2
+    assert reads == ["library-cache-origin"]
+    db.delete_workspace("library-cache-origin", expected_version=1)
+    reads.clear()
+    assert [row["assistant_startup"]["source"] for row in read(db.client_id)] == ["unknown"] * 2
+    assert reads == ["library-cache-origin"]
+
+
+def test_legacy_history_export_and_import_do_not_transport_local_startup(db: CharactersRAGDB) -> None:
+    """Legacy history bytes omit local origin and the real factory distrusts forged input."""
+    from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, decode_assistant_startup
+    from tldw_Server_API.app.core.Chat.chat_history import generate_chat_history_content
+
+    db.upsert_workspace("legacy-private-origin-marker", "Private")
+    char_id = db.add_character_card({"name": "Legacy transport", "system_prompt": "Help."})
+    source_id = db.add_conversation(
+        {"character_id": char_id, "title": "Legacy source"},
+        assistant_startup=AssistantStartup(
+            source="workspace_default", workspace_id="legacy-private-origin-marker", workspace_version=1,
+        ),
+    )
+    exported, name = generate_chat_history_content(
+        [("Keep user text.", "Keep assistant text.")], source_id, {}, db_instance=db,
+    )
+    assert name == "Legacy source"
+    for forbidden in ("assistant_startup", "assistant_startup_json", "legacy-private-origin-marker"):
+        assert forbidden not in exported
+    payload = json.loads(exported)
+    # The legacy file importer uses messages, while the history exporter uses history.
+    payload["messages"] = payload.pop("history")
+    payload["assistant_startup"] = {
+        "schema_version": 1, "source": "workspace_default",
+        "workspace_id": "forged-private-marker", "workspace_version": 44,
+    }
+    payload["assistant_startup_json"] = json.dumps(payload["assistant_startup"])
+    imported_id, imported_character = load_chat_history_from_file_and_save_to_db(
+        db, char_id, file_content=json.dumps(payload), title="Imported legacy startup",
+    )
+    assert imported_id is not None
+    assert imported_id != source_id
+    assert imported_character == char_id
+    assert decode_assistant_startup(db.get_conversation_by_id(imported_id)["assistant_startup_json"]).model_dump() == {
+        "schema_version": 1, "source": "unknown", "workspace_id": None, "workspace_version": None,
+    }
+    assert [message["content"] for message in db.get_messages_for_conversation(imported_id)] == [
+        "Keep user text.", "Keep assistant text.",
+    ]
 
 
 # --- Pytest Fixture for Capturing Logs (using standard logging) ---

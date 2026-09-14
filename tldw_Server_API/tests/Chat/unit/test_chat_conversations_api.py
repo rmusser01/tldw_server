@@ -1,16 +1,21 @@
+"""Conversation HTTP metadata preserves scope, identity, and private local origin boundaries."""
+
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.endpoints import chat as chat_router
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints import chat as chat_router
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, ConflictError, InputError
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
-
 
 pytestmark = pytest.mark.unit
 
@@ -34,6 +39,128 @@ def _build_app(db: CharactersRAGDB) -> TestClient:
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id="user-1")
     return TestClient(app)
+
+
+@pytest.fixture
+def startup_read_context(tmp_path: Path) -> Iterator[SimpleNamespace]:
+    """Seed a global chat with historical origin in a distinct real Workspace."""
+    db = CharactersRAGDB(tmp_path / "startup-read.db", client_id="user-1")
+    db.upsert_workspace("private-read-origin", "Origin")
+    cid = db.add_conversation(
+        {"title": "Moved conversation", "client_id": "user-1"},
+        assistant_startup=AssistantStartup(
+            source="workspace_default", workspace_id="private-read-origin", workspace_version=1,
+        ),
+    )
+    try:
+        with _build_app(db) as client:
+            yield SimpleNamespace(db=db, client=client, cid=cid)
+    finally:
+        db.close_all_connections()
+
+
+@pytest.mark.parametrize("surface", ["list", "detail", "update", "tree"])
+@pytest.mark.parametrize("origin_state", ["visible", "archived", "deleted", "staged", "corrupt", "legacy"])
+def test_conversation_http_surfaces_project_stored_startup(
+    startup_read_context: SimpleNamespace, surface: str, origin_state: str,
+) -> None:
+    """Every builder exposes checked history rather than hiding omissions with defaults."""
+    ctx = startup_read_context
+    db = ctx.db
+    if origin_state == "archived":
+        db.update_workspace("private-read-origin", {"archived": True}, 1)
+    elif origin_state == "deleted":
+        db.delete_workspace("private-read-origin", expected_version=1)
+    elif origin_state == "staged":
+        with db.transaction() as conn:
+            conn.execute("UPDATE workspaces SET system_operation_state = 'staged' WHERE id = ?", ("private-read-origin",))
+    elif origin_state in {"corrupt", "legacy"}:
+        with db.transaction() as conn:
+            conn.execute(
+                "UPDATE conversations SET assistant_startup_json = ? WHERE id = ?",
+                ("broken" if origin_state == "corrupt" else None, ctx.cid),
+            )
+    before = db.get_conversation_by_id(ctx.cid)
+    path = f"/api/v1/chat/conversations/{ctx.cid}"
+    if surface == "list":
+        response = ctx.client.get("/api/v1/chat/conversations")
+    elif surface == "update":
+        response = ctx.client.patch(path, json={"version": before["version"], "source": "api"})
+    else:
+        response = ctx.client.get(path + ("/tree" if surface == "tree" else ""))
+    assert response.status_code == 200, response.text
+    if surface == "list":
+        result = next(item for item in response.json()["items"] if item["id"] == ctx.cid)
+    elif surface == "tree":
+        result = response.json()["conversation"]
+    else:
+        result = response.json()
+    visible = origin_state in {"visible", "archived"}
+    assert result["assistant_startup"] == {
+        "schema_version": 1, "source": "workspace_default" if visible else "unknown",
+        "workspace_id": "private-read-origin" if visible else None, "workspace_version": 1 if visible else None,
+    }
+    assert "assistant_startup_json" not in response.text
+    if not visible:
+        assert "private-read-origin" not in response.text
+    assert db.get_conversation_by_id(ctx.cid)["assistant_startup_json"] == before["assistant_startup_json"]
+
+
+def test_conversation_list_origin_cache_does_not_outlive_request(
+    startup_read_context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shared origins cost one read per response and access loss affects the next response."""
+    ctx = startup_read_context
+    ctx.db.add_conversation(
+        {"title": "Another moved conversation", "client_id": "user-1"},
+        assistant_startup=AssistantStartup(
+            source="workspace_default", workspace_id="private-read-origin", workspace_version=1,
+        ),
+    )
+    real_lookup = ctx.db.get_workspace
+    reads: list[str] = []
+
+    def counted_lookup(workspace_id: str, **kwargs: Any) -> dict[str, Any] | None:
+        """Count the existing real authorization boundary, not a mocked outcome."""
+        reads.append(workspace_id)
+        return real_lookup(workspace_id, **kwargs)
+
+    monkeypatch.setattr(ctx.db, "get_workspace", counted_lookup)
+    first = ctx.client.get("/api/v1/chat/conversations")
+    assert first.status_code == 200, first.text
+    assert [item["assistant_startup"]["source"] for item in first.json()["items"]] == ["workspace_default", "workspace_default"]
+    assert reads == ["private-read-origin"]
+    ctx.db.delete_workspace("private-read-origin", expected_version=1)
+    reads.clear()
+    second = ctx.client.get("/api/v1/chat/conversations")
+    assert second.status_code == 200, second.text
+    assert [item["assistant_startup"]["source"] for item in second.json()["items"]] == ["unknown", "unknown"]
+    assert reads == ["private-read-origin"]
+
+
+@pytest.mark.parametrize("surface", ["list", "detail", "update", "tree"])
+def test_conversation_origin_lookup_failure_propagates(
+    startup_read_context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, surface: str,
+) -> None:
+    """An authorization DB outage cannot masquerade as successful unknown metadata."""
+    ctx = startup_read_context
+    before = ctx.db.get_conversation_by_id(ctx.cid)
+
+    def unavailable(*args: Any, **kwargs: Any) -> None:
+        """Fail only the historical Workspace visibility lookup."""
+        raise CharactersRAGDBError("Workspace storage unavailable")
+
+    monkeypatch.setattr(ctx.db, "get_workspace", unavailable)
+    path = f"/api/v1/chat/conversations/{ctx.cid}"
+    if surface == "list":
+        response = ctx.client.get("/api/v1/chat/conversations")
+    elif surface == "update":
+        response = ctx.client.patch(path, json={"version": before["version"], "source": "api"})
+    else:
+        response = ctx.client.get(path + ("/tree" if surface == "tree" else ""))
+    assert response.status_code == 500, response.text
+    assert "assistant_startup" not in response.text
+    assert ctx.db.get_conversation_by_id(ctx.cid)["assistant_startup_json"] == before["assistant_startup_json"]
 
 
 def _install_conversation_observability_spies(monkeypatch: pytest.MonkeyPatch):

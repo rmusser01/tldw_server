@@ -19,7 +19,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import ChatSessionC
 from tldw_Server_API.app.core import feature_flags
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import create_character_conversation
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, decode_assistant_startup
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.tests.Sync.test_sync_v2_server_origin_capture import (
     _chat_messages_app,
@@ -101,6 +101,118 @@ def test_creation_records_omission_null_and_explicit_choices(
         "workspace_id": "ws" if source == "workspace_default" else None,
         "workspace_version": startup_api.db.get_workspace("ws")["version"] if source == "workspace_default" else None,
     }
+    assert response.json()["assistant_startup"] == origin
+
+
+@pytest.mark.parametrize("source", ["workspace_default", "system_fallback"])
+@pytest.mark.parametrize("visibility", ["visible", "archived", "deleted", "staged", "legacy", "corrupt"])
+@pytest.mark.parametrize("surface", ["get", "list", "update", "restore", "restore_active"])
+def test_chat_session_builders_project_stored_startup(
+    startup_api: SimpleNamespace, source: str, visibility: str, surface: str,
+) -> None:
+    """Every chat builder checks historical origin, including both restore branches."""
+    db = startup_api.db
+    db.upsert_workspace("private-session-origin", "Origin")
+    cid = db.add_conversation(
+        {"title": "Moved to global", "client_id": "1"},
+        assistant_startup=AssistantStartup(source=source, workspace_id="private-session-origin", workspace_version=1),
+    )
+    if visibility == "archived":
+        db.update_workspace("private-session-origin", {"archived": True}, 1)
+    elif visibility == "deleted":
+        db.delete_workspace("private-session-origin", expected_version=1)
+    elif visibility == "staged":
+        with db.transaction() as conn:
+            conn.execute("UPDATE workspaces SET system_operation_state = 'staged' WHERE id = ?", ("private-session-origin",))
+    elif visibility in {"legacy", "corrupt"}:
+        with db.transaction() as conn:
+            conn.execute("UPDATE conversations SET assistant_startup_json = ? WHERE id = ?", (None if visibility == "legacy" else "broken", cid))
+    before = db.get_conversation_by_id(cid)
+    path = f"/api/v1/chats/{cid}"
+    if surface == "list":
+        response = startup_api.client.get("/api/v1/chats/")
+    elif surface == "update":
+        response = startup_api.client.put(path, params={"expected_version": before["version"]}, json={"title": "Renamed"})
+    elif surface.startswith("restore"):
+        if surface == "restore":
+            db.soft_delete_conversation(cid, before["version"])
+        response = startup_api.client.post(path + "/restore")
+    else:
+        response = startup_api.client.get(path)
+    assert response.status_code == 200, response.text
+    result = response.json()["chats"][0] if surface == "list" else response.json()
+    visible = visibility in {"visible", "archived"}
+    assert result["assistant_startup"] == {
+        "schema_version": 1, "source": source if visible else "unknown",
+        "workspace_id": "private-session-origin" if visible else None, "workspace_version": 1 if visible else None,
+    }
+    assert "assistant_startup_json" not in response.text
+    if not visible:
+        assert "private-session-origin" not in response.text
+    assert db.get_conversation_by_id(cid)["assistant_startup_json"] == before["assistant_startup_json"]
+
+
+def test_chat_list_startup_cache_expires_after_request(
+    startup_api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """List caches only this response's distinct origins and rechecks access next time."""
+    db = startup_api.db
+    db.upsert_workspace("list-origin", "Origin")
+    for title in ("First", "Second"):
+        db.add_conversation({"title": title}, assistant_startup=AssistantStartup(
+            source="system_fallback", workspace_id="list-origin", workspace_version=1,
+        ))
+    lookup = db.get_workspace
+    reads: list[str] = []
+
+    def counted_lookup(workspace_id: str, **kwargs: Any) -> dict[str, Any] | None:
+        """Observe actual visibility reads without replacing authorization."""
+        reads.append(workspace_id)
+        return lookup(workspace_id, **kwargs)
+
+    monkeypatch.setattr(db, "get_workspace", counted_lookup)
+    first = startup_api.client.get("/api/v1/chats/")
+    assert first.status_code == 200, first.text
+    assert [item["assistant_startup"]["source"] for item in first.json()["chats"]] == ["system_fallback"] * 2
+    assert reads == ["list-origin"]
+    db.delete_workspace("list-origin", expected_version=1)
+    reads.clear()
+    second = startup_api.client.get("/api/v1/chats/")
+    assert second.status_code == 200, second.text
+    assert [item["assistant_startup"]["source"] for item in second.json()["chats"]] == ["unknown"] * 2
+    assert reads == ["list-origin"]
+
+
+@pytest.mark.parametrize("surface", ["get", "list", "update", "restore", "restore_active"])
+def test_chat_startup_visibility_failure_is_not_successful_unknown(
+    startup_api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, surface: str,
+) -> None:
+    """DB failure during origin authorization reaches existing endpoint error mapping."""
+    db = startup_api.db
+    cid = db.add_conversation({"title": "Moved"}, assistant_startup=AssistantStartup(
+        source="workspace_default", workspace_id="ws", workspace_version=2,
+    ))
+    raw = db.get_conversation_by_id(cid)["assistant_startup_json"]
+    if surface == "restore":
+        db.soft_delete_conversation(cid, 1)
+
+    def unavailable(*args: Any, **kwargs: Any) -> None:
+        """Fail at the origin DB boundary, not at conversation authorization."""
+        raise CharactersRAGDBError("Workspace storage unavailable")
+
+    monkeypatch.setattr(db, "get_workspace", unavailable)
+    path = f"/api/v1/chats/{cid}"
+    if surface == "list":
+        response = startup_api.client.get("/api/v1/chats/")
+    elif surface == "update":
+        response = startup_api.client.put(path, params={"expected_version": 1}, json={"title": "Renamed"})
+    elif surface.startswith("restore"):
+        response = startup_api.client.post(path + "/restore")
+    else:
+        response = startup_api.client.get(path)
+    assert response.status_code == 500, response.text
+    assert "assistant_startup" not in response.text
+    assert db.get_conversation_by_id(cid, include_deleted=True)["assistant_startup_json"] == raw
 
 
 def test_global_creation_remains_unknown(startup_api: SimpleNamespace) -> None:
