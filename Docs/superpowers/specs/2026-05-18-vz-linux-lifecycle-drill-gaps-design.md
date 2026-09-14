@@ -282,3 +282,37 @@ touch:
   first implementation drill lands?
 - What minimum prepared-host evidence is required before any of these drills can
   be promoted from manual local run to manual host-gated workflow input?
+
+## 2026-09-13 Reproducible Guest-Fault Workflow
+
+TASK-13243.5 packages the two already accepted real guest drills (missing `exec`
+capability and acknowledged-handshake readiness withholding) into one explicit
+operator workflow, `tools/macos-vz-helper/scripts/vz-failure-drill.py`. This is
+preparation and repeatability work, not a new runtime or a general fault engine.
+The existing individual pytest entrypoints remain available.
+
+- Require explicit fault-injection consent, a known-good Debian arm64 ext4
+  bundle, a signed helper path, and a new private evidence directory.
+- Keep fault behavior in checked-in test fixtures applied through Go build
+  overlays. Refuse ambiguous/missing source anchors rather than silently
+  producing a healthy guest. No production flags or source edits.
+- Use the existing image-store materializer for all clones. Install each test
+  binary into an offline clone through a separate healthy disposable preparer
+  VM; compare installed bytes and run filesystem checks. Never boot source
+  bundles, and independently verify their hashes even after a failed drill.
+- Use the existing managed direct-helper lifecycle at a fresh private socket,
+  with signing/entitlement preflight and PID ownership checks. Do not attach to
+  another helper, install launchd services, or change default smoke/CI triggers.
+- Run both positive tests and negative controls on fresh clones. Negative
+  acceptance requires the intended assertion failure **and** recorded completed
+  execution, exit zero, exact stdout, and dispatch to the fault VM. Cancelled
+  runs, unrelated failures, missing reports, and skips are not acceptance.
+- Retain receipts, input/binary/source hashes, overlays, logs, and image-store
+  clones. Independently attempt VM cleanup, disk-handle checks, helper stop, and
+  socket/PID absence verification. Any cleanup uncertainty makes the command
+  fail. Only the empty short runtime directory is automatically removed.
+
+Host reboot, kernel boot hangs, missing-agent, protocol-version mismatch,
+workspace mismatch, arbitrary crash classes, and scheduled fault injection
+remain outside this slice. See the helper README for the operator command and
+`Docs/Sandbox/vz-linux-prepared-host-evidence.md` for the actual host results.

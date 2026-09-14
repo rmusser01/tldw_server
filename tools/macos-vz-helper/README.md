@@ -162,6 +162,60 @@ run's evidence directory after review when it is no longer needed. Hard host
 termination can bypass Python cleanup; inspect the receipt's unique label and
 plist before any manual cleanup. Do not add this opt-in to scheduled CI.
 
+### Reproducible Guest Failure Workflow
+
+Use this explicit, manual-only command to prepare and run **both** the
+capability-mismatch and acknowledged-handshake readiness-timeout drills below.
+It also runs a negative control for each drill. Production guest code, normal
+smoke behavior, and scheduled CI are unchanged.
+
+Prerequisites: Apple Silicon macOS, the project Python environment (including
+pytest-timeout), Go with this repository's agent dependencies already cached,
+an explicitly selected signed helper, and a known-good Debian arm64 bundle.
+The bundle must use an ext4 `rootfs.img` and contain `e2fsck`, `debugfs`, `cmp`,
+and `sha256sum`. It must not be in use or modified by another process. Preparation
+is offline: the command does not download Go dependencies or provision Debian.
+Use the existing build/sign instructions above for the helper.
+
+```bash
+source .venv/bin/activate
+# This parent already exists on a prepared macOS host; choose a new run name.
+evidence_dir="$HOME/Library/Logs/tldw-vz-failure-$(date +%Y%m%d-%H%M%S)"
+python tools/macos-vz-helper/scripts/vz-failure-drill.py \
+  --allow-fault-injection \
+  --source-bundle "${SOURCE_BUNDLE:?Set SOURCE_BUNDLE to the canonical healthy bundle}" \
+  --helper "${HELPER_BINARY:?Set HELPER_BINARY to the signed helper executable}" \
+  --evidence-dir "$evidence_dir"
+```
+
+The evidence directory must be new and its parent must already exist. The
+workflow builds two **test-only Go overlays** from the checkout, failing closed
+if the source anchors have changed. A separate disposable healthy VM installs
+each binary into an **offline image-store clone**, verifies the installed bytes,
+and checks the filesystem. Each test attempt gets fresh healthy/fault clones;
+neither canonical nor prepared fault sources are booted. The command manages
+its own direct helper with a unique private socket and PID file. It never
+attaches to an existing helper, installs launchd services, or reboots the host.
+
+Exit zero requires two passing live tests, two negative controls failing at
+their specific execution assertions, no skipped tests, no cleanup errors, empty
+VM inventory, closed disposable disks, helper shutdown, and unchanged source
+hashes. An unrelated boot failure is not a successful negative control.
+
+Retained artifacts include `receipt.json`, per-case `result.json`, JUnit and
+guest receipts, build overlays/binaries/hashes, installation logs, helper/serial
+logs, and the image store. Treat these as private operator evidence; review them
+before sharing. **Evidence and disks are deliberately not deleted.** After review,
+remove only that run's evidence directory when its cleanup receipt confirms the
+helper and VMs are gone. A failure retains logs and returns nonzero; unavailable
+cleanup checks are not reported as empty. Ctrl-C/SIGTERM attempt cleanup, but
+SIGKILL, a host crash, or power loss can bypass it. In that case inspect the
+receipt's unique runtime/socket/PID paths before manual recovery. Never enable
+these fault fixtures on a production guest or run this in scheduled CI.
+
+The standalone tests below remain useful when operating an already isolated
+helper or investigating one drill independently.
+
 ### Guest Capability Mismatch Drill
 
 This manual test exercises the existing runner's required-capability gate. It

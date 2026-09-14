@@ -1,0 +1,34 @@
+	// Test-only build overlay; the normal guest never reads this challenge.
+	challengeData, challengeErr := os.ReadFile(c.cfg.WorkspaceRoot + "/.tldw-readiness-challenge.json")
+	if challengeErr != nil && !errors.Is(challengeErr, os.ErrNotExist) {
+		return nil, challengeErr
+	}
+	if challengeErr == nil {
+		var challenge struct {
+			Nonce string `json:"nonce"`
+			WithholdReady bool `json:"withhold_ready"`
+		}
+		if err := json.Unmarshal(challengeData, &challenge); err != nil {
+			return nil, err
+		}
+		if len(challenge.Nonce) != 32 {
+			return nil, errors.New("invalid test readiness challenge")
+		}
+		proof, err := json.Marshal(map[string]any{
+			"nonce": challenge.Nonce, "vm_id": c.cfg.VMID, "handshake_acknowledged": true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(c.cfg.WorkspaceRoot+"/.tldw-readiness-proof.json", proof, 0600); err != nil {
+			return nil, err
+		}
+		if challenge.WithholdReady {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(2 * time.Minute):
+				return nil, errors.New("test-only readiness watchdog expired")
+			}
+		}
+	}

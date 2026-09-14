@@ -103,6 +103,50 @@ triage issue.
 
 ## Latest Evidence
 
+### 2026-09-13: Checked-in real guest-failure workflow (TASK-13243.5)
+
+- Source: `codex/vz-failure-drill-workflow`, based on merged PR #2960
+  (`ebdeeac384c58559fa90fd3a5f79f5262ae190d5`), same Apple Silicon host.
+  No reboot or changes to the canonical Debian arm64 image.
+- Command: `python tools/macos-vz-helper/scripts/vz-failure-drill.py
+  --allow-fault-injection --source-bundle "$SOURCE_BUNDLE"
+  --helper "$HELPER_BINARY" --evidence-dir "$EVIDENCE_DIR"`, from the project
+  environment. The exact operator recipe and prerequisites are in the helper
+  README. No local-only driver or fault overlay was needed.
+- Final packet: `~/Library/Logs/tldw/vz-failure-workflow-20260913-r2/`.
+  `receipt.json` SHA-256:
+  `b961d96340c5779de938734737f085e16bfa518b2ff2c2eb146a8e87a442963e`.
+  The earlier `vz-failure-workflow-20260913-r1` packet is also retained;
+  final acceptance uses r2 after the negative-control review fix.
+- Both overlays were built from the checkout and installed through separate
+  healthy preparer VMs into offline image-store clones. Installed bytes matched
+  the built binaries, and ext4 filesystem checks passed before/after patching.
+- Positive capability-mismatch test: **1 passed, 0 skipped/errors**; real missing
+  `exec` metadata was rejected without dispatch, then two healthy commands reused
+  VM `5845c56e-678c-4780-9d29-0741ad3f811d`.
+- Positive readiness test: **1 passed, 0 skipped/errors**; a fresh acknowledged
+  handshake proof preceded `guest_transport_timeout` at **15.071 seconds**.
+  Two healthy commands then reused VM `d5f5a6c3-075f-4c46-a594-2531bd1a5c42`.
+- Both negative controls: exactly **1 expected assertion failure, 0 skips/errors**
+  per case. The final wrapper also verified the guest receipts: completed run,
+  exit zero, exact expected stdout, and execution in the fault VM. A cancelled
+  run or unrelated boot failure cannot count as successful negative evidence.
+- Final cleanup: empty VM inventory, no disposable disk handles before helper
+  stop, managed helper stopped, socket/PID absent, private runtime removed.
+  Canonical and both prepared fault-source hashes remained identical. Canonical
+  rootfs SHA-256 remained
+  `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`.
+- Portable verification: **255 passed, 8 explicitly gated skips** across workflow,
+  helperctl, materializer, mismatch, and readiness tests; normal Go agent suite
+  passed. Ruff/Black and scoped Bandit validation passed. The eight portable-run
+  skips are not substituted for live acceptance: all four explicit live cases
+  ran without skips. Full server and Swift suites were not run for this
+  Python/test-fixture-only slice.
+- Remaining gaps unchanged: host reboot, kernel boot hang, missing agent,
+  protocol-version/workspace mismatch injection, and broader crash classes.
+  This closes reproducible preparation for the two existing guest drills, not
+  every lifecycle failure mode. Follow-up remains tracked by #1442.
+
 ### 2026-09-13: PR #2960 review follow-up (portable verification)
 
 - Both drills now share the readiness drill's resilient ownership-scoped cleanup.
