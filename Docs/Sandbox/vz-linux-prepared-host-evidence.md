@@ -103,6 +103,91 @@ triage issue.
 
 ## Latest Evidence
 
+### 2026-09-14: PR #2962 review-fix real workflow verification
+
+- Repeated the checked-in operator command on the same Apple Silicon host,
+  using the same canonical Debian arm64 bundle and signed helper as below.
+  Includes process-group cancellation, dependency provenance, and contextual
+  readiness-overlay errors; no production runtime changes or host reboot.
+- Final packet: `~/Library/Logs/tldw/vz-failure-workflow-20260914-final/`.
+  `receipt.json` SHA-256:
+  `2b8a4d8d5a10642354bb8ff9de0a1d3fb5b77e7c57f034f9df59a54282766456`.
+  The receipt includes the exact workflow, helperctl, materializer, guest-source,
+  fixture, and helper hashes used for this run. The earlier passing
+  `vz-failure-workflow-20260914-review` packet is retained, but final acceptance
+  uses the rerun after the independently identified spawn-cancellation fix.
+- Both positive cases passed with no skips/errors. Both negative controls
+  produced their exact expected assertion failures and verified completed,
+  exit-zero guest execution with exact stdout in the fault VM. Healthy-session
+  recovery and same-session reuse passed in both positive cases.
+- Cleanup: empty VM inventory, no allocated disk handles, helper stopped,
+  socket/PID absent, private runtime removed. Canonical and both prepared
+  fault-source hashes remained unchanged; `errors` was empty and `ok` true.
+- Separate real-process regressions reproduced orphaned descendants on timeout
+  and parent-only SIGTERM before the fix; both passed after process-group
+  termination and direct-child reaping were added. This is process cancellation
+  evidence, not a claim of live-VM SIGTERM or host-reboot acceptance.
+- A deterministic signal during process creation also reproduced a child leak.
+  Deferring handled termination signals until ownership registration fixed it;
+  independent SIGINT/SIGTERM probes confirmed reaping and handler restoration.
+- Final focused suite: **295 passed, 2 expected host-gated skips**, four existing
+  warnings. Go agent suite, Ruff (including annotations/docstrings), Black,
+  diff checks, and scoped Bandit scans passed (test assertions excluded).
+  Independent re-review found no remaining issues. Full server/Swift suites
+  and additional failure classes remain outside this Python/test-only change.
+- Subsequent reviewer-guide follow-up: **298 passed, 2 expected host-gated
+  skips**, four existing warnings. Added combined installation/termination
+  failure regressions and a startup signal-burst test; documented first-signal
+  coalescing and the boot-artifact/metadata fingerprint boundary. This later
+  change preserves the primary exception with a cleanup note; it does not
+  alter Go overlays or normal VM behavior. No additional real VM run was
+  performed for this exception-reporting/test/documentation-only follow-up;
+  the packet above records the exact earlier workflow bytes it exercised.
+
+### 2026-09-13: Checked-in real guest-failure workflow (TASK-13243.5)
+
+- Source: `codex/vz-failure-drill-workflow`, based on merged PR #2960
+  (`ebdeeac384c58559fa90fd3a5f79f5262ae190d5`), same Apple Silicon host.
+  No reboot or changes to the canonical Debian arm64 image.
+- Command: `python tools/macos-vz-helper/scripts/vz-failure-drill.py
+  --allow-fault-injection --source-bundle "$SOURCE_BUNDLE"
+  --helper "$HELPER_BINARY" --evidence-dir "$EVIDENCE_DIR"`, from the project
+  environment. The exact operator recipe and prerequisites are in the helper
+  README. No local-only driver or fault overlay was needed.
+- Final packet: `~/Library/Logs/tldw/vz-failure-workflow-20260913-r2/`.
+  `receipt.json` SHA-256:
+  `b961d96340c5779de938734737f085e16bfa518b2ff2c2eb146a8e87a442963e`.
+  The earlier `vz-failure-workflow-20260913-r1` packet is also retained;
+  final acceptance uses r2 after the negative-control review fix.
+- Both overlays were built from the checkout and installed through separate
+  healthy preparer VMs into offline image-store clones. Installed bytes matched
+  the built binaries, and ext4 filesystem checks passed before/after patching.
+- Positive capability-mismatch test: **1 passed, 0 skipped/errors**; real missing
+  `exec` metadata was rejected without dispatch, then two healthy commands reused
+  VM `5845c56e-678c-4780-9d29-0741ad3f811d`.
+- Positive readiness test: **1 passed, 0 skipped/errors**; a fresh acknowledged
+  handshake proof preceded `guest_transport_timeout` at **15.071 seconds**.
+  Two healthy commands then reused VM `d5f5a6c3-075f-4c46-a594-2531bd1a5c42`.
+- Both negative controls: exactly **1 expected assertion failure, 0 skips/errors**
+  per case. The final wrapper also verified the guest receipts: completed run,
+  exit zero, exact expected stdout, and execution in the fault VM. A cancelled
+  run or unrelated boot failure cannot count as successful negative evidence.
+- Final cleanup: empty VM inventory, no disposable disk handles before helper
+  stop, managed helper stopped, socket/PID absent, private runtime removed.
+  Canonical and both prepared fault-source hashes remained identical. Canonical
+  rootfs SHA-256 remained
+  `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`.
+- Portable verification: **255 passed, 8 explicitly gated skips** across workflow,
+  helperctl, materializer, mismatch, and readiness tests; normal Go agent suite
+  passed. Ruff/Black and scoped Bandit validation passed. The eight portable-run
+  skips are not substituted for live acceptance: all four explicit live cases
+  ran without skips. Full server and Swift suites were not run for this
+  Python/test-fixture-only slice.
+- Remaining gaps unchanged: host reboot, kernel boot hang, missing agent,
+  protocol-version/workspace mismatch injection, and broader crash classes.
+  This closes reproducible preparation for the two existing guest drills, not
+  every lifecycle failure mode. Follow-up remains tracked by #1442.
+
 ### 2026-09-13: PR #2960 review follow-up (portable verification)
 
 - Both drills now share the readiness drill's resilient ownership-scoped cleanup.
