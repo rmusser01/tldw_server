@@ -4,13 +4,14 @@ import importlib.util
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import NoReturn, Optional
 
 import pytest
 
 
 @pytest.fixture
-def drill():
+def drill() -> ModuleType:
     """Load the operator entrypoint without starting a helper."""
     path = Path(__file__).resolve().parents[1] / "scripts/vz-failure-drill.py"
     assert path.is_file(), "The reproducible fault workflow is not implemented"
@@ -20,7 +21,8 @@ def drill():
     return module
 
 
-def test_evidence_is_exclusive_and_private(drill, tmp_path):
+@pytest.mark.unit
+def test_evidence_is_exclusive_and_private(drill: ModuleType, tmp_path: Path) -> None:
     """Re-running a command must not overwrite earlier receipts."""
     source = tmp_path / "source"
     source.mkdir()
@@ -32,8 +34,9 @@ def test_evidence_is_exclusive_and_private(drill, tmp_path):
     assert (evidence / "receipt.json").read_text() == "retained"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("symlink", [False, True])
-def test_evidence_cannot_mutate_source(drill, tmp_path, symlink):
+def test_evidence_cannot_mutate_source(drill: ModuleType, tmp_path: Path, symlink: bool) -> None:
     """Containment checks must resolve aliases before creating output."""
     source = tmp_path / "source"
     source.mkdir()
@@ -46,19 +49,21 @@ def test_evidence_cannot_mutate_source(drill, tmp_path, symlink):
     assert list(source.iterdir()) == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("source", ["missing", "anchor anchor"])
-def test_overlay_refuses_source_drift(drill, source):
+def test_overlay_refuses_source_drift(drill: ModuleType, source: str) -> None:
     """An unrecognized or ambiguous source must not yield a healthy fault guest."""
     with pytest.raises(ValueError, match="anchor"):
         drill.replace_once(source, "anchor", "fault")
 
 
-def test_overlay_replaces_exactly_one_anchor(drill):
+@pytest.mark.unit
+def test_overlay_replaces_exactly_one_anchor(drill: ModuleType) -> None:
     """The replacement must preserve surrounding production code."""
     assert drill.replace_once("before anchor after", "anchor", "fault") == "before fault after"
 
 
-def write_junit(path, name, outcome="", message="", body=""):
+def write_junit(path: Path, name: str, outcome: str = "", message: str = "", body: str = "") -> None:
     """Write an independently specified single-test report."""
     # Escaping locally constructed test output; no XML parser is invoked here.
     from xml.sax.saxutils import escape, quoteattr  # nosec B406
@@ -67,6 +72,7 @@ def write_junit(path, name, outcome="", message="", body=""):
     path.write_text(f'<testsuites><testsuite><testcase name="{name}">{result}</testcase></testsuite></testsuites>')
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "outcome,code,message,negative,accepted",
     [
@@ -79,14 +85,17 @@ def write_junit(path, name, outcome="", message="", body=""):
         ("failure", 2, "Failed: Readiness withholding did not fail: completed", True, False),
     ],
 )
-def test_acceptance_requires_exact_result(drill, tmp_path, outcome, code, message, negative, accepted):
+def test_acceptance_requires_exact_result(
+    drill: ModuleType, tmp_path: Path, outcome: str, code: int, message: str, negative: bool, accepted: bool
+) -> None:
     """Only the intended pass/failure is acceptance, never skips or other errors."""
     xml = tmp_path / "host.xml"
     write_junit(xml, "test_vz_linux_readiness_timeout_then_healthy_session_reuse", outcome, message)
     assert drill.test_result(xml, code, "readiness", negative)["ok"] is accepted
 
 
-def test_negative_control_does_not_match_source_in_traceback(drill, tmp_path):
+@pytest.mark.unit
+def test_negative_control_does_not_match_source_in_traceback(drill: ModuleType, tmp_path: Path) -> None:
     """A traceback quoting the assertion must not hide an unrelated failure."""
     xml = tmp_path / "host.xml"
     write_junit(
@@ -99,8 +108,9 @@ def test_negative_control_does_not_match_source_in_traceback(drill, tmp_path):
     assert not drill.test_result(xml, 1, "readiness", True)["ok"]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("variant", ["missing", "malformed", "empty", "wrong_test", "extra_test"])
-def test_result_rejects_incomplete_or_wrong_report(drill, tmp_path, variant):
+def test_result_rejects_incomplete_or_wrong_report(drill: ModuleType, tmp_path: Path, variant: str) -> None:
     """A green process exit alone cannot prove that the selected drill ran."""
     xml = tmp_path / "host.xml"
     if variant == "malformed":
@@ -114,11 +124,13 @@ def test_result_rejects_incomplete_or_wrong_report(drill, tmp_path, variant):
     assert not drill.test_result(xml, 0, "readiness", False)["ok"]
 
 
-def test_cleanup_attempts_every_vm_and_records_remaining(drill):
+@pytest.mark.unit
+def test_cleanup_attempts_every_vm_and_records_remaining(drill: ModuleType) -> None:
     """One operational cleanup failure must not prevent later deletions."""
     remaining = {"a", "b"}
 
-    def terminate(vm_id):
+    def terminate(vm_id: str) -> bool:
+        """Fail the first termination and remove subsequent VMs from the inventory."""
         if vm_id == "a":
             raise OSError("could not terminate a")
         remaining.remove(vm_id)
@@ -135,10 +147,12 @@ def test_cleanup_attempts_every_vm_and_records_remaining(drill):
     assert "could not terminate a" in result["errors"][0]
 
 
-def test_cleanup_unknown_is_not_empty(drill):
+@pytest.mark.unit
+def test_cleanup_unknown_is_not_empty(drill: ModuleType) -> None:
     """Unavailable enumeration is not successful cleanup."""
 
-    def unavailable():
+    def unavailable() -> NoReturn:
+        """Simulate an unavailable helper instead of an empty VM inventory."""
         raise OSError("helper unavailable")
 
     result = drill.cleanup_vms(SimpleNamespace(list_vms=unavailable))
@@ -146,24 +160,31 @@ def test_cleanup_unknown_is_not_empty(drill):
     assert not result["ok"]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "body_fails,start_fails,stop_fails", [(True, False, False), (False, True, False), (False, False, True)]
 )
-def test_managed_lifecycle_retains_failure_and_stops(drill, tmp_path, body_fails, start_fails, stop_fails):
+def test_managed_lifecycle_retains_failure_and_stops(
+    drill: ModuleType, tmp_path: Path, body_fails: bool, start_fails: bool, stop_fails: bool
+) -> None:
     """Failed starts or drill bodies must still stop the exclusively owned helper."""
 
     @dataclass
     class Result:
+        """Represent the outcome returned by a simulated helper lifecycle action."""
+
         ok: bool
         reason: str = ""
 
     state = {"running": False}
 
-    def start(*args):
+    def start(*args: Path) -> Result:
+        """Mark the helper running and return the configured startup outcome."""
         state["running"] = True
         return Result(not start_fails, "start failed" if start_fails else "")
 
-    def stop(*args, **kwargs):
+    def stop(*args: Path, **kwargs: Path) -> Result:
+        """Stop the simulated helper unless the configured shutdown fails."""
         if stop_fails:
             raise OSError("stop failed")
         state["running"] = False
@@ -189,7 +210,8 @@ def test_managed_lifecycle_retains_failure_and_stops(drill, tmp_path, body_fails
         assert receipt["errors"]
 
 
-def test_disk_probe_errors_are_not_absence(drill, tmp_path, monkeypatch):
+@pytest.mark.unit
+def test_disk_probe_errors_are_not_absence(drill: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """lsof exit 1 with diagnostics means unknown, not no open handles."""
     monkeypatch.setattr(
         drill.subprocess,
@@ -199,7 +221,8 @@ def test_disk_probe_errors_are_not_absence(drill, tmp_path, monkeypatch):
     assert not drill.disk_handles([tmp_path / "rootfs.img"])["ok"]
 
 
-def test_cli_requires_opt_in_before_mutation(drill, tmp_path):
+@pytest.mark.unit
+def test_cli_requires_opt_in_before_mutation(drill: ModuleType, tmp_path: Path) -> None:
     """An accidental copy/paste without consent must not allocate images or logs."""
     with pytest.raises(SystemExit) as result:
         drill.main(
@@ -209,7 +232,8 @@ def test_cli_requires_opt_in_before_mutation(drill, tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
-def test_source_verification_continues_after_canonical_failure(drill, tmp_path):
+@pytest.mark.unit
+def test_source_verification_continues_after_canonical_failure(drill: ModuleType, tmp_path: Path) -> None:
     """Failure receipts must still check fault-source immutability independently."""
     fault = tmp_path / "image-store/runs/mismatch-source/bundle"
     fault.mkdir(parents=True)
@@ -225,11 +249,14 @@ def test_source_verification_continues_after_canonical_failure(drill, tmp_path):
     assert len(receipt["errors"]) == 2
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("profile", ["mismatch", "readiness"])
 @pytest.mark.parametrize(
     "fault", [None, "cancelled", "exit_code", "stdout", "dispatch", "handshake", "missing", "malformed"]
 )
-def test_negative_control_requires_actual_fault_execution(drill, tmp_path, profile, fault):
+def test_negative_control_requires_actual_fault_execution(
+    drill: ModuleType, tmp_path: Path, profile: str, fault: Optional[str]
+) -> None:
     """Cancellation/empty output/another VM must not count as meaningful RED."""
     packet = tmp_path / "pytest/test_case0"
     packet.mkdir(parents=True)

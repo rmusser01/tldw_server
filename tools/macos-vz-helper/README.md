@@ -202,13 +202,16 @@ their specific execution assertions, no skipped tests, no cleanup errors, empty
 VM inventory, closed disposable disks, helper shutdown, and unchanged source
 hashes. An unrelated boot failure is not a successful negative control.
 
-Retained artifacts include `receipt.json`, per-case `result.json`, JUnit and
+Retained artifacts include `receipt.json` (including hashes of helperctl and
+the image-store materializer), per-case `result.json`, JUnit and
 guest receipts, build overlays/binaries/hashes, installation logs, helper/serial
 logs, and the image store. Treat these as private operator evidence; review them
 before sharing. **Evidence and disks are deliberately not deleted.** After review,
 remove only that run's evidence directory when its cleanup receipt confirms the
 helper and VMs are gone. A failure retains logs and returns nonzero; unavailable
-cleanup checks are not reported as empty. Ctrl-C/SIGTERM attempt cleanup, but
+cleanup checks are not reported as empty. Ctrl-C/SIGTERM and command timeouts
+terminate the active build/test process group and reap its direct child before
+helper cleanup (three-second TERM grace, then KILL). They attempt cleanup, but
 SIGKILL, a host crash, or power loss can bypass it. In that case inspect the
 receipt's unique runtime/socket/PID paths before manual recovery. Never enable
 these fault fixtures on a production guest or run this in scheduled CI.

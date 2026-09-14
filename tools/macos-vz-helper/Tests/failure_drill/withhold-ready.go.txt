@@ -1,7 +1,9 @@
 	// Test-only build overlay; the normal guest never reads this challenge.
-	challengeData, challengeErr := os.ReadFile(c.cfg.WorkspaceRoot + "/.tldw-readiness-challenge.json")
+	challengePath := c.cfg.WorkspaceRoot + "/.tldw-readiness-challenge.json"
+	proofPath := c.cfg.WorkspaceRoot + "/.tldw-readiness-proof.json"
+	challengeData, challengeErr := os.ReadFile(challengePath)
 	if challengeErr != nil && !errors.Is(challengeErr, os.ErrNotExist) {
-		return nil, challengeErr
+		return nil, fmt.Errorf("read test readiness challenge %s: %w", challengePath, challengeErr)
 	}
 	if challengeErr == nil {
 		var challenge struct {
@@ -9,7 +11,7 @@
 			WithholdReady bool `json:"withhold_ready"`
 		}
 		if err := json.Unmarshal(challengeData, &challenge); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode test readiness challenge %s: %w", challengePath, err)
 		}
 		if len(challenge.Nonce) != 32 {
 			return nil, errors.New("invalid test readiness challenge")
@@ -18,10 +20,10 @@
 			"nonce": challenge.Nonce, "vm_id": c.cfg.VMID, "handshake_acknowledged": true,
 		})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("encode test readiness proof %s: %w", proofPath, err)
 		}
-		if err := os.WriteFile(c.cfg.WorkspaceRoot+"/.tldw-readiness-proof.json", proof, 0600); err != nil {
-			return nil, err
+		if err := os.WriteFile(proofPath, proof, 0600); err != nil {
+			return nil, fmt.Errorf("write test readiness proof %s: %w", proofPath, err)
 		}
 		if challenge.WithholdReady {
 			select {

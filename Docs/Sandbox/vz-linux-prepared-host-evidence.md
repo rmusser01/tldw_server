@@ -103,6 +103,39 @@ triage issue.
 
 ## Latest Evidence
 
+### 2026-09-14: PR #2962 review-fix real workflow verification
+
+- Repeated the checked-in operator command on the same Apple Silicon host,
+  using the same canonical Debian arm64 bundle and signed helper as below.
+  Includes process-group cancellation, dependency provenance, and contextual
+  readiness-overlay errors; no production runtime changes or host reboot.
+- Final packet: `~/Library/Logs/tldw/vz-failure-workflow-20260914-final/`.
+  `receipt.json` SHA-256:
+  `2b8a4d8d5a10642354bb8ff9de0a1d3fb5b77e7c57f034f9df59a54282766456`.
+  The receipt includes the exact workflow, helperctl, materializer, guest-source,
+  fixture, and helper hashes used for this run. The earlier passing
+  `vz-failure-workflow-20260914-review` packet is retained, but final acceptance
+  uses the rerun after the independently identified spawn-cancellation fix.
+- Both positive cases passed with no skips/errors. Both negative controls
+  produced their exact expected assertion failures and verified completed,
+  exit-zero guest execution with exact stdout in the fault VM. Healthy-session
+  recovery and same-session reuse passed in both positive cases.
+- Cleanup: empty VM inventory, no allocated disk handles, helper stopped,
+  socket/PID absent, private runtime removed. Canonical and both prepared
+  fault-source hashes remained unchanged; `errors` was empty and `ok` true.
+- Separate real-process regressions reproduced orphaned descendants on timeout
+  and parent-only SIGTERM before the fix; both passed after process-group
+  termination and direct-child reaping were added. This is process cancellation
+  evidence, not a claim of live-VM SIGTERM or host-reboot acceptance.
+- A deterministic signal during process creation also reproduced a child leak.
+  Deferring handled termination signals until ownership registration fixed it;
+  independent SIGINT/SIGTERM probes confirmed reaping and handler restoration.
+- Final focused suite: **295 passed, 2 expected host-gated skips**, four existing
+  warnings. Go agent suite, Ruff (including annotations/docstrings), Black,
+  diff checks, and scoped Bandit scans passed (test assertions excluded).
+  Independent re-review found no remaining issues. Full server/Swift suites
+  and additional failure classes remain outside this Python/test-only change.
+
 ### 2026-09-13: Checked-in real guest-failure workflow (TASK-13243.5)
 
 - Source: `codex/vz-failure-drill-workflow`, based on merged PR #2960
