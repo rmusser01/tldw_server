@@ -12,7 +12,7 @@
 
 **Tracking:** [#2950](https://github.com/rmusser01/tldw_server/issues/2950), TASK-13245; this planning unit is TASK-13245.3. Based on [2A PR #2959](https://github.com/rmusser01/tldw_server/pull/2959), commit `8d5e6a5be37653134f7249a9699070940a61cbe3`. Create a separate execution child task before runtime edits; search first to avoid duplicates.
 
-**Delivery status:** Planning and review only. All runtime execution stages below are Not Started.
+**Delivery status:** Planning and review only, published in [draft PR #2961](https://github.com/rmusser01/tldw_server/pull/2961). All runtime execution stages below are Not Started.
 
 ## Global Constraints
 
