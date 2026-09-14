@@ -228,6 +228,7 @@ const defaultWireState = (): WorkspaceSourceSavedViewStateV1 => {
 
 export const useSourceSavedViews = (
   workspaceId: string | null,
+  workspaceExists: boolean,
   currentState: SourceListViewState,
   onApplyState: (state: SourceListViewState) => void,
 ) => {
@@ -336,6 +337,7 @@ export const useSourceSavedViews = (
       targetWorkspaceId: string,
       prepare?: (current: ControllerState) => ControllerState,
     ): Promise<OperationToken | null> => {
+      if (!workspaceExists) return null;
       const token = beginOperation(generation);
       if (!token) return null;
       commitOperation(token, (current) => {
@@ -368,11 +370,12 @@ export const useSourceSavedViews = (
         return token;
       }
     },
-    [beginOperation, commitOperation, isOperationCurrent],
+    [beginOperation, commitOperation, isOperationCurrent, workspaceExists],
   );
 
   const reconcileOperation = React.useCallback(
     async (token: OperationToken, targetWorkspaceId: string) => {
+      if (!workspaceExists) return;
       if (!isOperationCurrent(token)) return;
       commitOperation(token, (current) => ({
         ...current,
@@ -398,7 +401,7 @@ export const useSourceSavedViews = (
         }));
       }
     },
-    [commitOperation, isOperationCurrent],
+    [commitOperation, isOperationCurrent, workspaceExists],
   );
 
   React.useLayoutEffect(() => {
@@ -431,13 +434,14 @@ export const useSourceSavedViews = (
   React.useEffect(() => {
     if (
       workspaceId === null ||
+      !workspaceExists ||
       identityRef.current !== workspaceId ||
       !mountedRef.current
     ) {
       return;
     }
     void load(generationRef.current, workspaceId);
-  }, [load, workspaceId]);
+  }, [load, workspaceExists, workspaceId]);
 
   const exposed =
     !identityPending && state.generation === renderGeneration
@@ -472,6 +476,7 @@ export const useSourceSavedViews = (
   const retry = React.useCallback(async () => {
     if (
       workspaceId === null ||
+      !workspaceExists ||
       identityRef.current !== workspaceId ||
       mutationInFlightRef.current ||
       !isGenerationCurrent(renderGeneration)
@@ -479,11 +484,22 @@ export const useSourceSavedViews = (
       return;
     }
     await load(renderGeneration, workspaceId);
-  }, [isGenerationCurrent, load, renderGeneration, workspaceId]);
+  }, [
+    isGenerationCurrent,
+    load,
+    renderGeneration,
+    workspaceExists,
+    workspaceId,
+  ]);
 
   const applyView = React.useCallback(
     (view: WorkspaceSourceSavedViewResponse) => {
-      if (!view.valid || !isGenerationCurrent(renderGeneration)) return;
+      if (
+        !workspaceExists ||
+        !view.valid ||
+        !isGenerationCurrent(renderGeneration)
+      )
+        return;
       const canonical = deserializeSourceViewState(view.state);
       if (canonical === null) return;
       const signature = getSourceViewStateSignature(canonical);
@@ -507,6 +523,7 @@ export const useSourceSavedViews = (
       isGenerationCurrent,
       onApplyState,
       renderGeneration,
+      workspaceExists,
     ],
   );
 
@@ -542,6 +559,7 @@ export const useSourceSavedViews = (
       targetWorkspaceId: string,
       options: PatchOptions,
     ): Promise<void> => {
+      if (!workspaceExists) return;
       const token = beginMutation(generation);
       if (!token) return;
       const needsReconciliation = !hasAuthoritativeViewsRef.current;
@@ -636,6 +654,7 @@ export const useSourceSavedViews = (
       isOperationCurrent,
       load,
       reconcileOperation,
+      workspaceExists,
     ],
   );
 
@@ -643,6 +662,7 @@ export const useSourceSavedViews = (
     async (rawName: string) => {
       if (
         workspaceId === null ||
+        !workspaceExists ||
         !isGenerationCurrent(renderGeneration)
       ) {
         return;
@@ -759,6 +779,7 @@ export const useSourceSavedViews = (
       isOperationCurrent,
       reconcileOperation,
       renderGeneration,
+      workspaceExists,
       workspaceId,
     ],
   );
@@ -767,6 +788,7 @@ export const useSourceSavedViews = (
     const conflict = exposed.duplicateConflict;
     if (
       workspaceId === null ||
+      !workspaceExists ||
       conflict === null ||
       !isGenerationCurrent(renderGeneration)
     ) {
@@ -795,6 +817,7 @@ export const useSourceSavedViews = (
     isGenerationCurrent,
     performPatch,
     renderGeneration,
+    workspaceExists,
     workspaceId,
   ]);
 
@@ -835,6 +858,7 @@ export const useSourceSavedViews = (
     async (view: WorkspaceSourceSavedViewResponse) => {
       if (
         workspaceId === null ||
+        !workspaceExists ||
         !view.valid ||
         !isGenerationCurrent(renderGeneration)
       ) {
@@ -872,6 +896,7 @@ export const useSourceSavedViews = (
       isGenerationCurrent,
       performPatch,
       renderGeneration,
+      workspaceExists,
       workspaceId,
     ],
   );
@@ -880,6 +905,7 @@ export const useSourceSavedViews = (
     async (view: WorkspaceSourceSavedViewResponse) => {
       if (
         workspaceId === null ||
+        !workspaceExists ||
         !isGenerationCurrent(renderGeneration)
       )
         return;
@@ -913,6 +939,7 @@ export const useSourceSavedViews = (
       onApplyState,
       performPatch,
       renderGeneration,
+      workspaceExists,
       workspaceId,
     ],
   );
@@ -921,6 +948,7 @@ export const useSourceSavedViews = (
     async (view: WorkspaceSourceSavedViewResponse) => {
       if (
         workspaceId === null ||
+        !workspaceExists ||
         !isGenerationCurrent(renderGeneration)
       )
         return;
@@ -977,6 +1005,7 @@ export const useSourceSavedViews = (
       isOperationCurrent,
       reconcileOperation,
       renderGeneration,
+      workspaceExists,
       workspaceId,
     ],
   );
@@ -984,18 +1013,20 @@ export const useSourceSavedViews = (
   const retryMutation = React.useCallback(async () => {
     const retryOperation = mutationRetryRef.current;
     if (
+      !workspaceExists ||
       !retryOperation ||
       !isOperationCurrent(retryOperation)
     )
       return;
     await retryOperation.run();
-  }, [isOperationCurrent]);
+  }, [isOperationCurrent, workspaceExists]);
 
   const retryVersionConflict = React.useCallback(async () => {
     const retryOperation = versionRetryRef.current;
     const conflict =
       state.generation === generationRef.current ? state.versionConflict : null;
     if (
+      !workspaceExists ||
       !retryOperation ||
       !isOperationCurrent(retryOperation) ||
       conflict === null
@@ -1003,7 +1034,12 @@ export const useSourceSavedViews = (
       return;
     }
     await retryOperation.run(conflict.currentVersion);
-  }, [isOperationCurrent, state.generation, state.versionConflict]);
+  }, [
+    isOperationCurrent,
+    state.generation,
+    state.versionConflict,
+    workspaceExists,
+  ]);
 
   const currentSignature = getSourceListViewStateSignature(currentState);
   const modified =
@@ -1011,7 +1047,7 @@ export const useSourceSavedViews = (
     (currentSignature === null || currentSignature !== exposed.activeSignature);
 
   return {
-    available: workspaceId !== null,
+    available: workspaceId !== null && workspaceExists,
     generation: renderGeneration,
     views: exposed.views,
     loading: exposed.loading,

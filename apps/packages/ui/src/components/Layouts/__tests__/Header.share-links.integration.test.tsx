@@ -1,6 +1,7 @@
 import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import commonEn from "@/assets/locale/en/common.json"
 import { Header } from "../Header"
 
 const listConversationShareLinksMock = vi.fn()
@@ -10,17 +11,20 @@ const setHeaderShortcutsExpandedMock = vi.fn().mockResolvedValue(undefined)
 const toggleDarkModeMock = vi.fn()
 const setSelectedCharacterMock = vi.fn()
 const navigateMock = vi.fn()
-const mockT = (
-  key: string,
-  fallback?: string,
-  values?: Record<string, unknown>
-) => {
-  if (!fallback) return key
-  if (!values) return fallback
-  return Object.entries(values).reduce((acc, [name, value]) => {
-    return acc.replaceAll(`{{${name}}}`, String(value))
-  }, fallback)
-}
+const mockT = vi.fn(
+  (
+    key: string,
+    fallback?: string,
+    values?: Record<string, unknown>
+  ) => {
+    if (key === "common:loading.title") return commonEn.loading.title
+    if (!fallback) return key
+    if (!values) return fallback
+    return Object.entries(values).reduce((acc, [name, value]) => {
+      return acc.replaceAll(`{{${name}}}`, String(value))
+    }, fallback)
+  }
+)
 
 const messageOptionState = {
   clearChat: vi.fn(),
@@ -174,6 +178,23 @@ describe("Header share links integration", () => {
         "1 active link(s)"
       )
     })
+  })
+
+  it("uses a scalar translation key while share links are loading", async () => {
+    listConversationShareLinksMock.mockImplementation(
+      () => new Promise(() => undefined)
+    )
+
+    render(<Header />)
+    fireEvent.click(screen.getByRole("button", { name: "Open share modal" }))
+
+    await waitFor(() => {
+      expect(listConversationShareLinksMock).toHaveBeenCalledWith("server-chat-1")
+    })
+    await waitFor(() => {
+      expect(screen.getByText(commonEn.loading.title)).toBeInTheDocument()
+    })
+    expect(mockT).toHaveBeenCalledWith("common:loading.title", "Loading...")
   })
 
   it("creates and revokes share links with ttl controls", async () => {

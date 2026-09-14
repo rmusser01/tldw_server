@@ -59,6 +59,13 @@ def enable_test_mode(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("CSRF_ENABLED", "false")
 
+
+@pytest.fixture(autouse=True)
+def isolate_prompt_studio_jobs_db(monkeypatch, tmp_path):
+    """Keep durable Jobs rows from leaking across Prompt Studio tests."""
+
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "prompt-studio-jobs.sqlite"))
+
 @pytest.fixture
 def mock_current_user():
     """Mock user for authentication."""
@@ -170,6 +177,9 @@ def _reset_prompt_studio_tables(db: PromptStudioDatabase) -> None:
     try:
         for name in tables:
             cursor.execute(f"DELETE FROM {_quote_ident(name)}")  # nosec B608
+        cursor.execute(
+            "DELETE FROM sync_log WHERE entity LIKE 'prompt_studio_%'"
+        )
         if tables:
             placeholders = ", ".join("?" for _ in tables)
             try:

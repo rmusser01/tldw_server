@@ -5,7 +5,9 @@ import gzip
 import inspect
 import logging
 import zlib
+from collections.abc import Sequence
 from dataclasses import replace
+from datetime import datetime
 from typing import Any
 
 import httpcore
@@ -14,6 +16,7 @@ import pytest
 from tldw_Server_API.app.core.Security import http_hop
 from tldw_Server_API.tests.Security.test_http_hop_transport import (
     BlockingReadStream,
+    DeterministicClock,
     RecordingBackend,
     RecordingStream,
 )
@@ -43,6 +46,24 @@ class ErrorReadStream(RecordingStream):
     async def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
         del max_bytes, timeout
         raise self.error
+
+
+class BodyReadCanaryError(Exception):
+    """Unique evidence that status-only transport tried to read a body."""
+
+
+class HeaderThenBodyCanaryStream(RecordingStream):
+    """Return one complete header block and fail on every later read."""
+
+    def __init__(self, head: bytes) -> None:
+        super().__init__(server_addr=("8.8.8.8", 80), response=(head,))
+        self.read_calls = 0
+
+    async def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        self.read_calls += 1
+        if self.read_calls > 1:
+            raise BodyReadCanaryError("status-only body iterator canary")
+        return await super().read(max_bytes, timeout=timeout)
 
 
 def _limits(**overrides: object) -> http_hop.HTTPHopLimits:
@@ -94,11 +115,45 @@ async def _execute_error(
     return exc.value, active_stream
 
 
+async def _execute_status(
+    response: tuple[bytes, ...],
+    *,
+    request: http_hop.NormalizedHTTPHopRequest | None = None,
+    stream: RecordingStream | None = None,
+    clock: DeterministicClock | None = None,
+) -> tuple[http_hop.StatusOnlyHTTPHopResponse, RecordingStream]:
+    active_stream = stream or RecordingStream(
+        server_addr=("8.8.8.8", 80),
+        response=response,
+    )
+
+    async def resolver(_host: str, _port: int, _timeout_seconds: float) -> Sequence[str]:
+        return ("8.8.8.8",)
+
+    result = await http_hop._request_http_hop_status(
+        request or _request(),
+        resolver=resolver,
+        network_backend=RecordingBackend(active_stream),
+        clock=clock or DeterministicClock(),
+    )
+    return result, active_stream
+
+
 def _head(*headers: tuple[bytes, bytes], reason: bytes = b"OK") -> bytes:
     return (
         b"HTTP/1.1 200 "
         + reason
         + b"\r\n"
+        + b"".join(name + b": " + value + b"\r\n" for name, value in headers)
+        + b"\r\n"
+    )
+
+
+def _status_head(status: int, *headers: tuple[bytes, bytes]) -> bytes:
+    return (
+        b"HTTP/1.1 "
+        + str(status).encode("ascii")
+        + b" Status\r\n"
         + b"".join(name + b": " + value + b"\r\n" for name, value in headers)
         + b"\r\n"
     )
@@ -129,6 +184,294 @@ def test_public_request_function_accepts_exactly_one_request_argument() -> None:
     assert tuple(signature.parameters) == ("request",)
     assert signature.parameters["request"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
     assert "request_http_hop" in http_hop.__all__
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        ((b"Content-Length", b"999999999"),),
+        ((b"Transfer-Encoding", b"chunked"),),
+        ((b"Content-Encoding", b"gzip"), (b"Content-Length", b"999999999")),
+    ],
+    ids=("large-fixed", "chunked", "compressed"),
+)
+async def test_status_only_closes_without_reading_any_response_body(
+    headers: tuple[tuple[bytes, bytes], ...],
+) -> None:
+    stream = HeaderThenBodyCanaryStream(
+        _status_head(200, *headers, (b"Connection", b"close"))
+    )
+
+    response, active_stream = await _execute_status((), stream=stream)
+
+    assert response.status_code == 200
+    assert response.retry_after_seconds is None
+    assert stream.read_calls == 1
+    assert active_stream.closed is True
+
+
+async def test_status_only_discards_coalesced_body_before_httpcore_retains_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instances: list[ForwardingGuard] = []
+
+    class ForwardingGuard(http_hop._RawResponseGuard):
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__(**kwargs)  # type: ignore[arg-type]
+            self.forwarded: list[bytes] = []
+            instances.append(self)
+
+        async def read(
+            self,
+            stream: httpcore.AsyncNetworkStream,
+            max_bytes: int,
+            timeout: float | None,
+        ) -> bytes:
+            data = await super().read(stream, max_bytes, timeout)
+            self.forwarded.append(data)
+            return data
+
+    monkeypatch.setattr(http_hop, "_RawResponseGuard", ForwardingGuard)
+    body_canary = b"coalesced-status-body-must-not-reach-httpcore"
+    head = _status_head(
+        200,
+        (b"Content-Length", str(len(body_canary)).encode("ascii")),
+        (b"Connection", b"close"),
+    )
+
+    response, stream = await _execute_status((head + body_canary,))
+
+    assert response.status_code == 200
+    assert len(instances) == 1
+    assert b"".join(instances[0].forwarded) == head
+    assert body_canary not in instances[0]._pending
+    assert stream.closed is True
+
+
+async def test_status_only_never_calls_bounded_body_or_header_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def body_canary(*_args: object, **_kwargs: object) -> bytes:
+        raise BodyReadCanaryError("bounded body helper called")
+
+    def headers_canary(*_args: object, **_kwargs: object) -> object:
+        raise BodyReadCanaryError("ordinary headers exposed")
+
+    monkeypatch.setattr(http_hop, "_read_decoded_body", body_canary)
+    monkeypatch.setattr(http_hop, "_response_headers", headers_canary)
+    raw = _status_head(
+        429,
+        (b"Retry-After", b"60"),
+        (b"Content-Length", b"500000"),
+        (b"Connection", b"close"),
+    )
+
+    response, stream = await _execute_status((raw,))
+
+    assert response.retry_after_seconds == 60
+    assert stream.closed is True
+
+
+@pytest.mark.parametrize(
+    ("status", "headers", "expected"),
+    [
+        (429, ((b"Retry-After", b"0"),), 1),
+        (429, ((b"Retry-After", b"60"),), 60),
+        (503, ((b"Retry-After", b"999999999999"),), 1_800),
+        (503, ((b"Retry-After", b"Sun, 23 Aug 2026 00:02:00 GMT"),), 120),
+        (503, ((b"Retry-After", b"Sat, 22 Aug 2026 23:59:00 GMT"),), 1),
+        (500, ((b"Retry-After", b"300"),), None),
+        (429, ((b"Retry-After", b"60"), (b"Retry-After", b"120")), None),
+        (429, ((b"Retry-After", b"12x"),), None),
+        (429, ((b"Retry-After", b"\xff"),), None),
+        (503, ((b"Retry-After", b"Sun, 23 Aug 2026 00:02:00"),), None),
+    ],
+    ids=(
+        "zero-clamps-up",
+        "delta",
+        "huge-clamps-down",
+        "http-date",
+        "past-date",
+        "wrong-status",
+        "duplicate",
+        "malformed",
+        "non-ascii",
+        "naive-date",
+    ),
+)
+async def test_status_only_retry_after_is_strict_bounded_and_status_scoped(
+    status: int,
+    headers: tuple[tuple[bytes, bytes], ...],
+    expected: int | None,
+) -> None:
+    raw = _status_head(status, *headers, (b"Content-Length", b"0"))
+
+    response, stream = await _execute_status((raw,))
+
+    assert response.retry_after_seconds == expected
+    assert stream.closed is True
+
+
+@pytest.mark.parametrize(
+    "raw_value",
+    [
+        b"\t60",
+        b"60\t",
+        b"Sun,\t23 Aug 2026 00:02:00 GMT",
+        b"\x1fSun, 23 Aug 2026 00:02:00 GMT",
+    ],
+    ids=("leading-htab", "trailing-htab", "embedded-htab", "unit-separator"),
+)
+async def test_status_only_rejects_raw_retry_after_control_octets(
+    raw_value: bytes,
+) -> None:
+    raw = _status_head(
+        503,
+        (b"Retry-After", raw_value),
+        (b"Content-Length", b"0"),
+    )
+
+    response, stream = await _execute_status((raw,))
+
+    assert response.retry_after_seconds is None
+    assert stream.closed is True
+
+
+async def test_status_only_header_limit_failure_closes_before_return() -> None:
+    raw = _status_head(
+        200,
+        (b"X-First", b"one"),
+        (b"X-Second", b"two"),
+    )
+    stream = RecordingStream(server_addr=("8.8.8.8", 80), response=(raw,))
+
+    with pytest.raises(http_hop.HTTPHopError) as exc:
+        await _execute_status(
+            (),
+            request=_request(limits=_limits(max_response_headers=1)),
+            stream=stream,
+        )
+
+    assert exc.value.code == "response_headers_too_large"
+    assert stream.closed is True
+
+
+async def test_status_only_total_timeout_closes_blocked_header_read() -> None:
+    stream = BlockingReadStream(server_addr=("8.8.8.8", 80))
+
+    with pytest.raises(http_hop.HTTPHopError) as exc:
+        await _execute_status(
+            (),
+            request=_request(limits=_limits(total_timeout_seconds=0.01)),
+            stream=stream,
+        )
+
+    assert exc.value.code == "total_timeout"
+    assert stream.closed is True
+
+
+async def test_status_only_whole_hop_timeout_is_capped_at_30_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_timeouts: list[float | None] = []
+    real_wait_for = asyncio.wait_for
+
+    async def recording_wait_for(
+        awaitable: Any,
+        timeout: float | None,
+    ) -> Any:
+        observed_timeouts.append(timeout)
+        return await real_wait_for(awaitable, timeout=timeout)
+
+    monkeypatch.setattr(http_hop.asyncio, "wait_for", recording_wait_for)
+    stream = RecordingStream(
+        server_addr=("8.8.8.8", 80),
+        response=(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",),
+    )
+
+    response, active_stream = await _execute_status(
+        (),
+        request=_request(limits=_limits(total_timeout_seconds=45.0)),
+        stream=stream,
+    )
+
+    assert response.status_code == 200
+    assert observed_timeouts[0] == 30.0
+    assert active_stream.closed is True
+
+
+async def test_bounded_body_whole_hop_preserves_configured_timeout_above_30_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_timeouts: list[float | None] = []
+    real_wait_for = asyncio.wait_for
+
+    async def recording_wait_for(
+        awaitable: Any,
+        timeout: float | None,
+    ) -> Any:
+        observed_timeouts.append(timeout)
+        return await real_wait_for(awaitable, timeout=timeout)
+
+    monkeypatch.setattr(http_hop.asyncio, "wait_for", recording_wait_for)
+    stream = RecordingStream(
+        server_addr=("8.8.8.8", 80),
+        response=(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",),
+    )
+
+    async def resolver(_host: str, _port: int, _timeout_seconds: float) -> Sequence[str]:
+        return ("8.8.8.8",)
+
+    response = await http_hop._request_http_hop(
+        _request(limits=_limits(total_timeout_seconds=45.0)),
+        resolver=resolver,
+        network_backend=RecordingBackend(stream),
+    )
+
+    assert response.body == b"ok"
+    assert observed_timeouts[0] == 45.0
+    assert stream.closed is True
+
+
+async def test_status_only_nonfinite_start_clock_fails_before_network_io() -> None:
+    stream = RecordingStream(
+        server_addr=("8.8.8.8", 80),
+        response=(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",),
+    )
+    backend = RecordingBackend(stream)
+
+    async def resolver(_host: str, _port: int, _timeout_seconds: float) -> Sequence[str]:
+        return ("8.8.8.8",)
+
+    with pytest.raises(http_hop.HTTPHopError) as exc:
+        await http_hop._request_http_hop_status(
+            _request(),
+            resolver=resolver,
+            network_backend=backend,
+            clock=DeterministicClock(monotonic_values=(float("nan"),)),
+        )
+
+    assert exc.value.code == "transport_error"
+    assert backend.connect_calls == []
+
+
+async def test_status_only_invalid_utc_clock_fails_closed_and_closes() -> None:
+    raw = _status_head(
+        503,
+        (b"Retry-After", b"Sun, 23 Aug 2026 00:02:00 GMT"),
+        (b"Content-Length", b"0"),
+    )
+    stream = RecordingStream(server_addr=("8.8.8.8", 80), response=(raw,))
+
+    with pytest.raises(http_hop.HTTPHopError) as exc:
+        await _execute_status(
+            (),
+            stream=stream,
+            clock=DeterministicClock(utc_now=datetime(2026, 8, 23)),
+        )
+
+    assert exc.value.code == "transport_error"
+    assert stream.closed is True
 
 
 async def test_counts_all_informational_and_final_header_bytes_exactly() -> None:

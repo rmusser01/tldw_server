@@ -15,8 +15,8 @@ from fastapi import (
     status,
 )
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
     get_media_db_for_user,
     try_get_media_db_for_user,
@@ -671,7 +671,10 @@ async def empty_media_trash_endpoint(
     Permanently delete all items currently in trash.
     """
     try:
-        cursor = db.execute_query("SELECT id FROM Media WHERE deleted = 0 AND is_trash = 1")
+        cursor = db.execute_query(
+            "SELECT id FROM Media "
+            "WHERE deleted = 0 AND is_trash = 1 AND system_operation_id IS NULL"
+        )
         rows = cursor.fetchall()
         media_ids = [row["id"] for row in rows] if rows else []
 
@@ -696,7 +699,8 @@ async def empty_media_trash_endpoint(
         remaining_count = -1
         try:
             count_cursor = db.execute_query(
-                "SELECT COUNT(*) AS total_items FROM Media WHERE deleted = 0 AND is_trash = 1"
+                "SELECT COUNT(*) AS total_items FROM Media "
+                "WHERE deleted = 0 AND is_trash = 1 AND system_operation_id IS NULL"
             )
             count_row = count_cursor.fetchone()
             remaining_count = count_row["total_items"] if count_row else 0

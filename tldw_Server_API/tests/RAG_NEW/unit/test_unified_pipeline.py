@@ -4,17 +4,16 @@ Unit tests for the unified RAG pipeline.
 Tests the single unified pipeline function with all feature combinations.
 """
 
-import pytest
-from unittest.mock import Mock, AsyncMock, patch, MagicMock, call
 import asyncio
 from types import SimpleNamespace
-from typing import Dict, List, Any, Optional
-from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
+import pytest
+
+from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
     unified_rag_pipeline,
 )
-from tldw_Server_API.app.core.RAG.rag_service.types import Document, SearchResult, DataSource
 
 
 @pytest.mark.unit
@@ -61,22 +60,26 @@ class TestUnifiedPipeline:
 
     @pytest.mark.asyncio
     async def test_unified_pipeline_with_cache(self, mock_semantic_cache):
-        """Test unified pipeline with caching enabled."""
-        # Test cache hit
+        """A failed regeneration must not expose a legacy cached answer."""
         cached_result = {
-            "answer": "Cached answer",
+            "answer": "STALE_SENTINEL",
             "documents": [
                 Document(id="cached_1", content="Cached content", metadata={})
             ]
         }
         mock_semantic_cache.get.return_value = cached_result
 
-        with patch('tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.SemanticCache', return_value=mock_semantic_cache):
+        with patch('tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.SemanticCache', return_value=mock_semantic_cache), \
+                patch('tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.AnswerGenerator') as mock_generator:
+            generator = MagicMock()
+            generator.generate = AsyncMock(side_effect=RuntimeError("generation failed"))
+            mock_generator.return_value = generator
             result = await unified_rag_pipeline(
                 query="cached query",
                 enable_cache=True,
                 cache_ttl=3600,
                 adaptive_cache=False,
+                enable_reranking=False,
             )
 
             answer = (
@@ -93,8 +96,12 @@ class TestUnifiedPipeline:
             if docs:
                 first = docs[0]
                 first_id = getattr(first, 'id', None) if not isinstance(first, dict) else first.get('id')
-            assert answer == "Cached answer"
+            assert answer is None
+            assert "STALE_SENTINEL" not in repr(result)
             assert first_id == "cached_1"
+            assert result.metadata["retrieval_cache_hit"] is True
+            assert result.metadata["generation_executed"] is True
+            generator.generate.assert_awaited_once()
             mock_semantic_cache.get.assert_called_once()
 
     @pytest.mark.asyncio
@@ -435,7 +442,7 @@ class TestUnifiedPipeline:
             from types import SimpleNamespace
             mock_filter = MagicMock()
             async def _filter_by_sensitivity(docs, max_level=None):
-                return [d for d in docs if d.metadata.get("sensitive") != True]
+                return [d for d in docs if not d.metadata.get("sensitive")]
             mock_filter.filter_by_sensitivity = AsyncMock(side_effect=_filter_by_sensitivity)
             mock_security.return_value = mock_filter
             # Ensure SensitivityLevel is present

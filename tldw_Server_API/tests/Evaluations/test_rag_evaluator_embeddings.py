@@ -4,10 +4,10 @@ Test suite for RAG evaluator with embeddings integration.
 Tests the integration between the evaluations module and the production embeddings service.
 """
 
-import pytest
-import asyncio
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, patch
+
 import numpy as np
+import pytest
 
 from tldw_Server_API.app.core.Evaluations.rag_evaluator import RAGEvaluator
 
@@ -84,8 +84,11 @@ class TestRAGEvaluatorEmbeddings:
         # Make embeddings fail
         mock_create_embedding.side_effect = RuntimeError("Embedding service unavailable")
 
-        with patch('tldw_Server_API.app.core.Evaluations.rag_evaluator.asyncio.to_thread') as mock_thread:
-            mock_thread.return_value = "4"  # LLM returns score of 4
+        with patch(
+            "tldw_Server_API.app.core.Evaluations.rag_evaluator._run_bounded_rag_analyze",
+            new_callable=AsyncMock,
+        ) as mock_analyze:
+            mock_analyze.return_value = "4"  # LLM returns score of 4
 
             metric_name, result = await evaluator._evaluate_answer_similarity(
                 "Response text",
@@ -103,8 +106,11 @@ class TestRAGEvaluatorEmbeddings:
         evaluator = RAGEvaluator()
         evaluator.embedding_available = False  # Force LLM path
 
-        with patch('tldw_Server_API.app.core.Evaluations.rag_evaluator.asyncio.to_thread') as mock_thread:
-            mock_thread.side_effect = RuntimeError("LLM API error")
+        with patch(
+            "tldw_Server_API.app.core.Evaluations.rag_evaluator._run_bounded_rag_analyze",
+            new_callable=AsyncMock,
+        ) as mock_analyze:
+            mock_analyze.side_effect = RuntimeError("LLM API error")
 
             with pytest.raises(ValueError) as exc_info:
                 await evaluator._evaluate_answer_similarity(
@@ -113,6 +119,8 @@ class TestRAGEvaluatorEmbeddings:
                 )
 
             assert "Answer similarity evaluation failed" in str(exc_info.value)
+            assert exc_info.value.__cause__ is None
+            assert exc_info.value.__context__ is None
 
     @pytest.mark.asyncio
     async def test_evaluate_with_embeddings(self, mock_create_embedding):

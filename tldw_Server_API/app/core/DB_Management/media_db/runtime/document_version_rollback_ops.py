@@ -55,7 +55,8 @@ def rollback_to_version(
         with self.transaction() as conn:
             media_info = self._fetchone_with_connection(
                 conn,
-                "SELECT uuid, version, title, content FROM Media WHERE id = ? AND deleted = 0",
+                "SELECT uuid, version, title, content FROM Media WHERE id = ? "
+                "AND deleted = 0 AND system_operation_id IS NULL",
                 (media_id,),
             )
             if not media_info:
@@ -112,7 +113,8 @@ def rollback_to_version(
             update_cursor = self._execute_with_connection(
                 conn,
                 """UPDATE Media SET content=?, content_hash=?, last_modified=?, version=?, client_id=?,
-                   chunking_status='pending', vector_processing=0 WHERE id=? AND version=?""",
+                   chunking_status='pending', vector_processing=0 WHERE id=? AND version=?
+                   AND system_operation_id IS NULL""",
                 (
                     target_content,
                     new_content_hash,
@@ -128,7 +130,7 @@ def rollback_to_version(
 
             updated_media_data = self._fetchone_with_connection(
                 conn,
-                "SELECT * FROM Media WHERE id = ?",
+                "SELECT * FROM Media WHERE id = ? AND system_operation_id IS NULL",
                 (media_id,),
             ) or {}
             updated_media_data["rolled_back_to_doc_ver_uuid"] = new_doc_version_uuid

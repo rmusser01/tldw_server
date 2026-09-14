@@ -1,20 +1,19 @@
 import builtins
 import json
 import os
-from typing import Any, Dict, List, Optional
+from types import SimpleNamespace
+from typing import Any, Optional
 
+import pytest
 from fastapi import Response
 from fastapi.testclient import TestClient
 from loguru import logger
-import pytest
 from starlette.requests import Request
 
-from tldw_Server_API.app.main import app
 from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as mcp_ep
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole
-
+from tldw_Server_API.app.main import app
 
 # Disable HTTP security guard for these tests (IP allowlist/mTLS) to focus on auth behavior.
 try:
@@ -42,6 +41,7 @@ def _json_request(payload: Any) -> Request:
             "method": "POST",
             "path": "/api/v1/mcp/request",
             "headers": [(b"content-type", b"application/json")],
+            "app": app,
         },
         receive,
     )
@@ -60,7 +60,7 @@ class _DummyServer:
     def __init__(self):
         self.initialized = True
         self.protocol = _DummyProtocol()
-        self.last_metadata: Optional[Dict[str, Any]] = None
+        self.last_metadata: Optional[dict[str, Any]] = None
 
     async def initialize(self):
         self.initialized = True
@@ -70,7 +70,7 @@ class _DummyServer:
         request,
         client_id: Optional[str] = None,
         user_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ):
         from tldw_Server_API.app.core.MCP_unified.protocol import MCPResponse
 
@@ -82,7 +82,7 @@ class _DummyServer:
         requests,
         client_id: Optional[str] = None,
         user_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ):
         from tldw_Server_API.app.core.MCP_unified.protocol import MCPResponse
 
@@ -99,11 +99,82 @@ class _LoggerStub:
 
 
 def _install_dummy_server(monkeypatch) -> _DummyServer:
-
-
     server = _DummyServer()
     monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
     return server
+
+
+@pytest.mark.asyncio
+async def test_shared_validation_pool_reaches_all_mcp_slides_restore_ingress_paths(monkeypatch):
+    sentinel_pool = object()
+    monkeypatch.setattr(app.state, "standalone_html_validation_pool", sentinel_pool, raising=False)
+    server = _install_dummy_server(monkeypatch)
+    auth = mcp_ep.McpAuthContext(
+        user=mcp_ep.TokenData(sub="1", roles=["admin"], permissions=["*"], token_type="access"),
+        principal=None,
+        api_key_info=None,
+        raw_api_key=None,
+    )
+    metadata_key = "_server_standalone_html_validation_pool"
+
+    await mcp_ep.mcp_request(
+        http_request=_json_request({"jsonrpc": "2.0", "method": "tools/call", "id": 1}),
+        response=Response(),
+        client_id=None,
+        auth=auth,
+        mcp_session_id=None,
+        config=None,
+        _guard=None,
+    )
+    assert server.last_metadata is not None
+    assert server.last_metadata[metadata_key] is sentinel_pool
+
+    await mcp_ep.mcp_request_batch(
+        http_request=_json_request([{"jsonrpc": "2.0", "method": "tools/call", "id": 2}]),
+        response=Response(),
+        client_id=None,
+        auth=auth,
+        mcp_session_id=None,
+        config=None,
+        _guard=None,
+    )
+    assert server.last_metadata is not None
+    assert server.last_metadata[metadata_key] is sentinel_pool
+
+    await mcp_ep.execute_tool(
+        request=mcp_ep.ToolExecutionRequest(
+            tool_name="slides.presentations.restore",
+            arguments={"presentation_id": "html-deck", "expected_version": 2},
+        ),
+        http_request=_json_request({}),
+        auth=auth,
+        _guard=None,
+    )
+    assert server.last_metadata is not None
+    assert server.last_metadata[metadata_key] is sentinel_pool
+
+    class _WebSocketServer:
+        initialized = True
+
+        def __init__(self) -> None:
+            self.kwargs: dict[str, Any] = {}
+
+        async def handle_websocket(self, _websocket, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    websocket_server = _WebSocketServer()
+    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: websocket_server)
+    websocket = SimpleNamespace(app=app)
+    await mcp_ep.websocket_endpoint(
+        websocket=websocket,
+        client_id=None,
+        token=None,
+        api_key=None,
+        mcp_session_id=None,
+        workspace_id=None,
+        cwd=None,
+    )
+    assert websocket_server.kwargs["runtime_metadata"][metadata_key] is sentinel_pool
 
 
 def test_mcp_get_client_ip_sanitizes_resolution_failure_log(monkeypatch):
@@ -186,7 +257,7 @@ class _ScopeServer:
         request,
         client_id: Optional[str] = None,
         user_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ):
         from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
 
@@ -211,10 +282,10 @@ async def test_mcp_http_requests_use_single_api_key_validation(monkeypatch):
     # the single-user shortcut.
     monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: False)
 
-    calls: List[Dict[str, Any]] = []
+    calls: list[dict[str, Any]] = []
 
     class _DummyApiManager:
-        async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> Dict[str, Any]:
+        async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> dict[str, Any]:
             calls.append({"key": key, "ip": ip_address})
             return {"user_id": "123", "org_id": 9, "team_id": 7}
 
@@ -275,7 +346,7 @@ def test_http_api_key_scopes_enforced(monkeypatch):
     monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: False)
 
     class _DummyApiManager:
-        async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> Dict[str, Any]:
+        async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> dict[str, Any]:
             scope = ["mcp:tool:media.search"] if key == "scope-match" else ["mcp:tool:other"]
             return {"user_id": "123", "org_id": 9, "team_id": 7, "scope": scope}
 
@@ -310,7 +381,7 @@ def test_tools_list_attaches_api_key_metadata(monkeypatch):
     monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: False)
 
     class _DummyApiManager:
-        async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> Dict[str, Any]:
+        async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> dict[str, Any]:
             return {"user_id": "123", "org_id": 9, "team_id": 7, "scope": ["read"]}
 
     async def _fake_get_api_key_manager():
@@ -398,7 +469,7 @@ def test_tools_execute_preserves_rag_json_content_wrapper(monkeypatch):
             request,
             client_id: Optional[str] = None,
             user_id: Optional[str] = None,
-            metadata: Optional[Dict[str, Any]] = None,
+            metadata: Optional[dict[str, Any]] = None,
         ):
             from tldw_Server_API.app.core.MCP_unified.protocol import MCPResponse
 
@@ -449,7 +520,7 @@ def test_tools_execute_api_key_scopes_enforced(monkeypatch):
     monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: False)
 
     class _DummyApiManager:
-        async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> Dict[str, Any]:
+        async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> dict[str, Any]:
             scope = ["mcp:tool:media.search"] if key == "scope-match" else ["mcp:tool:other"]
             return {"user_id": "123", "org_id": 9, "team_id": 7, "scope": scope}
 
@@ -478,9 +549,9 @@ async def test_modules_health_uses_principal_metadata(monkeypatch):
     Ensure /mcp/modules/health uses the principal returned by require_permissions(SYSTEM_LOGS)
     and forwards its roles/permissions into the MCP metadata.
     """
-    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-    from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
     server = _install_dummy_server(monkeypatch)
 
@@ -665,7 +736,7 @@ async def test_mcp_single_user_api_key_flag_disabled_uses_api_key_manager(monkey
     calls: list[dict[str, Any]] = []
 
     class _DummyApiManager:
-        async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> Dict[str, Any]:
+        async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> dict[str, Any]:
             calls.append({"key": key, "ip": ip_address})
             return {"user_id": "123", "org_id": 9, "team_id": 7}
 
@@ -705,8 +776,8 @@ async def test_get_current_user_authnz_jwt_failure_falls_back_to_mcp_jwt(monkeyp
     If AuthNZ JWT decode fails but an MCP JWT is valid, compat token resolution should
     return the MCP TokenData instead of raising or propagating a 500-style error.
     """
-    from fastapi.security.http import HTTPAuthorizationCredentials
     from fastapi import HTTPException, status
+    from fastapi.security.http import HTTPAuthorizationCredentials
 
     async def _fail_verify_jwt(_request, _token: str):
         raise HTTPException(
@@ -748,8 +819,8 @@ async def test_get_current_user_authnz_revoked_does_not_fallback(monkeypatch):
     """
     If an AuthNZ JWT verifies but is revoked/inactive, do not fall back to MCP JWT.
     """
-    from fastapi.security.http import HTTPAuthorizationCredentials
     from fastapi import HTTPException, status
+    from fastapi.security.http import HTTPAuthorizationCredentials
 
     async def _revoked_verify(_request, _token: str):
         raise HTTPException(
@@ -780,10 +851,9 @@ async def test_get_current_user_authnz_and_mcp_failure_use_api_key_and_set_state
     the multi-user API key path, returning a TokenData and attaching API key
     metadata to request.state.mcp_api_key_info.
     """
+    from fastapi import HTTPException, status
     from fastapi.security.http import HTTPAuthorizationCredentials
     from starlette.requests import Request
-
-    from fastapi import HTTPException, status
 
     async def _fail_verify_jwt(_request, _token: str):
         raise HTTPException(
@@ -809,7 +879,7 @@ async def test_get_current_user_authnz_and_mcp_failure_use_api_key_and_set_state
     calls: list[dict[str, Any]] = []
 
     class _DummyApiManager:
-        async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> Dict[str, Any]:
+        async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> dict[str, Any]:
             calls.append({"key": key, "ip": ip_address})
             return {"user_id": "42", "org_id": 99, "team_id": 7, "scope": ["read"]}
 
@@ -899,8 +969,9 @@ async def test_single_user_test_api_key_uses_api_key_manager_outside_dev_context
     SINGLE_USER_TEST_API_KEY should not be accepted via the single-user compat
     shim; instead it should flow through the multi-user API key manager path.
     """
-    from starlette.requests import Request
     import sys as _sys
+
+    from starlette.requests import Request
 
     test_key = "test-key-prod-456"
 
@@ -935,7 +1006,7 @@ async def test_single_user_test_api_key_uses_api_key_manager_outside_dev_context
     calls: list[dict[str, Any]] = []
 
     class _DummyApiManager:
-        async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> Dict[str, Any]:
+        async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> dict[str, Any]:
             calls.append({"key": key, "ip": ip_address})
             return {"user_id": "777", "org_id": 1, "team_id": 2, "scope": ["read"]}
 

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from dataclasses import asdict, replace
 from pathlib import Path
+from threading import Event, local
 from typing import Any
 
 import pytest
@@ -9,15 +14,36 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
+from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
+from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
+    NotesOrganizationSyncStore,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_link import NotesLinkDomainAdapter
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
+    NotesOrganizationDomainAdapter,
+)
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.materializers.chat import (
     ChatConversationMaterializer,
     ChatMessageMaterializer,
 )
 from tldw_Server_API.app.core.Sync.v2.materializers.notes import NotesMaterializer
-from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS, SyncEnvelopeCreate
+from tldw_Server_API.app.core.Sync.v2.materializers.notes_link import NotesLinkMaterializer
+from tldw_Server_API.app.core.Sync.v2.materializers.notes_organization import (
+    NotesOrganizationMaterializer,
+)
+from tldw_Server_API.app.core.Sync.v2.models import (
+    M1_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
+    SyncEnvelopeCreate,
+)
+from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
+    mutation_group_plan_hash,
+)
 from tldw_Server_API.app.core.Sync.v2.security import server_trusted_encryption_status_from_config
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
@@ -85,6 +111,11 @@ def repair_client(repair_service: SyncV2Service) -> TestClient:
 def _registry() -> SyncAdapterRegistry:
     return SyncAdapterRegistry(
         [StaticSyncAdapter(domain=domain, supported_adapter_versions={1}) for domain in M1_SYNC_DOMAINS]
+        + [NotesLinkDomainAdapter()]
+        + [
+            NotesOrganizationDomainAdapter(domain=domain)
+            for domain in NOTES_ORGANIZATION_DOMAINS
+        ]
     )
 
 
@@ -100,6 +131,20 @@ def _service(sync_store: SyncV2Store, *, materializers: dict[str, Any]) -> SyncV
             restore_manifest_scan_limit=100,
         ),
     )
+
+
+class _ConflictMaterializer:
+    def apply(self, envelope, *, store: SyncV2Store) -> MaterializationResult:
+        store.mark_envelope_apply_status(
+            envelope.server_cursor,
+            apply_status="conflict",
+            apply_error_code="repair_conflict",
+        )
+        return MaterializationResult(
+            status="conflict",
+            conflict_type="repair_conflict",
+            error_code="repair_conflict",
+        )
 
 
 def _register_and_enroll(service: SyncV2Service) -> None:
@@ -203,6 +248,159 @@ def _push(service: SyncV2Service, *envelopes: SyncEnvelopeCreate) -> None:
     ]
 
 
+def _enable_ready_notes_organization(store: SyncV2Store) -> None:
+    store.db.execute(
+        "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ? "
+        "WHERE dataset_id = ?",
+        (
+            json.dumps([*M1_SYNC_DOMAINS, *NOTES_ORGANIZATION_DOMAINS]),
+            json.dumps({"notes_organization_v1": {"state": "ready"}}),
+            "dataset-1",
+        ),
+    )
+
+
+def _enable_ready_notes_link(store: SyncV2Store) -> None:
+    store.db.execute(
+        "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ? "
+        "WHERE dataset_id = ?",
+        (
+            json.dumps([*M1_SYNC_DOMAINS, "notes.link"]),
+            json.dumps({"notes_link_v1": {"state": "ready"}}),
+            "dataset-1",
+        ),
+    )
+
+
+def _notes_link_envelope(
+    *,
+    client_envelope_id: str,
+    edge_id: str,
+    source_note_id: str,
+    target_note_id: str,
+    operation: str = "upsert",
+    revision: int = 1,
+    base: Any = None,
+    restore: bool = False,
+) -> SyncEnvelopeCreate:
+    source_note_id, target_note_id = sorted((source_note_id, target_note_id))
+    if not 1 <= revision <= 10:
+        raise ValueError("notes.link test revisions must be between 1 and 10")
+    timestamp = f"2026-08-10T12:00:{revision - 1:02d}+00:00"
+    payload: dict[str, object] = {
+        "source_note_id": source_note_id,
+        "target_note_id": target_note_id,
+        "type": "manual",
+        "directed": False,
+        "weight": 1.0,
+        "label": None,
+        "properties": {},
+        "created_at": "2026-08-10T12:00:00+00:00",
+        "last_modified": timestamp,
+        "created_by": "device-1",
+    }
+    if operation == "tombstone":
+        payload.update({"deleted_at": timestamp, "reason": "manual-delete"})
+    return SyncEnvelopeCreate(
+        dataset_id="dataset-1",
+        client_envelope_id=client_envelope_id,
+        domain="notes.link",
+        operation=operation,
+        object_id=edge_id,
+        device_id="device-1",
+        client_sequence=100 + revision,
+        base_server_cursor=base.server_cursor if base is not None else None,
+        base_object_revision=base.object_revision if base is not None else None,
+        base_object_hash=base.payload_hash if base is not None else None,
+        base_version=base.entity_version if base is not None else None,
+        object_revision=revision,
+        entity_version=revision,
+        payload=payload,
+        payload_hash=f"sha256:{client_envelope_id}",
+        created_at_client=timestamp,
+        routing_metadata={"restore_intent": True} if restore else {},
+        status="accepted",
+    )
+
+
+def _keyword_group(
+    *,
+    group_id: str,
+    count: int = 3,
+) -> list[SyncEnvelopeCreate]:
+    plan = [
+        SyncEnvelopeCreate(
+            dataset_id="dataset-1",
+            client_envelope_id=f"env-keyword-{index}",
+            domain="notes.keyword",
+            operation="upsert",
+            object_id=f"{index + 1:08d}-1111-4111-8111-111111111111",
+            device_id="server-origin",
+            object_revision=1,
+            payload={"keyword": f"Synthetic {index}"},
+            payload_hash=f"sha256:keyword-{index}",
+            payload_size_bytes=32,
+            encryption_metadata={"policy": "server_trusted_v1"},
+            mutation_group_id=group_id,
+            mutation_step=index,
+            mutation_step_count=count,
+            mutation_plan_hash="0" * 64,
+        )
+        for index in range(count)
+    ]
+    plan_hash = mutation_group_plan_hash(plan)
+    return [replace(envelope, mutation_plan_hash=plan_hash) for envelope in plan]
+
+
+class _RecordingGroupMaterializer:
+    def __init__(self) -> None:
+        self.steps: list[int] = []
+
+    def apply(self, envelope, *, store: SyncV2Store) -> MaterializationResult:
+        assert envelope.mutation_step is not None
+        self.steps.append(envelope.mutation_step)
+        store.mark_envelope_apply_status(
+            envelope.server_cursor,
+            apply_status="applied",
+        )
+        return MaterializationResult(status="applied")
+
+
+class _RecordingMaterializer:
+    def __init__(self) -> None:
+        self.object_ids: list[str] = []
+
+    def apply(self, envelope, *, store: SyncV2Store) -> MaterializationResult:
+        self.object_ids.append(envelope.object_id)
+        store.mark_envelope_apply_status(
+            envelope.server_cursor,
+            apply_status="applied",
+        )
+        return MaterializationResult(status="applied")
+
+
+def _assert_blocked_group(
+    result,
+    materializer: _RecordingGroupMaterializer,
+    *,
+    group_id: str,
+    failing_step: int,
+    error_code: str,
+) -> None:
+    assert materializer.steps == []
+    assert result.failed_count == 1
+    assert result.repair_status["status"] == "repair_needed"
+    assert result.repair_status["mutation_groups"] == [
+        {
+            "mutation_group_id": group_id,
+            "failing_step": failing_step,
+            "error_code": error_code,
+            "retry_result": "blocked",
+            "state": "failed",
+        }
+    ]
+
+
 def test_repair_rebuilds_note_projection_from_accepted_envelopes(
     log_service: SyncV2Service,
     repair_service: SyncV2Service,
@@ -224,6 +422,94 @@ def test_repair_rebuilds_note_projection_from_accepted_envelopes(
     assert result.failed_count == 0
     assert result.domain_results[0].domain == "notes.note"
     assert result.domain_results[0].applied_count == 1
+
+
+def test_notes_link_repair_preserves_tombstone_restore_and_exact_replay(
+    sync_store: SyncV2Store,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    source_note_id = "11111111-1111-4111-8111-111111111111"
+    target_note_id = "22222222-2222-4222-8222-222222222222"
+    edge_id = "33333333-3333-4333-8333-333333333333"
+    for note_id in (source_note_id, target_note_id):
+        chacha_db.note_store.add_note(note_id, "body", note_id=note_id)
+    service = _service(
+        sync_store,
+        materializers={"notes.link": NotesLinkMaterializer(chacha_db)},
+    )
+    _register_and_enroll(service)
+    _enable_ready_notes_link(sync_store)
+    created = sync_store.insert_envelope(
+        _notes_link_envelope(
+            client_envelope_id="env-link-repair-create",
+            edge_id=edge_id,
+            source_note_id=source_note_id,
+            target_note_id=target_note_id,
+        )
+    )
+
+    created_result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.link"],
+    )
+    tombstone = sync_store.insert_envelope(
+        _notes_link_envelope(
+            client_envelope_id="env-link-repair-delete",
+            edge_id=edge_id,
+            source_note_id=source_note_id,
+            target_note_id=target_note_id,
+            operation="tombstone",
+            revision=2,
+            base=created,
+        )
+    )
+    deleted_result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.link"],
+        since_cursor=created.server_cursor or 0,
+    )
+    restored = sync_store.insert_envelope(
+        _notes_link_envelope(
+            client_envelope_id="env-link-repair-restore",
+            edge_id=edge_id,
+            source_note_id=source_note_id,
+            target_note_id=target_note_id,
+            revision=3,
+            base=tombstone,
+            restore=True,
+        )
+    )
+    restored_result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.link"],
+        since_cursor=tombstone.server_cursor or 0,
+    )
+    graph_revision = chacha_db.execute_query(
+        "SELECT revision FROM note_graph_revisions WHERE singleton_id = 1"
+    ).fetchone()["revision"]
+
+    replayed = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.link"],
+        failed_only=True,
+    )
+
+    link = NotesLinkStore(chacha_db).get(edge_id)
+    state = sync_store.get_object_state("dataset-1", "notes.link", edge_id)
+    assert created_result.applied_count == 1
+    assert deleted_result.applied_count == 1
+    assert restored_result.applied_count == 1
+    assert replayed.attempted_count == 0
+    assert replayed.repair_status["status"] == "healthy"
+    assert link is not None and link.deleted is False and link.version == 3
+    assert state is not None and state.latest_server_cursor == restored.server_cursor
+    assert chacha_db.execute_query(
+        "SELECT revision FROM note_graph_revisions WHERE singleton_id = 1"
+    ).fetchone()["revision"] == graph_revision
 
 
 def test_repair_rebuilds_chat_conversation_and_messages(
@@ -354,6 +640,37 @@ def test_repair_never_replays_conflict_envelopes_as_accepted_changes(
     assert result.conflict_count == 0
 
 
+def test_repair_records_materialization_conflict_in_bound_sync_transaction(
+    log_service: SyncV2Service,
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _push(log_service, _note_envelope())
+    repair_service = _service(
+        sync_store,
+        materializers={"notes.note": _ConflictMaterializer()},
+    )
+    observed_connections: list[object | None] = []
+    original_insert = sync_store.db.insert_conflict
+
+    def record_insert(conflict, *, connection=None):
+        observed_connections.append(connection)
+        return original_insert(conflict, connection=connection)
+
+    monkeypatch.setattr(sync_store.db, "insert_conflict", record_insert)
+
+    result = repair_service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+
+    assert result.conflict_count == 1
+    assert len(sync_store.list_conflicts("dataset-1")) == 1
+    assert len(observed_connections) == 1
+    assert observed_connections[0] is not None
+
+
 def test_repair_endpoint_requires_owned_dataset_and_returns_status(
     log_service: SyncV2Service,
     repair_client: TestClient,
@@ -376,3 +693,549 @@ def test_repair_endpoint_requires_owned_dataset_and_returns_status(
     assert chacha_db.get_note_by_id("note-1") is not None
     assert forbidden.status_code == 404
     assert forbidden.json()["detail"]["error_code"] == "sync_resource_not_found"
+
+
+def test_repair_treats_superseded_singleton_as_terminal_without_debt(
+    log_service: SyncV2Service,
+    sync_store: SyncV2Store,
+) -> None:
+    stored = sync_store.insert_envelope(_note_envelope(status="accepted"))
+    sync_store.mark_envelope_apply_status(
+        stored.server_cursor,
+        apply_status="superseded",
+        apply_error_code="sync_conflict_skipped",
+    )
+
+    result = log_service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+
+    assert result.attempted_count == 0
+    assert result.skipped_count == 0
+    assert result.repair_status["status"] == "healthy"
+
+
+def test_repair_treats_all_superseded_group_as_terminal_without_debt(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(
+        sync_store,
+        materializers={"notes.keyword": materializer},
+    )
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    stored = sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-superseded-group")
+    )
+    for envelope in stored:
+        sync_store.mark_envelope_apply_status(
+            envelope.server_cursor,
+            apply_status="superseded",
+            apply_error_code="sync_conflict_superseded",
+        )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+    )
+
+    assert materializer.steps == []
+    assert result.attempted_count == 0
+    assert result.skipped_count == 0
+    assert result.repair_status["status"] == "healthy"
+    assert result.repair_status["mutation_groups"] == [
+        {
+            "mutation_group_id": "server-origin-superseded-group",
+            "failing_step": None,
+            "error_code": None,
+            "retry_result": "skipped",
+            "state": "applied",
+        }
+    ]
+
+
+def test_notes_organization_repair_resumes_failed_group_without_skipping_pending_suffix(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(
+        sync_store,
+        materializers={"notes.keyword": materializer},
+    )
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    stored = sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-group-retry")
+    )
+    sync_store.mark_envelope_apply_status(stored[0].server_cursor, apply_status="applied")
+    sync_store.mark_envelope_apply_status(
+        stored[1].server_cursor,
+        apply_status="failed",
+        apply_error_code="notes_organization_projection_failed",
+        apply_error_message="Synthetic label /private/path raw database error",
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    assert materializer.steps == [1, 2]
+    assert result.attempted_count == 2
+    assert result.applied_count == 2
+    assert result.failed_count == 0
+    assert result.repair_status["mutation_groups"] == [
+        {
+            "mutation_group_id": "server-origin-group-retry",
+            "failing_step": None,
+            "error_code": None,
+            "retry_result": "applied",
+            "state": "applied",
+        }
+    ]
+    serialized = str(asdict(result))
+    assert "Synthetic label" not in serialized
+    assert "/private/path" not in serialized
+    assert "raw database error" not in serialized
+
+
+def test_code_quality_i4_repair_limit_is_soft_for_one_complete_group(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(
+        sync_store,
+        materializers={"notes.keyword": materializer},
+    )
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    stored = sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-soft-repair-limit")
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        limit=1,
+    )
+
+    assert materializer.steps == [0, 1, 2]
+    assert result.scanned_count == 3
+    assert result.to_cursor == stored[-1].server_cursor
+
+
+def test_code_quality_i4_repair_propagates_shared_group_limit_failure(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(
+        sync_store,
+        materializers={"notes.keyword": materializer},
+    )
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-oversized-repair-group")
+    )
+
+    def reject_oversized_group(
+        _dataset_id: str,
+        _mutation_group_id: str,
+    ) -> list[Any]:
+        raise SyncStoreError("sync_restore_group_limit_exceeded")
+
+    monkeypatch.setattr(sync_store, "list_mutation_group", reject_oversized_group)
+
+    with pytest.raises(SyncStoreError, match="sync_restore_group_limit_exceeded"):
+        service.repair(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            domains=["notes.keyword"],
+            limit=1,
+        )
+
+    assert materializer.steps == []
+
+
+def test_spec_fix_repair_blocks_per_step_plan_hash_mismatch(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(sync_store, materializers={"notes.keyword": materializer})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    group_id = "server-origin-corrupt-step-hash"
+    stored = sync_store.insert_envelopes_atomic(_keyword_group(group_id=group_id))
+    sync_store.db.execute(
+        "UPDATE sync_envelopes SET mutation_plan_hash = ? WHERE server_sequence = ?",
+        ("f" * 64, stored[1].server_cursor),
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    _assert_blocked_group(
+        result,
+        materializer,
+        group_id=group_id,
+        failing_step=1,
+        error_code="mutation_group_plan_hash_invalid",
+    )
+
+
+def test_spec_fix_repair_blocks_recomputed_group_fingerprint_mismatch(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(sync_store, materializers={"notes.keyword": materializer})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    group_id = "server-origin-corrupt-content"
+    stored = sync_store.insert_envelopes_atomic(_keyword_group(group_id=group_id))
+    sync_store.db.execute(
+        "UPDATE sync_envelopes SET payload_json = ? WHERE server_sequence = ?",
+        (json.dumps({"keyword": "Secret /private/path raw value"}), stored[1].server_cursor),
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    _assert_blocked_group(
+        result,
+        materializer,
+        group_id=group_id,
+        failing_step=0,
+        error_code="mutation_group_fingerprint_invalid",
+    )
+    serialized = str(asdict(result))
+    assert "Secret" not in serialized
+    assert "/private/path" not in serialized
+    assert "raw value" not in serialized
+
+
+def test_spec_fix_repair_reports_first_missing_group_index(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(sync_store, materializers={"notes.keyword": materializer})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    group_id = "server-origin-missing-step"
+    stored = sync_store.insert_envelopes_atomic(_keyword_group(group_id=group_id))
+    sync_store.db.execute(
+        "DELETE FROM sync_envelopes WHERE server_sequence = ?",
+        (stored[1].server_cursor,),
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    _assert_blocked_group(
+        result,
+        materializer,
+        group_id=group_id,
+        failing_step=1,
+        error_code="mutation_group_step_missing",
+    )
+
+
+def test_spec_fix_repair_blocks_duplicate_group_index(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(sync_store, materializers={"notes.keyword": materializer})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    group_id = "server-origin-duplicate-step"
+    stored = sync_store.insert_envelopes_atomic(_keyword_group(group_id=group_id))
+    duplicate = [stored[0], replace(stored[1], mutation_step=0), stored[2]]
+    monkeypatch.setattr(sync_store, "list_mutation_group", lambda *_: duplicate)
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    _assert_blocked_group(
+        result,
+        materializer,
+        group_id=group_id,
+        failing_step=0,
+        error_code="mutation_group_step_duplicate",
+    )
+
+
+def test_spec_fix_repair_resumes_pending_only_group_suffix(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(sync_store, materializers={"notes.keyword": materializer})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    stored = sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-pending-suffix")
+    )
+    sync_store.mark_envelope_apply_status(stored[0].server_cursor, apply_status="applied")
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    assert materializer.steps == [1, 2]
+    assert result.attempted_count == 2
+    assert result.applied_count == 2
+    assert result.repair_status["status"] == "healthy"
+    assert result.repair_status["mutation_groups"][0]["state"] == "applied"
+
+
+def test_repair_holds_one_group_guard_across_every_projection_step(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(sync_store, materializers={"notes.keyword": materializer})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-overlapping-repair")
+    )
+    thread_context = local()
+    first_step_entered = Event()
+    release_first_step = Event()
+    second_guard_attempted = Event()
+    second_finished = Event()
+    original_apply = materializer.apply
+    original_guard = sync_store.materialization_guard
+
+    def blocking_apply(envelope, *, store: SyncV2Store) -> MaterializationResult:
+        if getattr(thread_context, "label", None) == "first" and envelope.mutation_step == 0:
+            first_step_entered.set()
+            assert release_first_step.wait(5)
+        return original_apply(envelope, store=store)
+
+    @contextmanager
+    def observed_guard(envelopes):
+        members = tuple(envelopes)
+        label = getattr(thread_context, "label", None)
+        if label == "second":
+            second_guard_attempted.set()
+        with original_guard(members) as guarded:
+            yield guarded
+        if label == "first" and len(members) == 1 and members[0].mutation_step == 0:
+            assert second_finished.wait(5)
+
+    monkeypatch.setattr(materializer, "apply", blocking_apply)
+    monkeypatch.setattr(sync_store, "materialization_guard", observed_guard)
+
+    def run_repair(label: str):
+        thread_context.label = label
+        try:
+            return service.repair(
+                user_id="user-1",
+                dataset_id="dataset-1",
+                domains=["notes.keyword"],
+                failed_only=True,
+            )
+        finally:
+            if label == "second":
+                second_finished.set()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_future = executor.submit(run_repair, "first")
+        assert first_step_entered.wait(5)
+        second_future = executor.submit(run_repair, "second")
+        assert second_guard_attempted.wait(5)
+        release_first_step.set()
+        first_result = first_future.result()
+        second_result = second_future.result()
+
+    assert materializer.steps == [0, 1, 2]
+    assert first_result.repair_status["status"] == "healthy"
+    assert second_result.repair_status["status"] == "healthy"
+
+
+def test_spec_fix_repair_resumes_pending_singleton(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingMaterializer()
+    service = _service(sync_store, materializers={"notes.keyword": materializer})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    sync_store.insert_envelope(
+        replace(
+            _keyword_group(group_id="server-origin-unused", count=1)[0],
+            mutation_group_id=None,
+            mutation_step=None,
+            mutation_step_count=None,
+            mutation_plan_hash=None,
+        )
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    assert materializer.object_ids == ["00000001-1111-4111-8111-111111111111"]
+    assert result.applied_count == 1
+    assert result.skipped_count == 0
+    assert result.repair_status["status"] == "healthy"
+
+
+def test_spec_fix_repair_reports_unmaterializable_pending_group_as_repair_needed(
+    sync_store: SyncV2Store,
+) -> None:
+    service = _service(sync_store, materializers={})
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-pending-blocked")
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    assert result.repair_status["status"] == "repair_needed"
+    assert result.repair_status["mutation_groups"] == [
+        {
+            "mutation_group_id": "server-origin-pending-blocked",
+            "failing_step": 0,
+            "error_code": "sync_materializer_unavailable",
+            "retry_result": "blocked",
+            "state": "pending",
+        }
+    ]
+
+
+def test_notes_organization_repair_reports_blocked_group_without_applying_later_steps(
+    sync_store: SyncV2Store,
+) -> None:
+    materializer = _RecordingGroupMaterializer()
+    service = _service(
+        sync_store,
+        materializers={"notes.keyword": materializer},
+    )
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    stored = sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-group-blocked")
+    )
+    sync_store.mark_envelope_apply_status(stored[0].server_cursor, apply_status="applied")
+    sync_store.mark_envelope_apply_status(
+        stored[1].server_cursor,
+        apply_status="conflict",
+        apply_error_code="notes_organization_base_conflict",
+        apply_error_message="Secret label /private/path idempotency-key-plaintext",
+    )
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+    )
+
+    assert materializer.steps == []
+    assert result.attempted_count == 0
+    assert result.conflict_count == 1
+    assert result.repair_status["mutation_groups"] == [
+        {
+            "mutation_group_id": "server-origin-group-blocked",
+            "failing_step": 1,
+            "error_code": "notes_organization_base_conflict",
+            "retry_result": "blocked",
+            "state": "conflict",
+        }
+    ]
+    serialized = str(asdict(result))
+    assert "Secret label" not in serialized
+    assert "/private/path" not in serialized
+    assert "idempotency-key-plaintext" not in serialized
+
+
+def test_notes_organization_repair_exact_post_state_finishes_bookkeeping_once(
+    sync_store: SyncV2Store,
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    materializer = NotesOrganizationMaterializer(chacha_db, "notes.keyword")
+    service = _service(
+        sync_store,
+        materializers={"notes.keyword": materializer},
+    )
+    _register_and_enroll(service)
+    _enable_ready_notes_organization(sync_store)
+    stored = sync_store.insert_envelopes_atomic(
+        _keyword_group(group_id="server-origin-group-bookkeeping", count=1)
+    )[0]
+    product_writes = 0
+    projection = NotesOrganizationSyncStore.apply_resource
+    original_mark = sync_store.mark_envelope_apply_status
+    fail_once = True
+
+    def _count_product_write(*args: Any, **kwargs: Any):
+        nonlocal product_writes
+        product_writes += 1
+        return projection(*args, **kwargs)
+
+    def _fail_first_applied_status(*args: Any, **kwargs: Any):
+        nonlocal fail_once
+        if kwargs.get("apply_status") == "applied" and fail_once:
+            fail_once = False
+            raise RuntimeError("Sync bookkeeping unavailable")
+        return original_mark(*args, **kwargs)
+
+    monkeypatch.setattr(
+        NotesOrganizationSyncStore,
+        "apply_resource",
+        _count_product_write,
+    )
+    monkeypatch.setattr(sync_store, "mark_envelope_apply_status", _fail_first_applied_status)
+    first = materializer.apply(stored, store=sync_store)
+    assert first.status == "failed"
+    assert product_writes == 1
+    monkeypatch.setattr(sync_store, "mark_envelope_apply_status", original_mark)
+
+    result = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.keyword"],
+        failed_only=True,
+    )
+
+    assert result.applied_count == 1
+    assert product_writes == 1
+    assert sync_store.list_mutation_group(
+        "dataset-1", "server-origin-group-bookkeeping"
+    )[0].apply_status == "applied"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import Any
@@ -8,13 +9,13 @@ import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints.admin import admin_rbac
-from tldw_Server_API.app.api.v1.schemas.admin_schemas import ToolPermissionGrantRequest
 from tldw_Server_API.app.api.v1.schemas.admin_rbac_schemas import (
     OverrideEffect,
     PermissionCreateRequest,
     RoleCreateRequest,
     UserOverrideUpsertRequest,
 )
+from tldw_Server_API.app.api.v1.schemas.admin_schemas import ToolPermissionGrantRequest
 from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
 
 
@@ -126,6 +127,23 @@ async def test_roles_boolean_matrix_postgres_uses_boolean_is_system_default(
 
     assert response.roles[0].name == "admin"
     _assert_postgres_role_query_uses_boolean_default(db)
+
+
+@pytest.mark.asyncio
+async def test_admin_rbac_endpoint_preserves_cancellation_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancellation = asyncio.CancelledError("request cancelled")
+
+    async def _cancel(*_args: Any, **_kwargs: Any) -> Any:
+        raise cancellation
+
+    monkeypatch.setattr(admin_rbac, "svc_list_roles", _cancel)
+
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await admin_rbac.list_roles(db=object())
+
+    assert raised.value is cancellation
 
 
 @pytest.mark.asyncio

@@ -180,7 +180,8 @@ class TestOpenAIAdapterInitialization:
         finally:
             openai_mod.logger.remove(sink_id)
 
-        assert exc_info.value.details["error"] == raw_marker
+        assert raw_marker not in str(exc_info.value)
+        assert exc_info.value.details == {"error_type": "RuntimeError"}
         assert any("Initialization failed" in message for message in logged_messages)
         assert all(raw_marker not in message for message in logged_messages)
         assert all("RuntimeError" in message for message in logged_messages)
@@ -319,6 +320,14 @@ class TestRequestValidation:
     """Test request validation in OpenAI adapter."""
 
     @pytest.mark.unit
+    async def test_production_adapter_accepts_gpt_4o_mini_tts(self):
+        """The endpoint's registered OpenAI model must pass the adapter boundary."""
+        adapter = ProductionOpenAITTSAdapter({"openai_api_key": "test-key"})
+        request = TTSRequest(text="Hello", voice="alloy", model="gpt-4o-mini-tts")
+
+        await adapter.validate_request(request)
+
+    @pytest.mark.unit
     async def test_validate_valid_request(self):
         """Test validation of valid request."""
         adapter = OpenAITTSAdapter({"openai_api_key": "test-key"})
@@ -336,6 +345,30 @@ class TestRequestValidation:
         is_valid, error = await adapter.validate_request(request)
         assert is_valid and error is None
         assert adapter.map_voice("invalid_voice") in {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_legacy_model_alias_keeps_request_case_and_sends_canonical_payload(self):
+        captured: dict[str, object] = {}
+
+        async def _stream(**kwargs):
+            captured.update(kwargs)
+            yield b"audio"
+
+        adapter = ProductionOpenAITTSAdapter({"api_key": "test-key"})
+        request = TTSRequest(
+            text="Hello",
+            voice="alloy",
+            model="TTS-1",
+            stream=True,
+        )
+
+        with patch.object(openai_mod, "astream_bytes", _stream):
+            chunks = [chunk async for chunk in adapter.generate_stream(request)]
+
+        assert chunks == [b"audio"]
+        assert request.model == "TTS-1"
+        assert captured["json"]["model"] == "tts-1"
 
     @pytest.mark.unit
     @pytest.mark.xfail(reason="OpenAIAdapter does not validate model names in validate_request")
@@ -581,7 +614,8 @@ class TestErrorHandling:
         finally:
             openai_mod.logger.remove(sink_id)
 
-        assert raw_marker in str(exc_info.value)
+        assert raw_marker not in str(exc_info.value)
+        assert exc_info.value.details == {"status": 500}
         assert any("OpenAI API error: 500" in message for message in logged_messages)
         assert all(raw_marker not in message for message in logged_messages)
         assert all("HTTPStatusError" in message for message in logged_messages)
@@ -625,7 +659,8 @@ class TestErrorHandling:
         finally:
             openai_mod.logger.remove(sink_id)
 
-        assert exc_info.value.details["error"] == raw_marker
+        assert raw_marker not in str(exc_info.value)
+        assert exc_info.value.details == {"error_type": "RuntimeError"}
         assert any("unexpected error" in message for message in logged_messages)
         assert all(raw_marker not in message for message in logged_messages)
         assert all("RuntimeError" in message for message in logged_messages)

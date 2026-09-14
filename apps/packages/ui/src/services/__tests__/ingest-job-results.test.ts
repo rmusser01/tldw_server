@@ -36,6 +36,22 @@ describe("ingest job result helpers", () => {
     expect(extractCompletedIngestJobMediaId(payload)).toBe(321)
   })
 
+  it("extracts the persisted media id from a media/add result list", () => {
+    expect(
+      extractCompletedIngestJobMediaId({
+        results: [{ status: "Success", db_id: 321 }]
+      })
+    ).toBe(321)
+  })
+
+  it("extracts the persisted media id when media/add returns the list directly", () => {
+    expect(
+      extractCompletedIngestJobMediaId([
+        { status: "Success", db_id: 321 }
+      ])
+    ).toBe(321)
+  })
+
   it("surfaces root-level completed error metadata", () => {
     const payload = {
       status: "completed",

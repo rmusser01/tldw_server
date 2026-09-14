@@ -14,7 +14,7 @@ from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import WebClipperSav
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
-
+from tldw_Server_API.app.core.Notes.organization_capture import stable_note_id
 
 pytestmark = pytest.mark.integration
 
@@ -117,20 +117,21 @@ def _save_payload(
 
 def test_web_clipper_save_and_status_flow(client_with_web_clipper_db: TestClient):
     client = client_with_web_clipper_db
+    expected_note_id = stable_note_id("web-clipper", "1\0clip-123")
 
     response = client.post("/api/v1/web-clipper/save", json=_save_payload(include_attachment=True))
     assert response.status_code == 200, response.text
     data = response.json()
 
     assert data["status"] == "saved"
-    assert data["note"]["id"] == "clip-123"
+    assert data["note"]["id"] == expected_note_id
     assert data["workspace_placement"]["workspace_id"] == "ws-1"
     assert len(data["attachments"]) == 1
 
     status_response = client.get("/api/v1/web-clipper/clip-123")
     assert status_response.status_code == 200, status_response.text
     status_data = status_response.json()
-    assert status_data["note"]["id"] == "clip-123"
+    assert status_data["note"]["id"] == expected_note_id
     assert len(status_data["workspace_placements"]) == 1
     assert len(status_data["attachments"]) == 1
 
@@ -203,13 +204,14 @@ def test_web_clipper_workspace_save_enqueues_workspace_source_ingest_job(client_
 
 def test_web_clipper_save_retry_reuses_note_and_attachment(client_with_web_clipper_db: TestClient):
     client = client_with_web_clipper_db
+    expected_note_id = stable_note_id("web-clipper", "1\0clip-123")
 
     first = client.post("/api/v1/web-clipper/save", json=_save_payload(include_attachment=True))
     second = client.post("/api/v1/web-clipper/save", json=_save_payload(include_attachment=True))
 
     assert first.status_code == 200, first.text
     assert second.status_code == 200, second.text
-    assert first.json()["note"]["id"] == second.json()["note"]["id"] == "clip-123"
+    assert first.json()["note"]["id"] == second.json()["note"]["id"] == expected_note_id
     assert first.json()["workspace_placement"]["workspace_note_id"] == second.json()["workspace_placement"]["workspace_note_id"]
 
     status_response = client.get("/api/v1/web-clipper/clip-123")
@@ -225,10 +227,11 @@ def test_web_clipper_enrichment_conflict_flow(client_with_web_clipper_db: TestCl
     assert save_response.status_code == 200, save_response.text
     saved = save_response.json()
 
-    current_note = db.get_note_by_id("clip-123")
+    note_id = saved["note"]["id"]
+    current_note = db.get_note_by_id(note_id)
     assert current_note is not None
     db.update_note(
-        note_id="clip-123",
+        note_id=note_id,
         update_data={"content": f"{current_note['content']}\n\nUser edit."},
         expected_version=int(current_note["version"]),
     )

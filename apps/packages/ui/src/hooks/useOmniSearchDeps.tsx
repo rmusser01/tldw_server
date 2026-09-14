@@ -210,12 +210,12 @@ const BASE_SCREEN_CONFIGS: ScreenConfig[] = [
     icon: "settings"
   },
   {
-    id: "settings-prompts",
+    id: "settings-workflow-prompts",
     route: "/settings/prompt",
-    labelKey: "settings:managePrompts.title",
-    defaultLabel: "Prompt settings",
-    description: "Manage prompt library",
-    keywords: ["settings", "prompt"],
+    labelKey: "settings:servicePrompts.title",
+    defaultLabel: "Workflow prompts",
+    description: "Edit instructions used by supported workflows",
+    keywords: ["settings", "workflow", "prompt", "instructions"],
     icon: "settings"
   },
   {

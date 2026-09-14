@@ -3,12 +3,11 @@ import contextlib
 import json
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any, Dict, List, Tuple
 
 import pytest
 
-from tldw_Server_API.app.core.MCP_unified.modules.implementations.slides_module import SlidesModule
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
+from tldw_Server_API.app.core.MCP_unified.modules.implementations.slides_module import SlidesModule
 
 
 def _ensure(condition: bool, message: str) -> None:
@@ -37,6 +36,7 @@ class FakeRow:
     deleted: int
     client_id: str
     version: int
+    content_kind: str = "structured_slides"
 
 
 @dataclass
@@ -50,8 +50,8 @@ class FakeVersionRow:
 
 class FakeSlidesDB:
     def __init__(self) -> None:
-        self.rows: Dict[str, FakeRow] = {}
-        self.versions: Dict[str, Dict[int, FakeVersionRow]] = {}
+        self.rows: dict[str, FakeRow] = {}
+        self.versions: dict[str, dict[int, FakeVersionRow]] = {}
         self._counter = 0
 
     def _snapshot_payload(self, row: FakeRow) -> str:
@@ -87,7 +87,23 @@ class FakeSlidesDB:
             client_id=row.client_id,
         )
 
-    def create_presentation(self, presentation_id, title, description, theme, marp_theme, template_id, settings, studio_data, slides, slides_text, source_type, source_ref, source_query, custom_css):
+    def create_presentation(
+        self,
+        presentation_id,
+        title,
+        description,
+        theme,
+        marp_theme,
+        template_id,
+        settings,
+        studio_data,
+        slides,
+        slides_text,
+        source_type,
+        source_ref,
+        source_query,
+        custom_css,
+    ):
         self._counter += 1
         pid = presentation_id or f"pres-{self._counter}"
         row = FakeRow(
@@ -115,19 +131,88 @@ class FakeSlidesDB:
         self._store_version(row)
         return row
 
-    def list_presentations(self, limit, offset, include_deleted, sort_column, sort_direction) -> Tuple[List[FakeRow], int]:
+    def list_presentations(
+        self, limit, offset, include_deleted, sort_column, sort_direction
+    ) -> tuple[list[FakeRow], int]:
         items = list(self.rows.values())
-        return items[offset: offset + limit], len(items)
+        return items[offset : offset + limit], len(items)
+
+    @staticmethod
+    def _summary(row: FakeRow):
+        return SimpleNamespace(
+            id=row.id,
+            title=row.title,
+            description=row.description,
+            theme=row.theme,
+            content_kind=row.content_kind,
+            source_kind=row.source_type,
+            provider=None,
+            model=None,
+            slide_count=1,
+            html_slide_count=None,
+            html_bytes=None,
+            created_at=row.created_at,
+            last_modified=row.last_modified,
+            deleted=row.deleted,
+            version=row.version,
+        )
+
+    def list_presentation_summaries(
+        self,
+        limit,
+        offset,
+        include_deleted,
+        sort_column,
+        sort_direction,
+        accepted_content_kinds,
+    ):
+        rows, total = self.list_presentations(
+            limit,
+            offset,
+            include_deleted,
+            sort_column,
+            sort_direction,
+        )
+        return [self._summary(row) for row in rows], total
 
     def search_presentations(self, query, limit, offset, include_deleted):
         items = list(self.rows.values())
-        return items[offset: offset + limit], len(items)
+        return items[offset : offset + limit], len(items)
+
+    def search_presentation_summaries(
+        self,
+        query,
+        limit,
+        offset,
+        include_deleted,
+        accepted_content_kinds,
+    ):
+        rows, total = self.search_presentations(query, limit, offset, include_deleted)
+        return [self._summary(row) for row in rows], total
 
     def get_presentation_by_id(self, presentation_id, include_deleted=False):
         row = self.rows.get(presentation_id)
         if not row:
             raise KeyError("presentation_not_found")
         return row
+
+    def get_presentation_kind(self, presentation_id, include_deleted=False):
+        row = self.get_presentation_by_id(presentation_id, include_deleted=include_deleted)
+        return SimpleNamespace(
+            id=row.id,
+            content_kind=row.content_kind,
+            version=row.version,
+            deleted=row.deleted,
+            last_modified=row.last_modified,
+        )
+
+    def get_presentation_summary(self, presentation_id, include_deleted=False):
+        return self._summary(
+            self.get_presentation_by_id(
+                presentation_id,
+                include_deleted=include_deleted,
+            )
+        )
 
     def update_presentation(self, presentation_id, update_fields, expected_version, operation=None):
         row = self.get_presentation_by_id(presentation_id, include_deleted=True)
@@ -139,7 +224,21 @@ class FakeSlidesDB:
 
     def list_presentation_versions(self, presentation_id, limit, offset):
         versions = sorted(self.versions.get(presentation_id, {}).values(), key=lambda row: row.version, reverse=True)
-        return versions[offset: offset + limit], len(versions)
+        return versions[offset : offset + limit], len(versions)
+
+    def list_presentation_version_metadata(self, presentation_id, limit, offset):
+        rows, total = self.list_presentation_versions(presentation_id, limit, offset)
+        return [
+            SimpleNamespace(
+                presentation_id=row.presentation_id,
+                version=row.version,
+                created_at=row.created_at,
+                client_id=row.client_id,
+                title=None,
+                deleted=None,
+            )
+            for row in rows
+        ], total
 
     def get_presentation_version(self, presentation_id, version):
         row = self.versions.get(presentation_id, {}).get(version)
@@ -164,7 +263,21 @@ class FakeSlidesDB:
 
 
 class FakeGenerator:
-    def generate_from_text(self, source_text, title_hint=None, provider=None, model=None, api_key=None, temperature=0.7, max_tokens=4000, max_source_tokens=None, max_source_chars=None, enable_chunking=True, chunk_size_tokens=1000, summary_tokens=200):
+    def generate_from_text(
+        self,
+        source_text,
+        title_hint=None,
+        provider=None,
+        model=None,
+        api_key=None,
+        temperature=0.7,
+        max_tokens=4000,
+        max_source_tokens=None,
+        max_source_chars=None,
+        enable_chunking=True,
+        chunk_size_tokens=1000,
+        summary_tokens=200,
+    ):
         return {"title": title_hint or "Generated", "slides": [{"order": 0, "title": "Slide", "content": "Content"}]}
 
 
@@ -201,7 +314,8 @@ def test_slides_module_get_media_content_uses_managed_media_database(monkeypatch
 
     _ensure(result == "slide source", f"Unexpected media content: {result!r}")
     _ensure(
-        events == [
+        events
+        == [
             ("open", "mcp_slides_gen", {"db_path": str(tmp_path / "media.db"), "initialize": False}),
             ("get_media_by_id", 23),
         ],
@@ -235,6 +349,7 @@ async def test_slides_templates_export_and_rag(monkeypatch, tmp_path):
     _ensure(template["template"]["id"] == "academic", f"Unexpected template payload: {template!r}")
 
     from tldw_Server_API.app.core.Slides import slides_export
+
     monkeypatch.setattr(slides_export, "export_presentation_bundle", lambda **_kwargs: b"zip")
     monkeypatch.setattr(slides_export, "export_presentation_pdf", lambda **_kwargs: b"pdf")
 
@@ -242,13 +357,16 @@ async def test_slides_templates_export_and_rag(monkeypatch, tmp_path):
     _ensure(base64.b64decode(exported["content_base64"]) == b"zip", f"Unexpected reveal export payload: {exported!r}")
 
     exported_pdf = await mod.execute_tool("slides.export", {"presentation_id": pres_id, "format": "pdf"}, context=ctx)
-    _ensure(base64.b64decode(exported_pdf["content_base64"]) == b"pdf", f"Unexpected pdf export payload: {exported_pdf!r}")
+    _ensure(
+        base64.b64decode(exported_pdf["content_base64"]) == b"pdf", f"Unexpected pdf export payload: {exported_pdf!r}"
+    )
 
     async def _fake_rag_pipeline(**kwargs):
         doc = SimpleNamespace(metadata={"title": "Doc"}, content="RAG content")
         return SimpleNamespace(documents=[doc], generated_answer=None)
 
     import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as rag_pipeline
+
     monkeypatch.setattr(rag_pipeline, "unified_rag_pipeline", _fake_rag_pipeline)
     mod._get_generator = lambda: FakeGenerator()  # type: ignore[attr-defined]
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import importlib
+from collections import OrderedDict
 
 import pytest
 
@@ -63,7 +63,6 @@ def test_canonical_evaluations_user_scope_retries_id_when_id_str_is_blank():
 def test_unified_service_cache_uses_canonical_string_scope(monkeypatch: pytest.MonkeyPatch):
     import tldw_Server_API.app.core.Evaluations.unified_evaluation_service as service_module
 
-    service_module = importlib.reload(service_module)
     created: dict[str, str] = {}
 
     class _DummyService:
@@ -71,7 +70,7 @@ def test_unified_service_cache_uses_canonical_string_scope(monkeypatch: pytest.M
             created["db_path"] = db_path
 
     monkeypatch.setattr(service_module, "UnifiedEvaluationService", _DummyService)
-    service_module._service_instances_by_user.clear()
+    monkeypatch.setattr(service_module, "_service_instances_by_user", OrderedDict())
 
     service = service_module.get_unified_evaluation_service_for_user("tenant-user")
 
@@ -84,7 +83,6 @@ def test_unified_service_cache_uses_canonical_string_scope(monkeypatch: pytest.M
 def test_rate_limiter_cache_uses_canonical_string_scope(monkeypatch: pytest.MonkeyPatch):
     import tldw_Server_API.app.core.Evaluations.user_rate_limiter as limiter_module
 
-    limiter_module = importlib.reload(limiter_module)
     created: dict[str, str] = {}
 
     class _DummyLimiter:
@@ -94,7 +92,7 @@ def test_rate_limiter_cache_uses_canonical_string_scope(monkeypatch: pytest.Monk
     monkeypatch.setattr(limiter_module, "UserRateLimiter", _DummyLimiter)
     monkeypatch.setattr(limiter_module, "is_test_mode", lambda: False)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    limiter_module._user_rate_limiter_instances.clear()
+    monkeypatch.setattr(limiter_module, "_user_rate_limiter_instances", OrderedDict())
 
     limiter = limiter_module.get_user_rate_limiter_for_user("tenant-user")
 

@@ -1,6 +1,5 @@
-import { promptForRag } from "~/services/tldw-server"
 import { type ChatHistory, type Message, type ToolChoice } from "~/store/option"
-import { addFileToSession, getSessionFiles } from "@/db/dexie/helpers"
+import { getSessionFiles } from "@/db/dexie/helpers"
 import { generateHistory } from "@/utils/generate-history"
 import { pageAssistModel } from "@/models"
 import { humanMessageFormatter } from "@/utils/human-message"
@@ -17,11 +16,18 @@ import type { ChatModelSettings } from "@/store/model"
 import { extractGenerationInfo } from "@/utils/llm-helpers"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
+  getRequiredServicePrompt,
   runChatPipeline,
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import {
+  loadServicePromptSnapshot,
+  renderServicePromptPart,
+  type ServicePromptSnapshot
+} from "@/services/service-prompts"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 interface RagDocumentMetadata {
   filename?: string
@@ -58,6 +64,8 @@ type DocumentChatModeParams = {
   setIsProcessing: (value: boolean) => void
   setStreaming: (value: boolean) => void
   setAbortController: (controller: AbortController | null) => void
+  releaseAbortControllerIfOwned?: (signal: AbortSignal) => boolean
+  discardCurrentTurnOnAbort?: () => boolean
   historyId: string | null
   setHistoryId: (id: string) => void
   fileRetrievalEnabled: boolean
@@ -78,6 +86,7 @@ type DocumentChatModeParams = {
   newFiles: UploadedFile[]
   allFiles: UploadedFile[]
   documents?: any[]
+  servicePromptSnapshot?: ServicePromptSnapshot
 }
 
 const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
@@ -116,11 +125,13 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
   }),
   preparePrompt: async (ctx) => {
     let query = ctx.message
-    const { ragPrompt: systemPrompt, ragQuestionPrompt: questionPrompt } =
-      await promptForRag()
-    const resolvedSystemPrompt = appendSystemPromptSuffix(
-      systemPrompt,
-      ctx.systemPromptAppendix
+    const answerPrompt = getRequiredServicePrompt(
+      ctx.servicePromptSnapshot,
+      "chat.rag.answer"
+    )
+    const rewritePrompt = getRequiredServicePrompt(
+      ctx.servicePromptSnapshot,
+      "chat.rag.question_rewrite"
     )
     const contextMessages = ctx.isRegenerate
       ? ctx.messages
@@ -147,9 +158,12 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
           return `${message.isBot ? "Assistant: " : "Human: "}${message.message}`
         })
         .join("\n")
-      const promptForQuestion = questionPrompt
-        .replaceAll("{chat_history}", chat_history)
-        .replaceAll("{question}", ctx.message)
+      const promptForQuestion = renderServicePromptPart(
+        rewritePrompt.definition,
+        "template",
+        rewritePrompt.parts.template,
+        { chat_history, question: ctx.message }
+      )
       const questionMessage = await humanMessageFormatter({
         content: [
           {
@@ -162,9 +176,15 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
       })
       const questionOllama = await pageAssistModel({
         model: ctx.selectedModel,
-        toolChoice: ctx.toolChoice
+        toolChoice: "none",
+        tools: [],
+        saveToDb: false,
+        requestScope: ctx.servicePromptSnapshot?.requestScope
       })
-      const response = await questionOllama.invoke([questionMessage])
+      const response = await questionOllama.invoke(
+        [questionMessage],
+        { signal: ctx.signal }
+      )
       query = response.content.toString()
       query = removeReasoning(query)
     }
@@ -188,7 +208,9 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
         enable_cache: true,
         adaptive_cache: true,
         enable_chunk_citations: true,
-        enable_generation: false
+        enable_generation: false,
+        signal: ctx.signal,
+        requestScope: ctx.servicePromptSnapshot?.requestScope
       } as const
       const ragRes = (await tldwClient.ragSearch(
         query,
@@ -216,6 +238,7 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
         ]
       }
     } catch (e) {
+      if (ctx.signal.aborted || isRequestConfigScopeChangedError(e)) throw e
       console.error("media_db RAG failed; will fallback to inline context", e)
     }
 
@@ -246,12 +269,21 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
       context += "No documents uploaded for this conversation."
     }
 
+    const renderedSystemPrompt = renderServicePromptPart(
+      answerPrompt.definition,
+      "template",
+      answerPrompt.parts.template,
+      { context, question: ctx.message }
+    )
+    const resolvedSystemPrompt = appendSystemPromptSuffix(
+      renderedSystemPrompt,
+      ctx.systemPromptAppendix
+    )
+
     const humanMessage = await humanMessageFormatter({
       content: [
         {
-          text: resolvedSystemPrompt
-            .replace("{context}", context)
-            .replace("{question}", ctx.message),
+          text: resolvedSystemPrompt,
           type: "text"
         }
       ],
@@ -290,54 +322,74 @@ export const documentChatMode = async (
   uploadedFiles: UploadedFile[],
   params: Omit<DocumentChatModeParams, "uploadedFiles" | "newFiles" | "allFiles">
 ): Promise<ChatSubmitResult> => {
-  await getAllDefaultModelSettings()
+  const ownsServicePromptSnapshot = !params.servicePromptSnapshot
+  const servicePromptSnapshot =
+    params.servicePromptSnapshot ??
+    (await loadServicePromptSnapshot(
+      ["chat.rag.answer", "chat.rag.question_rewrite"],
+      { signal }
+    ))
+  const executionSignal = servicePromptSnapshot.scopeSignal
+  const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal
+  try {
+    getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
+    getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.question_rewrite")
+    await getAllDefaultModelSettings()
 
-  let sessionFiles: UploadedFile[] = []
-  const currentFiles: UploadedFile[] = uploadedFiles
+    let sessionFiles: UploadedFile[] = []
+    const currentFiles: UploadedFile[] = uploadedFiles
 
-  if (params.historyId) {
-    sessionFiles = await getSessionFiles(params.historyId)
-  }
-
-  const newFiles = currentFiles.filter(
-    (file) => !sessionFiles.some((sf) => sf.id === file.id)
-  )
-
-  const allFiles = [...sessionFiles, ...newFiles]
-  const documentsForSave: any[] = uploadedFiles.map((file) => ({
-    type: "file",
-    filename: file.filename,
-    fileSize: file.size,
-    processed: file.processed
-  }))
-
-  const saveMessageOnSuccess = async (data: SaveMessageData) => {
-    const chatHistoryId = await params.saveMessageOnSuccess(data)
-    if (chatHistoryId) {
-      for (const file of newFiles) {
-        await addFileToSession(chatHistoryId, file)
-      }
+    if (params.historyId) {
+      sessionFiles = await getSessionFiles(params.historyId)
     }
-    return chatHistoryId
-  }
 
-  const modeParams: DocumentChatModeParams = {
-    ...params,
-    saveMessageOnSuccess,
-    documents: documentsForSave,
-    uploadedFiles,
-    newFiles,
-    allFiles
-  }
+    const newFiles = currentFiles.filter(
+      (file) => !sessionFiles.some((sf) => sf.id === file.id)
+    )
 
-  return runChatPipeline(
-    documentChatModeDefinition,
-    message,
-    image,
-    isRegenerate,
-    messages,
-    history,
-    signal,
-    modeParams
-  )
+    const allFiles = [...sessionFiles, ...newFiles]
+    const documentsForSave: any[] = uploadedFiles.map((file) => ({
+      type: "file",
+      filename: file.filename,
+      fileSize: file.size,
+      processed: file.processed
+    }))
+
+    const saveMessageOnSuccess = async (data: SaveMessageData) => {
+      return params.saveMessageOnSuccess({
+        ...data,
+        sessionFilesToAdd: newFiles
+      })
+    }
+
+    const modeParams: DocumentChatModeParams = {
+      ...params,
+      saveMessageOnSuccess,
+      documents: documentsForSave,
+      uploadedFiles,
+      newFiles,
+      allFiles,
+      servicePromptSnapshot
+    }
+
+    return await runChatPipeline(
+      documentChatModeDefinition,
+      message,
+      image,
+      isRegenerate,
+      messages,
+      history,
+      executionSignal,
+      {
+        ...modeParams,
+        discardCurrentTurnOnAbort: () =>
+          scopeInvalidatedSignal.aborted,
+        releaseAbortControllerIfOwned: params.releaseAbortControllerIfOwned
+          ? () => params.releaseAbortControllerIfOwned!(signal)
+          : undefined
+      }
+    )
+  } finally {
+    if (ownsServicePromptSnapshot) servicePromptSnapshot.release()
+  }
 }

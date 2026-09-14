@@ -1,19 +1,39 @@
 # CI Required Gates
 
-This document defines the required pull-request gate contract during the phased CI rollout.
+This document defines the required pull-request gate contract for `dev`.
 
 ## Required Check Names
 
-Configure branch protection to require these checks:
+The active `dev-core-required-gates` repository ruleset requires these checks:
 
 1. `backend-required`
 2. `security-required`
 3. `coverage-required`
 4. `frontend-required`
 5. `e2e-required`
-6. `container-build-check` *(pending branch protection configuration)*
+6. `container-build-check`
 
-These check names are stable and should remain unchanged once branch protection is configured.
+These check names are stable and must remain unchanged. Each status is bound to
+GitHub Actions integration `15368`.
+
+## Live `dev` Enforcement
+
+GitHub aggregates two active, `dev`-only repository rulesets:
+
+- `dev-core-required-gates` (ID `21824526`) requires all six checks above,
+  uses strict/current-base enforcement, and has no bypass actors.
+- `frontend-license-gate-dev` (ID `19362594`) retains the pull-request rule
+  and requires `frontend-license-policy/trusted/dev` from integration `15368`.
+
+The effective pull-request rule sets the required approving-review count to
+zero, dismisses stale reviews after a push, and requires extra approval for
+unattributed changes.
+Neither ruleset grants an administrative bypass; GitHub reports
+`current_user_can_bypass: never` for both.
+
+If the additive core ruleset malfunctions, disable ruleset `21824526` without
+deleting it or modifying ruleset `19362594`, then record the before/after API
+responses in TASK-13013.2.
 
 ### Container Build Check Details
 
@@ -46,13 +66,18 @@ Examples:
 
 Expired allowlist entries are ignored by the gate.
 
-## Rollout Phases (2-4 Weeks)
+## Rollout Status
 
 1. Introduce required lanes and deterministic no-op semantics.
 2. Tighten blocking behavior across required lanes.
 3. Refine path coupling and flake handling in `e2e-required`.
-4. Finalize branch protection to required lane names above.
-5. Add `container-build-check` to branch protection required statuses.
+4. Enforce the required lane names on `dev` with strict/current-base checks.
+5. Enforce `container-build-check` with the other required statuses.
+
+The required-status enforcement described in phases 4 and 5 is complete for
+`dev` as of 2026-08-29. The controlled TASK-13013.2 proof PR recorded a
+failing `coverage-required` check from integration `15368` and GitHub reported
+the ready pull request as `BLOCKED`.
 
 ## Legacy CI Workflow
 

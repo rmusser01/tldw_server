@@ -6,6 +6,7 @@
 #
 # Scripts taken from https://github.com/microsoft/promptflow/tree/main/examples/flows/evaluation/eval-summarization and modified.
 #
+import copy
 import inspect
 import json
 import logging
@@ -18,21 +19,38 @@ from tenacity import (
     Retrying,
     after_log,
     before_sleep_log,
+    retry_if_not_exception_type,
     stop_after_attempt,
     wait_random_exponential,
 )
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    is_runtime_issued_provider_call_credentials,
+)
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatConfigurationError,
+)
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.custom_openai_providers import custom_openai_provider_number
+from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
     get_adapter_or_raise,
     normalize_provider,
+    provider_auth_is_resolved,
     resolve_provider_api_key_from_config,
     resolve_provider_model,
     split_system_message,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
+    list_registered_providers,
+    provider_requires_api_key,
 )
 
 #######################################################################################################################
@@ -45,6 +63,25 @@ logger = logger
 config = load_comprehensive_config()
 
 
+def _validate_provider_credentials(
+    provider: str,
+    provider_credentials: ProviderCallCredentials | None,
+) -> ProviderCallCredentials | None:
+    """Reject forged or cross-provider runtime capabilities."""
+
+    if provider_credentials is None:
+        return None
+    if not is_runtime_issued_provider_call_credentials(
+        provider_credentials,
+        provider=provider,
+    ):
+        raise ChatConfigurationError(
+            provider=provider,
+            message="Provider credential context is invalid.",
+        )
+    return provider_credentials
+
+
 def _call_adapter_text(
     *,
     api_endpoint: str,
@@ -54,13 +91,24 @@ def _call_adapter_text(
     model: Optional[str] = None,
     user: Optional[str] = None,
     app_config: Optional[dict[str, Any]] = None,
+    credentials_resolved: bool = False,
+    provider_credentials: ProviderCallCredentials | None = None,
     timeout: Optional[float] = None,
     **extra_kwargs: Any,
 ) -> str:
     provider = normalize_provider(api_endpoint)
     if not provider:
         raise ChatConfigurationError(provider=api_endpoint, message="LLM provider is required.")
-    cfg = ensure_app_config(app_config)
+    provider_credentials = _validate_provider_credentials(
+        provider,
+        provider_credentials,
+    )
+    if provider_credentials is not None:
+        cfg = copy.deepcopy(provider_credentials.app_config or {})
+        api_key = provider_credentials.api_key
+        credentials_resolved = True
+    else:
+        cfg = ensure_app_config(app_config)
     resolved_model = model or resolve_provider_model(provider, cfg)
     if not resolved_model:
         raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
@@ -69,12 +117,19 @@ def _call_adapter_text(
         "messages": cleaned_messages,
         "system_message": system_message,
         "model": resolved_model,
-        "api_key": api_key or resolve_provider_api_key_from_config(provider, cfg),
+        "api_key": (
+            api_key
+            if credentials_resolved
+            else api_key or resolve_provider_api_key_from_config(provider, cfg)
+        ),
         "temperature": temperature,
         "user": user,
         "app_config": cfg,
+        "credentials_resolved": credentials_resolved,
     }
     request.update(extra_kwargs)
+    if provider_credentials is not None:
+        request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
     response = get_adapter_or_raise(provider).chat(request, timeout=timeout)
     return extract_response_content(response) or str(response)
 
@@ -122,7 +177,19 @@ def run_geval(
     save: bool = False,
     user_identifier: Optional[str] = None,
     model: Optional[str] = None,
+    app_config: Optional[dict[str, Any]] = None,
+    credentials_resolved: bool = False,
+    provider_credentials: ProviderCallCredentials | None = None,
 ):
+    provider = normalize_provider(api_name)
+    provider_credentials = _validate_provider_credentials(
+        provider,
+        provider_credentials,
+    )
+    if provider_credentials is not None:
+        api_key = provider_credentials.api_key
+        app_config = provider_credentials.app_config
+        credentials_resolved = True
     # Check for test mode - if api_key starts with "test_", return mock data
     if api_key and api_key.startswith("test_"):
         return {
@@ -142,7 +209,14 @@ def run_geval(
             }
         }
     try:
-        validate_inputs(transcript, summary, api_name, api_key)
+        validate_inputs(
+            transcript,
+            summary,
+            api_name,
+            api_key,
+            app_config=app_config,
+            credentials_resolved=credentials_resolved,
+        )
     except ValueError as e:
         # Return structured error for API compatibility
         return {
@@ -291,16 +365,25 @@ def run_geval(
                 api_key,
                 user_identifier=user_identifier,
                 model=model,
+                app_config=app_config,
+                credentials_resolved=credentials_resolved,
+                provider_credentials=provider_credentials,
             )
             scores[metric] = score
             explanations[metric] = "Score based on the evaluation criteria."
+        except ChatAPIError:
+            raise
         except Exception as e:
-            error_message = detailed_api_error(api_name, e)
+            logger.warning(
+                "G-Eval provider call failed provider={} error_type={}",
+                normalize_provider(api_name),
+                type(e).__name__,
+            )
             # Return structured error for API compatibility
             return {
                 "metrics": {"coherence": 0, "consistency": 0, "fluency": 0, "relevance": 0},
                 "average_score": 0,
-                "assessment": f"API error: {error_message}",
+                "assessment": "Provider evaluation failed.",
                 "explanations": {}
             }
 
@@ -369,8 +452,26 @@ def geval_summarization(
     api_key: str,
     user_identifier: Optional[str] = None,
     model: Optional[str] = None,
+    app_config: Optional[dict[str, Any]] = None,
+    credentials_resolved: bool = False,
+    provider_credentials: ProviderCallCredentials | None = None,
 ) -> float:
-    model = model or get_model_from_config(api_endpoint)
+    provider = normalize_provider(api_endpoint)
+    provider_credentials = _validate_provider_credentials(
+        provider,
+        provider_credentials,
+    )
+    if provider_credentials is not None:
+        api_key = provider_credentials.api_key
+        app_config = provider_credentials.app_config
+        credentials_resolved = True
+    model = model or get_model_from_config(
+        api_endpoint,
+        app_config,
+        allow_global_fallback=not credentials_resolved,
+    )
+    if credentials_resolved and not model:
+        raise ValueError("Model is required for resolved provider credentials")
 
     try:
         for attempt in Retrying(
@@ -379,6 +480,9 @@ def geval_summarization(
             after=after_log(logger, logging.INFO),
             wait=wait_random_exponential(multiplier=1, min=1, max=120),
             stop=stop_after_attempt(10),
+            retry=retry_if_not_exception_type(
+                (ChatAuthenticationError, ChatConfigurationError, ChatBadRequestError)
+            ),
         ):
             with attempt:
                 system_message="You are a helpful AI assistant"
@@ -397,6 +501,38 @@ def geval_summarization(
                         temperature=temp,
                         model=model,
                         user=user_identifier,
+                        app_config=app_config,
+                        credentials_resolved=credentials_resolved,
+                        provider_credentials=provider_credentials,
+                    )
+                except ChatAuthenticationError as exc:
+                    raise_detached_error(
+                        ChatAuthenticationError(
+                            provider=normalize_provider(api_endpoint),
+                            status_code=403 if exc.status_code == 403 else 401,
+                        )
+                    )
+                except ChatConfigurationError as exc:
+                    raise_detached_error(
+                        ChatConfigurationError(
+                            provider=normalize_provider(api_endpoint),
+                            error_code=exc.error_code,
+                        )
+                    )
+                except ChatBadRequestError:
+                    raise_detached_error(
+                        ChatBadRequestError(provider=normalize_provider(api_endpoint))
+                    )
+                except ChatAPIError as exc:
+                    upstream_status = getattr(exc, "status_code", 502)
+                    if type(upstream_status) is not int or not 100 <= upstream_status <= 599:
+                        upstream_status = 502
+                    raise_detached_error(
+                        ChatAPIError(
+                            message="Provider evaluation request failed.",
+                            status_code=upstream_status,
+                            provider=normalize_provider(api_endpoint),
+                        )
                     )
                 except Exception:
                     raise ValueError(f"Unsupported API endpoint: {api_endpoint}") from None
@@ -413,11 +549,18 @@ def geval_summarization(
     return score
 
 
-def get_model_from_config(api_name: str, app_config: Optional[dict[str, Any]] = None) -> str:
+def get_model_from_config(
+    api_name: str,
+    app_config: Optional[dict[str, Any]] = None,
+    *,
+    allow_global_fallback: bool = True,
+) -> str:
     cfg = ensure_app_config(app_config)
     resolved = resolve_provider_model(api_name, cfg)
     if resolved:
         return resolved
+    if not allow_global_fallback:
+        return ""
     try:
         model = config.get('models', api_name)
     except Exception:
@@ -452,7 +595,15 @@ def aggregate_llm_scores(llm_responses: list[str], max_score: float) -> float:
     return score
 
 
-def validate_inputs(document: str, summary: str, api_name: str | None, api_key: str | None) -> None:
+def validate_inputs(
+    document: str,
+    summary: str,
+    api_name: str | None,
+    api_key: str | None,
+    *,
+    app_config: Optional[dict[str, Any]] = None,
+    credentials_resolved: bool = False,
+) -> None:
     """
     Validate inputs for the G-Eval function.
 
@@ -469,38 +620,19 @@ def validate_inputs(document: str, summary: str, api_name: str | None, api_key: 
         raise ValueError("Source document cannot be empty")
     if not summary.strip():
         raise ValueError("Summary cannot be empty")
-    allowed_apis = {
-        "openai",
-        "anthropic",
-        "cohere",
-        "groq",
-        "openrouter",
-        "deepseek",
-        "huggingface",
-        "mistral",
-        "google",
-        "qwen",
-        "custom-openai-api",
-        "custom-openai-api-2",
-        "llama.cpp",
-        "kobold",
-        "ooba",
-        "tabbyapi",
-        "vllm",
-        "local-llm",
-        "ollama",
-        "aphrodite",
-    }
     if not isinstance(api_name, str) or not api_name.strip():
         raise ValueError(f"Unsupported API: {api_name}")
-    api_provider_key = api_name.strip().lower()
+    api_provider_key = normalize_provider(api_name)
+    allowed_apis = set(list_registered_providers())
     if api_provider_key not in allowed_apis and custom_openai_provider_number(api_provider_key) is None:
         raise ValueError(f"Unsupported API: {api_name}")
 
-    # Check if API key is required for the given API
-    from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
-
-    if provider_requires_api_key(api_provider_key) and not api_key:
+    if provider_requires_api_key(api_provider_key) and not provider_auth_is_resolved(
+        api_provider_key,
+        api_key=api_key,
+        app_config=app_config,
+        credentials_resolved=credentials_resolved,
+    ):
         raise ValueError(f"API key is required for {api_name}. Please provide a valid API key.")
 
 
@@ -515,9 +647,11 @@ def detailed_api_error(api_name: str, error: Exception) -> str:
     Returns:
         str: A detailed error message
     """
-    error_type = type(error).__name__
-    error_message = str(error)
-    return f"API Failure: {api_name}\nError Type: {error_type}\nError Message: {error_message}\nPlease check your API key and network connection, and try again."
+    return (
+        f"API Failure: {normalize_provider(api_name)}\n"
+        f"Error Type: {type(error).__name__}\n"
+        "Please check the provider configuration and try again."
+    )
 
 
 def save_eval_results(results: dict[str, Any], filename: str = "geval_results.json") -> None:

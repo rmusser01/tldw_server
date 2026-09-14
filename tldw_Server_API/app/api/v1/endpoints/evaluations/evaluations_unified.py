@@ -9,14 +9,16 @@ import asyncio
 import json
 import os
 import time
+from collections.abc import Awaitable
+from types import SimpleNamespace
 from typing import Annotated, Any, Optional, Union
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, rbac_rate_limit, RequireRole, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, User, get_auth_principal, rbac_rate_limit
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
 # Import unified schemas
@@ -39,13 +41,33 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     ResponseQualityRequest,
     ResponseQualityResponse,
 )
+from tldw_Server_API.app.core.AuthNZ.byok_config import PROVIDER_APP_CONFIG_KEYS
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ResolvedByokCredentials,
+    ByokResolutionError,
     record_byok_missing_credentials,
-    resolve_byok_credentials,
+)
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_READ
-from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCallCredentials,
+    ProviderCredentialRuntime,
+)
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    DaemonCapacityError,
+    await_owned_worker,
+)
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatConfigurationError,
+)
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_provider_number,
+    custom_openai_section_name,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Evaluations.audit_adapter import (
     log_evaluation_deleted,
@@ -61,9 +83,17 @@ from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
 from tldw_Server_API.app.core.Evaluations.user_rate_limiter import get_user_rate_limiter_for_user
 from tldw_Server_API.app.core.Evaluations.webhook_identity import webhook_user_id_from_user
 from tldw_Server_API.app.core.Evaluations.webhook_manager import WebhookEvent, WebhookManager
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+    SummaryProviderError,
+)
 from tldw_Server_API.app.core.testing import (
     is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
+)
+from tldw_Server_API.app.core.testing import (
     is_test_mode as _is_test_mode,
 )
 
@@ -103,8 +133,8 @@ from .evaluations_auth import (
     _apply_rate_limit_headers,
     check_evaluation_rate_limit,
     enforce_heavy_evaluations_admin,
-    get_evaluation_identity,
     get_eval_request_user,
+    get_evaluation_identity,
     require_eval_permissions,
     sanitize_error_message,
     verify_api_key,
@@ -179,24 +209,131 @@ async def _get_admin_principal_if_needed(
     return None
 
 
-async def _resolve_eval_credentials(
+def _eval_credential_http_exception(exc: ByokResolutionError) -> HTTPException:
+    """Map credential and provider-policy failures to bounded responses."""
+    policy_code = getattr(exc, "policy_code", None)
+    if isinstance(policy_code, str):
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error_code": policy_code,
+                "message": "The selected provider or model is disabled by policy.",
+            },
+        )
+    if exc.code == "credential_scope_revoked":
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error_code": exc.code,
+                "message": "The active credential scope is no longer available.",
+            },
+        )
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "error_code": exc.code,
+            "message": "Provider credentials are temporarily unavailable.",
+        },
+    )
+
+
+def _eval_provider_http_exception(exc: BaseException) -> HTTPException:
+    """Map downstream evaluation-provider failures to a bounded response."""
+    upstream_status = getattr(exc, "status_code", 0)
+    if type(upstream_status) is not int:
+        upstream_status = 0
+    if isinstance(exc, SummaryProviderError):
+        summary_code = exc.code
+        if summary_code == "authentication":
+            code = "provider_authentication_failed"
+            status_code = status.HTTP_502_BAD_GATEWAY
+            message = "The selected provider credentials could not be authenticated."
+        elif summary_code == "missing_credentials":
+            code = "missing_provider_credentials"
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            message = "The selected provider credentials are not configured."
+        elif summary_code in {
+            "configuration",
+            "invalid_provider",
+            "adapter_unavailable",
+            "missing_model",
+        }:
+            code = "provider_configuration_invalid"
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            message = "The selected provider configuration is invalid."
+        else:
+            code = "provider_unavailable"
+            status_code = status.HTTP_502_BAD_GATEWAY
+            message = "The selected provider is currently unavailable."
+    elif isinstance(exc, ChatAuthenticationError) or (
+        isinstance(exc, ChatAPIError)
+        and upstream_status in {401, 403}
+    ):
+        code = "provider_authentication_failed"
+        status_code = status.HTTP_502_BAD_GATEWAY
+        message = "The selected provider credentials could not be authenticated."
+    elif isinstance(exc, ChatConfigurationError):
+        code = getattr(exc, "error_code", "provider_configuration_invalid")
+        if code not in {"missing_provider_credentials", "provider_configuration_invalid"}:
+            code = "provider_configuration_invalid"
+        status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        message = (
+            "The selected provider credentials are not configured."
+            if code == "missing_provider_credentials"
+            else "The selected provider configuration is invalid."
+        )
+    else:
+        code = "provider_unavailable"
+        status_code = status.HTTP_502_BAD_GATEWAY
+        message = "The selected provider is currently unavailable."
+    return HTTPException(
+        status_code=status_code,
+        detail={"error_code": code, "message": message},
+    )
+
+
+def _eval_model_from_snapshot(
     provider: str,
+    app_config: Optional[dict[str, Any]],
+) -> Optional[str]:
+    """Read a provider model only from the resolved credential snapshot."""
+    if not isinstance(app_config, dict):
+        return None
+    provider_key = canonical_provider_name(provider)
+    section = PROVIDER_APP_CONFIG_KEYS.get(provider_key)
+    custom_number = custom_openai_provider_number(provider_key)
+    if section is None and custom_number is not None:
+        section = custom_openai_section_name(custom_number)
+    if section is None:
+        section = f"{provider_key.replace('.', '_').replace('-', '_')}_api"
+    provider_config = app_config.get(section)
+    if not isinstance(provider_config, dict):
+        return None
+    for field_name in ("model", "model_id", "model_path", "mlx_model_path"):
+        value = provider_config.get(field_name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _build_eval_credential_runtime(
     *,
     current_user: User,
-    request: Optional[Request],
-) -> ResolvedByokCredentials:
-    def _fallback_resolver(name: str) -> Optional[str]:
-        key_val, _ = resolve_provider_api_key(
-            name,
-            prefer_module_keys_in_tests=True,
+    http_request: Request,
+) -> ProviderCredentialRuntime:
+    """Create one request-owned credential runtime from trusted AuthNZ scope."""
+    try:
+        user_id, team_ids, org_ids, trusted_base_url_override = (
+            derive_trusted_credential_scope(http_request, current_user)
         )
-        return key_val
-
-    return await resolve_byok_credentials(
-        provider,
-        user_id=_normalize_eval_user_id(current_user),
-        request=request,
-        fallback_resolver=_fallback_resolver,
+    except ByokResolutionError as exc:
+        raise _eval_credential_http_exception(exc) from None
+    return ProviderCredentialRuntime(
+        user_id=user_id,
+        team_ids=team_ids,
+        org_ids=org_ids,
+        trusted_base_url_override=trusted_base_url_override,
+        override_snapshot_resolver=capture_provider_override_call_snapshot,
     )
 
 
@@ -204,14 +341,18 @@ async def _validate_provider_credentials(
     eval_type: str,
     provider_key: str,
     provider_name: str,
-    provider_api_key: Optional[str],
+    provider_credentials: ProviderCallCredentials,
 ) -> None:
     """Validate required provider credentials for evaluation endpoints."""
     if (
         eval_type in {"geval", "rag", "response_quality"}
         and provider_requires_api_key(provider_key)
-        and not provider_api_key
-        and not _is_eval_test_mode()
+        and not provider_auth_is_resolved(
+            provider_key,
+            api_key=provider_credentials.api_key,
+            app_config=provider_credentials.app_config,
+            credentials_resolved=provider_credentials.credentials_resolved,
+        )
     ):
         record_byok_missing_credentials(provider_key, operation="evaluations")
         raise HTTPException(
@@ -229,33 +370,65 @@ async def _resolve_and_validate_eval_provider(
     *,
     current_user: User,
     http_request: Request,
-) -> tuple[str, Optional[str], Optional[str], Optional[ResolvedByokCredentials]]:
-    """Resolve provider credentials and validate BYOK requirements for evaluation requests."""
-    provider_name = (request.api_name or "openai").strip() or "openai"
-    provider_key = provider_name.lower()
+    credential_runtime: Optional[ProviderCredentialRuntime] = None,
+) -> tuple[str, str, ProviderCallCredentials, ProviderCredentialRuntime]:
+    """Resolve one policy-enforced provider/model credential handle."""
+    provider_name = canonical_provider_name((request.api_name or "openai").strip() or "openai")
     raw_api_key = getattr(request, "api_key", None)
     if raw_api_key:
         logger.debug("Ignoring per-request api_key override for provider={}", provider_name)
-    explicit_key = None
-    provider_api_key = None
-    byok_resolution: Optional[ResolvedByokCredentials] = None
-
-    if not provider_api_key:
-        byok_resolution = await _resolve_eval_credentials(
-            provider_key,
-            current_user=current_user,
-            request=http_request,
-        )
-        provider_api_key = byok_resolution.api_key
-
-    await _validate_provider_credentials(
-        eval_type,
-        provider_key,
-        provider_name,
-        provider_api_key,
+    runtime = credential_runtime or _build_eval_credential_runtime(
+        current_user=current_user,
+        http_request=http_request,
     )
+    owns_runtime = credential_runtime is None
+    try:
+        requested_model = getattr(request, "model", None)
+        handle = await runtime.resolve(provider_name, model=requested_model)
+        model_name = requested_model or _eval_model_from_snapshot(
+            provider_name,
+            handle.app_config,
+        )
+        if not model_name:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error_code": "provider_model_unavailable",
+                    "message": "The selected provider has no configured evaluation model.",
+                },
+            )
+        await _validate_provider_credentials(
+            eval_type,
+            provider_name,
+            provider_name,
+            handle,
+        )
+        return provider_name, model_name, handle, runtime
+    except ByokResolutionError as exc:
+        if owns_runtime:
+            await runtime.close()
+        raise _eval_credential_http_exception(exc) from None
+    except BaseException:
+        if owns_runtime:
+            await runtime.close()
+        raise
 
-    return provider_name, provider_api_key, explicit_key, byok_resolution
+
+async def _await_evaluation_and_mark_used(
+    evaluation: Awaitable[Any],
+    *,
+    credential_runtime: Optional[ProviderCredentialRuntime],
+    credential_handle: Optional[ProviderCallCredentials],
+) -> Any:
+    """Keep provider work and its usage mark inside the credential lifetime."""
+
+    async def _run_owned_evaluation() -> Any:
+        result = await evaluation
+        if credential_runtime is not None and credential_handle is not None:
+            await credential_runtime.mark_used(credential_handle)
+        return result
+
+    return await await_owned_worker(_run_owned_evaluation())
 
 
 # verify_api_key et al. imported from evaluations_auth
@@ -706,8 +879,8 @@ async def get_rate_limit_status(
         ) from e
 
 
-from .evaluations_crud import crud_router
 from .evaluations_benchmarks import benchmarks_router
+from .evaluations_crud import crud_router
 from .evaluations_datasets import datasets_router
 from .evaluations_rag_pipeline import pipeline_router
 from .evaluations_webhooks import webhooks_router
@@ -819,6 +992,7 @@ async def evaluate_geval(
 
     G-Eval evaluates summaries on fluency, consistency, relevance, and coherence.
     """
+    credential_runtime: Optional[ProviderCredentialRuntime] = None
     try:
         # Per-user usage limits
         limiter = get_user_rate_limiter_for_user(current_user.id)
@@ -826,7 +1000,7 @@ async def evaluate_geval(
             request.source_text,
             request.summary,
             provider=getattr(request, "api_name", None),
-            model=None,
+            model=request.model,
         )
         allowed, meta = await limiter.check_rate_limit(user_id, endpoint="evals:geval", is_batch=False, tokens_requested=tokens_est, estimated_cost=0.0)
         if not allowed:
@@ -839,7 +1013,7 @@ async def evaluate_geval(
         stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
         webhook_user_id = webhook_user_id_from_user(current_user)
 
-        provider_name, provider_api_key, explicit_key, byok_resolution = await _resolve_and_validate_eval_provider(
+        provider_name, model_name, credential_handle, credential_runtime = await _resolve_and_validate_eval_provider(
             request,
             "geval",
             current_user=current_user,
@@ -848,7 +1022,6 @@ async def evaluate_geval(
 
         # Send webhook: evaluation started (await in TEST_MODE)
         import asyncio as _asyncio
-        import os as _os
         import time as _time
         wm = _get_webhook_manager_for_user(current_user.id)
         start_event_id = f"geval_{int(_time.time())}_{webhook_user_id[:8]}"
@@ -873,22 +1046,30 @@ async def evaluate_geval(
                 }
             ))
         svc = get_unified_evaluation_service_for_user(current_user.id)
-        result = await svc.evaluate_geval(
-            source_text=request.source_text,
-            summary=request.summary,
-            metrics=request.metrics,
-            api_name=provider_name,
-            api_key=provider_api_key,
-            user_id=stable_user_id,
-            webhook_user_id=webhook_user_id,
+        result = await _await_evaluation_and_mark_used(
+            svc.evaluate_geval(
+                source_text=request.source_text,
+                summary=request.summary,
+                metrics=request.metrics,
+                api_name=provider_name,
+                api_key=credential_handle.api_key,
+                model=model_name,
+                user_id=stable_user_id,
+                webhook_user_id=webhook_user_id,
+                app_config=credential_handle.app_config,
+                credentials_resolved=True,
+                provider_credentials=credential_handle,
+            ),
+            credential_runtime=credential_runtime,
+            credential_handle=credential_handle,
         )
-        if byok_resolution and byok_resolution.uses_byok and not explicit_key:
-            await byok_resolution.touch_last_used()
         # If provider returned actual usage, record it
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
             if usage and isinstance(usage, dict):
                 await limiter.record_actual_usage(user_id, "evals:geval", int(usage.get("total_tokens", 0)), float(usage.get("cost", 0.0) or 0.0))
+        except asyncio.CancelledError:
+            raise
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
 
@@ -985,27 +1166,40 @@ async def evaluate_geval(
         try:
             if response is not None:
                 await _apply_rate_limit_headers(limiter, user_id, response, meta)
+        except asyncio.CancelledError:
+            raise
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         return resp_payload
 
+    except asyncio.CancelledError:
+        raise
+    except DaemonCapacityError:
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error_code": "provider_capacity_exhausted",
+                    "message": "The evaluation provider is temporarily busy.",
+                },
+            )
+        )
     except HTTPException:
         raise
+    except (SummaryProviderError, ChatAPIError) as exc:
+        logger.warning("G-Eval provider failed error_type={}", type(exc).__name__)
+        raise_detached_error(_eval_provider_http_exception(exc))
     except _EVALS_NONCRITICAL_EXCEPTIONS as e:
         # Log with stack trace for diagnostics
-        logger.exception(f"G-Eval evaluation failed: {e}")
-        # In TEST_MODE, surface a slightly more verbose message to aid debugging
+        logger.error("G-Eval evaluation failed error_type={}", type(e).__name__)
         _detail = f"Evaluation failed: {sanitize_error_message(e, 'G-Eval evaluation')}"
-        try:
-            import os as _os
-            if _is_eval_test_mode():
-                _detail = _detail + f" (debug: {str(e)})"
-        except _EVALS_NONCRITICAL_EXCEPTIONS:
-            pass
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=_detail
         ) from e
+    finally:
+        if credential_runtime is not None:
+            await await_owned_worker(credential_runtime.close())
 
 
 @router.post("/rag", response_model=RAGEvaluationResponse, dependencies=[Depends(check_evaluation_rate_limit)])
@@ -1021,6 +1215,7 @@ async def evaluate_rag(
 
     Evaluates relevance, faithfulness, answer similarity, and context precision.
     """
+    credential_runtime: Optional[ProviderCredentialRuntime] = None
     try:
         # Per-user usage limits
         limiter = get_user_rate_limiter_for_user(current_user.id)
@@ -1030,7 +1225,7 @@ async def evaluate_rag(
             request.generated_response,
             request.ground_truth,
             provider=getattr(request, "api_name", None),
-            model=None,
+            model=request.model,
         )
         allowed, meta = await limiter.check_rate_limit(user_id, endpoint="evals:rag", is_batch=False, tokens_requested=tokens_est, estimated_cost=0.0)
         if not allowed:
@@ -1043,7 +1238,7 @@ async def evaluate_rag(
         stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
         webhook_user_id = webhook_user_id_from_user(current_user)
 
-        provider_name, provider_api_key, explicit_key, byok_resolution = await _resolve_and_validate_eval_provider(
+        provider_name, model_name, credential_handle, credential_runtime = await _resolve_and_validate_eval_provider(
             request,
             "rag",
             current_user=current_user,
@@ -1052,7 +1247,6 @@ async def evaluate_rag(
 
         # Send webhook: evaluation started (await in TEST_MODE)
         import asyncio as _asyncio
-        import os as _os
         wm = _get_webhook_manager_for_user(current_user.id)
         import time as _time
         start_event_id = f"rag_{int(_time.time())}_{webhook_user_id[:8]}"
@@ -1077,23 +1271,31 @@ async def evaluate_rag(
                 }
             ))
         svc = get_unified_evaluation_service_for_user(current_user.id)
-        result = await svc.evaluate_rag(
-            query=request.query,
-            contexts=request.retrieved_contexts,
-            response=request.generated_response,
-            ground_truth=request.ground_truth,
-            metrics=request.metrics,
-            api_name=provider_name,
-            api_key=provider_api_key,
-            user_id=stable_user_id,
-            webhook_user_id=webhook_user_id,
+        result = await _await_evaluation_and_mark_used(
+            svc.evaluate_rag(
+                query=request.query,
+                contexts=request.retrieved_contexts,
+                response=request.generated_response,
+                ground_truth=request.ground_truth,
+                metrics=request.metrics,
+                api_name=provider_name,
+                api_key=credential_handle.api_key,
+                model=model_name,
+                user_id=stable_user_id,
+                webhook_user_id=webhook_user_id,
+                app_config=credential_handle.app_config,
+                credentials_resolved=True,
+                provider_credentials=credential_handle,
+            ),
+            credential_runtime=credential_runtime,
+            credential_handle=credential_handle,
         )
-        if byok_resolution and byok_resolution.uses_byok and not explicit_key:
-            await byok_resolution.touch_last_used()
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
             if usage and isinstance(usage, dict):
                 await limiter.record_actual_usage(user_id, "evals:rag", int(usage.get("total_tokens", 0)), float(usage.get("cost", 0.0) or 0.0))
+        except asyncio.CancelledError:
+            raise
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
 
@@ -1162,18 +1364,38 @@ async def evaluate_rag(
         try:
             if response is not None:
                 await _apply_rate_limit_headers(limiter, user_id, response, meta)
+        except asyncio.CancelledError:
+            raise
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         return resp_payload
 
+    except asyncio.CancelledError:
+        raise
+    except DaemonCapacityError:
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error_code": "provider_capacity_exhausted",
+                    "message": "The evaluation provider is temporarily busy.",
+                },
+            )
+        )
     except HTTPException:
         raise
+    except (SummaryProviderError, ChatAPIError) as exc:
+        logger.warning("RAG evaluation provider failed error_type={}", type(exc).__name__)
+        raise_detached_error(_eval_provider_http_exception(exc))
     except _EVALS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"RAG evaluation failed: {e}")
+        logger.error("RAG evaluation failed error_type={}", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"RAG evaluation failed: {sanitize_error_message(e, 'RAG evaluation')}"
         ) from e
+    finally:
+        if credential_runtime is not None:
+            await await_owned_worker(credential_runtime.close())
 
 
 @router.post("/response-quality", response_model=ResponseQualityResponse, dependencies=[Depends(check_evaluation_rate_limit)])
@@ -1189,6 +1411,7 @@ async def evaluate_response_quality(
 
     Checks relevance, completeness, accuracy, and format compliance.
     """
+    credential_runtime: Optional[ProviderCredentialRuntime] = None
     try:
         # Per-user usage limits
         limiter = get_user_rate_limiter_for_user(current_user.id)
@@ -1197,7 +1420,7 @@ async def evaluate_response_quality(
             request.response,
             request.expected_format,
             provider=getattr(request, "api_name", None),
-            model=None,
+            model=request.model,
         )
         allowed, meta = await limiter.check_rate_limit(user_id, endpoint="evals:response_quality", is_batch=False, tokens_requested=tokens_est, estimated_cost=0.0)
         if not allowed:
@@ -1210,7 +1433,7 @@ async def evaluate_response_quality(
         stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
         webhook_user_id = webhook_user_id_from_user(current_user)
 
-        provider_name, provider_api_key, explicit_key, byok_resolution = await _resolve_and_validate_eval_provider(
+        provider_name, model_name, credential_handle, credential_runtime = await _resolve_and_validate_eval_provider(
             request,
             "response_quality",
             current_user=current_user,
@@ -1219,7 +1442,6 @@ async def evaluate_response_quality(
 
         # Send webhook: evaluation started (await in TEST_MODE)
         import asyncio as _asyncio
-        import os as _os
         wm = _get_webhook_manager_for_user(current_user.id)
         import time as _time
         start_event_id = f"response_quality_{int(_time.time())}_{webhook_user_id[:8]}"
@@ -1245,22 +1467,30 @@ async def evaluate_response_quality(
             ))
 
         svc = get_unified_evaluation_service_for_user(current_user.id)
-        result = await svc.evaluate_response_quality(
-            prompt=request.prompt,
-            response=request.response,
-            expected_format=request.expected_format,
-            custom_criteria=request.evaluation_criteria,
-            api_name=provider_name,
-            api_key=provider_api_key,
-            user_id=stable_user_id,
-            webhook_user_id=webhook_user_id,
+        result = await _await_evaluation_and_mark_used(
+            svc.evaluate_response_quality(
+                prompt=request.prompt,
+                response=request.response,
+                expected_format=request.expected_format,
+                custom_criteria=request.evaluation_criteria,
+                api_name=provider_name,
+                api_key=credential_handle.api_key,
+                model=model_name,
+                user_id=stable_user_id,
+                webhook_user_id=webhook_user_id,
+                app_config=credential_handle.app_config,
+                credentials_resolved=True,
+                provider_credentials=credential_handle,
+            ),
+            credential_runtime=credential_runtime,
+            credential_handle=credential_handle,
         )
-        if byok_resolution and byok_resolution.uses_byok and not explicit_key:
-            await byok_resolution.touch_last_used()
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
             if usage and isinstance(usage, dict):
                 await limiter.record_actual_usage(user_id, "evals:response_quality", int(usage.get("total_tokens", 0)), float(usage.get("cost", 0.0) or 0.0))
+        except asyncio.CancelledError:
+            raise
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
 
@@ -1328,18 +1558,44 @@ async def evaluate_response_quality(
         try:
             if response is not None:
                 await _apply_rate_limit_headers(limiter, user_id, response, meta)
+        except asyncio.CancelledError:
+            raise
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         return resp_payload
 
+    except asyncio.CancelledError:
+        raise
+    except DaemonCapacityError:
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error_code": "provider_capacity_exhausted",
+                    "message": "The evaluation provider is temporarily busy.",
+                },
+            )
+        )
     except HTTPException:
         raise
+    except (SummaryProviderError, ChatAPIError) as exc:
+        logger.warning(
+            "Response-quality provider failed error_type={}",
+            type(exc).__name__,
+        )
+        raise_detached_error(_eval_provider_http_exception(exc))
     except _EVALS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Response quality evaluation failed: {e}")
+        logger.error(
+            "Response quality evaluation failed error_type={}",
+            type(e).__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Quality evaluation failed: {sanitize_error_message(e, 'quality evaluation')}"
         ) from e
+    finally:
+        if credential_runtime is not None:
+            await await_owned_worker(credential_runtime.close())
 
 
 @router.post("/propositions", response_model=PropositionEvaluationResponse, dependencies=[Depends(check_evaluation_rate_limit)])
@@ -1404,6 +1660,8 @@ async def evaluate_propositions_endpoint(
         try:
             if response is not None:
                 await _apply_rate_limit_headers(limiter, user_id, response, meta)
+        except asyncio.CancelledError:
+            raise
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         return resp_payload
@@ -1438,55 +1696,40 @@ async def batch_evaluate(
 
     Supports running multiple evaluation types with configurable parallelism.
     """
+    credential_runtime: Optional[ProviderCredentialRuntime] = None
+    active_batch_tasks: set[asyncio.Task[Any]] = set()
     try:
         start_time = time.time()
         service = get_unified_evaluation_service_for_user(current_user.id)
-        byok_cache: dict[str, ResolvedByokCredentials] = {}
-
-        async def _resolve_byok(provider_name: str) -> ResolvedByokCredentials:
-            key = (provider_name or "openai").strip().lower()
-            cached = byok_cache.get(key)
-            if cached:
-                return cached
-            resolved = await _resolve_eval_credentials(
-                key,
+        if request.evaluation_type in {"geval", "rag", "response_quality"}:
+            credential_runtime = _build_eval_credential_runtime(
                 current_user=current_user,
-                request=http_request,
+                http_request=http_request,
             )
-            byok_cache[key] = resolved
-            return resolved
 
         async def _extract_provider_and_key(
             eval_request: Any,
             eval_type: str,
-        ) -> tuple[str, Optional[str], Optional[str], Optional[ResolvedByokCredentials]]:
-            """Extract provider name and API key for a batch evaluation item."""
-            provider_name = "openai"
-            explicit_key: Optional[str] = None
-            if isinstance(eval_request, dict):
-                provider_name = (eval_request.get("api_name") or "openai").strip() or "openai"
-                raw_api_key = eval_request.get("api_key")
-                if raw_api_key:
-                    logger.debug("Ignoring per-request api_key override for provider={}", provider_name)
-            provider_key = provider_name.lower()
-            provider_api_key = None
-            byok_resolution = None
-
-            if eval_type in {"geval", "rag", "response_quality"} and not provider_api_key:
-                if _is_eval_test_mode():
-                    provider_api_key = "test_api_key"
-                else:
-                    byok_resolution = await _resolve_byok(provider_key)
-                    provider_api_key = byok_resolution.api_key
-
-            await _validate_provider_credentials(
-                eval_type,
-                provider_key,
-                provider_name,
-                provider_api_key,
+        ) -> tuple[str, Optional[str], Optional[ProviderCallCredentials]]:
+            """Resolve one batch item's exact provider/model credential handle."""
+            if eval_type not in {"geval", "rag", "response_quality"}:
+                return "openai", None, None
+            if credential_runtime is None:
+                raise RuntimeError("Evaluation credential runtime is unavailable")
+            item = eval_request if isinstance(eval_request, dict) else {}
+            provider_request = SimpleNamespace(
+                api_name=item.get("api_name") or "openai",
+                api_key=item.get("api_key"),
+                model=item.get("model") or item.get("target_model"),
             )
-
-            return provider_name, provider_api_key, explicit_key, byok_resolution
+            provider_name, model_name, handle, _ = await _resolve_and_validate_eval_provider(
+                provider_request,
+                eval_type,
+                current_user=current_user,
+                http_request=http_request,
+                credential_runtime=credential_runtime,
+            )
+            return provider_name, model_name, handle
 
         # Per-user usage limits (aggregate all items)
         limiter = get_user_rate_limiter_for_user(current_user.id)
@@ -1566,47 +1809,75 @@ async def batch_evaluate(
         if request.parallel_workers > 1:
             # Run evaluations in parallel
             tasks_with_meta: list[
-                tuple[int, dict[str, Any], str, Optional[str], Optional[ResolvedByokCredentials], Optional[str]]
+                tuple[int, dict[str, Any], str, Optional[str], Optional[ProviderCallCredentials]]
             ] = []
             results_by_index: dict[int, dict[str, Any]] = {}
 
             def _build_parallel_task(
                 eval_request: dict[str, Any],
                 provider_name: str,
-                provider_api_key: Optional[str],
+                model_name: Optional[str],
+                credential_handle: Optional[ProviderCallCredentials],
             ):
+                provider_api_key = credential_handle.api_key if credential_handle else None
+                provider_app_config = credential_handle.app_config if credential_handle else None
+                credentials_resolved = credential_handle is not None
                 if eval_type == "geval":
-                    return service.evaluate_geval(
-                        source_text=eval_request.get("source_text", ""),
-                        summary=eval_request.get("summary", ""),
-                        metrics=eval_request.get("metrics", ["coherence"]),
-                        api_name=provider_name,
-                        api_key=provider_api_key,
-                        user_id=stable_user_id,
-                        webhook_user_id=batch_webhook_user_id,
+                    return _await_evaluation_and_mark_used(
+                        service.evaluate_geval(
+                            source_text=eval_request.get("source_text", ""),
+                            summary=eval_request.get("summary", ""),
+                            metrics=eval_request.get("metrics", ["coherence"]),
+                            api_name=provider_name,
+                            api_key=provider_api_key,
+                            model=model_name,
+                            user_id=stable_user_id,
+                            webhook_user_id=batch_webhook_user_id,
+                            app_config=provider_app_config,
+                            credentials_resolved=credentials_resolved,
+                            provider_credentials=credential_handle,
+                        ),
+                        credential_runtime=credential_runtime,
+                        credential_handle=credential_handle,
                     )
                 if eval_type == "rag":
-                    return service.evaluate_rag(
-                        query=eval_request.get("query", ""),
-                        contexts=eval_request.get("retrieved_contexts", []),
-                        response=eval_request.get("generated_response", ""),
-                        ground_truth=eval_request.get("ground_truth"),
-                        metrics=eval_request.get("metrics", ["relevance", "faithfulness"]),
-                        api_name=provider_name,
-                        api_key=provider_api_key,
-                        user_id=stable_user_id,
-                        webhook_user_id=batch_webhook_user_id,
+                    return _await_evaluation_and_mark_used(
+                        service.evaluate_rag(
+                            query=eval_request.get("query", ""),
+                            contexts=eval_request.get("retrieved_contexts", []),
+                            response=eval_request.get("generated_response", ""),
+                            ground_truth=eval_request.get("ground_truth"),
+                            metrics=eval_request.get("metrics", ["relevance", "faithfulness"]),
+                            api_name=provider_name,
+                            api_key=provider_api_key,
+                            model=model_name,
+                            user_id=stable_user_id,
+                            webhook_user_id=batch_webhook_user_id,
+                            app_config=provider_app_config,
+                            credentials_resolved=credentials_resolved,
+                            provider_credentials=credential_handle,
+                        ),
+                        credential_runtime=credential_runtime,
+                        credential_handle=credential_handle,
                     )
                 if eval_type == "response_quality":
-                    return service.evaluate_response_quality(
-                        prompt=eval_request.get("prompt", ""),
-                        response=eval_request.get("response", ""),
-                        expected_format=eval_request.get("expected_format"),
-                        custom_criteria=eval_request.get("evaluation_criteria"),
-                        api_name=provider_name,
-                        api_key=provider_api_key,
-                        user_id=stable_user_id,
-                        webhook_user_id=batch_webhook_user_id,
+                    return _await_evaluation_and_mark_used(
+                        service.evaluate_response_quality(
+                            prompt=eval_request.get("prompt", ""),
+                            response=eval_request.get("response", ""),
+                            expected_format=eval_request.get("expected_format"),
+                            custom_criteria=eval_request.get("evaluation_criteria"),
+                            api_name=provider_name,
+                            api_key=provider_api_key,
+                            model=model_name,
+                            user_id=stable_user_id,
+                            webhook_user_id=batch_webhook_user_id,
+                            app_config=provider_app_config,
+                            credentials_resolved=credentials_resolved,
+                            provider_credentials=credential_handle,
+                        ),
+                        credential_runtime=credential_runtime,
+                        credential_handle=credential_handle,
                     )
                 if eval_type == "ocr":
                     return service.evaluate_ocr(
@@ -1627,7 +1898,7 @@ async def batch_evaluate(
                 return None
 
             for item_index, eval_request in enumerate(request.items):
-                provider_name, provider_api_key, explicit_key, byok_resolution = await _extract_provider_and_key(
+                provider_name, model_name, credential_handle = await _extract_provider_and_key(
                     eval_request,
                     eval_type,
                 )
@@ -1649,15 +1920,14 @@ async def batch_evaluate(
                         item_index,
                         eval_request,
                         provider_name,
-                        provider_api_key,
-                        byok_resolution,
-                        explicit_key,
+                        model_name,
+                        credential_handle,
                     )
                 )
 
             # Wait for all tasks
             if tasks_with_meta:
-                in_flight: dict[asyncio.Task[Any], tuple[int, Optional[ResolvedByokCredentials], Optional[str]]] = {}
+                in_flight: dict[asyncio.Task[Any], tuple[int, Optional[ProviderCallCredentials]]] = {}
                 next_task_offset = 0
                 fail_fast_cancelled = False
                 cancel_reason = "Cancelled due to strict fail-fast after a prior item failure."
@@ -1667,12 +1937,16 @@ async def batch_evaluate(
                         item_index,
                         task_request,
                         task_provider_name,
-                        task_provider_api_key,
-                        byok_resolution,
-                        explicit_key,
+                        task_model_name,
+                        credential_handle,
                     ) = tasks_with_meta[next_task_offset]
                     next_task_offset += 1
-                    task_coro = _build_parallel_task(task_request, task_provider_name, task_provider_api_key)
+                    task_coro = _build_parallel_task(
+                        task_request,
+                        task_provider_name,
+                        task_model_name,
+                        credential_handle,
+                    )
                     if task_coro is None:
                         results_by_index[item_index] = {
                             "evaluation_id": None,
@@ -1685,13 +1959,15 @@ async def batch_evaluate(
                             break
                         continue
                     running_task = asyncio.create_task(task_coro)
-                    in_flight[running_task] = (item_index, byok_resolution, explicit_key)
+                    active_batch_tasks.add(running_task)
+                    in_flight[running_task] = (item_index, credential_handle)
 
                 while in_flight:
                     done, _ = await asyncio.wait(set(in_flight.keys()), return_when=asyncio.FIRST_COMPLETED)
 
                     for done_task in done:
-                        item_index, byok_resolution, explicit_key = in_flight.pop(done_task)
+                        item_index, credential_handle = in_flight.pop(done_task)
+                        active_batch_tasks.discard(done_task)
                         try:
                             result = done_task.result()
                         except asyncio.CancelledError:
@@ -1703,7 +1979,10 @@ async def batch_evaluate(
                                 }
                                 failed_count += 1
                         except _EVALS_NONCRITICAL_EXCEPTIONS as e:
-                            logger.error(f"Batch evaluation item failed: {e}", exc_info=True)
+                            logger.error(
+                                "Batch evaluation item failed error_type={}",
+                                type(e).__name__,
+                            )
                             results_by_index[item_index] = {
                                 "evaluation_id": None,
                                 "status": "failed",
@@ -1713,7 +1992,10 @@ async def batch_evaluate(
                             if not request.continue_on_error:
                                 fail_fast_cancelled = True
                         except Exception as e:
-                            logger.error(f"Batch evaluation item failed: {e}", exc_info=True)
+                            logger.error(
+                                "Batch evaluation item failed error_type={}",
+                                type(e).__name__,
+                            )
                             results_by_index[item_index] = {
                                 "evaluation_id": None,
                                 "status": "failed",
@@ -1723,8 +2005,6 @@ async def batch_evaluate(
                             if not request.continue_on_error:
                                 fail_fast_cancelled = True
                         else:
-                            if byok_resolution and byok_resolution.uses_byok and not explicit_key:
-                                await byok_resolution.touch_last_used()
                             results_by_index[item_index] = {
                                 "evaluation_id": result.get("evaluation_id"),
                                 "status": "completed",
@@ -1738,7 +2018,8 @@ async def batch_evaluate(
                         if remaining_tasks:
                             await asyncio.gather(*remaining_tasks, return_exceptions=True)
                         for remaining_task in remaining_tasks:
-                            item_index, _, _ = in_flight.pop(remaining_task)
+                            item_index, _ = in_flight.pop(remaining_task)
+                            active_batch_tasks.discard(remaining_task)
                             if item_index not in results_by_index:
                                 results_by_index[item_index] = {
                                     "evaluation_id": None,
@@ -1748,7 +2029,7 @@ async def batch_evaluate(
                                 failed_count += 1
 
                         while next_task_offset < len(tasks_with_meta):
-                            item_index, _, _, _, _, _ = tasks_with_meta[next_task_offset]
+                            item_index, _, _, _, _ = tasks_with_meta[next_task_offset]
                             next_task_offset += 1
                             if item_index not in results_by_index:
                                 results_by_index[item_index] = {
@@ -1764,12 +2045,16 @@ async def batch_evaluate(
                             item_index,
                             task_request,
                             task_provider_name,
-                            task_provider_api_key,
-                            byok_resolution,
-                            explicit_key,
+                            task_model_name,
+                            credential_handle,
                         ) = tasks_with_meta[next_task_offset]
                         next_task_offset += 1
-                        task_coro = _build_parallel_task(task_request, task_provider_name, task_provider_api_key)
+                        task_coro = _build_parallel_task(
+                            task_request,
+                            task_provider_name,
+                            task_model_name,
+                            credential_handle,
+                        )
                         if task_coro is None:
                             results_by_index[item_index] = {
                                 "evaluation_id": None,
@@ -1782,7 +2067,8 @@ async def batch_evaluate(
                                 break
                             continue
                         running_task = asyncio.create_task(task_coro)
-                        in_flight[running_task] = (item_index, byok_resolution, explicit_key)
+                        active_batch_tasks.add(running_task)
+                        in_flight[running_task] = (item_index, credential_handle)
 
                 for item_index in range(len(request.items)):
                     if item_index in results_by_index:
@@ -1791,43 +2077,70 @@ async def batch_evaluate(
             # Run evaluations sequentially
             for eval_request in request.items:
                 try:
-                    provider_name, provider_api_key, explicit_key, byok_resolution = await _extract_provider_and_key(
+                    provider_name, model_name, credential_handle = await _extract_provider_and_key(
                         eval_request,
                         eval_type,
                     )
+                    provider_api_key = credential_handle.api_key if credential_handle else None
+                    provider_app_config = credential_handle.app_config if credential_handle else None
+                    credentials_resolved = credential_handle is not None
 
                     if eval_type == "geval":
-                        result = await service.evaluate_geval(
-                            source_text=eval_request.get("source_text", ""),
-                            summary=eval_request.get("summary", ""),
-                            metrics=eval_request.get("metrics", ["coherence"]),
-                            api_name=provider_name,
-                            api_key=provider_api_key,
-                            user_id=stable_user_id,
-                            webhook_user_id=batch_webhook_user_id,
+                        result = await _await_evaluation_and_mark_used(
+                            service.evaluate_geval(
+                                source_text=eval_request.get("source_text", ""),
+                                summary=eval_request.get("summary", ""),
+                                metrics=eval_request.get("metrics", ["coherence"]),
+                                api_name=provider_name,
+                                api_key=provider_api_key,
+                                model=model_name,
+                                user_id=stable_user_id,
+                                webhook_user_id=batch_webhook_user_id,
+                                app_config=provider_app_config,
+                                credentials_resolved=credentials_resolved,
+                                provider_credentials=credential_handle,
+                            ),
+                            credential_runtime=credential_runtime,
+                            credential_handle=credential_handle,
                         )
                     elif eval_type == "rag":
-                        result = await service.evaluate_rag(
-                            query=eval_request.get("query", ""),
-                            contexts=eval_request.get("retrieved_contexts", []),
-                            response=eval_request.get("generated_response", ""),
-                            ground_truth=eval_request.get("ground_truth"),
-                            metrics=eval_request.get("metrics", ["relevance", "faithfulness"]),
-                            api_name=provider_name,
-                            api_key=provider_api_key,
-                            user_id=stable_user_id,
-                            webhook_user_id=batch_webhook_user_id,
+                        result = await _await_evaluation_and_mark_used(
+                            service.evaluate_rag(
+                                query=eval_request.get("query", ""),
+                                contexts=eval_request.get("retrieved_contexts", []),
+                                response=eval_request.get("generated_response", ""),
+                                ground_truth=eval_request.get("ground_truth"),
+                                metrics=eval_request.get("metrics", ["relevance", "faithfulness"]),
+                                api_name=provider_name,
+                                api_key=provider_api_key,
+                                model=model_name,
+                                user_id=stable_user_id,
+                                webhook_user_id=batch_webhook_user_id,
+                                app_config=provider_app_config,
+                                credentials_resolved=credentials_resolved,
+                                provider_credentials=credential_handle,
+                            ),
+                            credential_runtime=credential_runtime,
+                            credential_handle=credential_handle,
                         )
                     elif eval_type == "response_quality":
-                        result = await service.evaluate_response_quality(
-                            prompt=eval_request.get("prompt", ""),
-                            response=eval_request.get("response", ""),
-                            expected_format=eval_request.get("expected_format"),
-                            custom_criteria=eval_request.get("evaluation_criteria"),
-                            api_name=provider_name,
-                            api_key=provider_api_key,
-                            user_id=stable_user_id,
-                            webhook_user_id=batch_webhook_user_id,
+                        result = await _await_evaluation_and_mark_used(
+                            service.evaluate_response_quality(
+                                prompt=eval_request.get("prompt", ""),
+                                response=eval_request.get("response", ""),
+                                expected_format=eval_request.get("expected_format"),
+                                custom_criteria=eval_request.get("evaluation_criteria"),
+                                api_name=provider_name,
+                                api_key=provider_api_key,
+                                model=model_name,
+                                user_id=stable_user_id,
+                                webhook_user_id=batch_webhook_user_id,
+                                app_config=provider_app_config,
+                                credentials_resolved=credentials_resolved,
+                                provider_credentials=credential_handle,
+                            ),
+                            credential_runtime=credential_runtime,
+                            credential_handle=credential_handle,
                         )
                     elif eval_type == "ocr":
                         result = await service.evaluate_ocr(
@@ -1854,16 +2167,19 @@ async def batch_evaluate(
                         failed_count += 1
                         continue
 
-                    if byok_resolution and byok_resolution.uses_byok and not explicit_key:
-                        await byok_resolution.touch_last_used()
                     results.append({
                         "evaluation_id": result.get("evaluation_id"),
                         "status": "completed",
                         "results": result.get("results", {})
                     })
 
+                except asyncio.CancelledError:
+                    raise
                 except _EVALS_NONCRITICAL_EXCEPTIONS as e:
-                    logger.error(f"Batch evaluation item failed: {e}", exc_info=True)
+                    logger.error(
+                        "Batch evaluation item failed error_type={}",
+                        type(e).__name__,
+                    )
                     results.append({
                         "evaluation_id": None,
                         "status": "failed",
@@ -1888,16 +2204,30 @@ async def batch_evaluate(
         try:
             if response is not None:
                 await _apply_rate_limit_headers(limiter, user_id, response, meta)
+        except asyncio.CancelledError:
+            raise
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         return resp_payload
 
+    except asyncio.CancelledError:
+        raise
     except _EVALS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Batch evaluation failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Batch evaluation failed: {sanitize_error_message(e, 'batch evaluation')}"
         ) from e
+    finally:
+        remaining_tasks = list(active_batch_tasks)
+        for remaining_task in remaining_tasks:
+            remaining_task.cancel()
+        if remaining_tasks:
+            await await_owned_worker(
+                asyncio.gather(*remaining_tasks, return_exceptions=True)
+            )
+        if credential_runtime is not None:
+            await await_owned_worker(credential_runtime.close())
 
 
 # ============= OCR Evaluation Endpoint =============

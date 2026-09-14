@@ -20,7 +20,9 @@ const {
   mockClearSetting,
   mockGetAllNoteKeywordStats,
   mockSearchNoteKeywords,
-  mockCytoscapeFactory
+  mockCytoscapeFactory,
+  mockGetCurrentUser,
+  mockCanonicalConfig
 } = vi.hoisted(() => {
   const cyInstance: Record<string, any> = {
     on: vi.fn(),
@@ -44,7 +46,13 @@ const {
     mockClearSetting: vi.fn(),
     mockGetAllNoteKeywordStats: vi.fn(),
     mockSearchNoteKeywords: vi.fn(),
-    mockCytoscapeFactory: cytoscapeFactory
+    mockCytoscapeFactory: cytoscapeFactory,
+    mockGetCurrentUser: vi.fn(),
+    mockCanonicalConfig: {
+      serverUrl: "https://notes.example.test",
+      authMode: "single-user" as const,
+      authSource: "cookie-session" as const
+    }
   }
 })
 
@@ -87,6 +95,17 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
     capabilities: { hasNotes: true },
     loading: false
   })
+}))
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: mockCanonicalConfig,
+    loading: false
+  })
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: mockGetCurrentUser }
 }))
 
 vi.mock("@/components/Common/confirm-danger", () => ({
@@ -220,6 +239,13 @@ const contrastRatio = (a: [number, number, number], b: [number, number, number])
 }
 
 const seedAndSaveNote = async () => {
+  await waitFor(() => {
+    expect(
+      mockBgRequest.mock.calls.some(([request]) =>
+        String(request?.path || "").startsWith("/api/v1/notes/?")
+      )
+    ).toBe(true)
+  })
   fireEvent.change(screen.getByPlaceholderText("Title"), {
     target: { value: "A11y regression note" }
   })
@@ -242,6 +268,11 @@ describe("NotesManagerPage stage 22 accessibility regression", () => {
     mockClearSetting.mockResolvedValue(undefined)
     mockGetAllNoteKeywordStats.mockResolvedValue([{ keyword: "research", noteCount: 3 }])
     mockSearchNoteKeywords.mockResolvedValue(["research"])
+    mockGetCurrentUser.mockResolvedValue({
+      id: 1,
+      username: "notes-user",
+      is_active: true
+    })
 
     mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       const path = String(request.path || "")
@@ -311,19 +342,26 @@ describe("NotesManagerPage stage 22 accessibility regression", () => {
     expect(results.violations).toEqual([])
   })
 
-  it("has no core aria/name violations in the graph modal state", async () => {
+  it("has no core aria/name violations in the first-class graph workspace", async () => {
     renderPage()
     await seedAndSaveNote()
 
     fireEvent.click(screen.getByRole("button", { name: "Split" }))
     fireEvent.click(await screen.findByTestId("notes-open-graph-view"))
 
-    const radiusControl = await screen.findByTestId("notes-graph-radius-control")
-    const modalRoot = radiusControl.closest(".ant-modal-root") || document.body
+    const workspace = await screen.findByTestId("notes-graph-workspace")
+    expect(workspace).toHaveAccessibleName("Notes graph")
+    expect(
+      screen.getByRole("searchbox", { name: "Search loaded nodes" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Focus current note" })
+    ).toHaveAttribute("title", "Focus current note")
+    expect(
+      screen.getByRole("button", { name: "Edge visibility" })
+    ).toHaveAttribute("aria-controls", "notes-graph-edge-menu")
 
-    const modalTitle = modalRoot.querySelector(".ant-modal-title")
-    expect(modalTitle).toHaveTextContent("Notes graph view")
-    const results = await runA11yRules(modalRoot, CORE_RULES)
+    const results = await runA11yRules(workspace, CORE_RULES)
     expect(results.violations).toEqual([])
   })
 

@@ -1,0 +1,39 @@
+{
+  "scope_decision": {
+    "date": "2026-09-14",
+    "decision": "Requester removed container collector and dedicated tests; retains CodeQL fixes, narrow DSR fix, Jobs test repair and frontend diagnostics. Broader certification is follow-up work, not a release prerequisite.",
+    "collector": "removed",
+    "dsr": "five normalized-storage regressions retained; two recovery certification cases removed",
+    "deferred_tasks": [
+      "TASK-13013.7",
+      "TASK-13013.8",
+      "TASK-13013.9",
+      "TASK-12116"
+    ],
+    "historical_results": "Other verification records in this file describe past revisions, not current release requirements."
+  },
+  "retained": [
+    "Requested CodeQL repairs",
+    "Normalized DSR embedding-storage repair and five regressions",
+    "Jobs batch-test lease repair",
+    "Frontend head/base failure report retention"
+  ],
+  "verification": {
+    "focused_tests": 45,
+    "failures": 0,
+    "skips": 0,
+    "workflow_and_contracts": "Exactly match pre-collector08946442af",
+    "ruff": "passed",
+    "actionlint": "passed with external ShellCheck disabled",
+    "black": "retained DSR test file passed",
+    "bandit": "zero findings/errors with test assertions excluded",
+    "hosted_ci": "New run required after push"
+  },
+  "human_summary": {
+    "status": "waived_by_requester",
+    "scope": "PR2761 only",
+    "request": "continue, the human summary aint happening for this, this is too large of a pr for that to make sense",
+    "repository_wide_policy_changed": false
+  },
+  "release_metadata": "Unchanged: no protected frontend or application source changes in this cleanup."
+}

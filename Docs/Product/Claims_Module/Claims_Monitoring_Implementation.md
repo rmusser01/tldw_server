@@ -267,13 +267,13 @@ Request schema:
 {
   "format": "csv|json",               // required
   "filters": {
-    "workspace_id": "string|null",    // admin-only; non-admins should omit (ignored if provided); 403 on other workspace
-    "event_type": "string|null",
-    "severity": "string|null",
-    "provider": "string|null",
-    "model": "string|null",
-    "start_time": "string|null",      // ISO 8601
-    "end_time": "string|null"         // ISO 8601
+    "workspace_id": "string|null",    // optional signed-64-bit owner ID, max 19 characters; admin required for another owner
+    "event_type": "string|null",      // max 128 characters
+    "severity": "string|null",        // max 64 characters
+    "provider": "string|null",        // max 128 characters
+    "model": "string|null",           // max 256 characters
+    "start_time": "string|null",      // ISO 8601, max 64 characters
+    "end_time": "string|null"         // ISO 8601, max 64 characters
   },
   "pagination": {
     "limit": 1000,                    // optional, max 10000
@@ -287,12 +287,30 @@ Response schema:
 {
   "export_id": "string",
   "format": "csv|json",
-  "status": "queued|ready|failed",
+  "status": "queued|processing|ready|failed",
+  "job_id": "integer|null",
+  "job_status": "queued|processing|completed|failed|cancelled|quarantined|null",
+  "error_code": "string|null",
+  "snapshot_at": "string|null",
   "download_url": "string|null",
   "created_at": "string"
 }
 ```
-Download endpoint: `GET /api/v1/claims/analytics/export/{export_id}` returns the export payload (JSON) or CSV body.
+When either `CLAIMS_JOBS_ENABLED` or `CLAIMS_ANALYTICS_EXPORT_JOBS_ENABLED` is
+disabled, the request runs synchronously and returns HTTP 200 with a ready
+artifact and null Job fields. When both producer flags are enabled, the request
+returns HTTP 202 with a queued artifact, `job_id`, `job_status`, and
+`snapshot_at`; these additive fields remain nullable in the response contract.
+If the enqueue call returns without a complete Job ID/status projection, Claims
+still returns HTTP 202 because the Job may already be accepted. The worker and
+bounded reconciliation repair the artifact association. HTTP 503 with
+`claims_export_enqueue_failed` applies only when enqueue raises before returning
+acceptance, never after accepted Job creation. The producer does not require
+`CLAIMS_JOBS_WORKER_ENABLED`, because dedicated worker processes may run the
+WorkerSDK service separately.
+
+Download endpoint: `GET /api/v1/claims/analytics/export/{export_id}` returns the
+export payload (JSON) or CSV body only when the artifact is ready.
 
 #### GET /api/v1/claims/analytics/exports
 Lists stored analytics exports.
@@ -302,7 +320,7 @@ Query params:
 {
   "limit": 100,                       // optional, max 1000
   "offset": 0,                        // optional
-  "status": "queued|ready|failed",    // optional
+  "status": "queued|processing|ready|failed", // optional
   "format": "csv|json",               // optional
   "workspace_id": "string|null"       // optional, admin-only filter; non-admins are scoped to their workspace_id
 }
@@ -317,7 +335,11 @@ Response schema:
     {
       "export_id": "string",
       "format": "csv|json",
-      "status": "queued|ready|failed",
+      "status": "queued|processing|ready|failed",
+      "job_id": "integer|null",
+      "job_status": "queued|processing|completed|failed|cancelled|quarantined|null",
+      "error_code": "string|null",
+      "snapshot_at": "string|null",
       "download_url": "string|null",
       "created_at": "string",
       "updated_at": "string",
@@ -328,43 +350,195 @@ Response schema:
   ],
   "total": 0,
   "limit": 100,
-  "offset": 0
+  "offset": 0,
+  "pagination": {
+    "mode": "offset",
+    "limit": 100,
+    "offset": 0,
+    "total": 0,
+    "has_more": false,
+    "next_offset": null
+  },
+  "has_more": false,
+  "next_offset": null
 }
 ```
+Persisted filter and pagination snapshots are validated before response
+projection. Historical or malformed snapshots that exceed current limits or
+otherwise fail their public shapes are returned as `filters: null` or
+`pagination: null` so the export row remains listable. SQLite and PostgreSQL
+list and exact-artifact projections independently enforce an 8 KiB serialized
+cap for each request snapshot before the API or worker decodes it.
+Maintenance projections omit both filter and pagination snapshots because
+reconciliation and cleanup use only artifact lifecycle fields.
+
+Export requests are bounded to at most 10,000 monitoring-event rows. Rendered
+JSON or CSV output is bounded by `CLAIMS_ANALYTICS_EXPORT_MAX_BYTES`; the default
+configured limit is 10 MiB (10,485,760 UTF-8 bytes). Any configured positive
+integer value overrides that default, while invalid or non-positive values use 10 MiB.
+Process environment values take precedence over config-loaded settings. API
+producer and WorkerSDK processes must use the same byte limit so synchronous and
+asynchronous rendering enforce one contract.
+Monitoring-event scans return only bounded ordering and ownership metadata;
+variable-width `event_type`, `severity`, and payload text are loaded only for
+selected, owner-scoped rows. When a provider or model filter is present, the
+database checks raw payload bytes before evaluating JSON. Payload source above
+six times the configured export limit plus 64 KiB is not parsed; the scan
+returns a fixed-size marker and rendering fails with `claims_export_too_large`
+rather than silently excluding a possible match. Before parsing selected-row
+JSON, the selected-row query limits
+their combined raw UTF-8 source to six times the builder's remaining budget plus
+a fixed 64 KiB formatting allowance. It then canonicalizes the payload with
+compact separators, decoded Unicode, and finite JSON numbers and applies the
+exact remaining-byte limit to the selected data. Claims appends each JSON event
+or CSV row to a byte-counted builder. An individually oversized selected row,
+an excessive raw source, and the first cumulative serialized overflow therefore
+fail before an oversized result or database page is retained in application
+memory.
+At artifact acceptance, Claims also records an internal owner-scoped monitoring
+event-ID high-water. Rendering and retries apply that high-water with the
+timestamp cutoff so events added later with equal or backdated timestamps are
+excluded. This internal value is not exposed in the API or Jobs contracts; the
+matching `(user_id, id)` high-water and `(user_id, created_at, id)` keyset-scan
+indexes are present on SQLite and PostgreSQL. PostgreSQL monitoring-event
+inserts take a shared transaction-scoped owner lock before insert admission,
+while high-water capture takes the matching exclusive lock before `MAX(id)`, so
+the captured ID boundary includes every admitted event that commits first.
+Rendered event content is limited to immutable `id`, `user_id`, `event_type`,
+`severity`, `created_at`, and decoded `payload` fields. Mutable delivery state
+such as `delivered_at` is intentionally omitted so worker retries reproduce the
+same payload after delivery bookkeeping changes.
+Synchronous requests that exceed the configured byte limit return HTTP 413 with
+the stable `claims_export_too_large` code; asynchronous requests expose the safe
+failed artifact through the normal status APIs.
+
+CSV downloads use UTF-8, standard CSV quoting, and spreadsheet-formula
+protection. String cells beginning with `=`, `+`, `-`, `@`, tab, or carriage
+return are prefixed with a single quote before writing. Ready CSV responses use
+`text/csv; charset=utf-8` and attachment headers with a safe filename derived
+only from the validated server-generated `export_id`. JSON responses use
+`application/json`.
+
+Export lookup, list, and download are owner-scoped at the database query. A
+platform-admin caller authorized to target another user receives generated
+cross-user URLs with that target's `workspace_id` query parameter so per-user
+SQLite routing resolves the correct database. Non-admin callers cannot set
+another owner, and missing and wrong-owner exports both return HTTP 404. Owner
+IDs must be canonical positive signed-64-bit integers in the range 1 through
+9,223,372,036,854,775,807 before database routing.
 
 ### Export Status Lifecycle
 - **queued**: export request accepted and queued for async processing.
+- **processing**: a worker attempt is rendering or persisting output.
 - **ready**: export payload stored; `download_url` populated.
-- **failed**: processing error; `error_message` populated.
+- **failed**: the latest artifact attempt failed or reconciliation proved that
+  no accepted Job exists; `error_message` is a short safe message.
+
+Claims artifact status and Jobs lifecycle status are separate. `status` is the
+artifact state owned by Claims. `job_status` is a read-only projection of the
+shared Jobs lifecycle, which may include `queued`, `processing`, `completed`,
+`failed`, `cancelled`, or `quarantined`. Jobs remains authoritative for retries,
+leases, cancellation, quarantine, and terminal execution state; Claims does not
+maintain a second Jobs state machine. A ready artifact remains downloadable even
+when its Jobs row is unavailable or still completing.
 
 State transitions:
-- queued -> ready: backend completes payload generation (typical: < 30s for < 100k records).
-- queued -> failed: validation, timeout, or storage error.
+- queued -> processing -> ready: a worker completes payload generation.
+- queued -> failed: enqueue compensation or reconciliation proves no accepted
+  Job exists.
+- processing -> failed: any worker attempt fails, including a retryable failure.
+- failed -> processing: Jobs later retries the same artifact.
 
 Client guidance:
 - Poll `GET /api/v1/claims/analytics/export/{export_id}` with exponential backoff
-  (e.g., 2s, 5s, 10s, 30s) until `status` is `ready` or `failed`.
+  (e.g., 2s, 5s, 10s, 30s). Continue only while the HTTP 409 detail reports
+  artifact `status` as `queued` or `processing` and `job_status` is null or
+  non-terminal. Stop on HTTP 200, artifact `status=failed`, or terminal
+  `job_status` `completed`, `failed`, `cancelled`, or `quarantined`; cancelled
+  and quarantined downloads use stable `claims_export_job_cancelled` and
+  `claims_export_job_quarantined` codes. Listing `GET
+  /api/v1/claims/analytics/exports` also runs bounded reconciliation before it
+  returns artifact and Jobs status projections.
 - No webhook callback is provided; `export_id` is the tracking identifier.
 
 Cleanup:
-- Exports older than `CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS` (default 24) are deleted
-  by a scheduled cleanup job (e.g., every 6 hours).
-- Clients should download before expiry.
+- Retention cleanup and orphan reconciliation run as bounded, best-effort work
+  during existing Claims create/list activity. They use
+  `CLAIMS_ANALYTICS_EXPORT_RETENTION_HOURS` (default 24) and
+  `CLAIMS_ANALYTICS_EXPORT_ORPHAN_GRACE_SEC` (default 300).
+- Retention accepts any finite positive hour value, including fractional values;
+  invalid, non-finite, or non-positive values fall back to the default.
+- Once retention eligibility is reached, lifecycle-aware cleanup may delete aged
+  ready artifacts. Every failed artifact, with or without `job_id`, requires
+  retention plus orphan grace and a successful exact owner-scoped,
+  archived-aware lookup proving that no Job exists. Any exact active or archived
+  Jobs row preserves the failed artifact regardless of its observed status,
+  because Jobs may retry terminal work. Queued, processing, retrying, and
+  uncertain non-ready artifacts are also preserved. A Jobs lookup failure or
+  owner/domain/type mismatch remains uncertainty and preserves the artifact.
+- Maintenance scans use `(user_id, status, export_id)` and
+  `(user_id, status, updated_at, export_id)` indexes on SQLite and PostgreSQL for
+  rotating and age-ordered bounded pages.
+- This is request-time maintenance, not a scheduled Claims cleanup job,
+  scheduler, daemon, lease loop, or retry engine. Clients should download before
+  expiry.
 
 ### Error Handling
-All endpoints return consistent error payloads:
+
+Claims analytics export endpoints use FastAPI `detail` responses. These shapes
+apply only to the analytics export endpoints and do not redefine unrelated
+Claims endpoint errors.
+
+A missing or wrong-owner export returns the same generic HTTP 404 response:
+
 ```json
 {
-  "error": {
-    "code": "string",
-    "message": "string",
-    "details": "object|null"
+  "detail": "Export not found"
+}
+```
+
+Non-ready and failed downloads return HTTP 409:
+
+```json
+{
+  "detail": {
+    "code": "claims_export_not_ready",
+    "status": "queued",
+    "job_status": null
   }
 }
 ```
-Status codes: 400 for validation failures, 401/403 for auth/permissions, 404 for
-missing resources, 409 for conflicts, 429 for rate limits, 500 for unexpected errors.
-Error code guidance: `invalid_channels` when all alert channels are false (400).
+
+When asynchronous mode is enabled, an enqueue exception before acceptance
+returns HTTP 503:
+
+```json
+{
+  "detail": {
+    "code": "claims_export_enqueue_failed",
+    "message": "Claims analytics export could not be queued."
+  }
+}
+```
+
+An incomplete projection returned by enqueue is not a 503 condition. Claims
+returns HTTP 202 because the Job may already be accepted, and the worker or
+bounded reconciliation repairs the association. Claims never returns HTTP 503
+after accepted Job creation. Unrelated Claims endpoint behavior is unchanged;
+for example, alert validation still uses `invalid_channels` when all channels
+are false.
+
+Download behavior is explicit: a non-ready or failed artifact returns HTTP 409
+with artifact status, nullable `job_status`, and a stable public error code:
+
+- Pending or retrying work uses `claims_export_not_ready`.
+- A cancelled Jobs projection uses `claims_export_job_cancelled`.
+- A quarantined Jobs projection uses `claims_export_job_quarantined`.
+- A failed artifact uses its stored safe `error_code`, or
+  `claims_export_failed` when no safe stored code is available.
+
+The generic 404 response does not reveal whether another owner has the requested
+export ID.
 
 Webhook delivery:
 - Retry strategy: exponential backoff with jitter.
@@ -396,6 +570,46 @@ the latest row per workspace.
 ## Access Control
 - Require `admin` role or `claims.admin` permission for config/alerts endpoints.
 - Health endpoint should be limited to `admin`/SRE roles.
+
+## Jobs Operator Boundary
+Claims owns export authorization, request normalization, artifact status,
+rendering, reconciliation, and download readiness. Shared Jobs owns queue
+admission, leases, retries, backoff, cancellation, quarantine, lifecycle
+status, and administrative controls. Existing Jobs admin endpoints are the only
+pause, cancel, retry, quarantine, or drain controls; Claims must not recreate
+those controls or add a Claims scheduler.
+
+Producer and worker enablement are independent. The asynchronous producer
+requires both `CLAIMS_JOBS_ENABLED` and
+`CLAIMS_ANALYTICS_EXPORT_JOBS_ENABLED`, while
+`CLAIMS_JOBS_WORKER_ENABLED` only controls whether the WorkerSDK service starts
+in that process. Request-time reconciliation and cleanup are bounded maintenance
+on existing create/list activity, not a Claims scheduler, daemon, or retry loop.
+
+## Rollout And Rollback
+Roll out in this order:
+
+1. Deploy the schema and Job payload/handler support with producers disabled.
+2. Start or enable Claims WorkerSDK workers and verify they advertise the
+   configured Claims queue.
+3. Enable `CLAIMS_ANALYTICS_EXPORT_JOBS_ENABLED` for a producer canary while
+   retaining the synchronous fallback elsewhere.
+4. Verify accepted exports, Job status, retries, artifact readiness, safe
+   downloads, limits, and retention behavior before expanding the canary.
+
+Roll back in this order:
+
+1. Disable `CLAIMS_ANALYTICS_EXPORT_JOBS_ENABLED` first so new analytics export
+   requests use the synchronous path.
+2. Keep `CLAIMS_JOBS_ENABLED` unchanged unless separately rolling back all Claims
+   Jobs workloads, because it also controls Stage 1. Keep workers running to
+   drain accepted Jobs and repair accepted artifacts.
+3. Disable workers only after the accepted Jobs have drained. Use the existing
+   Jobs admin endpoints for any required pause, cancel, retry, quarantine, or
+   drain action.
+
+Disabling workers before the analytics export producer can strand accepted
+artifacts and is not the supported rollback sequence.
 
 ## Testing
 - API tests for config CRUD and rebuild health response shape.

@@ -14,6 +14,7 @@ import re
 import uuid
 
 from loguru import logger
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -233,6 +234,44 @@ class RGSimpleMiddleware:
         if not policy_id:
             await self.app(scope, receive, send)
             return
+
+        # Cookie sessions must spend their validated owner's user quota when
+        # the policy cannot admit an anonymous request. The
+        # canonical resolver caches AuthContext on shared ASGI request state,
+        # so endpoint auth reuses this validation. Explicit headers (even empty
+        # ones) keep precedence over cookies, matching the resolver contract.
+        if (
+            request.cookies
+            and request.headers.get("Authorization") is None
+            and request.headers.get("X-API-KEY") is None
+        ):
+            from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+            settings = get_settings()
+            loader = getattr(request.app.state, "rg_policy_loader", None)
+            policy = (loader.get_policy(policy_id) or {}) if loader else {}
+            policy_scopes = set(policy.get("scopes") or ["global", "entity"])
+            requires_owner = bool(policy_scopes & {"user", "api_key"}) and not (
+                policy_scopes & {"global", "ip", "entity"}
+            )
+            if (
+                requires_owner
+                and settings.AUTH_MODE == "single_user"
+                and request.cookies.get(settings.SINGLE_USER_SESSION_COOKIE_NAME)
+            ):
+                from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import (
+                    get_auth_principal,
+                )
+
+                try:
+                    await get_auth_principal(request)
+                except HTTPException as exc:
+                    # This middleware runs outside ExceptionMiddleware.
+                    response = JSONResponse(
+                        {"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers
+                    )
+                    await response(scope, receive, send)
+                    return
         # If governor not initialized, lazily create one using loader + backend env
         gov = getattr(request.app.state, "rg_governor", None)
         if gov is None:

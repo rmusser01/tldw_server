@@ -109,34 +109,6 @@ async def test_optional_media_db_unexpected_error_log_is_sanitized(monkeypatch):
     _assert_logs_are_sanitized(logger_stub)
 
 
-def test_test_mode_db_path_fallback_log_is_sanitized(monkeypatch):
-    logger_stub = _LoggerStub()
-
-    class _BrokenSettings:
-        def get(self, _key):
-            raise RuntimeError("backend exploded at /private/db/path SECRET_TOKEN")
-
-    monkeypatch.delenv("USER_DB_BASE_DIR", raising=False)
-    monkeypatch.setenv("TESTING", "1")
-    monkeypatch.setattr(db_deps, "logger", logger_stub)
-    monkeypatch.setattr(db_deps, "settings", _BrokenSettings())
-    monkeypatch.setattr(
-        db_deps.DatabasePaths,
-        "get_media_db_path",
-        staticmethod(lambda _user_id: Path("/tmp/safe-media.db")),
-    )
-
-    assert db_deps._get_db_path_for_user(42) == Path("/tmp/safe-media.db")
-
-    assert any(
-        level == "warning" and "TESTING mode: failed to derive project-root user DB dir" in message
-        for level, message, _args, _kwargs in logger_stub.messages
-    )
-    rendered = _render_logs(logger_stub)
-    assert "RuntimeError" in rendered
-    _assert_logs_are_sanitized(logger_stub)
-
-
 def test_media_db_factory_database_error_log_does_not_attach_traceback_metadata(monkeypatch):
     logger_stub = _LoggerStub()
     db_deps._media_db_factories.clear()

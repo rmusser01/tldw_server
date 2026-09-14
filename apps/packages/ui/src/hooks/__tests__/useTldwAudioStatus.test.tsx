@@ -419,6 +419,64 @@ describe("useTldwAudioStatus", () => {
     expect(state.fetchVoices).not.toHaveBeenCalled()
   })
 
+  it("does not request a voice catalog for a provider explicitly disabled by audio health", async () => {
+    state.capabilities = {
+      hasAudio: true,
+      hasStt: false,
+      hasTts: true,
+      hasVoiceChat: false
+    }
+    state.loading = true
+    state.inferProviderFromModel.mockReturnValue("kitten_tts")
+    state.apiSend.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {
+        status: "unhealthy",
+        providers: {
+          details: {
+            kitten_tts: {
+              status: "not_initialized"
+            }
+          }
+        },
+        capabilities_envelope: [
+          {
+            provider: "kitten-tts",
+            availability: "disabled"
+          }
+        ]
+      }
+    })
+
+    const { result, rerender } = renderHook(
+      () =>
+        useTldwAudioStatus({
+          requireVoices: true,
+          tldwTtsModel: "KittenML/kitten-tts-nano-0.8"
+        } as any),
+      {
+        wrapper: buildWrapper()
+      }
+    )
+
+    await waitFor(() => {
+      expect(result.current.voicesLoading).toBe(true)
+    })
+    expect(state.fetchVoiceCatalog).not.toHaveBeenCalled()
+
+    state.loading = false
+    rerender()
+
+    await waitFor(() => {
+      expect(result.current.ttsHealthLoading).toBe(false)
+    })
+
+    expect(state.fetchVoiceCatalog).not.toHaveBeenCalled()
+    expect(state.fetchVoices).not.toHaveBeenCalled()
+    expect(result.current.voicesAvailable).toBe(false)
+  })
+
   it("does not mark TTS unavailable when catalog voices prove the selected provider is reachable", async () => {
     state.capabilities = {
       hasAudio: false,

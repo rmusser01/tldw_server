@@ -189,12 +189,22 @@ describe("settings nav guardian gating", () => {
         "/settings/preferences",
         "/settings/chat",
         "/settings/ui",
+        "/settings/prompt",
         "/settings/rag"
       ])
     )
     expect(pathsByGroup.dataAdmin).toEqual(
       expect.arrayContaining(["/settings/data", "/settings/about"])
     )
+  })
+
+  it("keeps Workflow prompts in Preferences & Workflow with its own label token", () => {
+    const groups = getSettingsNavGroups(undefined)
+    const preferences = groups.find((group) => group.key === "preferencesWorkflow")
+    const prompt = preferences?.items.find((item) => item.to === "/settings/prompt")
+
+    expect(prompt?.labelToken).toBe("settings:servicePrompts.title")
+    expect(resolveLocaleToken(prompt?.labelToken ?? "")).toBe("Workflow prompts")
   })
 
   it("keeps only settings-prefixed routes in settings navigation", () => {

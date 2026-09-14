@@ -1,0 +1,47 @@
+{
+  "recorded_at_utc": "2026-09-06T02:40:29.858029+00:00",
+  "base_revision": "0f5ac351f213c78ab922c724f4d6b501e82af885",
+  "source_sha256": {
+    "apps/packages/ui/src/routes/sidepanel-persona.tsx": "bd2f5dbe1646826f39ddaa156be24087ff0151b9453e3c61178f518c70319113",
+    "apps/packages/ui/src/routes/hooks/usePersonaLiveSession.tsx": "29c56e899bacecd0e79d18ea3682635a74c9511168b28ab37bb90dad1bc33cec",
+    "apps/packages/ui/src/hooks/usePersonaLiveVoiceController.tsx": "940cb4f9b12670b08f547e2787afe8c3004e2532960365b82cdb17729d436cb4"
+  },
+  "surface": "Persona Live in real browser at localhost:18384",
+  "persona_id": "e19c631e-e2ac-452d-9935-293af03cee4e",
+  "mode": {
+    "auto_commit": false,
+    "auto_resume": false,
+    "stt": "Whisper tiny.en",
+    "chat": "configured DeepSeek",
+    "tts": "local Kokoro af_heart"
+  },
+  "authorization": "User ready; background audio paused; operator authorized to click Send now after phrase appeared.",
+  "committed_transcript": "Reply with the Blue Notebook is ready.",
+  "provider_reply": "The Blue Notebook is ready.",
+  "observed_ui_states": [
+    "idle",
+    "listening",
+    "thinking",
+    "speaking",
+    "idle",
+    "disconnected"
+  ],
+  "committed_user_entries": 1,
+  "tts_chunk_notices": 4,
+  "user_playback_confirmation": "Yes, clearly; it stopped afterward",
+  "send_now_disabled_after_submit": true,
+  "start_listening_disabled_after_disconnect": true,
+  "prior_cancelled_attempt": {
+    "mixed_background_speech": true,
+    "operator_pressed_stop_voice": true,
+    "observed_idle": true,
+    "send_now_disabled": true,
+    "provider_submission": false
+  },
+  "limits": [
+    "Raw MediaStream tracks were not directly inspected; cleanup ownership is also covered by targeted regression tests.",
+    "Live voice state labels were observed; independent floating Buddy state animation was not qualified.",
+    "BYOK-only server voice, OpenAI realtime physical microphone/playback, and intermittent optional visual/analytics fetch failures are not qualified by this run."
+  ],
+  "raw_audio_saved": false
+}

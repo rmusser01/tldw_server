@@ -75,7 +75,7 @@ class MediaSearchRepository:
         self.session = session
 
     @classmethod
-    def from_legacy_db(cls, db: MediaDbLike) -> "MediaSearchRepository":
+    def from_legacy_db(cls, db: MediaDbLike) -> MediaSearchRepository:
         return cls(
             session=require_media_database_like(
                 db,
@@ -184,7 +184,7 @@ class MediaSearchRepository:
         count_select = "COUNT(DISTINCT m.id)"
         base_from = "FROM Media m"
         joins: list[str] = []
-        conditions: list[str] = []
+        conditions: list[str] = ["m.system_operation_id IS NULL"]
         params: list[Any] = []
         fts_condition_index: int | None = None
         fts_param_index: int | None = None

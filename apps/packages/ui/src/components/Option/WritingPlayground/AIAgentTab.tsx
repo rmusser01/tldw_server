@@ -1,10 +1,12 @@
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react"
 import { Button, Empty, Input, Segmented, Spin, Typography } from "antd"
 import { Send } from "lucide-react"
 import { useWritingPlaygroundStore } from "@/store/writing-playground"
 import { TldwChatService } from "@/services/tldw/TldwChat"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useStorage } from "@plasmohq/storage/hook"
+import { loadServicePromptSnapshot, subscribeToServicePromptConfigChanges, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import {
   getManuscriptScene,
   listManuscriptCharacters,
@@ -17,12 +19,6 @@ import {
 type AIAgentTabProps = { isOnline: boolean }
 type AgentMode = "quick" | "planning" | "brainstorm"
 type AgentMessage = { role: "user" | "assistant"; content: string }
-
-const SYSTEM_PROMPTS: Record<AgentMode, string> = {
-  quick: "You are a writing assistant. Give brief, direct answers (3 sentences max). The WRITER writes. You ASSIST and ADVISE.",
-  planning: "You are a story planning assistant. Help with plot structure, character arcs, and world-building. Provide structured suggestions. The WRITER writes. You ASSIST and ADVISE.",
-  brainstorm: "You are a creative brainstorming partner. Generate ideas freely, suggest alternatives, explore possibilities. The WRITER writes. You ASSIST and ADVISE.",
-}
 
 const chatService = new TldwChatService()
 
@@ -37,6 +33,44 @@ export function AIAgentTab({ isOnline }: AIAgentTabProps) {
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const epochRef = useRef(0)
+  const controllerRef = useRef<AbortController | null>(null)
+  const historyScopeRef = useRef<string | null>(null)
+  const releaseHistoryRef = useRef<(() => void) | null>(null)
+
+  const cancelWork = useCallback(() => {
+    epochRef.current += 1
+    controllerRef.current?.abort()
+    controllerRef.current = null
+    releaseHistoryRef.current?.()
+    releaseHistoryRef.current = null
+    historyScopeRef.current = null
+  }, [])
+
+  const resetConversation = useCallback(() => {
+    cancelWork()
+    setMessages([])
+    setInput("")
+    setLoading(false)
+  }, [cancelWork])
+
+  useLayoutEffect(() => {
+    resetConversation()
+    return cancelWork
+  }, [activeProjectId, mode, resetConversation, cancelWork])
+
+  useEffect(() => {
+    // A failed first lookup has no lease to clear its error on account changes.
+    const clearUnboundState = () => {
+      if (!historyScopeRef.current && !controllerRef.current) resetConversation()
+    }
+    const unsubscribe = subscribeToServicePromptConfigChanges(clearUnboundState)
+    window.addEventListener("tldw:auth-credentials-changed", clearUnboundState)
+    return () => {
+      unsubscribe()
+      window.removeEventListener("tldw:auth-credentials-changed", clearUnboundState)
+    }
+  }, [resetConversation])
 
   useEffect(() => {
     if (typeof messagesEndRef.current?.scrollIntoView === "function") {
@@ -44,11 +78,13 @@ export function AIAgentTab({ isOnline }: AIAgentTabProps) {
     }
   }, [messages])
 
-  const buildContextSnippet = useCallback(async (): Promise<string> => {
+  const buildContextSnippet = useCallback(async (snapshot: ServicePromptSnapshot): Promise<string> => {
     const parts: string[] = []
+    const options = { signal: snapshot.scopeSignal, requestScope: snapshot.requestScope }
     try {
       if (activeNodeId) {
-        const scene: ManuscriptSceneResponse = await getManuscriptScene(activeNodeId)
+        const scene: ManuscriptSceneResponse = await getManuscriptScene(activeNodeId, options)
+        snapshot.scopeSignal.throwIfAborted()
         const sceneContent = scene.content_plain || ""
         if (sceneContent) {
           const snippet = sceneContent.length > 2000
@@ -57,11 +93,13 @@ export function AIAgentTab({ isOnline }: AIAgentTabProps) {
           parts.push(`[Current Scene: ${scene.title || "Untitled"}]\n${snippet}`)
         }
       }
+      snapshot.scopeSignal.throwIfAborted()
       if (activeProjectId) {
         const [charsResp, worldResp] = await Promise.all([
-          listManuscriptCharacters(activeProjectId),
-          listManuscriptWorldInfo(activeProjectId),
+          listManuscriptCharacters(activeProjectId, undefined, options),
+          listManuscriptWorldInfo(activeProjectId, undefined, options),
         ])
+        snapshot.scopeSignal.throwIfAborted()
         const chars = charsResp.characters || []
         if (chars.length > 0) {
           const charList = chars.slice(0, 10).map((c: ManuscriptCharacter) =>
@@ -77,27 +115,58 @@ export function AIAgentTab({ isOnline }: AIAgentTabProps) {
           parts.push(`[World Info]\n${worldList}`)
         }
       }
-    } catch {
-      // Context is best-effort; ignore errors
+    } catch (error) {
+      snapshot.scopeSignal.throwIfAborted()
+      if (isRequestConfigScopeChangedError(error)) throw error
+      // Ordinary context failures remain best-effort; scope failures never do.
     }
     return parts.length > 0 ? "\n\n--- Manuscript Context ---\n" + parts.join("\n\n") : ""
   }, [activeProjectId, activeNodeId])
 
   const handleSend = async () => {
     const text = input.trim()
-    if (!text || loading) return
+    if (!text || loading || controllerRef.current) return
+    const controller = new AbortController()
+    controllerRef.current = controller
+    const epoch = epochRef.current
+    const isCurrent = () => epoch === epochRef.current && !controller.signal.aborted
+    const history = historyScopeRef.current ? messages : []
 
     const userMsg: AgentMessage = { role: "user", content: text }
-    setMessages((prev) => [...prev, userMsg])
+    setMessages([...history, userMsg])
     setInput("")
     setLoading(true)
 
     try {
-      const context = await buildContextSnippet()
-      const systemPrompt = SYSTEM_PROMPTS[mode] + context
+      const id = `writing.agent.${mode}` as const
+      const snapshot = await loadServicePromptSnapshot([id], { signal: controller.signal })
+      if (!isCurrent() || snapshot.scopeInvalidatedSignal.aborted || snapshot.scopeSignal.aborted) {
+        snapshot.release()
+        if (isCurrent()) resetConversation()
+        return
+      }
+      if (historyScopeRef.current && historyScopeRef.current !== snapshot.scopeKey) {
+        snapshot.release()
+        resetConversation()
+        return
+      }
+      releaseHistoryRef.current?.()
+      historyScopeRef.current = snapshot.scopeKey
+      snapshot.scopeInvalidatedSignal.addEventListener("abort", resetConversation, { once: true })
+      // Keep the lease while history is visible, including between requests.
+      releaseHistoryRef.current = () => {
+        snapshot.scopeInvalidatedSignal.removeEventListener("abort", resetConversation)
+        snapshot.release()
+        controller.abort()
+      }
+      const system = snapshot.definitions[id]?.parts.system
+      if (typeof system !== "string" || !system.trim()) throw new Error(`Writing Agent prompt ${id} is unavailable.`)
+      const context = await buildContextSnippet(snapshot)
+      if (!isCurrent()) return
+      const systemPrompt = system + context
 
       const chatMessages = [
-        ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+        ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
         { role: "user" as const, content: text },
       ]
 
@@ -109,21 +178,31 @@ export function AIAgentTab({ isOnline }: AIAgentTabProps) {
           apiProvider: apiProvider || undefined,
           temperature: mode === "brainstorm" ? 0.9 : mode === "quick" ? 0.3 : 0.6,
           maxTokens: mode === "quick" ? 256 : 1024,
+          signal: snapshot.scopeSignal,
+          requestScope: snapshot.requestScope,
         }
       )
 
-      setMessages((prev) => [...prev, { role: "assistant", content: response }])
+      if (isCurrent()) setMessages((prev) => [...prev, { role: "assistant", content: response }])
     } catch (err: unknown) {
+      if (!isCurrent()) return
+      if (isRequestConfigScopeChangedError(err)) {
+        resetConversation()
+        return
+      }
       const message =
         err instanceof Error && err.message.trim().length > 0
           ? err.message
           : "Failed to get response"
       setMessages((prev) => [
-        ...prev,
+        ...(historyScopeRef.current ? prev : []),
         { role: "assistant", content: `Error: ${message}` },
       ])
     } finally {
-      setLoading(false)
+      if (isCurrent()) {
+        controllerRef.current = null
+        setLoading(false)
+      }
     }
   }
 
@@ -146,7 +225,6 @@ export function AIAgentTab({ isOnline }: AIAgentTabProps) {
         value={mode}
         onChange={(v) => {
           setMode(v as AgentMode)
-          setMessages([])
         }}
         options={[
           { value: "quick", label: "Quick" },

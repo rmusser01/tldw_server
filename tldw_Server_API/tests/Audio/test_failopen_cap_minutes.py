@@ -1,13 +1,10 @@
-import importlib
 import builtins
-import os
+import importlib
 import types
 
 import loguru
 import pytest
-from fastapi import APIRouter
-from fastapi import HTTPException
-
+from fastapi import APIRouter, HTTPException
 
 pytestmark = pytest.mark.unit
 
@@ -22,6 +19,17 @@ class _LoggerStub:
 
     def warning(self, *args, **kwargs):
         self.warning_calls.append((args, kwargs))
+
+
+class _HealthyProviderOverrideSnapshot:
+    def enforce(self, _model):
+        return None
+
+    def server_fallback(self, base_fallback=None):
+        return base_fallback
+
+    def ensure_healthy(self):
+        return None
 
 
 _SENSITIVE_LOG_MARKERS = (
@@ -337,18 +345,22 @@ async def test_aggregate_resolve_tts_byok_delegates_to_core(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_aggregate_resolve_tts_byok_logs_resolver_lookup_fallback(monkeypatch):
+    from tldw_Server_API.app.core.Audio import tts_service
+
     mod = _import_audio_aggregate_module(monkeypatch, cfg=_fake_cfg({}))
     logger_stub = _LoggerStub()
     monkeypatch.setattr(mod, "logger", logger_stub, raising=True)
     original_import = builtins.__import__
 
-    class _ByokResolution:
-        uses_byok = False
-        api_key = "configured"
-        credential_fields = {}
-
     async def _fallback_resolver(*_args, **_kwargs):
-        return _ByokResolution()
+        return tts_service.ResolvedByokCredentials(
+            provider="fish_s2",
+            api_key="configured",
+            app_config={},
+            credential_fields={},
+            source="user",
+            allowlisted=True,
+        )
 
     def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
         if name == "tldw_Server_API.app.api.v1.endpoints" and "audio" in fromlist:
@@ -356,6 +368,11 @@ async def test_aggregate_resolve_tts_byok_logs_resolver_lookup_fallback(monkeypa
         return original_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(mod, "resolve_byok_credentials", _fallback_resolver, raising=True)
+    monkeypatch.setattr(
+        tts_service,
+        "capture_provider_override_call_snapshot",
+        lambda _provider: _HealthyProviderOverrideSnapshot(),
+    )
     monkeypatch.setattr(builtins, "__import__", _guarded_import)
 
     result = await mod._resolve_tts_byok(
@@ -365,23 +382,36 @@ async def test_aggregate_resolve_tts_byok_logs_resolver_lookup_fallback(monkeypa
     )
 
     assert result[0] == 1
-    assert result[1] is None
-    _assert_sanitized_debug_log(logger_stub, "Falling back to default BYOK resolver after audio package resolver lookup failed")
+    assert result[1]["api_key"] == "configured"
+    assert result[1]["credentials_resolved"] is True
+    _assert_sanitized_debug_log(
+        logger_stub,
+        "Falling back to default BYOK resolver after audio package resolver lookup failed",
+    )
 
 
 @pytest.mark.asyncio
 async def test_aggregate_resolve_tts_byok_rejects_blank_byok_api_key(monkeypatch):
+    from tldw_Server_API.app.core.Audio import tts_service
+
     mod = _import_audio_aggregate_module(monkeypatch, cfg=_fake_cfg({}))
 
-    class _ByokResolution:
-        uses_byok = True
-        api_key = "   "
-        credential_fields = {}
-
     async def _blank_byok_resolver(*_args, **_kwargs):
-        return _ByokResolution()
+        return tts_service.ResolvedByokCredentials(
+            provider="fish_s2",
+            api_key="   ",
+            app_config={},
+            credential_fields={},
+            source="user",
+            allowlisted=True,
+        )
 
     monkeypatch.setattr(mod, "resolve_byok_credentials", _blank_byok_resolver, raising=True)
+    monkeypatch.setattr(
+        tts_service,
+        "capture_provider_override_call_snapshot",
+        lambda _provider: _HealthyProviderOverrideSnapshot(),
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         await mod._resolve_tts_byok(

@@ -1,0 +1,25 @@
+{
+  "header": {"type": "esummary", "version": "0.3"},
+  "result": {
+    "uids": ["9000001", "9000002"],
+    "9000001": {
+      "uid": "9000001",
+      "title": "Synthetic PMC metadata record one",
+      "authors": [{"name": "Synthetic Author One"}],
+      "articleids": [
+        {"idtype": "pmcid", "value": "PMC9000001"},
+        {"idtype": "doi", "value": "10.5555/synthetic.pmc.1"},
+        {"idtype": "pmid", "value": "12345678"}
+      ]
+    },
+    "9000002": {
+      "uid": "9000002",
+      "title": "Synthetic PMC metadata record two",
+      "authors": [{"name": "Synthetic Author Two"}],
+      "articleids": [
+        {"idtype": "pmcid", "value": "PMC9000002"},
+        {"idtype": "pmid", "value": "0"}
+      ]
+    }
+  }
+}

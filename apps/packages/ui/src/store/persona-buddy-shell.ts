@@ -37,8 +37,9 @@ type PersonaBuddyShellStoreState = {
 export const PERSONA_BUDDY_SHELL_STORAGE_KEY = "tldw-persona-buddy-shell"
 
 export const DEFAULT_PERSONA_BUDDY_SHELL_POSITIONS: PersonaBuddyShellPositions = {
-  "web-desktop": { x: 1120, y: 640 },
-  "sidepanel-desktop": { x: 1120, y: 640 }
+  // Start below global navigation, clear of the bottom composer controls.
+  "web-desktop": { x: 1120, y: 96 },
+  "sidepanel-desktop": { x: 1120, y: 96 }
 }
 
 const DEFAULT_SHELL_MARGIN = 16

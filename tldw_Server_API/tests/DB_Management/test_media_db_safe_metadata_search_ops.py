@@ -10,7 +10,6 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -153,7 +152,8 @@ def test_search_by_safe_metadata_eq_matches_default_json_spacing() -> None:
             title TEXT,
             type TEXT,
             deleted INTEGER NOT NULL DEFAULT 0,
-            last_modified TEXT
+            last_modified TEXT,
+            system_operation_id TEXT
         );
         CREATE TABLE DocumentVersions (
             id INTEGER PRIMARY KEY,

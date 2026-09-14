@@ -1,0 +1,59 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=2371823851
+rootdir: /private/tmp/tldw-server-buddy-persona-ux
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 3 items
+
+tldw_Server_API/tests/LLM_Adapters/unit/test_llm_providers_optional_metadata.py . [ 33%]
+..                                                                       [100%]2026-09-09 00:00:31.413 | INFO     | tldw_Server_API.app.core.config:_buffered_log:209 - Determined ACTUAL_PROJECT_ROOT for database paths: /private/tmp/tldw-server-buddy-persona-ux
+2026-09-09 00:00:31.414 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:209 - Early .env load: no candidate files found; relying on process env
+2026-09-09 00:00:31.414 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:209 - load_and_log_configs(): Loading and logging configurations...
+2026-09-09 00:00:31.416 | INFO     | tldw_Server_API.app.core.config:_buffered_log:209 - No .env/.ENV file found in /private/tmp/tldw-server-buddy-persona-ux/tldw_Server_API, /private/tmp/tldw-server-buddy-persona-ux/tldw_Server_API/Config_Files, /private/tmp/tldw-server-buddy-persona-ux, or /private/tmp/tldw-server-buddy-persona-ux/Config_Files; using config.txt and system env
+2026-09-09 00:00:31.417 | INFO     | tldw_Server_API.app.core.config:_buffered_log:209 - Attempting to load comprehensive config from: /private/tmp/tldw-server-buddy-persona-ux/tldw_Server_API/Config_Files/config.txt
+2026-09-09 00:00:31.420 | INFO     | tldw_Server_API.app.core.config:_buffered_log:209 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-09 00:00:31.423 | INFO     | tldw_Server_API.app.core.config:_buffered_log:209 - Ensured main SQLite database directory exists: /private/tmp/tldw-server-buddy-persona-ux/Databases
+2026-09-09 00:00:31.424 | INFO     | tldw_Server_API.app.core.config:_buffered_log:209 - Ensured user data base directory exists: Databases/user_databases
+2026-09-09 00:00:31.425 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:<module>:532 - Using cachetools.LRUCache for audit service instances (maxsize=20).
+2026-09-09 00:00:31.426 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-09 00:00:31.427 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-09 00:00:31.429 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-09 00:00:31.430 | WARNING  | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-09 00:00:31.431 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-09 00:00:31.431 | INFO     | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:77 - Detected database backend: sqlite
+2026-09-09 00:00:31.648 | INFO     | tldw_Server_API.app.core.Chat.prompt_template_manager:<module>:201 - Prompt templates directory: /private/tmp/tldw-server-buddy-persona-ux/tldw_Server_API/app/core/Chat/prompt_templates
+2026-09-09 00:00:31.648 | INFO     | tldw_Server_API.app.core.Chat.prompt_template_manager:<module>:202 - Available templates found: []
+2026-09-09 00:00:31.887 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlist_run
+2026-09-09 00:00:31.888 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_enrich_output
+2026-09-09 00:00:31.889 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_deliver_briefing
+2026-09-09 00:00:31.890 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: acp_run
+2026-09-09 00:00:31.891 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: workflow_run
+2026-09-09 00:00:31.893 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-29c3db63
+2026-09-09 00:00:31.894 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-29c3db63/1/workflows/workflows_scheduler.db
+2026-09-09 00:00:31.896 | INFO     | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-29c3db63/1/workflows/workflows_scheduler.db
+2026-09-09 00:00:31.897 | INFO     | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-09 00:00:31.898 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-09 00:00:31.899 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-09 00:00:31.909 | INFO     | tldw_Server_API.app.api.v1.API_Deps.DB_Deps:<module>:57 - Using LRUCache for user DB instances (maxsize=100).
+2026-09-09 00:00:32.149 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1858 - Registered metric: chunker_cache_get_total
+2026-09-09 00:00:32.149 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1858 - Registered metric: chunker_cache_put_total
+2026-09-09 00:00:32.150 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1858 - Registered metric: chunker_process_total
+2026-09-09 00:00:32.151 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1858 - Registered metric: chunker_frontmatter_duration_seconds
+2026-09-09 00:00:32.151 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1858 - Registered metric: chunker_header_extract_seconds
+2026-09-09 00:00:32.152 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1858 - Registered metric: chunker_chunking_duration_seconds
+2026-09-09 00:00:32.152 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1858 - Registered metric: chunker_normalization_seconds
+2026-09-09 00:00:32.153 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1858 - Registered metric: chunker_last_chunk_count
+2026-09-09 00:00:32.154 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1858 - Registered metric: chunker_output_bytes
+2026-09-09 00:00:32.154 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1858 - Registered metric: chunker_input_bytes
+2026-09-09 00:00:32.155 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1858 - Registered metric: chunker_process_total_seconds
+2026-09-09 00:00:32.156 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:209 - load_and_log_configs(): Loading and logging configurations...
+2026-09-09 00:00:32.159 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:209 - load_and_log_configs(): Loading and logging configurations...
+
+
+======================== 3 passed, 4 warnings in 1.33s =========================

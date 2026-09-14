@@ -62,3 +62,19 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-028](028-security-restricted-legacy-pickle-compatibility.md) | Accepted | Use Security restricted pickle helpers only for explicitly gated legacy compatibility paths, not as a general-purpose serialization format. |
 | [ADR-029](029-tldw-frontend-static-pypi-bundle.md) | Proposed | Allow a guarded static `tldw-frontend` export in `tldw-server` PyPI releases while forbidding source, cache, standalone, model, database, and admin UI artifacts. |
 | [ADR-030](030-configured-local-llm-egress-policy.md) | Accepted | Allow only an exact server-configured local LLM origin through scoped checked egress without weakening global SSRF defaults. |
+| [ADR-031](031-notes-capability-sync-domains.md) | Accepted | Use versioned Sync v2 domains for mutable Notes capabilities, with lossless core-note payloads and base-aware restore intent. |
+| [ADR-032](032-mcp-unified-multi-revision-stdio-protocol.md) | Superseded by ADR-033 | Original strict multi-revision stdio decision; replaced after public-contract hardening. |
+| [ADR-033](033-mcp-unified-stdio-contract-hardening.md) | Accepted | Harden the reusable stdio API for arbitrary JSON outputs, typed IDs, bounded pagination/results, safe errors, and portable streams. |
+| [ADR-034](034-durable-server-origin-sync-mutation-batches.md) | Accepted | Persist complete server-origin Sync mutation plans atomically, then materialize them in ordered, resumable steps. |
+| [ADR-035](035-canonical-folder-link-suppression-preserves-source-provenance.md) | Accepted | Materialize canonical folder-link tombstones with local suppressions while preserving source-ingestion provenance. |
+| [ADR-036](036-web-clipper-external-identity-mapping.md) | Accepted | Map owner-scoped public Web Clipper IDs to separate canonical Notes UUIDs and migrate legacy mappings safely. |
+| [ADR-037](037-canonical-notes-link-sync-and-derived-graph-projections.md) | Accepted | Synchronize explicit manual note links while keeping wikilinks, backlinks, orphan state, and graph summaries deterministic local projections. |
+| [ADR-038](038-canonical-notes-attachment-registry-and-blob-lifecycle.md) | Accepted | Give Notes attachments stable product identity while reusing the shared Sync blob lifecycle. |
+| [ADR-039](039-canonical-notes-task-sync-and-derived-checklist-projections.md) | Accepted | Synchronize mutable Notes tasks and immutable activity while keeping Markdown checklists and read state derived. |
+| [ADR-040](040-synchronized-moodboards-and-studio-authority.md) | Proposed | Synchronize moodboards, explicit placements, and accepted Studio sidecars while retaining existing product authority and derived smart matches. |
+| [ADR-041](041-scheduled-agent-execution-feasibility.md) | Accepted | Keep Scheduled Agent execution fail-closed until exact deployment certification and the separate execution stack are both ready. |
+| [ADR-042](042-browser-transport-admission-and-attestation.md) | Accepted | Admit browser retrieval only through URL-guarded single-user compatibility or a complete governed-transport attestation. |
+
+| [ADR-045](045-persona-live-pending-plan-handoff.md) | Accepted | Project the latest active owned pending Persona plan through authenticated session detail for explicit full Live review. |
+| [ADR-044](044-cookie-session-governance-owner-preflight.md) | Accepted | Resolve canonical cookie-session owners before ingress quotas only when policy scopes cannot admit anonymous requests. |
+| [ADR-046](046-persona-live-conversation-and-voice-runtime.md) | Accepted | Reuse authenticated Chat admission for Live conversation and require owned runtime preparation before voice capture. |

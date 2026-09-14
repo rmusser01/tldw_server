@@ -4,24 +4,59 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
-from .prompt_studio_base import JobStatus, JobType, TimestampMixin, UUIDMixin
+from tldw_Server_API.app.core.Prompt_Management.optimization_model_config import (
+    ACCEPTED_OPTIMIZATION_STRATEGIES,
+    normalize_durable_optimization_config,
+    normalize_optimization_strategy,
+)
+
+from .prompt_studio_base import (
+    DEFAULT_MAX_TEST_CASES,
+    JobStatus,
+    JobType,
+    TimestampMixin,
+    UUIDMixin,
+)
 
 ########################################################################################################################
 # Optimization Schemas
 
+DURABLE_OPTIMIZATION_STRATEGIES = ACCEPTED_OPTIMIZATION_STRATEGIES
+
+
 class OptimizationTechnique(str):
-    """Available optimization techniques"""
+    """Accepted optimization techniques."""
+
     MIPRO = "mipro"
     BOOTSTRAP = "bootstrap"
+    ITERATIVE = "iterative"
+    MCTS = "mcts"
+    # Retain historical constants for import compatibility. Public request
+    # schemas reject these unsupported strategies.
     HILL_CLIMBING = "hill_climbing"
     RANDOM_SEARCH = "random_search"
     GRID_SEARCH = "grid_search"
     BAYESIAN = "bayesian"
+    BEAM_SEARCH = "beam_search"
+    GREEDY = "greedy"
+    SIMULATED_ANNEALING = "simulated_annealing"
+    GENETIC = "genetic"
+    HYPERPARAMETER = "hyperparameter"
+
 
 class OptimizationConfig(BaseModel):
     """Configuration for optimization run"""
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
     optimizer_type: str = Field(..., description="Type of optimizer to use")
     max_iterations: int = Field(default=50, ge=1, le=500, description="Maximum iterations")
     target_metric: str = Field(..., description="Metric to optimize")
@@ -32,8 +67,30 @@ class OptimizationConfig(BaseModel):
     techniques_to_try: list[str] = Field(default=["cot", "few_shot"], description="Prompt techniques to try")
     models_to_test: Optional[list[str]] = Field(None, description="Models to test during optimization")
     budget_limit: Optional[float] = Field(None, ge=0.0, description="Maximum budget in dollars")
-    # Strategy-specific knobs (optional, forward-compatible)
-    strategy_params: dict[str, Any] = Field(default_factory=dict, description="Additional strategy-specific parameters (e.g., beam_width, mutation_rate)")
+    llm_model_config: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("model_config", "model_configuration"),
+        serialization_alias="model_config",
+    )
+    strategy_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional parameters for the selected strategy",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_durable_config(cls, value: Any) -> dict[str, Any]:
+        return normalize_durable_optimization_config(
+            value,
+            reject_sensitive=True,
+        )
+
+    @field_validator("optimizer_type")
+    @classmethod
+    def validate_optimizer_type(cls, value: str) -> str:
+        """Normalize accepted strategies and reject unknown values."""
+
+        return normalize_optimization_strategy(value)
 
     @field_validator('temperature_range')
     @classmethod
@@ -57,9 +114,25 @@ class OptimizationCreate(BaseModel):
     initial_prompt_id: int
     optimization_config: OptimizationConfig
     bootstrap_config: Optional[BootstrapConfig] = None
-    test_case_ids: Optional[list[int]] = Field(None, description="Specific test cases to optimize against")
+    test_case_ids: Optional[list[int]] = Field(
+        None,
+        min_length=1,
+        max_length=DEFAULT_MAX_TEST_CASES,
+        description="Specific test cases to optimize against",
+    )
     name: Optional[str] = Field(None, max_length=255, description="Optimization run name")
     description: Optional[str] = Field(None, max_length=1000, description="Optimization run description")
+
+    @field_validator("test_case_ids")
+    @classmethod
+    def validate_unique_test_case_ids(
+        cls,
+        value: Optional[list[int]],
+    ) -> Optional[list[int]]:
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("test_case_ids must be unique")
+        return value
+
 
 class OptimizationResponse(TimestampMixin, UUIDMixin):
     """Optimization response model"""

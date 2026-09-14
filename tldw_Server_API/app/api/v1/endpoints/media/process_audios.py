@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
+    Request,
     Response,
     UploadFile,
     status,
@@ -20,19 +22,32 @@ from tldw_Server_API.app.api.v1.API_Deps.billing_deps import (
     propagate_billing_headers,
     require_within_limit,
 )
-from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
-from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
     get_process_audios_form,
+)
+from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import (
+    media_create_dependencies,
 )
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
+from tldw_Server_API.app.api.v1.endpoints.media.deprecation_signals import (
+    apply_media_legacy_headers,
+    build_media_legacy_signal,
+)
+from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
+    normalize_urls_field,
+    validate_media_inputs,
+)
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessAudiosForm
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
     async_resolve_chunking_for_result,
@@ -44,15 +59,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     save_uploaded_files,
 )
+from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
 from tldw_Server_API.app.core.testing import is_test_mode
-from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
-    normalize_urls_field,
-    validate_media_inputs,
-)
-from tldw_Server_API.app.api.v1.endpoints.media.deprecation_signals import (
-    apply_media_legacy_headers,
-    build_media_legacy_signal,
-)
 
 router = APIRouter()
 
@@ -64,14 +72,17 @@ _propagate_billing_headers = propagate_billing_headers
     summary="Transcribe / chunk / analyse audio and return full artefacts (no DB write)",
     tags=["Media Processing (No DB)"],
     dependencies=[
+        *media_create_dependencies(),
         Depends(guard_storage_quota),
         Depends(require_within_limit(LimitCategory.STORAGE_MB, 1)),
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
     ],
 )
 async def process_audios_endpoint(
+    request: Request,
     background_tasks: BackgroundTasks,
     injected_response: Response,
+    current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
     form_data: ProcessAudiosForm = Depends(get_process_audios_form),
     files: list[UploadFile] | None = File(
@@ -79,13 +90,30 @@ async def process_audios_endpoint(
         description="Audio file uploads",
     ),
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
-):
+) -> JSONResponse:
     """
     Process audio inputs (URLs and uploads) without persisting to the Media DB.
 
     This endpoint mirrors the legacy `/process-audios` behavior while routing
     through the modular `media` package and using shared helpers for input
     handling and batch orchestration.
+
+    Args:
+        request: HTTP request used to acquire the authenticated owner's prompt database.
+        background_tasks: Framework background tasks retained for route compatibility.
+        injected_response: Response carrying billing headers for the batch response.
+        current_user: Authenticated owner of missing audio prompt instructions.
+        db: Owner media database used for optional chunking-template lookup.
+        form_data: Validated transcription and analysis options; explicit prompt parts win.
+        files: Audio uploads, optionally combined with URLs from form_data.
+        usage_log: Best-effort usage-event logger.
+
+    Returns:
+        JSON batch results: HTTP 200 on success, 207 on partial processing errors.
+
+    Raises:
+        HTTPException: Invalid or absent audio inputs (400).
+        ServicePromptCorruptOverride: Invalid saved pair, before uploads or transcription.
     """
 
     logger.info("Request received for /process-audios. Form data validated via dependency.")
@@ -125,6 +153,27 @@ async def process_audios_endpoint(
     except HTTPException as exc:
         logger.warning("Input validation failed for /process-audios: {}", exc.detail)
         raise
+
+    if (
+        form_data.perform_analysis
+        and form_data.api_name
+        and form_data.api_name.lower() != "none"
+        and (form_data.system_prompt is None or form_data.custom_prompt is None)
+    ):
+        prompts_db = await get_prompts_db_for_user(request, current_user)
+
+        def resolve_audio_prompts() -> dict[str, str]:
+            """Read and close the owner's connection on the same lookup worker."""
+            try:
+                return dict(resolve_service_prompt(prompts_db, "media.audio.analysis").parts)
+            finally:
+                prompts_db.close_connection()
+
+        parts = await asyncio.to_thread(resolve_audio_prompts)
+        if form_data.system_prompt is None:
+            form_data.system_prompt = parts["system"]
+        if form_data.custom_prompt is None:
+            form_data.custom_prompt = parts["user"]
 
     # Base batch structure used when we need to return an empty 207.
     empty_batch: dict[str, Any] = {
@@ -276,7 +325,7 @@ async def process_audios_endpoint(
                 errors_joined = " | ".join(str(e) for e in batch_result.get("errors", []) if e)
                 if "Download failed" in errors_joined or "Host could not be resolved" in errors_joined:
                     logger.debug(
-                        "TEST_MODE: /process-audios returned 207 due to audio " "download/egress error: {}",
+                        "TEST_MODE: /process-audios returned 207 due to audio download/egress error: {}",
                         errors_joined,
                     )
             except Exception:

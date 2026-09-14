@@ -3,7 +3,7 @@
 import base64
 import json
 import uuid
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -12,7 +12,13 @@ from tldw_Server_API.app.api.v1.schemas.notes_graph import (
     NoteGraphRequest,
     TimeRange,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.note_graph_projection_store import (
+    ProjectionStatus,
+    WikilinkProjectionEdge,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+from tldw_Server_API.app.core.Notes.wikilinks import parse_wikilinks
+from tldw_Server_API.app.core.Notes_Graph import graph_service as graph_service_module
 from tldw_Server_API.app.core.Notes_Graph.graph_cache import GraphCache
 from tldw_Server_API.app.core.Notes_Graph.graph_service import (
     NoteGraphService,
@@ -35,6 +41,33 @@ def _mock_db(notes=None, edges=None, tag_edges=None, tag_counts=None,
     _notes = notes or []
     _note_map = {n["id"]: n for n in _notes}
 
+    class _ProjectionStore:
+        def get_projection_status(self):
+            return ProjectionStatus(1, "ready", None)
+
+        def get_revision(self):
+            return 0
+
+        def count_dirty(self):
+            return 0
+
+        def list_live_edges_for_notes(self, note_ids):
+            wanted_ids = set(note_ids)
+            projected = []
+            for source_id, row in _note_map.items():
+                if row.get("deleted"):
+                    continue
+                for target_id in parse_wikilinks(
+                    str(row.get("content") or ""),
+                    source_note_id=source_id,
+                ).target_note_ids:
+                    target = _note_map.get(target_id)
+                    if target is None or target.get("deleted"):
+                        continue
+                    if source_id in wanted_ids or target_id in wanted_ids:
+                        projected.append(WikilinkProjectionEdge(source_id, target_id))
+            return tuple(projected)
+
     def get_notes_batch(ids, include_deleted=True):
         return [_note_map[i] for i in ids if i in _note_map]
 
@@ -44,7 +77,7 @@ def _mock_db(notes=None, edges=None, tag_edges=None, tag_counts=None,
         return [e for e in edges if e["from_note_id"] in note_ids or e["to_note_id"] in note_ids]
 
     def get_all_note_ids_for_graph(include_deleted=True, limit=500):
-        return (all_ids or [i for i in _note_map])[:limit]
+        return (all_ids or list(_note_map))[:limit]
 
     def get_note_tag_edges(note_ids):
         if tag_edges is None:
@@ -102,6 +135,7 @@ def _mock_db(notes=None, edges=None, tag_edges=None, tag_counts=None,
     db.count_user_notes = MagicMock(side_effect=count_user_notes)
     db.get_note_ids_by_tag_for_graph = MagicMock(side_effect=get_note_ids_by_tag_for_graph)
     db.get_note_ids_by_source_for_graph = MagicMock(side_effect=get_note_ids_by_source_for_graph)
+    db.note_graph_projection_store = _ProjectionStore()
     return db
 
 
@@ -179,6 +213,20 @@ class TestSeedlessLargeRejected:
             svc.generate_graph(req)
 
 
+def test_projection_query_node_limit_is_never_exceeded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(graph_service_module, "MAX_NODES", lambda: 1_200)
+    db = _mock_db(note_count=0)
+    service = NoteGraphService(user_id="u1", db=db, allow_heavy_limits=True)
+
+    max_nodes, _, _, _ = service._resolve_effective_limits(
+        NoteGraphRequest(radius=1, allow_heavy=True, max_nodes=2_000)
+    )
+
+    assert max_nodes == 1_000
+
+
 class TestTagFilterSeeds:
     def test_correct_seed_set(self):
         n1, n2, n3 = _uid(), _uid(), _uid()
@@ -213,7 +261,7 @@ class TestTagFilterSeeds:
         note_ids = {n.id for n in resp.nodes if n.type == "note"}
         assert matching in note_ids
         db.get_note_ids_by_tag_for_graph.assert_called_once_with(
-            "ml", include_deleted=True, limit=300,
+            "ml", include_deleted=False, limit=300,
         )
 
 
@@ -245,7 +293,7 @@ class TestSourceFilterSeeds:
         note_ids = {n.id for n in resp.nodes if n.type == "note"}
         assert matching in note_ids
         db.get_note_ids_by_source_for_graph.assert_called_once_with(
-            "source:youtube:abc123", include_deleted=True, limit=300,
+            "source:youtube:abc123", include_deleted=False, limit=300,
         )
 
 
@@ -368,6 +416,23 @@ class TestMaxDegreeEnforced:
         # center + 3 max neighbors
         note_count = len([n for n in resp.nodes if n.type == "note"])
         assert note_count <= 4
+
+    def test_dense_neighborhood_keeps_query_count_radius_bounded(self):
+        center = _uid()
+        neighbors = [_uid() for _ in range(500)]
+        notes = [_note(center)] + [_note(note_id) for note_id in neighbors]
+        edges = [_manual_edge(center, note_id) for note_id in neighbors]
+        db = _mock_db(notes=notes, edges=edges, note_count=len(notes))
+
+        response = NoteGraphService(user_id="u1", db=db).generate_graph(
+            NoteGraphRequest(center_note_id=center, radius=1, max_degree=7)
+        )
+
+        assert len([node for node in response.nodes if node.type == "note"]) == 8
+        assert response.truncated is True
+        assert "max_degree" in response.truncated_by
+        assert db.get_manual_edges_for_notes.call_count == 1
+        assert db.get_notes_batch.call_count == 1
 
 
 class TestLimitHardCaps:
@@ -507,6 +572,49 @@ class TestCursorRoundtrip:
         assert decoded["layer"] == 1
         assert decoded["pos"] == 42
         assert decoded["last_id"] == "abc-123"
+
+    def test_revision_bound_cursor_rejects_dataset_revision_parser_and_query_mismatch(self):
+        encoded = _encode_cursor(
+            1,
+            2,
+            "abc-123",
+            dataset_hash="dataset-hash",
+            graph_revision=7,
+            parser_version=2,
+            request_hash="request-hash",
+        )
+        assert _decode_cursor(
+            encoded,
+            expected_dataset_hash="dataset-hash",
+            expected_graph_revision=7,
+            expected_parser_version=2,
+            expected_request_hash="request-hash",
+        )["last_id"] == "abc-123"
+
+        for field, value in (
+            ("expected_dataset_hash", "other"),
+            ("expected_graph_revision", 8),
+            ("expected_parser_version", 3),
+            ("expected_request_hash", "other"),
+        ):
+            expected = {
+                "expected_dataset_hash": "dataset-hash",
+                "expected_graph_revision": 7,
+                "expected_parser_version": 2,
+                "expected_request_hash": "request-hash",
+            }
+            expected[field] = value
+            with pytest.raises(InputError, match="stale or mismatched"):
+                _decode_cursor(encoded, **expected)
+
+    def test_cursor_size_limits_fail_closed(self):
+        with pytest.raises(InputError, match="too large"):
+            _decode_cursor("a" * 8193)
+
+        oversized_json = {"layer": 0, "pos": 0, "last_id": "x" * 4100}
+        encoded = base64.urlsafe_b64encode(json.dumps(oversized_json).encode()).decode()
+        with pytest.raises(InputError, match="too large"):
+            _decode_cursor(encoded)
 
 
 class TestDeterministicOrdering:
@@ -777,18 +885,110 @@ class TestCenterNoteNotFound:
             svc.generate_graph(req)
 
 
-class TestCursorIgnoredForRadius2:
-    def test_cursor_ignored_with_warning(self):
-        """Cursor is ignored when radius > 1 to avoid broken BFS resume."""
+class TestCursorResumeForRadius2:
+    def test_resume_rejects_cursor_position_that_no_longer_matches_node(self):
+        center = "00000000-0000-4000-8000-000000000000"
+        neighbors = [
+            f"00000000-0000-4000-8000-{index:012d}"
+            for index in range(1, 4)
+        ]
+        service = NoteGraphService(
+            user_id="u1",
+            db=_mock_db(
+                notes=[_note(center), *(_note(note_id) for note_id in neighbors)],
+                edges=[_manual_edge(center, note_id) for note_id in neighbors],
+                note_count=4,
+            ),
+        )
+        first = service.generate_graph(
+            NoteGraphRequest(center_note_id=center, radius=2, max_nodes=2)
+        )
+        payload = _decode_cursor(first.cursor)
+        payload["last_id"] = neighbors[-1]
+        tampered = base64.urlsafe_b64encode(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).decode()
+
+        with pytest.raises(InputError, match="stale or mismatched"):
+            service.generate_graph(
+                NoteGraphRequest(
+                    center_note_id=center,
+                    radius=2,
+                    max_nodes=2,
+                    cursor=tampered,
+                )
+            )
+
+    def test_resume_from_second_layer_reconstructs_prior_frontier(self):
+        center = "00000000-0000-4000-8000-000000000000"
+        first_hop = [
+            f"00000000-0000-4000-8000-{index:012d}"
+            for index in range(1, 5)
+        ]
+        second_hop = [
+            "00000000-0000-4000-8000-000000000005",
+            "00000000-0000-4000-8000-000000000006",
+        ]
+        notes = [
+            _note(center),
+            *(_note(note_id) for note_id in first_hop),
+            *(_note(note_id) for note_id in second_hop),
+        ]
+        edges = [
+            *(_manual_edge(center, note_id) for note_id in first_hop),
+            _manual_edge(first_hop[2], second_hop[0]),
+            _manual_edge(first_hop[3], second_hop[1]),
+        ]
+        service = NoteGraphService(
+            user_id="u1",
+            db=_mock_db(notes=notes, edges=edges, note_count=len(notes)),
+        )
+
+        first = service.generate_graph(
+            NoteGraphRequest(center_note_id=center, radius=2, max_nodes=3)
+        )
+        second = service.generate_graph(
+            NoteGraphRequest(
+                center_note_id=center,
+                radius=2,
+                max_nodes=3,
+                cursor=first.cursor,
+            )
+        )
+        assert second.cursor is not None
+        assert _decode_cursor(second.cursor)["layer"] == 1
+
+        third = service.generate_graph(
+            NoteGraphRequest(
+                center_note_id=center,
+                radius=2,
+                max_nodes=3,
+                cursor=second.cursor,
+            )
+        )
+
+        third_note_ids = {node.id for node in third.nodes if node.type == "note"}
+        assert set(second_hop) <= third_note_ids
+
+    def test_revision_bound_cursor_is_accepted_for_radius_two(self):
         c = _uid()
-        n1 = _uid()
-        notes = [_note(c), _note(n1)]
-        edges = [_manual_edge(c, n1)]
-        db = _mock_db(notes=notes, edges=edges, note_count=2)
+        neighbors = [_uid() for _ in range(3)]
+        notes = [_note(c), *(_note(note_id) for note_id in neighbors)]
+        edges = [_manual_edge(c, note_id) for note_id in neighbors]
+        db = _mock_db(notes=notes, edges=edges, note_count=4)
         svc = NoteGraphService(user_id="u1", db=db)
-        cursor = _encode_cursor(0, 1, c)
-        req = NoteGraphRequest(center_note_id=c, radius=2, cursor=cursor)
-        resp = svc.generate_graph(req)
-        # Should still return a valid graph (cursor ignored, BFS runs fresh)
+        first = svc.generate_graph(
+            NoteGraphRequest(center_note_id=c, radius=2, max_nodes=2)
+        )
+        assert first.cursor is not None
+
+        resp = svc.generate_graph(
+            NoteGraphRequest(
+                center_note_id=c,
+                radius=2,
+                max_nodes=2,
+                cursor=first.cursor,
+            )
+        )
         note_ids = {n.id for n in resp.nodes if n.type == "note"}
         assert c in note_ids

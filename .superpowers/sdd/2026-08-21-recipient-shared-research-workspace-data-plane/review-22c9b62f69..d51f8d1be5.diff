@@ -1,0 +1,4426 @@
+diff --git a/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/desktop-grounded-answer.png b/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/desktop-grounded-answer.png
+index 8fbea950f912f6da0d7bc324e8e61b53e5de1ef0..0e8dddd63e1bc3c993c394de0b21379ad8e07b89 100644
+Binary files a/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/desktop-grounded-answer.png and b/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/desktop-grounded-answer.png differ
+diff --git a/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/desktop-shared-workspace.png b/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/desktop-shared-workspace.png
+index f4f434fbe2f8567153fb04491043d1bd79026500..529f438e13ee0957ccc91d5bba4396ab4824afd8 100644
+Binary files a/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/desktop-shared-workspace.png and b/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/desktop-shared-workspace.png differ
+diff --git a/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/evidence.json b/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/evidence.json
+index 553a8dcc202c6b953499e24ac243bd413c49e90f..1a2717e5bb7efd9603b8cdc88c655293fb531577 100644
+--- a/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/evidence.json
++++ b/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/evidence.json
+@@ -18,26 +18,26 @@
+   },
+   "contextIsolationProof": [
+     {
+-      "configHash": "sha256:13dc2a06cfcdfcf04267f95925ba9838d3e5df6568663eb447277517d55d1bf7",
+-      "cookieHash": "sha256:1db178e66cbe5483e59263b065e228a6f5ad6b2ee7f3c5bc26af150d0be1b1e5",
+-      "markerHash": "sha256:d9711f8f49481d807fbf323f383c07bef25b36e7433faeae112705dca4ff9a26",
+-      "markerCookieHash": "sha256:d9711f8f49481d807fbf323f383c07bef25b36e7433faeae112705dca4ff9a26",
++      "configHash": "sha256:2218cf01cb651a92c59b2eb663773cb1627eff1445b30ac1dda6aa4cf744edb6",
++      "cookieHash": "sha256:d4091088a943a5ccc8b36973cf9d93a4efcfc317d13d02ae695e4d1da40923b0",
++      "markerHash": "sha256:1b66f65aa4304a5b3f30ae31c6a889b021d6e8d5342360cb525ca63ac9f86c8c",
++      "markerCookieHash": "sha256:1b66f65aa4304a5b3f30ae31c6a889b021d6e8d5342360cb525ca63ac9f86c8c",
+       "persona": "member",
+       "storageKeyHash": "sha256:38e75decde64c25c2085b2c80ed24a1d0f998d18b1096a57497718962b70004b"
+     },
+     {
+-      "configHash": "sha256:fa4262ed92084de97dcff05dc69e88a0fb2d01333f678fb312c754f76ecbafca",
+-      "cookieHash": "sha256:d96a634aa260241237a858e13f1c6e7bbb7642ea6f7a36d12512e000f10d6f32",
+-      "markerHash": "sha256:30127268bedc259c6505bd91eafaccd006fde71ff3a4ac0fe1670dfd16c070f3",
+-      "markerCookieHash": "sha256:30127268bedc259c6505bd91eafaccd006fde71ff3a4ac0fe1670dfd16c070f3",
++      "configHash": "sha256:c9891b4448804db3593551bf35492bb1e2ea6420e818ed18a7d74104d9d3958c",
++      "cookieHash": "sha256:dd2c0495618db389dbe1a48a1291723ce7de83cb665941c9d6acf8093fd55314",
++      "markerHash": "sha256:58cf4ff55644ea4cdbdf12dfadb1f47894a21e23d9faff07e3948cbf4729c5bb",
++      "markerCookieHash": "sha256:58cf4ff55644ea4cdbdf12dfadb1f47894a21e23d9faff07e3948cbf4729c5bb",
+       "persona": "nonmember",
+       "storageKeyHash": "sha256:38e75decde64c25c2085b2c80ed24a1d0f998d18b1096a57497718962b70004b"
+     },
+     {
+-      "configHash": "sha256:fcf5607551de8b626771702667e4e806105c5f6dbf40ae2fc017b0ed8e9fd7af",
+-      "cookieHash": "sha256:f9080fc144a42756505fad5e78533dab3793af6dfbe38a443ca0cf40f59581c0",
+-      "markerHash": "sha256:5cb25878f4572b0335a14ddfeb751f655cc7396dca2cd6e08c1f11b6f6887bb3",
+-      "markerCookieHash": "sha256:5cb25878f4572b0335a14ddfeb751f655cc7396dca2cd6e08c1f11b6f6887bb3",
++      "configHash": "sha256:0a2c006b0d81ed58de93c7c64cfc86f2a625b14fb2398bfb040684637b533afe",
++      "cookieHash": "sha256:f176fc924e3d82f70fb981ab37d3dffe3a88199d5ecb3473c55946067641d4ae",
++      "markerHash": "sha256:09ded66220127f014a13cca7e588caa32800dbb04fdef12da8bfb6ac0516087d",
++      "markerCookieHash": "sha256:09ded66220127f014a13cca7e588caa32800dbb04fdef12da8bfb6ac0516087d",
+       "persona": "owner",
+       "storageKeyHash": "sha256:38e75decde64c25c2085b2c80ed24a1d0f998d18b1096a57497718962b70004b"
+     }
+@@ -54,21 +54,21 @@
+       "nonmember"
+     ],
+     "providerProbe": true,
+-    "webUrl": "http://127.0.0.1:18082"
++    "webUrl": "http://127.0.0.1:18083"
+   },
+-  "environmentHash": "sha256:813a4a4679bca81f3051b2d4ed5060e69298b80da9b87927f46a086b78f243fc",
++  "environmentHash": "sha256:10199d007d918c71107427b55efa2699275442d59c705af2f0cb120d1aaf1e92",
+   "failureMessageHash": null,
+-  "finishedAt": "2026-08-23T01:42:43.431Z",
++  "finishedAt": "2026-08-23T03:21:22.129Z",
+   "fixture": {
+-    "canonicalStatusEnvelopeHash": "sha256:1f7af4cd1258dacd626432c9c8ba5b20c2e5f494c7ac85afc6a2428f1109191b",
++    "canonicalStatusEnvelopeHash": "sha256:8a39c0940e298a5872a47e92ab1e4f88188b3e822f3820ed204fa86b32e0a5e5",
+     "canonicalStatusQueryable": true,
+     "provisioned": true,
+-    "shareIdHash": "sha256:41cfc0d1f2d127b04555b7246d84019b4d27710a3f3aff6e7764375b1e06e05d",
++    "shareIdHash": "sha256:7688b6ef52555962d008fff894223582c484517cea7da49ee67800adc7fc8866",
+     "sourceIds": [
+-      "sha256:1ddff5072abc1bbce90684398c37ffdba7d0dbcfa8e1c7f39cb33894ad7ca05d",
+-      "sha256:33c91d662b3cf064c43f44bc3eea4d5533c5579dcc9b4b0aa9dfef15b2ef46cd"
++      "sha256:392cb18b13f80f28bee715ac06239cfa4b6828cbaa35bb3098131752d985e222",
++      "sha256:e93183326cfbf40bf18149b171ff706b85713be631c3e42b5527c11cb09b5d1f"
+     ],
+-    "workspaceIdHash": "sha256:8a5c95902aecbe0e9fa2f47e23654958330260287a4b67c011d4d0ae18b1def6"
++    "workspaceIdHash": "sha256:0e3c02057994e55f178d16f85cb815a25174807994fd3b0494034199913dcfbb"
+   },
+   "ledger": {
+     "closed": true,
+@@ -77,31 +77,31 @@
+         "context": "nonmember",
+         "message": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+         "status": 404,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/workspace"
+       },
+       {
+         "context": "member",
+         "message": "Failed to load resource: the server responded with a status of 409 (Conflict)",
+         "status": 409,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/chat"
+       },
+       {
+         "context": "member",
+         "message": "Failed to load resource: the server responded with a status of 409 (Conflict)",
+         "status": 409,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/chat"
+       },
+       {
+         "context": "member",
+         "message": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+         "status": 404,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/workspace"
+       },
+       {
+         "context": "member",
+         "message": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+         "status": 404,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/sources/source-amber-final33-fix3-1787449107-31317/preview"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/sources/source-amber-final34-fix4d-1787455045-12857/preview"
+       }
+     ],
+     "expectedHttpFailures": [
+@@ -112,25 +112,25 @@
+         "method": "GET",
+         "operationId": "nonmember-neutral-bootstrap",
+         "status": 404,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/workspace"
+       },
+       {
+-        "bodyHash": "sha256:255bbc733960ed071283d7adba1969025032c3d702cce47eba67b4ae06363782",
++        "bodyHash": "sha256:756e3ef55207f43b8c7854c74a5b7c60055d4bfb6529e005aeae21411adb772b",
+         "consoleErrorCount": 1,
+         "context": "member",
+         "method": "POST",
+         "operationId": "race-concurrent-conflict",
+         "status": 409,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/chat"
+       },
+       {
+-        "bodyHash": "sha256:03be089e1fbc222c1a617b3931d9180dfdd169103856aa05673a75de3af659ec",
++        "bodyHash": "sha256:8205eb11ab07c321514da76a2bb78086712384ed726d710f7fa73f5c6ce8dc34",
+         "consoleErrorCount": 1,
+         "context": "member",
+         "method": "POST",
+         "operationId": "race-fingerprint-conflict",
+         "status": 409,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/chat"
+       },
+       {
+         "bodyHash": null,
+@@ -139,7 +139,7 @@
+         "method": "GET",
+         "operationId": "revoked-workspace-bootstrap",
+         "status": 404,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/workspace"
+       },
+       {
+         "bodyHash": null,
+@@ -148,7 +148,7 @@
+         "method": "GET",
+         "operationId": "revoked-source-preview",
+         "status": 404,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/sources/source-amber-final33-fix3-1787449107-31317/preview"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/sources/source-amber-final34-fix4d-1787455045-12857/preview"
+       }
+     ],
+     "pageErrors": [],
+@@ -158,98 +158,98 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/research-workspace?shared=52"
++        "url": "http://127.0.0.1:18083/research-workspace?shared=56"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
++        "url": "http://127.0.0.1:18083/_next/static/development/_buildManifest.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/webpack.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/react-refresh.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
++        "url": "http://127.0.0.1:18083/_next/static/development/_ssgManifest.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/pages/research-workspace.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/main.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/_app.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/pages/_app.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
++        "url": "http://127.0.0.1:18083/_next/static/development/_devMiddlewareManifest.json"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
++        "url": "http://127.0.0.1:18083/api/_tldw-webui/runtime-config"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
++        "url": "http://127.0.0.1:18083/fonts/Arimo.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/__nextjs_font/geist-latin.woff2"
++        "url": "http://127.0.0.1:18083/_next/static/development/_devPagesManifest.json"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
++        "url": "http://127.0.0.1:18001/api/v1/auth/me"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/auth/me"
++        "url": "http://127.0.0.1:18001/api/v1/health"
+       },
+       {
+         "bodyHash": null,
+@@ -263,21 +263,14 @@
+         "context": "member",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
++        "url": "http://127.0.0.1:18083/fonts/Inter-SemiBold.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+-      },
+-      {
+-        "bodyHash": null,
+-        "context": "member",
+-        "method": "GET",
+-        "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/health"
++        "url": "http://127.0.0.1:18083/fonts/Inter-Medium.ttf"
+       },
+       {
+         "bodyHash": null,
+@@ -291,28 +284,28 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/media/icon.db91a1fe.png"
++        "url": "http://127.0.0.1:18083/_next/static/media/icon.db91a1fe.png"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
+       },
+       {
+         "bodyHash": null,
+@@ -333,7 +326,7 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+       },
+       {
+         "bodyHash": null,
+@@ -361,140 +354,140 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/workspace"
+       },
+       {
+-        "bodyHash": "sha256:2311bce1327bd106deb0d69b85afc2f72f61fc6df1964b4cdffd7392338564b9",
++        "bodyHash": "sha256:5299a018c063fcb7bf94ae1b08b5951c3bdb14dea8aad6f22ebdb6ce409e8d35",
+         "context": "member",
+         "method": "POST",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/chat"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/sources/source-cobalt-final33-fix3-1787449107-31317/preview?chunk_index=0"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/sources/source-cobalt-final34-fix4d-1787455045-12857/preview?chunk_index=0"
+       },
+       {
+-        "bodyHash": "sha256:43111665fa13658f20f0798438430ba2ed16a5c6c2e8f7138a8db1c546daa3db",
++        "bodyHash": null,
+         "context": "member",
+-        "method": "POST",
++        "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/sources?offset=0&limit=200"
+       },
+       {
+-        "bodyHash": null,
++        "bodyHash": "sha256:2970cf8be925d9afff152c5755648126b29c5010503452eb2c7e8867f50995a5",
+         "context": "member",
+-        "method": "GET",
++        "method": "POST",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/llm/models/metadata"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/chat"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/research-workspace?shared=52"
++        "url": "http://127.0.0.1:18001/api/v1/llm/models/metadata"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
++        "url": "http://127.0.0.1:18083/research-workspace?shared=56"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
++        "url": "http://127.0.0.1:18083/_next/static/development/_buildManifest.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/react-refresh.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
++        "url": "http://127.0.0.1:18083/_next/static/development/_ssgManifest.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/webpack.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/pages/research-workspace.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/_app.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/main.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/pages/_app.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
++        "url": "http://127.0.0.1:18083/api/_tldw-webui/runtime-config"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+-        "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
++        "status": 200,
++        "url": "http://127.0.0.1:18083/_next/static/development/_devMiddlewareManifest.json"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+-        "status": 200,
+-        "url": "http://127.0.0.1:18082/__nextjs_font/geist-latin.woff2"
++        "status": 304,
++        "url": "http://127.0.0.1:18083/fonts/Arimo.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
++        "url": "http://127.0.0.1:18083/_next/static/development/_devPagesManifest.json"
+       },
+       {
+         "bodyHash": null,
+@@ -508,14 +501,14 @@
+         "context": "member",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
++        "url": "http://127.0.0.1:18083/fonts/Inter-SemiBold.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
++        "url": "http://127.0.0.1:18083/fonts/Inter-Medium.ttf"
+       },
+       {
+         "bodyHash": null,
+@@ -543,28 +536,28 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/media/icon.db91a1fe.png"
++        "url": "http://127.0.0.1:18083/_next/static/media/icon.db91a1fe.png"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
+       },
+       {
+         "bodyHash": null,
+@@ -578,14 +571,14 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/rag/health"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
++        "url": "http://127.0.0.1:18001/api/v1/rag/health"
+       },
+       {
+         "bodyHash": null,
+@@ -613,105 +606,105 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/workspace"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/research-workspace?shared=52"
++        "url": "http://127.0.0.1:18083/research-workspace?shared=56"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
++        "url": "http://127.0.0.1:18083/_next/static/development/_buildManifest.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/react-refresh.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
++        "url": "http://127.0.0.1:18083/_next/static/development/_ssgManifest.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/webpack.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/pages/research-workspace.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/main.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/_app.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/pages/_app.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
++        "url": "http://127.0.0.1:18083/api/_tldw-webui/runtime-config"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
++        "url": "http://127.0.0.1:18083/_next/static/development/_devMiddlewareManifest.json"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
++        "url": "http://127.0.0.1:18083/fonts/Arimo.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
++        "url": "http://127.0.0.1:18083/_next/static/development/_devPagesManifest.json"
+       },
+       {
+         "bodyHash": null,
+@@ -725,21 +718,21 @@
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
++        "url": "http://127.0.0.1:18001/api/v1/health"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
++        "url": "http://127.0.0.1:18083/fonts/Inter-SemiBold.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/health"
++        "url": "http://127.0.0.1:18083/fonts/Inter-Medium.ttf"
+       },
+       {
+         "bodyHash": null,
+@@ -760,28 +753,28 @@
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/media/icon.db91a1fe.png"
++        "url": "http://127.0.0.1:18083/_next/static/media/icon.db91a1fe.png"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
+       },
+       {
+         "bodyHash": null,
+@@ -802,7 +795,7 @@
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+       },
+       {
+         "bodyHash": null,
+@@ -823,7 +816,7 @@
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
+       },
+       {
+         "bodyHash": null,
+@@ -837,140 +830,133 @@
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/workspace"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/research-workspace?shared=invalid"
++        "url": "http://127.0.0.1:18083/research-workspace?shared=invalid"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
++        "url": "http://127.0.0.1:18083/_next/static/development/_buildManifest.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/react-refresh.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/webpack.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
++        "url": "http://127.0.0.1:18083/_next/static/development/_ssgManifest.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/pages/research-workspace.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/main.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/_app.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/pages/_app.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
++        "url": "http://127.0.0.1:18083/api/_tldw-webui/runtime-config"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
++        "url": "http://127.0.0.1:18083/_next/static/development/_devMiddlewareManifest.json"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
++        "url": "http://127.0.0.1:18083/fonts/Arimo.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/__nextjs_font/geist-latin.woff2"
++        "url": "http://127.0.0.1:18083/_next/static/development/_devPagesManifest.json"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
++        "url": "http://127.0.0.1:18001/api/v1/auth/me"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/auth/me"
++        "url": "http://127.0.0.1:18001/api/v1/health"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+-        "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
++        "status": 200,
++        "url": "http://127.0.0.1:18001/api/v1/health"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+-      },
+-      {
+-        "bodyHash": null,
+-        "context": "member",
+-        "method": "GET",
+-        "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/health"
++        "url": "http://127.0.0.1:18083/fonts/Inter-SemiBold.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+-        "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/health"
++        "status": 304,
++        "url": "http://127.0.0.1:18083/fonts/Inter-Medium.ttf"
+       },
+       {
+         "bodyHash": null,
+@@ -984,28 +970,28 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/media/icon.db91a1fe.png"
++        "url": "http://127.0.0.1:18083/_next/static/media/icon.db91a1fe.png"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
+       },
+       {
+         "bodyHash": null,
+@@ -1019,14 +1005,14 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/rag/health"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
++        "url": "http://127.0.0.1:18001/api/v1/rag/health"
+       },
+       {
+         "bodyHash": null,
+@@ -1047,112 +1033,105 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/notifications/stream?after=0"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
++        "url": "http://127.0.0.1:18001/api/v1/notifications/stream?after=0"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/research-workspace?shared=52"
++        "url": "http://127.0.0.1:18083/research-workspace?shared=56"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
++        "url": "http://127.0.0.1:18083/_next/static/development/_buildManifest.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/react-refresh.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/pages/research-workspace.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
++        "url": "http://127.0.0.1:18083/_next/static/development/_ssgManifest.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/webpack.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/main.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/_app.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/pages/_app.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
++        "url": "http://127.0.0.1:18083/api/_tldw-webui/runtime-config"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
++        "url": "http://127.0.0.1:18083/_next/static/development/_devMiddlewareManifest.json"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
++        "url": "http://127.0.0.1:18083/fonts/Arimo.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/__nextjs_font/geist-latin.woff2"
+-      },
+-      {
+-        "bodyHash": null,
+-        "context": "nonmember",
+-        "method": "GET",
+-        "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
++        "url": "http://127.0.0.1:18083/_next/static/development/_devPagesManifest.json"
+       },
+       {
+         "bodyHash": null,
+@@ -1173,14 +1152,14 @@
+         "context": "nonmember",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
++        "url": "http://127.0.0.1:18083/fonts/Inter-SemiBold.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
++        "url": "http://127.0.0.1:18083/fonts/Inter-Medium.ttf"
+       },
+       {
+         "bodyHash": null,
+@@ -1194,35 +1173,35 @@
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/media/icon.db91a1fe.png"
++        "url": "http://127.0.0.1:18083/_next/static/media/icon.db91a1fe.png"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+       },
+       {
+         "bodyHash": null,
+@@ -1264,7 +1243,7 @@
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
+       },
+       {
+         "bodyHash": null,
+@@ -1278,105 +1257,98 @@
+         "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+         "method": "GET",
+         "status": 404,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/workspace"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/research-workspace?shared=52"
++        "url": "http://127.0.0.1:18083/research-workspace?shared=56"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
++        "url": "http://127.0.0.1:18083/_next/static/development/_buildManifest.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/react-refresh.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
++        "url": "http://127.0.0.1:18083/_next/static/development/_ssgManifest.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/webpack.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/pages/research-workspace.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/main.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/_app.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/pages/_app.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
++        "url": "http://127.0.0.1:18083/api/_tldw-webui/runtime-config"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
++        "url": "http://127.0.0.1:18083/_next/static/development/_devMiddlewareManifest.json"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
+-      },
+-      {
+-        "bodyHash": null,
+-        "context": "member",
+-        "method": "GET",
+-        "status": 200,
+-        "url": "http://127.0.0.1:18082/__nextjs_font/geist-latin.woff2"
++        "url": "http://127.0.0.1:18083/fonts/Arimo.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
++        "url": "http://127.0.0.1:18083/_next/static/development/_devPagesManifest.json"
+       },
+       {
+         "bodyHash": null,
+@@ -1389,22 +1361,22 @@
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+-        "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/health"
++        "status": 304,
++        "url": "http://127.0.0.1:18083/fonts/Inter-SemiBold.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
++        "url": "http://127.0.0.1:18083/fonts/Inter-Medium.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+-        "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
++        "status": 200,
++        "url": "http://127.0.0.1:18001/api/v1/health"
+       },
+       {
+         "bodyHash": null,
+@@ -1425,28 +1397,28 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/media/icon.db91a1fe.png"
++        "url": "http://127.0.0.1:18083/_next/static/media/icon.db91a1fe.png"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
+       },
+       {
+         "bodyHash": null,
+@@ -1467,7 +1439,7 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+       },
+       {
+         "bodyHash": null,
+@@ -1495,56 +1467,56 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/workspace"
+       },
+       {
+-        "bodyHash": "sha256:255bbc733960ed071283d7adba1969025032c3d702cce47eba67b4ae06363782",
++        "bodyHash": "sha256:756e3ef55207f43b8c7854c74a5b7c60055d4bfb6529e005aeae21411adb772b",
+         "context": "member",
+         "method": "POST",
+         "status": 409,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/chat"
+       },
+       {
+-        "bodyHash": "sha256:255bbc733960ed071283d7adba1969025032c3d702cce47eba67b4ae06363782",
++        "bodyHash": "sha256:756e3ef55207f43b8c7854c74a5b7c60055d4bfb6529e005aeae21411adb772b",
+         "context": "member",
+         "method": "POST",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/chat"
+       },
+       {
+-        "bodyHash": "sha256:255bbc733960ed071283d7adba1969025032c3d702cce47eba67b4ae06363782",
++        "bodyHash": "sha256:756e3ef55207f43b8c7854c74a5b7c60055d4bfb6529e005aeae21411adb772b",
+         "context": "member",
+         "method": "POST",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/chat"
+       },
+       {
+-        "bodyHash": "sha256:03be089e1fbc222c1a617b3931d9180dfdd169103856aa05673a75de3af659ec",
++        "bodyHash": "sha256:8205eb11ab07c321514da76a2bb78086712384ed726d710f7fa73f5c6ce8dc34",
+         "context": "member",
+         "method": "POST",
+         "status": 409,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/chat"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/chat"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/sources/source-amber-final33-fix3-1787449107-31317/preview"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/sources/source-amber-final34-fix4d-1787455045-12857/preview"
+       },
+       {
+         "bodyHash": null,
+@@ -1600,28 +1572,28 @@
+         "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/tokens"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/workspaces/dd38400d-3a0a-4d0d-90f1-d921f27120c8/shares"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/shares"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/tokens"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner-revocation",
+         "method": "DELETE",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shares/52"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shares/56"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/shares"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/workspaces/dd38400d-3a0a-4d0d-90f1-d921f27120c8/shares"
+       },
+       {
+         "bodyHash": null,
+@@ -1635,42 +1607,42 @@
+         "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
++        "url": "http://127.0.0.1:18001/api/v1/workspaces/dd38400d-3a0a-4d0d-90f1-d921f27120c8/context"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
++        "url": "http://127.0.0.1:18001/api/v1/workspaces/dd38400d-3a0a-4d0d-90f1-d921f27120c8/context"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
++        "url": "http://127.0.0.1:18001/api/v1/workspaces/dd38400d-3a0a-4d0d-90f1-d921f27120c8/context"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
++        "url": "http://127.0.0.1:18001/api/v1/workspaces/dd38400d-3a0a-4d0d-90f1-d921f27120c8/context"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
++        "url": "http://127.0.0.1:18001/api/v1/workspaces/dd38400d-3a0a-4d0d-90f1-d921f27120c8/context"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
++        "url": "http://127.0.0.1:18001/api/v1/workspaces/dd38400d-3a0a-4d0d-90f1-d921f27120c8/context"
+       },
+       {
+         "bodyHash": null,
+@@ -1681,24 +1653,24 @@
+       },
+       {
+         "bodyHash": null,
+-        "context": "nonmember",
++        "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
++        "url": "http://127.0.0.1:18001/api/v1/workspaces/dd38400d-3a0a-4d0d-90f1-d921f27120c8/context"
+       },
+       {
+         "bodyHash": null,
+-        "context": "owner-revocation",
++        "context": "nonmember",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
++        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
++        "url": "http://127.0.0.1:18001/api/v1/workspaces/dd38400d-3a0a-4d0d-90f1-d921f27120c8/context"
+       },
+       {
+         "bodyHash": null,
+@@ -1719,14 +1691,14 @@
+         "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
++        "url": "http://127.0.0.1:18001/api/v1/workspaces/dd38400d-3a0a-4d0d-90f1-d921f27120c8/context"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
++        "url": "http://127.0.0.1:18001/api/v1/workspaces/dd38400d-3a0a-4d0d-90f1-d921f27120c8/context"
+       },
+       {
+         "bodyHash": null,
+@@ -1747,133 +1719,126 @@
+         "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
++        "url": "http://127.0.0.1:18001/api/v1/workspaces/dd38400d-3a0a-4d0d-90f1-d921f27120c8/context"
+       },
+       {
+         "bodyHash": null,
+         "context": "owner-revocation",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/workspaces/07c6f7cd-2350-46d2-b627-3a4c095d059e/context"
++        "url": "http://127.0.0.1:18001/api/v1/workspaces/dd38400d-3a0a-4d0d-90f1-d921f27120c8/context"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/research-workspace?shared=52"
++        "url": "http://127.0.0.1:18083/research-workspace?shared=56"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_buildManifest.js"
++        "url": "http://127.0.0.1:18083/_next/static/development/_buildManifest.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/react-refresh.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/react-refresh.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/webpack.js"
++        "url": "http://127.0.0.1:18083/_next/static/development/_ssgManifest.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/research-workspace.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/pages/research-workspace.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_ssgManifest.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/webpack.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/main.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/main.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/pages/_app.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/pages/_app.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/api/_tldw-webui/runtime-config"
++        "url": "http://127.0.0.1:18083/api/_tldw-webui/runtime-config"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devMiddlewareManifest.json"
++        "url": "http://127.0.0.1:18083/_next/static/development/_devMiddlewareManifest.json"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Arimo.ttf"
++        "url": "http://127.0.0.1:18083/fonts/Arimo.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/__nextjs_font/geist-latin.woff2"
++        "url": "http://127.0.0.1:18083/_next/static/development/_devPagesManifest.json"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
++        "url": "http://127.0.0.1:18001/api/v1/auth/me"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/auth/me"
++        "url": "http://127.0.0.1:18001/api/v1/health"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Inter-SemiBold.ttf"
++        "url": "http://127.0.0.1:18083/fonts/Inter-SemiBold.ttf"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 304,
+-        "url": "http://127.0.0.1:18082/fonts/Inter-Medium.ttf"
+-      },
+-      {
+-        "bodyHash": null,
+-        "context": "member",
+-        "method": "GET",
+-        "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/health"
++        "url": "http://127.0.0.1:18083/fonts/Inter-Medium.ttf"
+       },
+       {
+         "bodyHash": null,
+@@ -1894,35 +1859,35 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_components_layout_WebLayout_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/media/icon.db91a1fe.png"
++        "url": "http://127.0.0.1:18083/_next/static/media/icon.db91a1fe.png"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_KeyboardShortcutsModal_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_TutorialRunner_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Timeline_index_ts-_dc041.js"
+       },
+       {
+         "bodyHash": null,
+@@ -1936,56 +1901,56 @@
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
++        "url": "http://127.0.0.1:18001/api/v1/rag/health"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/rag/health"
++        "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/notifications?limit=1&offset=0&include_archived=false"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.js"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/notifications/stream?after=0"
++        "url": "http://127.0.0.1:18001/api/v1/notifications?limit=1&offset=0&include_archived=false"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Option_ResearchWorkspace_SharedResearchWorkspac-570bc1.js"
++        "url": "http://127.0.0.1:18001/api/v1/notifications/stream?after=0"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 404,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/workspace"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/workspace"
+       },
+       {
+         "bodyHash": null,
+         "context": "member",
+         "method": "GET",
+         "status": 404,
+-        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/52/sources/source-amber-final33-fix3-1787449107-31317/preview"
++        "url": "http://127.0.0.1:18001/api/v1/sharing/shared-with-me/56/sources/source-amber-final34-fix4d-1787455045-12857/preview"
+       },
+       {
+         "bodyHash": null,
+@@ -2015,27 +1980,6 @@
+         "status": 200,
+         "url": "http://127.0.0.1:18001/api/v1/notifications/unread-count"
+       },
+-      {
+-        "bodyHash": null,
+-        "context": "nonmember",
+-        "method": "GET",
+-        "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/webpack/d902ae78ab151429.webpack.hot-update.json"
+-      },
+-      {
+-        "bodyHash": null,
+-        "context": "nonmember",
+-        "method": "GET",
+-        "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/webpack/webpack.d902ae78ab151429.hot-update.js"
+-      },
+-      {
+-        "bodyHash": null,
+-        "context": "nonmember",
+-        "method": "GET",
+-        "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/webpack/_pages-dir-browser_packages_ui_src_routes_option-research-workspace_tsx.d902ae78ab151429.hot-update.js"
+-      },
+       {
+         "bodyHash": null,
+         "context": "nonmember",
+@@ -2062,42 +2006,42 @@
+         "context": "member-chats",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/development/_devPagesManifest.json"
++        "url": "http://127.0.0.1:18083/_next/static/development/_devPagesManifest.json"
+       },
+       {
+         "bodyHash": null,
+         "context": "member-chats",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/chats/a0a951c9-0ef1-4624-a78b-dd5928b145c8/settings?scope_type=global"
++        "url": "http://127.0.0.1:18001/api/v1/chats/9bfe6215-feb0-4d01-8afc-4bae39527e35/settings?scope_type=global"
+       },
+       {
+         "bodyHash": null,
+         "context": "member-chats",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/chats/a0a951c9-0ef1-4624-a78b-dd5928b145c8/research-runs"
++        "url": "http://127.0.0.1:18001/api/v1/chats/9bfe6215-feb0-4d01-8afc-4bae39527e35/research-runs"
+       },
+       {
+         "bodyHash": null,
+         "context": "member-chats",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/chats/a0a951c9-0ef1-4624-a78b-dd5928b145c8/messages?scope_type=global&include_deleted=false&include_metadata=true&limit=200&offset=0"
++        "url": "http://127.0.0.1:18001/api/v1/chats/9bfe6215-feb0-4d01-8afc-4bae39527e35/messages?scope_type=global&include_deleted=false&include_metadata=true&limit=200&offset=0"
+       },
+       {
+         "bodyHash": null,
+         "context": "member-chats",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/chat/conversations/a0a951c9-0ef1-4624-a78b-dd5928b145c8/share-links?scope_type=global"
++        "url": "http://127.0.0.1:18001/api/v1/chat/conversations/9bfe6215-feb0-4d01-8afc-4bae39527e35/share-links?scope_type=global"
+       },
+       {
+         "bodyHash": null,
+         "context": "member-chats",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/chats/a0a951c9-0ef1-4624-a78b-dd5928b145c8/settings?scope_type=global"
++        "url": "http://127.0.0.1:18083/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_Markdown_tsx-_979b2.js"
+       },
+       {
+         "bodyHash": null,
+@@ -2111,7 +2055,7 @@
+         "context": "member-chats",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18082/_next/static/chunks/_pages-dir-browser_packages_ui_src_components_Common_Markdown_tsx-_979b2.js"
++        "url": "http://127.0.0.1:18001/api/v1/chats/9bfe6215-feb0-4d01-8afc-4bae39527e35/settings?scope_type=global"
+       },
+       {
+         "bodyHash": null,
+@@ -2121,7 +2065,7 @@
+         "url": "http://127.0.0.1:18001/api/v1/auth/me"
+       },
+       {
+-        "bodyHash": "sha256:fe2b6fc4d5ea10554081e02b5e94000db7311bc1aea2dc240ce37e51373e6c89",
++        "bodyHash": "sha256:393fc072f1f7a2a0268d8e37d417e2932d6e594df8132e5d6adf3a4c8b8cde70",
+         "context": "member-chats",
+         "method": "POST",
+         "status": 200,
+@@ -2167,7 +2111,7 @@
+         "context": "member-chats",
+         "method": "GET",
+         "status": 200,
+-        "url": "http://127.0.0.1:18001/api/v1/chats/a0a951c9-0ef1-4624-a78b-dd5928b145c8/research-runs"
++        "url": "http://127.0.0.1:18001/api/v1/chats/9bfe6215-feb0-4d01-8afc-4bae39527e35/research-runs"
+       },
+       {
+         "bodyHash": null,
+@@ -2199,16 +2143,16 @@
+     "bodyUnchanged": true,
+     "forwardedRequestCount": 3,
+     "inputBodyHashes": [
+-      "sha256:34e78115573e5445f086d901a9736123aa6ed0dd2af9a38a0fe43cffc8aa57e5",
+-      "sha256:aaf74105210d7b88d8ec650a0e7b26e724b52211d6ec5ab6e4ae36166cc20020",
+-      "sha256:8fb7fa5070d3f239a49cea3ddd17a7a41767a26101b3fe52b2fea4a228061c3b"
++      "sha256:d1e725abd28cf0560dadff2b42af57d378eb929f6389c8fea0f611464e5b5fd9",
++      "sha256:98eb4aed5d37d6f5c9b6242d92f82e7cac1643da2ada7f2c535c591bd9ad6eab",
++      "sha256:9984c53538f170d20a4f4fdb1d2677e54576793ac5ad34405a701b2b36a26fcc"
+     ],
+     "maximumRequestCount": 16,
+     "mutationPayloadsAbsent": true,
+     "outputBodyHashes": [
+-      "sha256:34e78115573e5445f086d901a9736123aa6ed0dd2af9a38a0fe43cffc8aa57e5",
+-      "sha256:aaf74105210d7b88d8ec650a0e7b26e724b52211d6ec5ab6e4ae36166cc20020",
+-      "sha256:8fb7fa5070d3f239a49cea3ddd17a7a41767a26101b3fe52b2fea4a228061c3b"
++      "sha256:d1e725abd28cf0560dadff2b42af57d378eb929f6389c8fea0f611464e5b5fd9",
++      "sha256:98eb4aed5d37d6f5c9b6242d92f82e7cac1643da2ada7f2c535c591bd9ad6eab",
++      "sha256:9984c53538f170d20a4f4fdb1d2677e54576793ac5ad34405a701b2b36a26fcc"
+     ],
+     "ownerSentinelAbsent": true,
+     "payloadJsonValid": true,
+@@ -2224,24 +2168,24 @@
+   "raceProbe": {
+     "operations": [
+       {
+-        "bodyHash": "sha256:255bbc733960ed071283d7adba1969025032c3d702cce47eba67b4ae06363782",
++        "bodyHash": "sha256:756e3ef55207f43b8c7854c74a5b7c60055d4bfb6529e005aeae21411adb772b",
+         "operationId": "race-concurrent-conflict",
+         "status": 409
+       },
+       {
+-        "bodyHash": "sha256:03be089e1fbc222c1a617b3931d9180dfdd169103856aa05673a75de3af659ec",
++        "bodyHash": "sha256:8205eb11ab07c321514da76a2bb78086712384ed726d710f7fa73f5c6ce8dc34",
+         "operationId": "race-fingerprint-conflict",
+         "status": 409
+       }
+     ],
+     "requestHashes": [
+-      "sha256:255bbc733960ed071283d7adba1969025032c3d702cce47eba67b4ae06363782",
+-      "sha256:03be089e1fbc222c1a617b3931d9180dfdd169103856aa05673a75de3af659ec"
++      "sha256:756e3ef55207f43b8c7854c74a5b7c60055d4bfb6529e005aeae21411adb772b",
++      "sha256:8205eb11ab07c321514da76a2bb78086712384ed726d710f7fa73f5c6ce8dc34"
+     ],
+-    "requestIdHash": "sha256:be9fcd3dc9a1d392ff40c11b3af9a4bac8295a77a86a87c29ffb724834f5ea7e",
++    "requestIdHash": "sha256:e9dc86f3c7f6f3f78d45bc254259b4c85d33b97cf8418a8b7a750d596634faf1",
+     "responseHashes": [
+-      "sha256:4b20595f7083f4c622f232ed493ea02675f3b18f527eaa1de1ea2a139ecfa3d4",
+-      "sha256:8b2169d34cfe17e3d21ce7f307c585622e236189238fdea631ad6708dc820556"
++      "sha256:cecac2505b275955031e9d65ea6e2a36b73f17441c9bf8593221c9f29991e535",
++      "sha256:9fd0892cec50979edd9be0a9f827dd1a31ff509a0a0f4bd0704de5ad928ba4b6"
+     ],
+     "statuses": [
+       409,
+@@ -2250,17 +2194,17 @@
+       409
+     ],
+     "timingsMs": [
+-      383,
+-      4026,
+-      170,
+-      179
++      337,
++      3936,
++      175,
++      169
+     ],
+     "turnHashes": [
+-      "sha256:9808a9012f5ffcd8cd271db876693960ad444ca07ed604aab638a8c28a7a853f",
+-      "sha256:9808a9012f5ffcd8cd271db876693960ad444ca07ed604aab638a8c28a7a853f"
++      "sha256:046ad209eab43e4a65a6ed5f51fb705cb6681718dd55214325b035a5295c6166",
++      "sha256:046ad209eab43e4a65a6ed5f51fb705cb6681718dd55214325b035a5295c6166"
+     ]
+   },
+-  "runIdHash": "sha256:951500f99033420ff8f839d2c9354820500a4e05247ce72967de790f43922909",
++  "runIdHash": "sha256:8ad88c4a19c1a8f5854f16489c66d0b21c8331c5a16e3d40e04662d950185c3a",
+   "settingsRequestProbe": {
+     "count": 2,
+     "maximum": 2,
+@@ -2276,7 +2220,7 @@
+     "mobileSharedWorkspace": "mobile-shared-workspace.png",
+     "revokedShare": "revoked-share.png"
+   },
+-  "startedAt": "2026-08-23T01:38:27.980Z",
++  "startedAt": "2026-08-23T03:17:25.836Z",
+   "status": "passed",
+   "transitionProof": [
+     {
+@@ -2287,7 +2231,7 @@
+           "id": "owner-workspace-context-teardown",
+           "maximumCount": 1,
+           "method": "GET",
+-          "requestHash": "sha256:a7e53aa96bd4175a870d56e991ddb41488456a45073176fd54f0aa59541a3ba6"
++          "requestHash": "sha256:3d5751608cedffffede2a0ea0f2a5c5a3ed9a02ae357b106b282ed3f06050c45"
+         }
+       ],
+       "consoleErrorCount": 0,
+@@ -2299,86 +2243,79 @@
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:afaddcebdaeff1325c52aae6b82c0556c37796faee4a0a0916ecee42144f7f03",
++          "requestHash": "sha256:8ab5baa6a7f0e4610ea177dc16cb09c451f3bf1a3c1b1ebe079a1b6fcc24e004",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:1a00e52008279460327dda680a20f31761b09607c778c67642cf4b0a12c6c515",
++          "requestHash": "sha256:c9b90891778ec29f012089021c16daf8aba8b9f27deb81bbeb3e0ce7226281eb",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:cefb177fb2be30168ffc2898cbc1810f98ec2c0dbc58b3af45d5e536d34a007b",
++          "requestHash": "sha256:5fdbef3050a3710654718c2637a3be851ef0722fad5b48f3d063bb6cb8d9608c",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:8a622cf3eda4f76b8b9b208b02546d55733c23926b3d53d5b33b4a8fab9fc856",
++          "requestHash": "sha256:fa623ae4d9dc44ce2e8ba270b4325a98ca673e0ab0a81984c142bda444df33c8",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:1bf807e9f10245f1003f7d5ada724c67405653b818c2b95c142a89933b6c4c9d",
++          "requestHash": "sha256:96f41b2455c86fdff6ae067464cf2d5d7ede26e61fea198f235f65e87a998309",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:40f8963443a1f84a2ccabc86b989269d3a2b21caf4d2b6b63c17325247eac1c3",
++          "requestHash": "sha256:a92837e4a5824a5549157fd8e400ce15dd423719af95b7adee7dc3638b21075f",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:378c3bd02f5f35b968832d5fc24b5decb37908427d39b74a628faa5570553e8b",
++          "requestHash": "sha256:32e04cdc4f6677cba6eceedfe8b4bc602d9979fec17adbfe718f66f62f8cc64e",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:9e56d161dea0e93947319c15d8112cea3380ab36b8666f7483f723860f1ea0ec",
++          "requestHash": "sha256:65bca2ad6fed0143926f4c142e9e497333e985a76231ca310fdebf495503b524",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:12d83ccc13b8b5a974f9ae0634e1c05a03f1e13dd52ef261e5865ec71753464e",
++          "requestHash": "sha256:136225f72f0bce835398dc694b081758ff82c874733363dd89e971e2141b0ec1",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:bb0fadd998ccecb821e74c935d4abc0ed9739912d4c268c04e09bc866b16c357",
++          "requestHash": "sha256:e89f3603d1a41665507a69339031319b5ee1166a1456fda6c040946b7f573ce7",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:be5aaca848498775364425e4bb077e38bac46c7ecf60cdb831baa6ca558f2a8d",
++          "requestHash": "sha256:d4864009894e19e6018f42f91ab6f86bbd1864f70ea917880179d8f57ff16760",
+           "status": 304
+         },
+-        {
+-          "errorHash": null,
+-          "kind": "response",
+-          "method": "GET",
+-          "requestHash": "sha256:f759ef33a750e28d8a0ee65897e7344d4e46dd6829e84e105002dd3ebb52df62",
+-          "status": 200
+-        },
+         {
+           "errorHash": null,
+           "kind": "response",
+@@ -2390,14 +2327,14 @@
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:df9d5c7e179227ba42b3904ecf9675352ddf27b8c1755e5da1e8d071f1ad5e99",
++          "requestHash": "sha256:4b59f9e51e31d2d91062315806a95c0970ac0f6e7fb210efc482b90f4b92d06e",
+           "status": 304
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:5d5968e15c0084e46758822827737adaeaf550bee8adc8b277b0165512c854e2",
++          "requestHash": "sha256:f03343423f5833ce7de91eb8806cb8de964251fd640ef531d4397c0203e88bea",
+           "status": 304
+         },
+         {
+@@ -2425,28 +2362,28 @@
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:f1596ed0be94668c1d825f3ecfcc6e638f686df7d96adca8653d05ab0da5f036",
++          "requestHash": "sha256:07556e58a6d463d9b5e136131372bb309178ab9eb5821e7884551f5bb46c7515",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:574e30c336ef0a779175e018f4ccc34899cb430351946e4270f6b8251dc0fa7d",
++          "requestHash": "sha256:05a39319c96b88460209b48db062c253eeb22f4abd66cb6f9225b285a39f4cdb",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:583e3960367c1c8a32230555c08f24760dbb1af3118e81fbcf4c00e60f018187",
++          "requestHash": "sha256:6b377e7c4cbb5831ecff44424cb62df378de8267cf33085cc6467acacd264196",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:d22f723d878434b7dd75f6ccc5409bd8cdab24f9fccacce92d7cdf3bda90df8f",
++          "requestHash": "sha256:2ed237818b78eae8d790095838bfa394c75dd915b183e62194177033ee0c7a4b",
+           "status": 200
+         },
+         {
+@@ -2460,14 +2397,14 @@
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:78f6fb9e1db7ed40951f964493e84a83d26794089eeed7b2c9bf43b82d585f19",
++          "requestHash": "sha256:0c67d2056b77c02e89280d0b0d55144ae8dc27addb78ca488632c730d5eae43a",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:833e532a59c54d7868be7f95777d1aef23d46137d6737f2e68efb3d1f765dedd",
++          "requestHash": "sha256:78f6fb9e1db7ed40951f964493e84a83d26794089eeed7b2c9bf43b82d585f19",
+           "status": 200
+         },
+         {
+@@ -2488,98 +2425,98 @@
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:64479a49fe017bc0d50be66293a8ced28e692035e52447630304925a0df6b865",
++          "requestHash": "sha256:7a43aafb1f9be32d249565b9485ebf4b87ae38b98cbb595aec007a61fcac1f14",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:ece901809c6130367a70888d143efa321f789bdbb8a85b6b74a78399a2045702",
++          "requestHash": "sha256:64479a49fe017bc0d50be66293a8ced28e692035e52447630304925a0df6b865",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:571170a4faa4753f16543fefe6b3a98d9582b2013235ea42a4ff23435b3f2885",
++          "requestHash": "sha256:0a89e7b9f731cc042786df6e471173a08c32abc85f5afc524cafc0349a53374a",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:ccea709529fb53893aac9eac9482d570bbd578899dffab20ca728a0e407f00cb",
++          "requestHash": "sha256:956c201838b2c6b2591a9786e34162d0f16283bcd26ca32c825bcf5d0dadbdd8",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:1f1f77922fa0dacd6dd754c32da9f6fee009e030846154ca291459464c89ba43",
++          "requestHash": "sha256:685c9ffc39af881e10a79afbdc7c0387320cbbe93dc1364dd3db7dacaaf5b241",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:ceca8976a1c7841283ce957dcbffccfacbf82bc5aa2542df351e962b30b36e01",
++          "requestHash": "sha256:ff6dde9970cb5bb8149fa899fba31f2b750ae9ed100f844286bbb66b11f49319",
+           "status": 304
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:015587216e55bb1774fb0bf3bad138aaaa877366104b099b19daf90f7d1b4b0a",
++          "requestHash": "sha256:b6cc828cfd779adc2c873c8cc0c8f66a1068d59c890347495c07003bd7046a2c",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+-          "method": "PUT",
+-          "requestHash": "sha256:3c57747a00e59e4ee2b2a892fc0b30f26a6e7ad6b29fbdfbc0e40a20277ab060",
++          "method": "GET",
++          "requestHash": "sha256:c130b7c53399e16bf5a3b9c7161ddc4576c4b727f1bb53251b1b47a0d54462a7",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "PUT",
+-          "requestHash": "sha256:3c57747a00e59e4ee2b2a892fc0b30f26a6e7ad6b29fbdfbc0e40a20277ab060",
++          "requestHash": "sha256:d1503b97ded09b237e091e4432c3332d31a0610284b8b96e38cb1cb7039e57c4",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+-          "method": "GET",
+-          "requestHash": "sha256:b6cc828cfd779adc2c873c8cc0c8f66a1068d59c890347495c07003bd7046a2c",
++          "method": "PUT",
++          "requestHash": "sha256:d1503b97ded09b237e091e4432c3332d31a0610284b8b96e38cb1cb7039e57c4",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:42322a55b1694a7ed8b8478edf5cfed568d6a3b5e9b3386c6d12a86e8205aa1a",
++          "requestHash": "sha256:e91b7f460870a4a45d591a384ef22b6edc824abf06a3f1aab9583f25ea73814c",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:a7e53aa96bd4175a870d56e991ddb41488456a45073176fd54f0aa59541a3ba6",
++          "requestHash": "sha256:3d5751608cedffffede2a0ea0f2a5c5a3ed9a02ae357b106b282ed3f06050c45",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:3253b8064e540f43eff13cd22046e3b9b831bb3aec54520f9178a497348c3432",
++          "requestHash": "sha256:adb695c8b6d99d1cc0ba3c6fddf7a4960617ef5809880d07470abe7e2b739321",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:adb695c8b6d99d1cc0ba3c6fddf7a4960617ef5809880d07470abe7e2b739321",
++          "requestHash": "sha256:3253b8064e540f43eff13cd22046e3b9b831bb3aec54520f9178a497348c3432",
+           "status": 200
+         },
+         {
+@@ -2593,14 +2530,14 @@
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:015587216e55bb1774fb0bf3bad138aaaa877366104b099b19daf90f7d1b4b0a",
++          "requestHash": "sha256:c130b7c53399e16bf5a3b9c7161ddc4576c4b727f1bb53251b1b47a0d54462a7",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:bd7b6c02717e9411be48a5ec5d2515c3a45782ff2ebaa6dc5568729617a7c58e",
++          "requestHash": "sha256:755c0bbcf1c672933c237338dac475d59fec4771214a3efbefad6e92a515d4c7",
+           "status": 200
+         },
+         {
+@@ -2620,78 +2557,78 @@
+         {
+           "errorHash": null,
+           "kind": "response",
+-          "method": "GET",
+-          "requestHash": "sha256:d3062964e8939a35d73458b764f21c4874a65e2b2c0aa0a5c450ac39df925859",
++          "method": "PUT",
++          "requestHash": "sha256:2278acc8377172153cccd1e98d3da7d666ebb750e616c402dafb1a3eed8a8056",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "PUT",
+-          "requestHash": "sha256:bc357e2ce2623948349aa096567904334b83b8414dff89cbe7bab32e563c4d7e",
++          "requestHash": "sha256:2278acc8377172153cccd1e98d3da7d666ebb750e616c402dafb1a3eed8a8056",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "PUT",
+-          "requestHash": "sha256:bc357e2ce2623948349aa096567904334b83b8414dff89cbe7bab32e563c4d7e",
++          "requestHash": "sha256:6514a7f13670564276418003f62f30de5bb71623b44451345e59f59f06fd4752",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+-          "method": "PUT",
+-          "requestHash": "sha256:19013efc2690977ed5e9bceab85e6d196fd828a162c64f83ec06b06aa982f916",
++          "method": "GET",
++          "requestHash": "sha256:d3062964e8939a35d73458b764f21c4874a65e2b2c0aa0a5c450ac39df925859",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "PUT",
+-          "requestHash": "sha256:fe52e29a057af56c7174c837cc99f41dcfd43433b8493fcd907f3732a41d8a96",
++          "requestHash": "sha256:007e2ce4c970a51dcd6d41ea85cf426ea43cc4ebda900f0be535f344e78df028",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:a7e53aa96bd4175a870d56e991ddb41488456a45073176fd54f0aa59541a3ba6",
++          "requestHash": "sha256:3d5751608cedffffede2a0ea0f2a5c5a3ed9a02ae357b106b282ed3f06050c45",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "PUT",
+-          "requestHash": "sha256:68be8d5b9edae5a1f8eedd3b99b0c6baadbf05efe6dbd75743f58a0df7afd785",
++          "requestHash": "sha256:1c7888827e09c80b77261c2b1d37a5356c6eded337662eb57a865a3e493b5d7f",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "POST",
+-          "requestHash": "sha256:f374e83a5b4e31a0482657352eb08517c52c7ff3886ddfeaffa1afad61ab9f8c",
++          "requestHash": "sha256:9026b0e63a2fff9094a58fa17325f30ff6c9b15c42b866fc83c9b8c6c4aa529b",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:a7e53aa96bd4175a870d56e991ddb41488456a45073176fd54f0aa59541a3ba6",
++          "requestHash": "sha256:3d5751608cedffffede2a0ea0f2a5c5a3ed9a02ae357b106b282ed3f06050c45",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:4b245dd6d1fc10857141c22ad187993c30c8145a8c45c510b37c617e4adee162",
++          "requestHash": "sha256:1e25d9277faad1a87998b777e2ae5e64589f575c398a1e2a51192e4436f2baa5",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "POST",
+-          "requestHash": "sha256:de74d5ddd95931802c5b28e8275162a7db88cf9496d779bf70cf541a15d03598",
++          "requestHash": "sha256:be356a8882f39808956249881f5cc30bdf6fd23d7191289a758121b3e0baebdc",
+           "status": 200
+         }
+       ],
+@@ -2752,12 +2689,10 @@
+             200,
+             304
+           ],
+-          "count": 1,
++          "count": 0,
+           "maximumCount": 2,
+           "name": "webui-next-font-geist",
+-          "observedStatuses": [
+-            200
+-          ]
++          "observedStatuses": []
+         },
+         {
+           "allowedStatuses": [
+@@ -3131,7 +3066,7 @@
+       "pageErrorCount": 0,
+       "registeredAbortCount": 1,
+       "registeredOperationCount": 37,
+-      "requestCount": 57,
++      "requestCount": 56,
+       "runtimeOverlayCount": 0,
+       "unexpectedRequestCount": 0,
+       "withinRequestBound": true
+@@ -3144,7 +3079,7 @@
+           "id": "chat-share-links-teardown",
+           "maximumCount": 1,
+           "method": "GET",
+-          "requestHash": "sha256:6a431897a8b67764615aa92e461ebb22a31e4835a8d7c72872be672d21ce0c5e"
++          "requestHash": "sha256:737947a5030dc7b317d0d57ce8c70aaf265760c436307ecb5e370acaeb068a93"
+         },
+         {
+           "count": 0,
+@@ -3172,7 +3107,7 @@
+           "id": "chat-research-runs-teardown",
+           "maximumCount": 1,
+           "method": "GET",
+-          "requestHash": "sha256:1b905ec9f3367556dd5e6419a9d037584b5a5a12761399a40f06b20ad66f14b1"
++          "requestHash": "sha256:01f0b80aec82f487e694f93fc302d670ed1a0da7ed0485d3f68285337eb45121"
+         },
+         {
+           "count": 0,
+@@ -3205,107 +3140,79 @@
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:74e1d3d2ac815b2863b9d58f0c3c779c895a75ef1f7a1a75ac811df6bf289bf0",
+-          "status": 200
+-        },
+-        {
+-          "errorHash": null,
+-          "kind": "response",
+-          "method": "GET",
+-          "requestHash": "sha256:b02179300ee59a0c59356da9b0d5fad55212d0563362acfd76fb74bdedc92b39",
+-          "status": 200
+-        },
+-        {
+-          "errorHash": null,
+-          "kind": "response",
+-          "method": "GET",
+-          "requestHash": "sha256:dcf0713139d92af04ba5dd9e927cca4d6825c7adca8e786b92860363e4a92c5c",
+-          "status": 200
+-        },
+-        {
+-          "errorHash": null,
+-          "kind": "response",
+-          "method": "GET",
+-          "requestHash": "sha256:19af48021de81d55955852db5081ce5a02dbc045d56b997860df2c66fbc8d6d9",
++          "requestHash": "sha256:1ef5bee6b645bf9e67da721566bc0335174be0b07ca24697583238ba178f18f6",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:1a00e52008279460327dda680a20f31761b09607c778c67642cf4b0a12c6c515",
++          "requestHash": "sha256:5fdbef3050a3710654718c2637a3be851ef0722fad5b48f3d063bb6cb8d9608c",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:cefb177fb2be30168ffc2898cbc1810f98ec2c0dbc58b3af45d5e536d34a007b",
++          "requestHash": "sha256:c9b90891778ec29f012089021c16daf8aba8b9f27deb81bbeb3e0ce7226281eb",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:8a622cf3eda4f76b8b9b208b02546d55733c23926b3d53d5b33b4a8fab9fc856",
++          "requestHash": "sha256:fa623ae4d9dc44ce2e8ba270b4325a98ca673e0ab0a81984c142bda444df33c8",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:1bf807e9f10245f1003f7d5ada724c67405653b818c2b95c142a89933b6c4c9d",
++          "requestHash": "sha256:96899b33d1e14f81b39cae9ef3cb5530ec80a49db4959838f2f5035e85f0cc05",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:989a744a0a69faccb08603bd1919734e8fd37f2bbaf9800ddc40982cada48d3f",
++          "requestHash": "sha256:96f41b2455c86fdff6ae067464cf2d5d7ede26e61fea198f235f65e87a998309",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:378c3bd02f5f35b968832d5fc24b5decb37908427d39b74a628faa5570553e8b",
++          "requestHash": "sha256:32e04cdc4f6677cba6eceedfe8b4bc602d9979fec17adbfe718f66f62f8cc64e",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:9e56d161dea0e93947319c15d8112cea3380ab36b8666f7483f723860f1ea0ec",
++          "requestHash": "sha256:65bca2ad6fed0143926f4c142e9e497333e985a76231ca310fdebf495503b524",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:12d83ccc13b8b5a974f9ae0634e1c05a03f1e13dd52ef261e5865ec71753464e",
++          "requestHash": "sha256:136225f72f0bce835398dc694b081758ff82c874733363dd89e971e2141b0ec1",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:bb0fadd998ccecb821e74c935d4abc0ed9739912d4c268c04e09bc866b16c357",
++          "requestHash": "sha256:e89f3603d1a41665507a69339031319b5ee1166a1456fda6c040946b7f573ce7",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:be5aaca848498775364425e4bb077e38bac46c7ecf60cdb831baa6ca558f2a8d",
++          "requestHash": "sha256:d4864009894e19e6018f42f91ab6f86bbd1864f70ea917880179d8f57ff16760",
+           "status": 304
+         },
+-        {
+-          "errorHash": null,
+-          "kind": "response",
+-          "method": "GET",
+-          "requestHash": "sha256:f759ef33a750e28d8a0ee65897e7344d4e46dd6829e84e105002dd3ebb52df62",
+-          "status": 200
+-        },
+         {
+           "errorHash": null,
+           "kind": "response",
+@@ -3317,14 +3224,14 @@
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:df9d5c7e179227ba42b3904ecf9675352ddf27b8c1755e5da1e8d071f1ad5e99",
++          "requestHash": "sha256:4b59f9e51e31d2d91062315806a95c0970ac0f6e7fb210efc482b90f4b92d06e",
+           "status": 304
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:5d5968e15c0084e46758822827737adaeaf550bee8adc8b277b0165512c854e2",
++          "requestHash": "sha256:f03343423f5833ce7de91eb8806cb8de964251fd640ef531d4397c0203e88bea",
+           "status": 304
+         },
+         {
+@@ -3352,49 +3259,49 @@
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:f1596ed0be94668c1d825f3ecfcc6e638f686df7d96adca8653d05ab0da5f036",
++          "requestHash": "sha256:07556e58a6d463d9b5e136131372bb309178ab9eb5821e7884551f5bb46c7515",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:574e30c336ef0a779175e018f4ccc34899cb430351946e4270f6b8251dc0fa7d",
++          "requestHash": "sha256:05a39319c96b88460209b48db062c253eeb22f4abd66cb6f9225b285a39f4cdb",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:583e3960367c1c8a32230555c08f24760dbb1af3118e81fbcf4c00e60f018187",
++          "requestHash": "sha256:6b377e7c4cbb5831ecff44424cb62df378de8267cf33085cc6467acacd264196",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:d22f723d878434b7dd75f6ccc5409bd8cdab24f9fccacce92d7cdf3bda90df8f",
++          "requestHash": "sha256:2ed237818b78eae8d790095838bfa394c75dd915b183e62194177033ee0c7a4b",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:c93de97051b46c438b757c29d4e0764fc66548901e15981ce6fccadb9dd6651a",
++          "requestHash": "sha256:0c67d2056b77c02e89280d0b0d55144ae8dc27addb78ca488632c730d5eae43a",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:78f6fb9e1db7ed40951f964493e84a83d26794089eeed7b2c9bf43b82d585f19",
++          "requestHash": "sha256:c93de97051b46c438b757c29d4e0764fc66548901e15981ce6fccadb9dd6651a",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:833e532a59c54d7868be7f95777d1aef23d46137d6737f2e68efb3d1f765dedd",
++          "requestHash": "sha256:78f6fb9e1db7ed40951f964493e84a83d26794089eeed7b2c9bf43b82d585f19",
+           "status": 200
+         },
+         {
+@@ -3422,28 +3329,28 @@
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:c0348acd12e6d650512f8f564e123d0484ea371d6b430be7979dd731bbd8d267",
++          "requestHash": "sha256:6483a9b5ba4786f93f0527844c8ca3df8844c8b142867f6386fa13c113a23164",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:ceca8976a1c7841283ce957dcbffccfacbf82bc5aa2542df351e962b30b36e01",
++          "requestHash": "sha256:ff6dde9970cb5bb8149fa899fba31f2b750ae9ed100f844286bbb66b11f49319",
+           "status": 304
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:c3a1411fe50cdc00bf6be8a023ae3fd50ce75f00a9d54e435723b2b103ac3925",
++          "requestHash": "sha256:22fdeaddc58dc0ff6c6c98291418987457f8dbd18345c41ba05775c5e008ef2e",
+           "status": 200
+         },
+         {
+           "errorHash": null,
+           "kind": "response",
+           "method": "GET",
+-          "requestHash": "sha256:ada20c10cc7a40e08ff946bda70462e14041f84b6f5c24c5d41973113c383533",
++          "requestHash": "sha256:19363f4117a803702e0a17e441c5e4469227141c5b96a73ec1afb82ae5cd5321",
+           "status": 200
+         },
+         {
+@@ -3567,7 +3474,7 @@
+             200,
+             304
+           ],
+-          "count": 19,
++          "count": 16,
+           "maximumCount": 32,
+           "name": "webui-next-static",
+           "observedStatuses": [
+@@ -3586,9 +3493,6 @@
+             200,
+             200,
+             200,
+-            200,
+-            200,
+-            200,
+             200
+           ]
+         },
+@@ -3597,12 +3501,10 @@
+             200,
+             304
+           ],
+-          "count": 1,
++          "count": 0,
+           "maximumCount": 2,
+           "name": "webui-next-font-geist",
+-          "observedStatuses": [
+-            200
+-          ]
++          "observedStatuses": []
+         },
+         {
+           "allowedStatuses": [
+@@ -3940,7 +3842,7 @@
+       "pageErrorCount": 0,
+       "registeredAbortCount": 8,
+       "registeredOperationCount": 35,
+-      "requestCount": 48,
++      "requestCount": 44,
+       "runtimeOverlayCount": 0,
+       "unexpectedRequestCount": 0,
+       "withinRequestBound": true
+diff --git a/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/mobile-shared-workspace.png b/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/mobile-shared-workspace.png
+index 50520e6e4e434f4d71d021e309cbf3324a3123fb..58f0bb0dcdd00f64b80758d94a408a939db243ad 100644
+Binary files a/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/mobile-shared-workspace.png and b/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/mobile-shared-workspace.png differ
+diff --git a/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/mobile-source-preview.png b/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/mobile-source-preview.png
+index b47e0cdc699eec07e9960d995779f73a91044efd..4f5a314ef2d6c5910b0ebf114de5294b3c29146d 100644
+Binary files a/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/mobile-source-preview.png and b/Docs/Reviews/assets/2026-08-21-shared-research-workspace-recipient-uat/mobile-source-preview.png differ
+diff --git a/apps/packages/ui/src/assets/locale/en/playground.json b/apps/packages/ui/src/assets/locale/en/playground.json
+index 89230b0a3d897af775ac25bc758b0800175e4ff3..ecb6af82fc2f31c3489b887b665f4dbf21a6e10e 100644
+--- a/apps/packages/ui/src/assets/locale/en/playground.json
++++ b/apps/packages/ui/src/assets/locale/en/playground.json
+@@ -36,7 +36,9 @@
+     "all": "All",
+     "clearSelected": "Clear selected sources",
+     "clear": "Clear",
+-    "scopeLimit": "Choose a subset of up to 500 sources before asking a question.",
++    "scopeLimit": "Clear the selection, then choose up to 500 sources.",
++    "selectionPreparing": "Preparing complete source selection...",
++    "selectionUnavailable": "Couldn't load every queryable source. All queryable sources remain selected.",
+     "sourceList": "Shared sources",
+     "selectSource": "Select {{title}}",
+     "previewSource": "Preview {{title}}",
+@@ -69,6 +71,7 @@
+     "sourceConflict": "The shared source set changed. Refresh sources before trying again.",
+     "contextBudget": "The selected sources exceed this model's context budget. Choose fewer sources and try again.",
+     "retrievalUnavailable": "Shared source retrieval is temporarily unavailable. Try again.",
++    "responseUnconfirmed": "The answer status is uncertain. Retry to reconcile this question without sending a duplicate.",
+     "refreshSources": "Refresh sources",
+     "retry": "Retry",
+     "composerLabel": "Ask about shared sources",
+diff --git a/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/SharedWorkspaceChatPane.tsx b/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/SharedWorkspaceChatPane.tsx
+index ad7533e103e8a9e4034631219d9486ad963799a6..b60208eed4b4f078a86932df28cda8a8ec324d94 100644
+--- a/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/SharedWorkspaceChatPane.tsx
++++ b/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/SharedWorkspaceChatPane.tsx
+@@ -72,7 +72,9 @@ export const SharedWorkspaceChatPane: React.FC<
+   const [selectedModel, setSelectedModel] = React.useState<string | null>(null)
+   const [announcement, setAnnouncement] = React.useState("")
+   const seededDefaultRef = React.useRef<string | null>(null)
+-  const awaitingAnswerRef = React.useRef(false)
++  const announcedAssistantIdRef = React.useRef(
++    state.lastCompletedAssistantMessageId
++  )
+   const messagesEndRef = React.useRef<HTMLDivElement>(null)
+   const messagesScrollRef = React.useRef<HTMLDivElement>(null)
+   const historyAnchorRef = React.useRef<{
+@@ -209,6 +211,7 @@ export const SharedWorkspaceChatPane: React.FC<
+     generationDefault?.ready === true &&
+     Boolean(state.provider && state.model && selectedModel) &&
+     !invalidScope &&
++    !state.selectionMaterializing &&
+     !submitting &&
+     !rateLimited
+   const submissionCode = state.errors.submission?.code
+@@ -241,11 +244,16 @@ export const SharedWorkspaceChatPane: React.FC<
+                 "sharedWorkspace.retrievalUnavailable",
+                 "Shared source retrieval is temporarily unavailable. Try again."
+               )
+-            : state.errors.submission?.message || null
++            : submissionCode === "shared_chat_response_unconfirmed" ||
++                  submissionCode === "shared_chat_response_mismatch"
++                ? t(
++                    "sharedWorkspace.responseUnconfirmed",
++                    "The answer status is uncertain. Retry to reconcile this question without sending a duplicate."
++                  )
++                : state.errors.submission?.message || null
+
+   React.useEffect(() => {
+     if (!state.errors.submission) return
+-    awaitingAnswerRef.current = false
+     if (state.rateLimitRemainingMs > 0) {
+       setAnnouncement(
+         t("sharedWorkspace.rateLimited", "Try again in {{count}} second", {
+@@ -258,16 +266,17 @@ export const SharedWorkspaceChatPane: React.FC<
+   }, [state.errors.submission, state.rateLimitRemainingMs, t])
+
+   React.useEffect(() => {
++    const completedAssistantId = state.lastCompletedAssistantMessageId
+     if (
+-      !awaitingAnswerRef.current ||
+-      !state.messages.some((message) => message.role === "assistant")
++      !completedAssistantId ||
++      announcedAssistantIdRef.current === completedAssistantId
+     ) {
+       return
+     }
+-    awaitingAnswerRef.current = false
++    announcedAssistantIdRef.current = completedAssistantId
+     setAnnouncement(t("sharedWorkspace.answerAdded", "Answer added"))
+     messagesEndRef.current?.scrollIntoView?.({ block: "nearest" })
+-  }, [state.messages, t])
++  }, [state.lastCompletedAssistantMessageId, t])
+
+   React.useLayoutEffect(() => {
+     const anchor = historyAnchorRef.current
+@@ -296,13 +305,20 @@ export const SharedWorkspaceChatPane: React.FC<
+
+   const submit = async () => {
+     if (!canSubmit) return
+-    awaitingAnswerRef.current = true
+     setAnnouncement(
+       t("sharedWorkspace.askingStatus", "Asking shared workspace")
+     )
+     await controller.submitDraft()
+   }
+
++  const retry = async () => {
++    if (state.pendingSubmission?.status !== "retryable" || rateLimited) return
++    setAnnouncement(
++      t("sharedWorkspace.askingStatus", "Asking shared workspace")
++    )
++    await controller.retryPending()
++  }
++
+   return (
+     <section
+       data-testid="shared-workspace-chat-pane"
+@@ -453,7 +469,7 @@ export const SharedWorkspaceChatPane: React.FC<
+               {state.pendingSubmission?.status === "retryable" ? (
+                 <button
+                   type="button"
+-                  onClick={() => void controller.retryPending()}
++                  onClick={() => void retry()}
+                   disabled={rateLimited}
+                   className="h-9 rounded-md px-2 font-medium text-primary outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40"
+                 >
+diff --git a/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/SharedWorkspaceSourcesPane.tsx b/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/SharedWorkspaceSourcesPane.tsx
+index ec2edd1405efb54516385744cea30b1a55b9b90a..4031695247039b95f8def430fcb22da78fa2d4d1 100644
+--- a/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/SharedWorkspaceSourcesPane.tsx
++++ b/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/SharedWorkspaceSourcesPane.tsx
+@@ -24,10 +24,11 @@ export const SharedWorkspaceSourcesPane: React.FC<
+   const summary = state.sourceSummary
+   const inspectAction = state.allowedActions.inspect_sources
+   const canInspect = inspectAction.allowed
++  const selectionBusy = state.selectionMaterializing
+   const inspectReason = formatSharedActionReason(inspectAction.reason_code)
+
+   const runQuery = (patch: Partial<SharedSourceQuery>) => {
+-    if (!canInspect) return
++    if (!canInspect || selectionBusy) return
+     const query = { ...state.sourceQuery, ...patch }
+     controller.setSourceQuery(query)
+     void controller.refreshSources(query)
+@@ -38,6 +39,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
+       ? summary?.queryable ?? 0
+       : state.selectedSourceIds.length
+   const queryableCount = summary?.queryable ?? 0
++  const allScopeOverLimit = state.sourceScopeMode === "all" && queryableCount > 500
+   const reasonLabel = (source: SharedSource): string => {
+     if (source.reason_code === "transcription_pending") {
+       return t("sharedWorkspace.transcriptionPending", "Transcription pending")
+@@ -52,14 +54,6 @@ export const SharedWorkspaceSourcesPane: React.FC<
+       t("sharedWorkspace.notQueryable", "Not queryable")
+   }
+
+-  const toggleSource = (source: SharedSource, checked: boolean) => {
+-    if (!canInspect) return
+-    const selected = new Set(state.selectedSourceIds)
+-    if (checked) selected.add(source.source_id)
+-    else selected.delete(source.source_id)
+-    controller.setSelectedSourceIds(Array.from(selected))
+-  }
+-
+   return (
+     <section
+       data-testid="shared-workspace-sources-pane"
+@@ -119,7 +113,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
+             type="search"
+             aria-label={t("sharedWorkspace.search", "Search shared sources")}
+             value={state.sourceQuery.q ?? ""}
+-            disabled={!canInspect}
++            disabled={!canInspect || selectionBusy}
+             onChange={(event) => runQuery({ q: event.target.value, offset: 0 })}
+             className="h-9 w-full rounded-md border border-border bg-surface2 pl-8 pr-3 text-sm outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-focus"
+           />
+@@ -139,7 +133,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
+                 "Filter shared sources by state"
+               )}
+               value={state.sourceQuery.state ?? ""}
+-              disabled={!canInspect}
++              disabled={!canInspect || selectionBusy}
+               onChange={(event) =>
+                 runQuery({ state: event.target.value || undefined, offset: 0 })
+               }
+@@ -155,7 +149,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
+           </label>
+           <button
+             type="button"
+-            disabled={!canInspect}
++            disabled={!canInspect || selectionBusy}
+             onClick={controller.selectAllSources}
+             className="h-9 whitespace-nowrap rounded-md px-2 text-xs font-medium text-primary outline-none hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus"
+             aria-label={t(
+@@ -167,7 +161,7 @@ export const SharedWorkspaceSourcesPane: React.FC<
+           </button>
+           <button
+             type="button"
+-            disabled={!canInspect}
++            disabled={!canInspect || selectionBusy}
+             onClick={controller.clearSelectedSources}
+             className="h-9 whitespace-nowrap rounded-md px-2 text-xs font-medium text-text-muted outline-none hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus"
+             aria-label={t(
+@@ -179,14 +173,27 @@ export const SharedWorkspaceSourcesPane: React.FC<
+           </button>
+         </div>
+
+-        {state.sourceScopeMode === "all" && queryableCount > 500 ? (
++        {allScopeOverLimit ? (
+           <p className="text-xs text-warn">
+             {t(
+               "sharedWorkspace.scopeLimit",
+-              "Choose a subset of up to 500 sources before asking a question."
++              "Clear the selection, then choose up to 500 sources."
++            )}
++          </p>
++        ) : null}
++        {selectionBusy ? (
++          <p role="status" className="text-xs text-text-muted">
++            {t(
++              "sharedWorkspace.selectionPreparing",
++              "Preparing complete source selection..."
+             )}
+           </p>
+         ) : null}
++        {state.errors.selection ? (
++          <p role="alert" className="text-xs text-danger">
++            {t("sharedWorkspace.selectionUnavailable", state.errors.selection.message)}
++          </p>
++        ) : null}
+         {state.errors.sources ? (
+           <p className="text-xs text-danger">{state.errors.sources.message}</p>
+         ) : null}
+@@ -217,9 +224,17 @@ export const SharedWorkspaceSourcesPane: React.FC<
+                         { title: source.title }
+                       )}
+                       checked={checked}
+-                      disabled={!canInspect || !source.retrieval_ready}
++                      disabled={
++                        !canInspect ||
++                        !source.retrieval_ready ||
++                        selectionBusy ||
++                        allScopeOverLimit
++                      }
+                       onChange={(event) =>
+-                        toggleSource(source, event.target.checked)
++                        void controller.toggleSource(
++                          source,
++                          event.target.checked
++                        )
+                       }
+                       className="h-4 w-4 accent-primary focus-visible:ring-2 focus-visible:ring-focus"
+                     />
+@@ -293,7 +308,12 @@ export const SharedWorkspaceSourcesPane: React.FC<
+                 "sharedWorkspace.previousPage",
+                 "Previous source page"
+               )}
+-              disabled={!canInspect || !page || page.pagination.offset === 0}
++              disabled={
++                !canInspect ||
++                selectionBusy ||
++                !page ||
++                page.pagination.offset === 0
++              }
+               onClick={() =>
+                 runQuery({
+                   offset: Math.max(
+@@ -315,7 +335,9 @@ export const SharedWorkspaceSourcesPane: React.FC<
+                 "sharedWorkspace.nextPage",
+                 "Next source page"
+               )}
+-              disabled={!canInspect || !page?.pagination.has_more}
++              disabled={
++                !canInspect || selectionBusy || !page?.pagination.has_more
++              }
+               onClick={() =>
+                 runQuery({
+                   offset:
+diff --git a/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/shared-research-workspace-reducer.ts b/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/shared-research-workspace-reducer.ts
+index 91d87ad60aad6e7ea02a2ad873518f7ca131fa0e..1ebc90dfdc2baf8ba400e2a72d6a528286c80aca 100644
+--- a/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/shared-research-workspace-reducer.ts
++++ b/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/shared-research-workspace-reducer.ts
+@@ -40,7 +40,9 @@ export interface SharedResearchWorkspaceState {
+   sourceSummary: SharedSourceSummary | null
+   sourceScopeMode: "all" | "include"
+   selectedSourceIds: string[]
++  selectionMaterializing: boolean
+   messages: SharedMessage[]
++  lastCompletedAssistantMessageId: string | null
+   nextBefore: string | null
+   draft: string
+   draftRevision: number
+@@ -55,6 +57,7 @@ export interface SharedResearchWorkspaceState {
+   errors: {
+     bootstrap: SharedWorkspaceError | null
+     sources: SharedWorkspaceError | null
++    selection: SharedWorkspaceError | null
+     history: SharedWorkspaceError | null
+     preview: SharedWorkspaceError | null
+     submission: SharedWorkspaceError | null
+@@ -85,7 +88,9 @@ export const createInitialSharedResearchWorkspaceState = (
+   sourceSummary: null,
+   sourceScopeMode: "all",
+   selectedSourceIds: [],
++  selectionMaterializing: false,
+   messages: [],
++  lastCompletedAssistantMessageId: null,
+   nextBefore: null,
+   draft: "",
+   draftRevision: 0,
+@@ -100,6 +105,7 @@ export const createInitialSharedResearchWorkspaceState = (
+   errors: {
+     bootstrap: null,
+     sources: null,
++    selection: null,
+     history: null,
+     preview: null,
+     submission: null
+@@ -131,6 +137,20 @@ export type SharedResearchWorkspaceAction =
+       generation: number
+       error: SharedWorkspaceError
+     }
++  | {
++      type: "selectionStarted"
++      generation: number
++    }
++  | {
++      type: "selectionSucceeded"
++      generation: number
++      sourceIds: string[]
++    }
++  | {
++      type: "selectionFailed"
++      generation: number
++      error: SharedWorkspaceError
++    }
+   | {
+       type: "historySucceeded"
+       generation: number
+@@ -241,14 +261,13 @@ const reconcileSelectedSources = (
+   query: SharedSourceQuery,
+   page: SharedSourcePage
+ ): string[] => {
++  if (state.sourceScopeMode === "all") return []
+   const queryableIds = page.items
+     .filter((source) => source.retrieval_ready)
+     .map((source) => source.source_id)
+   if (isCompleteUnfilteredPage(query, page)) {
+     return uniqueSourceIds(
+-      state.sourceScopeMode === "all"
+-        ? queryableIds
+-        : state.selectedSourceIds.filter((id) => queryableIds.includes(id))
++      state.selectedSourceIds.filter((id) => queryableIds.includes(id))
+     )
+   }
+
+@@ -257,11 +276,7 @@ const reconcileSelectedSources = (
+       .filter((source) => !source.retrieval_ready)
+       .map((source) => source.source_id)
+   )
+-  const selected =
+-    state.sourceScopeMode === "all"
+-      ? [...state.selectedSourceIds, ...queryableIds]
+-      : state.selectedSourceIds
+-  return uniqueSourceIds(selected).filter(
++  return uniqueSourceIds(state.selectedSourceIds).filter(
+     (id) => !returnedNonqueryableIds.has(id)
+   )
+ }
+@@ -296,9 +311,8 @@ export const sharedResearchWorkspaceReducer = (
+         },
+         sourceSummary: action.bootstrap.source_summary,
+         sourceScopeMode: "all",
+-        selectedSourceIds: action.bootstrap.sources.items
+-          .filter((source) => source.retrieval_ready)
+-          .map((source) => source.source_id),
++        selectedSourceIds: [],
++        selectionMaterializing: false,
+         messages: action.bootstrap.conversation.messages,
+         nextBefore: action.bootstrap.conversation.next_before,
+         provider: generationReady
+@@ -334,6 +348,29 @@ export const sharedResearchWorkspaceReducer = (
+     }
+     case "sourcesFailed":
+       return { ...state, errors: { ...state.errors, sources: action.error } }
++    case "selectionStarted":
++      return {
++        ...state,
++        selectionMaterializing: true,
++        errors: { ...state.errors, selection: null }
++      }
++    case "selectionSucceeded":
++      return {
++        ...state,
++        sourceScopeMode: "include",
++        selectedSourceIds: uniqueSourceIds(action.sourceIds),
++        selectionMaterializing: false,
++        pendingSubmission: clearFailedReceipt(state),
++        errors: { ...state.errors, selection: null }
++      }
++    case "selectionFailed":
++      return {
++        ...state,
++        sourceScopeMode: "all",
++        selectedSourceIds: [],
++        selectionMaterializing: false,
++        errors: { ...state.errors, selection: action.error }
++      }
+     case "historySucceeded":
+       return {
+         ...state,
+@@ -387,13 +424,18 @@ export const sharedResearchWorkspaceReducer = (
+         ...state,
+         sourceScopeMode: "include",
+         selectedSourceIds: uniqueSourceIds(action.sourceIds),
+-        pendingSubmission: clearFailedReceipt(state)
++        selectionMaterializing: false,
++        pendingSubmission: clearFailedReceipt(state),
++        errors: { ...state.errors, selection: null }
+       }
+     case "allSourcesSelected":
+       return {
+         ...state,
+         sourceScopeMode: "all",
+-        pendingSubmission: clearFailedReceipt(state)
++        selectedSourceIds: [],
++        selectionMaterializing: false,
++        pendingSubmission: clearFailedReceipt(state),
++        errors: { ...state.errors, selection: null }
+       }
+     case "providerChanged":
+       return {
+@@ -459,6 +501,7 @@ export const sharedResearchWorkspaceReducer = (
+           userMessage,
+           assistantMessage
+         ]),
++        lastCompletedAssistantMessageId: assistantMessage.message_id,
+         draft:
+           pending &&
+           state.draftRevision === pending.draftRevision &&
+diff --git a/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/useSharedResearchWorkspace.ts b/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/useSharedResearchWorkspace.ts
+index b1088dc02e62356d26d48bbaa9c545056deae42d..11e32494c91bc0297baa73b34a22610a5d4604c7 100644
+--- a/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/useSharedResearchWorkspace.ts
++++ b/apps/packages/ui/src/components/Option/ResearchWorkspace/SharedResearchWorkspace/useSharedResearchWorkspace.ts
+@@ -3,9 +3,15 @@ import {
+   getStructuredApiErrorDetail,
+   type StructuredApiErrorDetail
+ } from "@/services/tldw/api-error"
+-import { sharedWorkspacesApi } from "@/services/tldw/domains/shared-workspaces"
++import {
++  isSharedWorkspacePostCommitResponseError,
++  SharedWorkspacePostCommitResponseError,
++  sharedWorkspacesApi
++} from "@/services/tldw/domains/shared-workspaces"
+ import type {
+   SharedChatRequest,
++  SharedSource,
++  SharedSourcePage,
+   SharedSourceQuery
+ } from "@/types/shared-workspace"
+ import {
+@@ -18,7 +24,23 @@ interface SharedResearchWorkspaceOptions {
+   createRequestId?: () => string
+ }
+
+-type Operation = "bootstrap" | "sources" | "history" | "preview" | "submission"
++type Operation =
++  | "bootstrap"
++  | "sources"
++  | "selection"
++  | "history"
++  | "preview"
++  | "submission"
++
++const SOURCE_MATERIALIZATION_LIMIT = 200
++const MAX_SOURCE_MATERIALIZATION_PAGES = 100
++const SOURCE_SELECTION_ERROR: SharedWorkspaceError = {
++  code: "shared_source_selection_unavailable",
++  message:
++    "Couldn't load every queryable source. All queryable sources remain selected.",
++  retryable: true,
++  recovery_action: "retry"
++}
+
+ const isRecord = (value: unknown): value is Record<string, unknown> =>
+   Boolean(value) && typeof value === "object" && !Array.isArray(value)
+@@ -28,9 +50,19 @@ const isAbortError = (error: unknown): boolean =>
+     ? error.name === "AbortError"
+     : isRecord(error) && error.name === "AbortError"
+
+-const isAmbiguousTransportFailure = (error: unknown): boolean =>
+-  error instanceof TypeError &&
+-  !(isRecord(error) && typeof error.status === "number")
++const isAmbiguousPostCommitFailure = (error: unknown): boolean =>
++  isSharedWorkspacePostCommitResponseError(error) ||
++  (error instanceof TypeError &&
++    !(isRecord(error) && typeof error.status === "number"))
++
++const sourceSummariesMatch = (
++  left: SharedSourcePage["summary"],
++  right: SharedSourcePage["summary"]
++): boolean =>
++  left.total === right.total &&
++  left.queryable === right.queryable &&
++  left.processing === right.processing &&
++  left.failed === right.failed
+
+ const normalizeError = (error: unknown): SharedWorkspaceError => {
+   const structured: StructuredApiErrorDetail =
+@@ -109,6 +141,11 @@ export const useSharedResearchWorkspace = (
+     return controller
+   }, [])
+
++  const cancelOperation = React.useCallback((operation: Operation) => {
++    controllersRef.current[operation]?.abort()
++    delete controllersRef.current[operation]
++  }, [])
++
+   const releaseOperation = React.useCallback(
+     (operation: Operation, controller: AbortController) => {
+       if (controllersRef.current[operation] === controller) {
+@@ -290,6 +327,136 @@ export const useSharedResearchWorkspace = (
+     ]
+   )
+
++  const toggleSource = React.useCallback(
++    async (source: SharedSource, checked: boolean): Promise<void> => {
++      if (
++        !state.allowedActions.inspect_sources.allowed ||
++        !source.retrieval_ready ||
++        state.selectionMaterializing
++      ) {
++        return
++      }
++
++      if (state.sourceScopeMode === "include") {
++        const selected = new Set(state.selectedSourceIds)
++        if (checked) selected.add(source.source_id)
++        else selected.delete(source.source_id)
++        dispatch({
++          type: "selectedSourcesChanged",
++          sourceIds: Array.from(selected)
++        })
++        return
++      }
++
++      if (checked) return
++      const expectedSummary = state.sourceSummary
++      if (
++        !expectedSummary ||
++        expectedSummary.queryable === 0 ||
++        expectedSummary.queryable > 500
++      ) {
++        return
++      }
++
++      const generation = generationRef.current
++      const controller = startOperation("selection")
++      dispatch({ type: "selectionStarted", generation })
++      try {
++        const seenSourceIds = new Set<string>()
++        const queryableSourceIds: string[] = []
++        let offset = 0
++        let pageCount = 0
++        let complete = false
++
++        while (!complete) {
++          pageCount += 1
++          if (pageCount > MAX_SOURCE_MATERIALIZATION_PAGES) {
++            throw new Error("Shared source selection exceeded the page limit")
++          }
++
++          const page = await sharedWorkspacesApi.listSources(
++            shareId,
++            { offset, limit: SOURCE_MATERIALIZATION_LIMIT },
++            controller.signal
++          )
++          if (!isCurrentOperation("selection", controller)) return
++
++          if (
++            page.partial_errors.length > 0 ||
++            page.pagination.offset !== offset ||
++            page.pagination.total !== expectedSummary.total ||
++            !sourceSummariesMatch(page.summary, expectedSummary) ||
++            page.items.length > page.pagination.limit
++          ) {
++            throw new Error("Shared source pagination changed")
++          }
++
++          for (const item of page.items) {
++            if (seenSourceIds.has(item.source_id)) {
++              throw new Error("Shared source pagination contained duplicates")
++            }
++            seenSourceIds.add(item.source_id)
++            if (item.retrieval_ready) queryableSourceIds.push(item.source_id)
++          }
++
++          const nextOffset = offset + page.items.length
++          if (
++            nextOffset > expectedSummary.total ||
++            (page.pagination.has_more &&
++              (page.items.length === 0 || nextOffset >= expectedSummary.total)) ||
++            (!page.pagination.has_more && nextOffset !== expectedSummary.total)
++          ) {
++            throw new Error("Shared source pagination was incomplete")
++          }
++          complete = !page.pagination.has_more
++          offset = nextOffset
++        }
++
++        if (
++          seenSourceIds.size !== expectedSummary.total ||
++          queryableSourceIds.length !== expectedSummary.queryable ||
++          !queryableSourceIds.includes(source.source_id)
++        ) {
++          throw new Error("Shared source selection was incomplete")
++        }
++
++        if (!isCurrentOperation("selection", controller)) return
++        dispatch({
++          type: "selectionSucceeded",
++          generation,
++          sourceIds: queryableSourceIds.filter(
++            (sourceId) => sourceId !== source.source_id
++          )
++        })
++      } catch (error) {
++        if (
++          !isAbortError(error) &&
++          isCurrentOperation("selection", controller) &&
++          generation === generationRef.current
++        ) {
++          dispatch({
++            type: "selectionFailed",
++            generation,
++            error: SOURCE_SELECTION_ERROR
++          })
++        }
++      } finally {
++        releaseOperation("selection", controller)
++      }
++    },
++    [
++      isCurrentOperation,
++      releaseOperation,
++      shareId,
++      startOperation,
++      state.allowedActions.inspect_sources.allowed,
++      state.selectedSourceIds,
++      state.selectionMaterializing,
++      state.sourceScopeMode,
++      state.sourceSummary
++    ]
++  )
++
+   const sendRequest = React.useCallback(
+     async (
+       request: Readonly<SharedChatRequest>,
+@@ -313,20 +480,13 @@ export const useSharedResearchWorkspace = (
+         )
+         if (!isCurrentOperation("submission", controller)) return
+         if (response.request_id !== request.request_id) {
+-          dispatch({
+-            type: "submissionFailed",
+-            generation,
+-            error: {
+-              status: 502,
+-              code: "shared_chat_response_mismatch",
+-              message: "Shared chat response did not match the request.",
+-              retryable: false
+-            },
+-            retryableReceipt: false,
+-            rateLimitUntil: null,
+-            rateLimitRemainingMs: 0
++          throw new SharedWorkspacePostCommitResponseError({
++            code: "shared_chat_response_mismatch",
++            message:
++              "The answer status is uncertain because the response did not match the request. Retry to reconcile this question.",
++            retryable: true,
++            recovery_action: "retry"
+           })
+-          return
+         }
+         dispatch({ type: "submissionSucceeded", generation, response })
+       } catch (error) {
+@@ -350,7 +510,7 @@ export const useSharedResearchWorkspace = (
+           type: "submissionFailed",
+           generation,
+           error: normalized,
+-          retryableReceipt: isAmbiguousTransportFailure(error),
++          retryableReceipt: isAmbiguousPostCommitFailure(error),
+           rateLimitUntil:
+             rateLimitRemainingMs === 0
+               ? null
+@@ -378,6 +538,7 @@ export const useSharedResearchWorkspace = (
+       !state.allowedActions.ask_grounded_questions.allowed ||
+       !state.provider ||
+       !state.model ||
++      state.selectionMaterializing ||
+       (state.rateLimitUntil !== null && Date.now() < state.rateLimitUntil) ||
+       (state.sourceScopeMode === "all"
+         ? !state.sourceSummary ||
+@@ -406,6 +567,7 @@ export const useSharedResearchWorkspace = (
+     state.model,
+     state.provider,
+     state.rateLimitUntil,
++    state.selectionMaterializing,
+     state.sourceScopeMode,
+     state.sourceSummary,
+     state.selectedSourceIds
+@@ -451,6 +613,7 @@ export const useSharedResearchWorkspace = (
+     refreshSources,
+     loadOlderHistory,
+     previewSource,
++    toggleSource,
+     submitDraft,
+     retryPending,
+     setDraft: (draft: string) => dispatch({ type: "draftChanged", draft }),
+@@ -461,16 +624,19 @@ export const useSharedResearchWorkspace = (
+     },
+     setSelectedSourceIds: (sourceIds: string[]) => {
+       if (state.allowedActions.inspect_sources.allowed) {
++        cancelOperation("selection")
+         dispatch({ type: "selectedSourcesChanged", sourceIds })
+       }
+     },
+     selectAllSources: () => {
+       if (state.allowedActions.inspect_sources.allowed) {
++        cancelOperation("selection")
+         dispatch({ type: "allSourcesSelected" })
+       }
+     },
+     clearSelectedSources: () => {
+       if (state.allowedActions.inspect_sources.allowed) {
++        cancelOperation("selection")
+         dispatch({ type: "selectedSourcesChanged", sourceIds: [] })
+       }
+     },
+diff --git a/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.accessibility.test.tsx b/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.accessibility.test.tsx
+index 2a9e67f769ef428f0b8dd3a2468cfc2141de680f..267ce70f73005047bcc3d5108f48691be1be5d09 100644
+--- a/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.accessibility.test.tsx
++++ b/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.accessibility.test.tsx
+@@ -25,9 +25,16 @@ const { api, fetchChatModels } = vi.hoisted(() => ({
+   fetchChatModels: vi.fn()
+ }))
+
+-vi.mock("@/services/tldw/domains/shared-workspaces", () => ({
+-  sharedWorkspacesApi: api
+-}))
++vi.mock(
++  "@/services/tldw/domains/shared-workspaces",
++  async (importOriginal) => {
++    const actual =
++      await importOriginal<
++        typeof import("@/services/tldw/domains/shared-workspaces")
++      >()
++    return { ...actual, sharedWorkspacesApi: api }
++  }
++)
+ vi.mock("@/services/tldw-server", () => ({ fetchChatModels }))
+
+ const renderWorkspace = () =>
+@@ -148,4 +155,61 @@ describe("SharedResearchWorkspace accessibility", () => {
+       screen.getByRole("button", { name: "Ask shared workspace" })
+     ).toBeInTheDocument()
+   })
++
++  it("announces and scrolls only for the assistant message completed by the submission", async () => {
++    const scrollIntoView = vi.fn()
++    Element.prototype.scrollIntoView = scrollIntoView
++    let resolveAsk: (value: typeof chatResponse) => void = () => undefined
++    let resolveHistory: (
++      value: Awaited<ReturnType<typeof api.listMessages>>
++    ) => void = () => undefined
++    api.ask.mockImplementation(
++      (_shareId, request) =>
++        new Promise((resolve) => {
++          resolveAsk = (value) =>
++            resolve({ ...value, request_id: request.request_id })
++        })
++    )
++    api.listMessages.mockImplementation(
++      () =>
++        new Promise((resolve) => {
++          resolveHistory = resolve
++        })
++    )
++    renderWorkspace()
++    await screen.findByText("Queryable report")
++    fireEvent.click(screen.getByRole("tab", { name: "Chat" }))
++    fireEvent.change(screen.getByLabelText("Ask about shared sources"), {
++      target: { value: "Pending question" }
++    })
++    fireEvent.click(screen.getByRole("button", { name: "Ask shared workspace" }))
++    expect(screen.getByRole("status")).toHaveTextContent(
++      "Asking shared workspace"
++    )
++
++    fireEvent.click(screen.getByRole("button", { name: "Load older messages" }))
++    resolveHistory({
++      conversation_id: "conversation-1",
++      messages: [
++        {
++          message_id: "older-assistant",
++          role: "assistant",
++          content: "An older answer",
++          created_at: "2026-08-20T10:00:00Z",
++          citations: []
++        }
++      ],
++      next_before: null
++    })
++    expect(await screen.findByText("An older answer")).toBeInTheDocument()
++    expect(screen.getByRole("status")).toHaveTextContent(
++      "Asking shared workspace"
++    )
++    expect(scrollIntoView).not.toHaveBeenCalled()
++
++    resolveAsk(chatResponse)
++
++    expect(await screen.findByRole("status")).toHaveTextContent("Answer added")
++    expect(scrollIntoView).toHaveBeenCalledTimes(1)
++  })
+ })
+diff --git a/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.responsive.test.tsx b/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.responsive.test.tsx
+index 56c2dced8430fa3dbf79cbb2cad2394a7edc2a9d..18113410006fa7dfaa72c16d38140e358e0f959a 100644
+--- a/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.responsive.test.tsx
++++ b/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.responsive.test.tsx
+@@ -23,9 +23,16 @@ const { api, fetchChatModels } = vi.hoisted(() => ({
+   fetchChatModels: vi.fn()
+ }))
+
+-vi.mock("@/services/tldw/domains/shared-workspaces", () => ({
+-  sharedWorkspacesApi: api
+-}))
++vi.mock(
++  "@/services/tldw/domains/shared-workspaces",
++  async (importOriginal) => {
++    const actual =
++      await importOriginal<
++        typeof import("@/services/tldw/domains/shared-workspaces")
++      >()
++    return { ...actual, sharedWorkspacesApi: api }
++  }
++)
+ vi.mock("@/services/tldw-server", () => ({ fetchChatModels }))
+
+ const renderAt = (width: number, height: number) => {
+diff --git a/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.test.tsx b/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.test.tsx
+index c029d75728bbee963d50b0c8bf2eb844ac565ab8..c57a1f38ee6f9a85663491c61d18d453738b5f4e 100644
+--- a/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.test.tsx
++++ b/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SharedResearchWorkspace.test.tsx
+@@ -25,9 +25,16 @@ const { api, fetchChatModels } = vi.hoisted(() => ({
+   fetchChatModels: vi.fn()
+ }))
+
+-vi.mock("@/services/tldw/domains/shared-workspaces", () => ({
+-  sharedWorkspacesApi: api
+-}))
++vi.mock(
++  "@/services/tldw/domains/shared-workspaces",
++  async (importOriginal) => {
++    const actual =
++      await importOriginal<
++        typeof import("@/services/tldw/domains/shared-workspaces")
++      >()
++    return { ...actual, sharedWorkspacesApi: api }
++  }
++)
+
+ vi.mock("@/services/tldw-server", () => ({ fetchChatModels }))
+
+@@ -143,20 +150,81 @@ describe("SharedResearchWorkspace recipient surface", () => {
+
+     expect(
+       await screen.findByText(
+-        "Choose a subset of up to 500 sources before asking a question."
++        "Clear the selection, then choose up to 500 sources."
+       )
+     ).toBeInTheDocument()
++    expect(screen.getByRole("checkbox", { name: "Select Queryable report" })).toBeDisabled()
++    expect(screen.getByRole("button", { name: "Clear selected sources" })).toBeEnabled()
+     fireEvent.change(screen.getByLabelText("Ask about shared sources"), {
+       target: { value: "Summarize the selected source" }
+     })
+     expect(screen.getByRole("button", { name: "Ask shared workspace" })).toBeDisabled()
+
+     fireEvent.click(screen.getByRole("button", { name: "Clear selected sources" }))
++    expect(screen.getByRole("checkbox", { name: "Select Queryable report" })).toBeEnabled()
+     fireEvent.click(screen.getByRole("checkbox", { name: "Select Queryable report" }))
+-    expect(screen.queryByText(/Choose a subset of up to 500 sources/)).not.toBeInTheDocument()
++    expect(
++      screen.queryByText(/Clear the selection, then choose up to 500 sources/)
++    ).not.toBeInTheDocument()
+     expect(screen.getByRole("button", { name: "Ask shared workspace" })).toBeEnabled()
+   })
+
++  it("shows a compact fail-closed state while all-mode selection is materialized", async () => {
++    const readySources = Array.from({ length: 50 }, (_, index) => ({
++      ...sourcePage.items[0],
++      source_id: `source-${index + 1}`,
++      title: index === 0 ? "Queryable report" : `Source ${index + 1}`,
++      position: index + 1
++    }))
++    api.bootstrap.mockResolvedValue(
++      buildBootstrap({
++        source_summary: {
++          total: 75,
++          queryable: 75,
++          processing: 0,
++          failed: 0
++        },
++        sources: {
++          items: readySources,
++          pagination: {
++            offset: 0,
++            limit: 50,
++            total: 75,
++            has_more: true
++          }
++        }
++      })
++    )
++    let rejectSources: (reason?: unknown) => void = () => undefined
++    api.listSources.mockImplementation(
++      () =>
++        new Promise((_resolve, reject) => {
++          rejectSources = reject
++        })
++    )
++    renderWorkspace()
++    const checkbox = await screen.findByRole("checkbox", {
++      name: "Select Queryable report"
++    })
++
++    fireEvent.click(checkbox)
++
++    expect(
++      await screen.findByText("Preparing complete source selection...")
++    ).toBeInTheDocument()
++    expect(checkbox).toBeChecked()
++    expect(checkbox).toBeDisabled()
++
++    rejectSources(new TypeError("connection reset"))
++
++    expect(
++      await screen.findByText(
++        "Couldn't load every queryable source. All queryable sources remain selected."
++      )
++    ).toBeInTheDocument()
++    expect(checkbox).toBeChecked()
++  })
++
+   it("keeps a literal view tier separate from an allowed chat capability", async () => {
+     const bootstrap = buildBootstrap()
+     api.bootstrap.mockResolvedValue({
+diff --git a/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/shared-research-workspace-reducer.test.ts b/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/shared-research-workspace-reducer.test.ts
+index 1f6d0dc3c8b586471ca3ad141fc3c57915b266fe..22331ef36a30c0d8f5daa2664b1ce68a40e415be 100644
+--- a/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/shared-research-workspace-reducer.test.ts
++++ b/apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/shared-research-workspace-reducer.test.ts
+@@ -1,5 +1,6 @@
+ import { act, renderHook, waitFor } from "@testing-library/react"
+ import { beforeEach, describe, expect, it, vi } from "vitest"
++import { SharedWorkspacePostCommitResponseError } from "@/services/tldw/domains/shared-workspaces"
+ import type {
+   SharedChatRequest,
+   SharedChatResponse,
+@@ -22,11 +23,18 @@ const api = vi.hoisted(() => ({
+   ask: vi.fn()
+ }))
+
+-vi.mock("@/services/tldw/domains/shared-workspaces", () => ({
+-  sharedWorkspacesApi: api
+-}))
++vi.mock(
++  "@/services/tldw/domains/shared-workspaces",
++  async (importOriginal) => {
++    const actual =
++      await importOriginal<
++        typeof import("@/services/tldw/domains/shared-workspaces")
++      >()
++    return { ...actual, sharedWorkspacesApi: api }
++  }
++)
+
+-const deferred = <T,>() => {
++const deferred = <T>() => {
+   let resolve!: (value: T) => void
+   let reject!: (reason?: unknown) => void
+   const promise = new Promise<T>((res, rej) => {
+@@ -62,37 +70,42 @@ const bootstrap = (
+     ready: true,
+     reason_code: null
+   }
+-): SharedWorkspaceBootstrap => ({
+-  schema_version: 1,
+-  generated_at: "2026-08-22T00:00:00Z",
+-  share: {
+-    share_id: shareId,
+-    access_level: "view_chat",
+-    allow_clone: false,
+-    owner_display_name: "Owner",
+-    shared_at: null
+-  },
+-  workspace: {
+-    workspace_id: `workspace-${shareId}`,
+-    name: `Workspace ${shareId}`,
+-    description: ""
+-  },
+-  allowed_actions: {
+-    inspect_sources: { allowed: true, reason_code: null },
+-    ask_grounded_questions: { allowed: true, reason_code: null },
+-    add_sources: { allowed: false, reason_code: "recipient_read_only" },
+-    edit_workspace: { allowed: false, reason_code: "recipient_read_only" },
+-    clone_workspace: { allowed: false, reason_code: "clone_not_allowed" }
+-  },
+-  generation_default: generationDefault,
+-  source_summary: { total: items.length, queryable: 1, processing: 1, failed: 0 },
+-  sources: {
+-    items,
+-    pagination: { offset: 0, limit: 50, total: items.length, has_more: false }
+-  },
+-  conversation: { conversation_id: null, messages: [], next_before: null },
+-  partial_errors: []
+-})
++): SharedWorkspaceBootstrap => {
++  const queryable = items.filter((item) => item.retrieval_ready).length
++  const processing = items.filter((item) => item.state === "processing").length
++  const failed = items.filter((item) => item.state === "failed").length
++  return {
++    schema_version: 1,
++    generated_at: "2026-08-22T00:00:00Z",
++    share: {
++      share_id: shareId,
++      access_level: "view_chat",
++      allow_clone: false,
++      owner_display_name: "Owner",
++      shared_at: null
++    },
++    workspace: {
++      workspace_id: `workspace-${shareId}`,
++      name: `Workspace ${shareId}`,
++      description: ""
++    },
++    allowed_actions: {
++      inspect_sources: { allowed: true, reason_code: null },
++      ask_grounded_questions: { allowed: true, reason_code: null },
++      add_sources: { allowed: false, reason_code: "recipient_read_only" },
++      edit_workspace: { allowed: false, reason_code: "recipient_read_only" },
++      clone_workspace: { allowed: false, reason_code: "clone_not_allowed" }
++    },
++    generation_default: generationDefault,
++    source_summary: { total: items.length, queryable, processing, failed },
++    sources: {
++      items,
++      pagination: { offset: 0, limit: 50, total: items.length, has_more: false }
++    },
++    conversation: { conversation_id: null, messages: [], next_before: null },
++    partial_errors: []
++  }
++}
+
+ const apiError = (
+   code: string,
+@@ -115,16 +128,17 @@ const sourcePage = (
+     limit: 50,
+     total: items.length,
+     has_more: false
+-  }
+-): SharedSourcePage => ({
+-  items,
+-  pagination,
+-  summary: {
++  },
++  summary: SharedSourcePage["summary"] = {
+     total: pagination.total,
+     queryable: items.filter((item) => item.retrieval_ready).length,
+     processing: items.filter((item) => item.state === "processing").length,
+     failed: items.filter((item) => item.state === "failed").length
+-  },
++  }
++): SharedSourcePage => ({
++  items,
++  pagination,
++  summary,
+   partial_errors: []
+ })
+
+@@ -226,7 +240,8 @@ describe("sharedResearchWorkspaceReducer", () => {
+     })
+
+     expect(state.sourceScopeMode).toBe("all")
+-    expect(state.selectedSourceIds).toEqual(["source-1"])
++    expect(state.selectedSourceIds).toEqual([])
++    expect(state.lastCompletedAssistantMessageId).toBeNull()
+     expect(state.provider).toBe("openai")
+     expect(state.model).toBe("gpt-5-mini")
+   })
+@@ -261,6 +276,7 @@ describe("sharedResearchWorkspaceReducer", () => {
+     )
+     state = {
+       ...state,
++      sourceScopeMode: "include",
+       selectedSourceIds: ["source-1", "source-2", "removed"]
+     }
+
+@@ -298,7 +314,7 @@ describe("sharedResearchWorkspaceReducer", () => {
+     expect(state.selectedSourceIds).toEqual(["source-1", "off-page"])
+   })
+
+-  it("keeps all-mode selection across pages and adds queryable returned sources", () => {
++  it("keeps all-mode selection implicit across source pages", () => {
+     let state = sharedResearchWorkspaceReducer(
+       createInitialSharedResearchWorkspaceState(4, 1),
+       { type: "bootstrapSucceeded", generation: 1, bootstrap: bootstrap(4) }
+@@ -317,7 +333,37 @@ describe("sharedResearchWorkspaceReducer", () => {
+     })
+
+     expect(state.sourceScopeMode).toBe("all")
+-    expect(state.selectedSourceIds).toEqual(["source-1", "source-51"])
++    expect(state.selectedSourceIds).toEqual([])
++  })
++
++  it("records only the exact assistant message completed by a submission", () => {
++    let state = sharedResearchWorkspaceReducer(createInitialSharedResearchWorkspaceState(4, 1), {
++      type: "bootstrapSucceeded",
++      generation: 1,
++      bootstrap: bootstrap(4)
++    })
++    const request: SharedChatRequest = {
++      request_id: "request-1",
++      query: "Question",
++      source_scope: { mode: "all", source_ids: [] },
++      provider: "openai",
++      model: "gpt-5-mini"
++    }
++    state = sharedResearchWorkspaceReducer(state, {
++      type: "submissionStarted",
++      generation: 1,
++      request,
++      submittedDraft: "Question",
++      draftRevision: 0
++    })
++
++    state = sharedResearchWorkspaceReducer(state, {
++      type: "submissionSucceeded",
++      generation: 1,
++      response: chatResponse("request-1", "exact", "all")
++    })
++
++    expect(state.lastCompletedAssistantMessageId).toBe("assistant-exact")
+   })
+
+   it("prepends older history without duplicating message IDs", () => {
+@@ -431,6 +477,158 @@ describe("useSharedResearchWorkspace", () => {
+     expect(result.current.state.draft).toBe("")
+   })
+
++  it("materializes every unfiltered queryable source before deselecting from all mode", async () => {
++    const items = Array.from({ length: 75 }, (_, index) => source(`source-${index + 1}`))
++    const initial = bootstrap(4, items.slice(0, 50))
++    initial.source_summary = {
++      total: 75,
++      queryable: 75,
++      processing: 0,
++      failed: 0
++    }
++    initial.sources.pagination = {
++      offset: 0,
++      limit: 50,
++      total: 75,
++      has_more: true
++    }
++    const summary = initial.source_summary
++    api.bootstrap.mockResolvedValue(initial)
++    api.listSources
++      .mockResolvedValueOnce(
++        sourcePage(items.slice(0, 50), { offset: 0, limit: 50, total: 75, has_more: true }, summary)
++      )
++      .mockResolvedValueOnce(
++        sourcePage(items.slice(50), { offset: 50, limit: 50, total: 75, has_more: false }, summary)
++      )
++    const { result } = renderHook(() => useSharedResearchWorkspace(4))
++    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
++    act(() =>
++      result.current.setSourceQuery({
++        offset: 0,
++        limit: 50,
++        q: "visible-filter"
++      })
++    )
++
++    await act(async () => result.current.toggleSource(items[0], false))
++
++    expect(api.listSources.mock.calls.map((call) => call[1])).toEqual([
++      { offset: 0, limit: 200 },
++      { offset: 50, limit: 200 }
++    ])
++    expect(result.current.state.sourceQuery).toEqual({
++      offset: 0,
++      limit: 50,
++      q: "visible-filter"
++    })
++    expect(result.current.state.sourceScopeMode).toBe("include")
++    expect(result.current.state.selectedSourceIds).toHaveLength(74)
++    expect(result.current.state.selectedSourceIds).not.toContain("source-1")
++    expect(result.current.state.selectedSourceIds).toContain("source-75")
++    expect(result.current.state.errors.selection).toBeNull()
++  })
++
++  it("leaves all mode unchanged when source materialization fails between pages", async () => {
++    const items = Array.from({ length: 75 }, (_, index) => source(`source-${index + 1}`))
++    const initial = bootstrap(4, items.slice(0, 50))
++    initial.source_summary = {
++      total: 75,
++      queryable: 75,
++      processing: 0,
++      failed: 0
++    }
++    initial.sources.pagination = {
++      offset: 0,
++      limit: 50,
++      total: 75,
++      has_more: true
++    }
++    api.bootstrap.mockResolvedValue(initial)
++    api.listSources
++      .mockResolvedValueOnce(
++        sourcePage(
++          items.slice(0, 50),
++          { offset: 0, limit: 50, total: 75, has_more: true },
++          initial.source_summary
++        )
++      )
++      .mockRejectedValueOnce(new TypeError("connection reset"))
++    const { result } = renderHook(() => useSharedResearchWorkspace(4))
++    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
++
++    await act(async () => result.current.toggleSource(items[0], false))
++
++    expect(result.current.state.sourceScopeMode).toBe("all")
++    expect(result.current.state.selectedSourceIds).toEqual([])
++    expect(result.current.state.selectionMaterializing).toBe(false)
++    expect(result.current.state.errors.selection?.code).toBe("shared_source_selection_unavailable")
++  })
++
++  it("leaves all mode unchanged when paginated materialization is inconsistent", async () => {
++    const items = Array.from({ length: 75 }, (_, index) => source(`source-${index + 1}`))
++    const initial = bootstrap(4, items.slice(0, 50))
++    initial.source_summary = {
++      total: 75,
++      queryable: 75,
++      processing: 0,
++      failed: 0
++    }
++    initial.sources.pagination = {
++      offset: 0,
++      limit: 50,
++      total: 75,
++      has_more: true
++    }
++    api.bootstrap.mockResolvedValue(initial)
++    api.listSources
++      .mockResolvedValueOnce(
++        sourcePage(
++          items.slice(0, 50),
++          { offset: 0, limit: 50, total: 75, has_more: true },
++          initial.source_summary
++        )
++      )
++      .mockResolvedValueOnce(
++        sourcePage(
++          [source("source-50"), ...items.slice(51)],
++          { offset: 50, limit: 50, total: 75, has_more: false },
++          initial.source_summary
++        )
++      )
++    const { result } = renderHook(() => useSharedResearchWorkspace(4))
++    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
++
++    await act(async () => result.current.toggleSource(items[0], false))
++
++    expect(result.current.state.sourceScopeMode).toBe("all")
++    expect(result.current.state.selectedSourceIds).toEqual([])
++    expect(result.current.state.errors.selection?.code).toBe("shared_source_selection_unavailable")
++  })
++
++  it("retains an immutable receipt for an invalid successful chat response", async () => {
++    api.bootstrap.mockResolvedValue(bootstrap(4))
++    api.ask
++      .mockRejectedValueOnce(new SharedWorkspacePostCommitResponseError())
++      .mockResolvedValueOnce(chatResponse("request-1", "1", "all"))
++    const uuid = vi.fn().mockReturnValue("request-1")
++    const { result } = renderHook(() => useSharedResearchWorkspace(4, { createRequestId: uuid }))
++    await waitFor(() => expect(result.current.state.status).toBe("loaded"))
++    act(() => result.current.setDraft("Question"))
++
++    await act(async () => result.current.submitDraft())
++
++    const frozen = api.ask.mock.calls[0][1] as SharedChatRequest
++    expect(result.current.state.pendingSubmission?.status).toBe("retryable")
++    expect(result.current.state.errors.submission?.code).toBe("shared_chat_response_unconfirmed")
++
++    await act(async () => result.current.retryPending())
++
++    expect(api.ask.mock.calls[1][1]).toBe(frozen)
++    expect(uuid).toHaveBeenCalledTimes(1)
++    expect(result.current.state.lastCompletedAssistantMessageId).toBe("assistant-1")
++  })
++
+   it("preserves an exact raw draft edit made while a request is in flight", async () => {
+     const pending = deferred<SharedChatResponse>()
+     api.bootstrap.mockResolvedValue(bootstrap(4))
+@@ -683,11 +881,12 @@ describe("useSharedResearchWorkspace", () => {
+     ])
+   })
+
+-  it("ignores a reordered same-share submission and rejects mismatched response IDs", async () => {
++  it("ignores a reordered submission and reconciles a mismatched response with the same UUID", async () => {
+     const older = deferred<SharedChatResponse>()
+     const newer = deferred<SharedChatResponse>()
+     api.bootstrap.mockResolvedValue(bootstrap(4))
+     api.ask.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise)
++      .mockResolvedValueOnce(chatResponse("request-2", "3", "all"))
+     const uuid = vi
+       .fn()
+       .mockReturnValueOnce("request-1")
+@@ -719,10 +918,18 @@ describe("useSharedResearchWorkspace", () => {
+
+     expect(result.current.state.messages).toEqual([])
+     expect(result.current.state.draft).toBe("Second")
+-    expect(result.current.state.pendingSubmission).toBeNull()
++    expect(result.current.state.pendingSubmission?.status).toBe("retryable")
++    expect(result.current.state.pendingSubmission?.request.request_id).toBe("request-2")
+     expect(result.current.state.errors.submission?.code).toBe(
+       "shared_chat_response_mismatch"
+     )
++
++    const frozen = api.ask.mock.calls[1][1]
++    await act(async () => result.current.retryPending())
++
++    expect(api.ask.mock.calls[2][1]).toBe(frozen)
++    expect(uuid).toHaveBeenCalledTimes(2)
++    expect(result.current.state.lastCompletedAssistantMessageId).toBe("assistant-3")
+   })
+
+   it("aborts every active operation and clears all old share data on replacement", async () => {
+@@ -839,6 +1046,7 @@ describe("useSharedResearchWorkspace", () => {
+
+     act(() => result.current.selectAllSources())
+     expect(result.current.state.sourceScopeMode).toBe("all")
++    expect(result.current.state.selectedSourceIds).toEqual([])
+
+     act(() => result.current.clearSelectedSources())
+     expect(result.current.state.sourceScopeMode).toBe("include")
+diff --git a/apps/packages/ui/src/public/_locales/en/playground.json b/apps/packages/ui/src/public/_locales/en/playground.json
+index a7f20c482ba9b95130a603edd6255fd81de2a037..55db9fe09ee57ccb4266ddcac8d840400f9ddceb 100644
+--- a/apps/packages/ui/src/public/_locales/en/playground.json
++++ b/apps/packages/ui/src/public/_locales/en/playground.json
+@@ -90,7 +90,13 @@
+     "message": "Clear"
+   },
+   "sharedWorkspace_scopeLimit": {
+-    "message": "Choose a subset of up to 500 sources before asking a question."
++    "message": "Clear the selection, then choose up to 500 sources."
++  },
++  "sharedWorkspace_selectionPreparing": {
++    "message": "Preparing complete source selection..."
++  },
++  "sharedWorkspace_selectionUnavailable": {
++    "message": "Couldn't load every queryable source. All queryable sources remain selected."
+   },
+   "sharedWorkspace_sourceList": {
+     "message": "Shared sources"
+@@ -188,6 +194,9 @@
+   "sharedWorkspace_retrievalUnavailable": {
+     "message": "Shared source retrieval is temporarily unavailable. Try again."
+   },
++  "sharedWorkspace_responseUnconfirmed": {
++    "message": "The answer status is uncertain. Retry to reconcile this question without sending a duplicate."
++  },
+   "sharedWorkspace_refreshSources": {
+     "message": "Refresh sources"
+   },
+diff --git a/apps/packages/ui/src/services/tldw/domains/__tests__/shared-workspaces.test.ts b/apps/packages/ui/src/services/tldw/domains/__tests__/shared-workspaces.test.ts
+index 78d5eb213974614745c5b8cd50537dc5c30f54e2..73da14616e371f8586811ea83bca526cef728931 100644
+--- a/apps/packages/ui/src/services/tldw/domains/__tests__/shared-workspaces.test.ts
++++ b/apps/packages/ui/src/services/tldw/domains/__tests__/shared-workspaces.test.ts
+@@ -1,6 +1,10 @@
+ import { beforeEach, describe, expect, it, vi } from "vitest"
+ import { getStructuredApiErrorDetail, TldwApiError } from "../../api-error"
+-import { sharedWorkspacesApi } from "../shared-workspaces"
++import {
++  isSharedWorkspacePostCommitResponseError,
++  SharedWorkspacePostCommitResponseError,
++  sharedWorkspacesApi
++} from "../shared-workspaces"
+
+ const fetchWithTldwAuth = vi.hoisted(() => vi.fn())
+ const getTldwServerURL = vi.hoisted(() =>
+@@ -276,12 +280,82 @@ describe("sharedWorkspacesApi", () => {
+       jsonResponse({ items: [], pagination: null, summary: {}, partial_errors: [] })
+     )
+
+-    await expect(
+-      sharedWorkspacesApi.listSources(42, { offset: 0, limit: 50 })
+-    ).rejects.toMatchObject({
++    const error = await sharedWorkspacesApi
++      .listSources(42, { offset: 0, limit: 50 })
++      .catch((cause: unknown) => cause)
++
++    expect(error).toMatchObject({
+       status: 502,
+       detail: { code: "shared_workspace_unavailable", retryable: true }
+     })
++    expect(isSharedWorkspacePostCommitResponseError(error)).toBe(false)
++  })
++
++  it.each([
++    [
++      "truncated JSON",
++      () =>
++        new Response('{"schema_version":1', {
++          status: 200,
++          headers: { "Content-Type": "application/json" }
++        })
++    ],
++    ["a strictly invalid chat envelope", () => jsonResponse({ schema_version: 1 })]
++  ])("marks ask-only %s as post-commit ambiguous", async (_case, response) => {
++    fetchWithTldwAuth.mockResolvedValue(response())
++
++    const error = await sharedWorkspacesApi
++      .ask(42, {
++        request_id: "00000000-0000-4000-8000-000000000042",
++        query: "What changed?",
++        source_scope: { mode: "all", source_ids: [] },
++        provider: "openai",
++        model: "gpt-5-mini"
++      })
++      .catch((cause: unknown) => cause)
++
++    expect(error).toBeInstanceOf(SharedWorkspacePostCommitResponseError)
++    expect(isSharedWorkspacePostCommitResponseError(error)).toBe(true)
++    expect(error).toMatchObject({
++      status: 502,
++      detail: {
++        code: "shared_chat_response_unconfirmed",
++        retryable: true,
++        recovery_action: "retry"
++      }
++    })
++  })
++
++  it("does not mark a typed non-2xx ask error as post-commit ambiguous", async () => {
++    fetchWithTldwAuth.mockResolvedValue(
++      jsonResponse(
++        {
++          detail: {
++            code: "generation_failed",
++            message: "Generation failed.",
++            retryable: true
++          }
++        },
++        503
++      )
++    )
++
++    const error = await sharedWorkspacesApi
++      .ask(42, {
++        request_id: "00000000-0000-4000-8000-000000000042",
++        query: "What changed?",
++        source_scope: { mode: "all", source_ids: [] },
++        provider: "openai",
++        model: "gpt-5-mini"
++      })
++      .catch((cause: unknown) => cause)
++
++    expect(error).toBeInstanceOf(TldwApiError)
++    expect(isSharedWorkspacePostCommitResponseError(error)).toBe(false)
++    expect(error).toMatchObject({
++      status: 503,
++      detail: { code: "generation_failed" }
++    })
+   })
+
+   it("normalizes shared error fields without changing unrelated detail semantics", () => {
+diff --git a/apps/packages/ui/src/services/tldw/domains/shared-workspaces.ts b/apps/packages/ui/src/services/tldw/domains/shared-workspaces.ts
+index 49f9268b184af739ec3cbf7f4782ca8542f9a392..c90408498015574ccf13acae6afe2da226490763 100644
+--- a/apps/packages/ui/src/services/tldw/domains/shared-workspaces.ts
++++ b/apps/packages/ui/src/services/tldw/domains/shared-workspaces.ts
+@@ -29,6 +29,34 @@ const INVALID_RESPONSE_DETAIL = {
+   recovery_action: "retry"
+ } as const
+
++const POST_COMMIT_RESPONSE_DETAIL = {
++  code: "shared_chat_response_unconfirmed",
++  message: "The answer status is uncertain. Retry to reconcile this question.",
++  retryable: true,
++  recovery_action: "retry"
++} as const
++
++type SharedPostCommitResponseDetail = {
++  code: string
++  message: string
++  retryable: true
++  recovery_action: "retry"
++}
++
++export class SharedWorkspacePostCommitResponseError extends TldwApiError {
++  constructor(
++    detail: SharedPostCommitResponseDetail = POST_COMMIT_RESPONSE_DETAIL
++  ) {
++    super(detail.message, 502, detail)
++    this.name = "SharedWorkspacePostCommitResponseError"
++  }
++}
++
++export const isSharedWorkspacePostCommitResponseError = (
++  error: unknown
++): error is SharedWorkspacePostCommitResponseError =>
++  error instanceof SharedWorkspacePostCommitResponseError
++
+ const isRecord = (value: unknown): value is Record<string, unknown> =>
+   Boolean(value) && typeof value === "object" && !Array.isArray(value)
+
+@@ -397,7 +425,8 @@ const apiUrl = async (shareId: number, suffix: string): Promise<string> => {
+ const requestJson = async <T>(
+   url: string,
+   init: RequestInit,
+-  parse: (value: unknown) => T
++  parse: (value: unknown) => T,
++  options: { postCommitOnInvalidSuccess?: boolean } = {}
+ ): Promise<T> => {
+   const response = await fetchWithTldwAuth(url, init)
+   if (!response.ok) throw await buildTldwApiError(response)
+@@ -405,6 +434,9 @@ const requestJson = async <T>(
+     return parse(await response.json())
+   } catch (error) {
+     if (error instanceof TldwApiError) throw error
++    if (options.postCommitOnInvalidSuccess) {
++      throw new SharedWorkspacePostCommitResponseError()
++    }
+     throw new TldwApiError(
+       INVALID_RESPONSE_DETAIL.message,
+       502,
+@@ -492,7 +524,8 @@ export const sharedWorkspacesApi = {
+         body: JSON.stringify(request),
+         signal
+       },
+-      parseChatResponse
++      parseChatResponse,
++      { postCommitOnInvalidSuccess: true }
+     )
+   }
+ }
+diff --git a/apps/tldw-frontend/__tests__/shared-research-workspace-cdp-uat.test.ts b/apps/tldw-frontend/__tests__/shared-research-workspace-cdp-uat.test.ts
+index eeaf7661dd8c9c7ebd325a3123172b701a65adc8..66d8b728b4c4ca86b6841aa8d86c7a3d972df1e3 100644
+--- a/apps/tldw-frontend/__tests__/shared-research-workspace-cdp-uat.test.ts
++++ b/apps/tldw-frontend/__tests__/shared-research-workspace-cdp-uat.test.ts
+@@ -16,6 +16,7 @@ import {
+   getTransitionEvidenceOperationContract,
+   selectEffectiveTarget,
+   validateEvidenceRecord,
++  waitForCheckboxState,
+ } from "../scripts/shared-research-workspace-cdp-uat.mjs"
+
+ const REQUIRED_ENV = {
+@@ -938,6 +939,29 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
+     expect(scrollAttempts).toBe(3)
+   })
+
++  it("waits for an asynchronously materialized checkbox selection", async () => {
++    let clicked = false
++    let reads = 0
++    const locator = {
++      click: async () => {
++        clicked = true
++      },
++      isChecked: async () => {
++        reads += 1
++        return !(clicked && reads >= 3)
++      },
++    }
++
++    await expect(
++      waitForCheckboxState(locator, false, {
++        pollIntervalMs: 0,
++        timeoutMs: 100,
++      })
++    ).resolves.toBeUndefined()
++    expect(clicked).toBe(true)
++    expect(reads).toBeGreaterThanOrEqual(3)
++  })
++
+   it("asks for both source facts without leaking either expected value", () => {
+     const question = buildAllSourcesQuestion({
+       amberTitle: "Amber protocol final18",
+@@ -1327,6 +1351,28 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
+     expect(classifyStrictLedger({ ...cleanLedger, requests }).ok).toBe(true)
+   })
+
++  it("allows exact read-only Chats bootstrap requests after transition handoff", () => {
++    const requests = [
++      "/api/v1/config/docs-info",
++      "/api/v1/ingestion-sources/capabilities",
++      "/api/v1/characters/",
++      "/api/v1/audio/health",
++    ].map((pathname) => ({
++      context: "member-chats",
++      method: "GET",
++      status: 200,
++      url: `http://127.0.0.1:18001${pathname}`,
++    }))
++
++    expect(classifyStrictLedger({ ...cleanLedger, requests }).ok).toBe(true)
++    expect(
++      classifyStrictLedger({
++        ...cleanLedger,
++        requests: [{ ...requests[0], method: "POST" }],
++      }).ok
++    ).toBe(false)
++  })
++
+   it("redacts credentials from nested evidence and never writes raw prompts or answers", () => {
+     const config = buildSharedUatConfig({ env: REQUIRED_ENV })
+     const evidence = createEvidenceRecord({
+diff --git a/apps/tldw-frontend/scripts/shared-research-workspace-cdp-uat.mjs b/apps/tldw-frontend/scripts/shared-research-workspace-cdp-uat.mjs
+index d344af424deb6e9a3e7595345ec48628af825b62..a885a6780d4aed246bc698e1bc8f53b3c1e561a2 100644
+--- a/apps/tldw-frontend/scripts/shared-research-workspace-cdp-uat.mjs
++++ b/apps/tldw-frontend/scripts/shared-research-workspace-cdp-uat.mjs
+@@ -83,6 +83,21 @@ export const ensureLocatorVisibleInViewport = async (locator, label) => {
+   }
+ }
+
++export const waitForCheckboxState = async (
++  locator,
++  checked,
++  { pollIntervalMs = 50, timeoutMs = 30_000 } = {}
++) => {
++  if ((await locator.isChecked()) === checked) return
++  await locator.click()
++  const deadline = Date.now() + timeoutMs
++  do {
++    if ((await locator.isChecked()) === checked) return
++    await sleep(pollIntervalMs)
++  } while (Date.now() <= deadline)
++  throw new Error(`Checkbox did not become ${checked ? "checked" : "unchecked"}`)
++}
++
+ const normalizeOrigin = (value, key) => {
+   let parsed
+   try {
+@@ -236,12 +251,16 @@ const allowedSharedRequest = (entry) => {
+     }
+     const safeReadPatterns = [
+       /^\/openapi\.json$/,
++      /^\/api\/v1\/audio\/health$/,
+       /^\/api\/v1\/audio\/transcriptions\/health$/,
+       /^\/api\/v1\/audio\/voices\/catalog$/,
++      /^\/api\/v1\/characters\/$/,
+       /^\/api\/v1\/chat\/conversations\/[^/]+\/share-links$/,
+       /^\/api\/v1\/chats\/$/,
+       /^\/api\/v1\/chats\/[^/]+\/(?:messages|research-runs|settings)$/,
++      /^\/api\/v1\/config\/docs-info$/,
+       /^\/api\/v1\/config\/providers$/,
++      /^\/api\/v1\/ingestion-sources\/capabilities$/,
+       /^\/api\/v1\/persona\/catalog$/,
+       /^\/api\/v1\/prompts\/capabilities$/,
+       /^\/api\/v1\/users\/me\/profile$/,
+@@ -2798,7 +2817,7 @@ export const runLiveUat = async (config) => {
+     await memberPage.getByLabel("Close source preview").click()
+
+     const selectedToRemove = memberPage.getByLabel(`Select ${fixture.sourceDefs[1].title}`)
+-    await selectedToRemove.uncheck()
++    await waitForCheckboxState(selectedToRemove, false)
+     if (
+       !(await memberPage.getByLabel(`Select ${fixture.sourceDefs[0].title}`).isChecked()) ||
+       (await selectedToRemove.isChecked())
+diff --git a/backlog/tasks/task-12020.40 - Bind-recipient-shared-workspace-sources-and-chat-to-the-canonical-share.md b/backlog/tasks/task-12020.40 - Bind-recipient-shared-workspace-sources-and-chat-to-the-canonical-share.md
+index ea3c221c914939eeae1b143f7f01fd2723797c59..223530c2c495acb1b1aba45b858377e027e4b2f1 100644
+--- a/backlog/tasks/task-12020.40 - Bind-recipient-shared-workspace-sources-and-chat-to-the-canonical-share.md
++++ b/backlog/tasks/task-12020.40 - Bind-recipient-shared-workspace-sources-and-chat-to-the-canonical-share.md
+@@ -4,7 +4,7 @@ title: Bind recipient shared workspace sources and chat to the canonical share
+ status: In Progress
+ assignee: []
+ created_date: ''
+-updated_date: 2026-08-23 01:49
++updated_date: 2026-08-23 02:27
+ labels:
+ - sharing
+ - frontend
+@@ -159,6 +159,7 @@ Fix Round 1/5 completed from reviewed base c718edb37406c78abf5f6813ab98612fd1bb7
+ 2026-08-22 Task 11 Fix Round 2/5 passed from reviewed head 5a648f8532 and is pending controller review. TDD RED/GREEN: coalescing 3 failed/84 passed plus 1 failed/87 skipped -> 88 passed; exact transition statuses 6 failed/2 passed/75 skipped -> 8 passed/75 skipped; evidence shape 2 failed/11 passed/82 skipped plus strengthened malformed-object RED -> 13 passed/82 skipped plus strengthened GREEN; loopback probe 16 failed/2 passed plus main-listen 2 failed/7 passed/20 skipped -> 29 passed. Final amended runner/probe matrix 159 passed; corrected package matrix 101 passed; post-lint proxy rerun 88 passed. Fresh final32-fix2-1787446794-16413 passed 15/15 with closed strict and exact-status transition ledgers, settings 2x200, race 200/409/200/409 with equal replay hashes, three unchanged clean provider-probe requests, exact distinct persona proof, and five visually inspected screenshots. Cleanup manifest/log are mode 0600; committed evidence credential/sentinel/machine-path scans are clean. Focused ESLint and node --check passed; forced package lint has 0 errors and 95 inherited warnings with no new warning. No Python differs from base, so touched-scope Ruff/Bandit are not applicable. No PR/push; unrelated watchlist templates remain untouched and unstaged.
+ 2026-08-22 Task 11 Fix Round 3/5 started from reviewed head 79cf6dc1d4. Scope: make transition evidence declarations exact per owner-revocation/member-chats context and disable all upstream redirect following in the loopback provider probe, with strict RED/GREEN regressions and a fresh live CDP run. Round 2 request-snapshot coalescing and exact transition-status behavior remain preserved. No PR/push; unrelated watchlist templates remain excluded.
+ 2026-08-22 Task 11 Fix Round 3/5 passed from reviewed head 79cf6dc1d4 and remains pending controller review. TDD: context-exact evidence RED 4 failed/95 skipped -> GREEN 4 passed/95 skipped; full runner compatibility pass exposed and fixed one invalid-fourth-chunk throw, then final runner 100 passed. Redirect RED 6 failed/28 skipped -> GREEN 6 passed/28 skipped; strengthened native-fetch 301/302/303/307/308 integration passed 5 with zero rejected-host destination contacts. One canonical contract now drives owner-revocation (37 declarations) and member-chats (35) runtime/evidence policy with exact names/statuses/bounds; provider forwarding uses redirect:error. Final focused matrix: 270 passed. Fresh final33-fix3-1787449107-31317 passed 15/15, strict and exact-context transitions closed at 57/48 requests with zero unexpected traffic, settings 2x200, race 409/200/200/409 with equal replay hashes, truthful ready local-llm/Qwen2.5-0.5B-Instruct, three unchanged clean probe requests, exact persona isolation, and five visually inspected screenshots. Cleanup manifest/log are 0600; credential/sentinel/body-field and committed-evidence machine-path scans are clean. Node checks and changed-file ESLint passed; shared-package lint is 0 errors/95 inherited warnings on unchanged files; no Python diff so Ruff/Bandit are not applicable; git diff --check passed. No PR/push; unrelated watchlist templates remain excluded.
++2026-08-22 final whole-workstream review fix pass started from 22c9b62f69610b26daff52c4f1e47ea0f2f116d2. Scope is limited to all-mode paginated deselection, typed post-commit ambiguity with exact immutable retry, and completion-ID-driven answer announcement. Strict per-finding RED/GREEN evidence is required. Task remains review-pending; no PR/push and unrelated watchlist templates stay excluded.
+ <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+ ## Final Summary

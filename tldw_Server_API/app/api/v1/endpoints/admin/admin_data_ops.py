@@ -238,7 +238,11 @@ async def list_backups(
             _require_user_id_for_dataset(normalized_dataset, user_id)
         if user_id is not None:
             await _enforce_admin_user_scope(principal, user_id, require_hierarchy=False)
-        items, total = svc_list_backup_items(
+        # Directory scans (now spanning every user_<id>/ subtree for the
+        # unfiltered admin view) are synchronous filesystem work - keep them
+        # off the event loop.
+        items, total = await asyncio.to_thread(
+            svc_list_backup_items,
             dataset=normalized_dataset,
             user_id=user_id,
             limit=limit,
@@ -323,6 +327,22 @@ async def create_backup(
         raise HTTPException(status_code=400, detail="invalid_backup_request") from exc
     except HTTPException:
         raise
+    except RuntimeError as exc:
+        # The backup layer reports failures as messages; surface the
+        # actionable configuration case instead of a generic 500, without
+        # echoing raw filesystem paths (#2921).
+        if "Invalid database path" in str(exc):
+            logger.error("Failed to create backup: source outside allowed roots")
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "backup_source_not_allowed: the dataset's database is "
+                    "outside the allowed backup roots. Use a canonical "
+                    "database location or extend TLDW_DB_ALLOWED_BASE_DIRS."
+                ),
+            ) from exc
+        logger.error("Failed to create backup")
+        raise HTTPException(status_code=500, detail="Failed to create backup") from exc
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
         logger.error("Failed to create backup")
         raise HTTPException(status_code=500, detail="Failed to create backup") from exc

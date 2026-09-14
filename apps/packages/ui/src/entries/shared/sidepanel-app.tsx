@@ -1,4 +1,5 @@
 import React from "react"
+import { IndependentBuddyHost } from "@/components/Common/PersonaBuddy/IndependentBuddyHost"
 import { useTranslation } from "react-i18next"
 import { useSidepanelInit } from "~/hooks/useSidepanelInit"
 import { platformConfig } from "@/config/platform"
@@ -60,6 +61,7 @@ export const SidepanelApp: React.FC = () => {
           <>
             {extras}
             <BuddyShellHost root="sidepanel" />
+            <IndependentBuddyHost root="sidepanel" />
           </>
         }
       >

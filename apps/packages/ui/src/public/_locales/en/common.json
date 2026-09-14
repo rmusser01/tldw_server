@@ -1418,6 +1418,216 @@
   "commandPalette_goToPrompts": {
     "message": "Go to Prompts"
   },
+  "promptAssist_trigger": {
+    "message": "Improve prompt"
+  },
+  "promptAssist_label": {
+    "message": "Improve my prompt"
+  },
+  "promptAssist_menuLabel": {
+    "message": "Prompt improvement actions"
+  },
+  "promptAssist_autoModel": {
+    "message": "Auto"
+  },
+  "promptAssist_activeModel": {
+    "message": "Active model: {{model}}"
+  },
+  "promptAssist_emptyDraft": {
+    "message": "Write a draft to enable prompt improvement."
+  },
+  "promptAssist_unsupported": {
+    "message": "Prompt improvement requires a newer server version."
+  },
+  "promptAssist_unknownCapability": {
+    "message": "Reconnect to check prompt improvement availability."
+  },
+  "promptAssist_selectModelRecovery": {
+    "message": "Select a chat model to improve this draft."
+  },
+  "promptAssist_selectModel": {
+    "message": "Select model"
+  },
+  "promptAssist_improveNow": {
+    "message": "Improve now"
+  },
+  "promptAssist_improveNowHelp": {
+    "message": "Replace this draft when checks pass."
+  },
+  "promptAssist_reviewChanges": {
+    "message": "Review changes"
+  },
+  "promptAssist_reviewChangesHelp": {
+    "message": "Edit and compare before applying."
+  },
+  "promptAssist_reviewTitle": {
+    "message": "Review improved prompt"
+  },
+  "promptAssist_appliedChanges": {
+    "message": "Applied changes"
+  },
+  "promptAssist_usedModel": {
+    "message": "Used {{model}} ({{provider}})"
+  },
+  "promptAssist_notice_draft_changed": {
+    "message": "The draft changed while this result was open. Applying normally will not overwrite it."
+  },
+  "promptAssist_notice_route_changed": {
+    "message": "The active model changed while this result was open. Review before applying."
+  },
+  "promptAssist_notice_review_required": {
+    "message": "Review the safety notices before applying."
+  },
+  "promptAssist_reviewSafety": {
+    "message": "Review the safety notices before applying."
+  },
+  "promptAssist_safetyNotices": {
+    "message": "Safety notices"
+  },
+  "promptAssist_observations": {
+    "message": "Model observations"
+  },
+  "promptAssist_reviewViews": {
+    "message": "Review views"
+  },
+  "promptAssist_editTab": {
+    "message": "Edit"
+  },
+  "promptAssist_changesTab": {
+    "message": "Changes"
+  },
+  "promptAssist_candidateLabel": {
+    "message": "Improved prompt candidate"
+  },
+  "promptAssist_plainCandidateLabel": {
+    "message": "Plain improved prompt candidate"
+  },
+  "promptAssist_changesLabel": {
+    "message": "Prompt changes"
+  },
+  "promptAssist_removed": {
+    "message": "Removed"
+  },
+  "promptAssist_added": {
+    "message": "Added"
+  },
+  "promptAssist_diffTooLarge": {
+    "message": "This comparison is too large to highlight safely. Showing the plain candidate."
+  },
+  "promptAssist_copy": {
+    "message": "Copy"
+  },
+  "promptAssist_copied": {
+    "message": "Candidate copied."
+  },
+  "promptAssist_copyFailed": {
+    "message": "Could not copy the candidate."
+  },
+  "promptAssist_apply": {
+    "message": "Apply to draft"
+  },
+  "promptAssist_replaceCurrent": {
+    "message": "Replace current draft"
+  },
+  "promptAssist_confirmReplaceQuestion": {
+    "message": "Replace the current draft with this candidate?"
+  },
+  "promptAssist_confirmReplace": {
+    "message": "Confirm replace"
+  },
+  "promptAssist_undo": {
+    "message": "Undo improvement"
+  },
+  "promptAssist_viewChanges": {
+    "message": "View changes"
+  },
+  "promptAssist_region": {
+    "message": "Prompt improvement"
+  },
+  "promptAssist_analyzing": {
+    "message": "Analyzing with {{model}}"
+  },
+  "promptAssist_analyzingHelp": {
+    "message": "Checking clarity, structure, and protected content."
+  },
+  "promptAssist_applied": {
+    "message": "Improvement applied."
+  },
+  "promptAssist_undone": {
+    "message": "Improvement undone."
+  },
+  "promptAssist_noChange": {
+    "message": "No useful improvement found."
+  },
+  "promptAssist_modelRecovery": {
+    "message": "Select a chat model and try again."
+  },
+  "promptAssist_retryCountdown": {
+    "message": "Retry available in {{count}} seconds."
+  },
+  "promptAssist_errors_invalid_input": {
+    "message": "Check the draft and try again."
+  },
+  "promptAssist_errors_missing_model": {
+    "message": "Select a chat model and try again."
+  },
+  "promptAssist_errors_unsupported_model": {
+    "message": "Choose a supported chat model and try again."
+  },
+  "promptAssist_errors_provider_not_configured": {
+    "message": "Configure the selected provider and try again."
+  },
+  "promptAssist_errors_draft_too_large": {
+    "message": "Shorten the draft and try again."
+  },
+  "promptAssist_errors_provider_rate_limited": {
+    "message": "The active provider is temporarily rate limited."
+  },
+  "promptAssist_errors_provider_timeout": {
+    "message": "The prompt improvement request timed out."
+  },
+  "promptAssist_errors_provider_unavailable": {
+    "message": "The prompt improvement service is unavailable."
+  },
+  "promptAssist_errors_model_refusal": {
+    "message": "The active model declined to improve this prompt."
+  },
+  "promptAssist_errors_invalid_model_output": {
+    "message": "The model returned an invalid improvement result."
+  },
+  "promptAssist_errors_preservation_failed": {
+    "message": "The candidate could not safely preserve protected content."
+  },
+  "promptAssist_errors_internal_error": {
+    "message": "Prompt improvement failed."
+  },
+  "promptAssist_warnings_unstructured_output": {
+    "message": "The model returned an unstructured candidate."
+  },
+  "promptAssist_warnings_target_mismatch": {
+    "message": "The response target did not match this draft."
+  },
+  "promptAssist_warnings_placeholder_mismatch": {
+    "message": "One or more placeholders changed."
+  },
+  "promptAssist_warnings_url_mismatch": {
+    "message": "One or more URLs changed."
+  },
+  "promptAssist_warnings_protected_token_mismatch": {
+    "message": "Protected prompt content changed."
+  },
+  "promptAssist_warnings_code_fence_mismatch": {
+    "message": "One or more code fences changed or became unbalanced."
+  },
+  "promptAssist_warnings_wrapper_mismatch": {
+    "message": "One or more structured section boundaries changed."
+  },
+  "promptAssist_warnings_large_rewrite": {
+    "message": "The rewrite is extensive and needs review."
+  },
+  "promptAssist_warnings_unknown": {
+    "message": "Prompt safety notice."
+  },
   "requestDetails": {
     "message": "Request details"
   },

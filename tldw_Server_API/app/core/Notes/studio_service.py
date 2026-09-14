@@ -2,23 +2,34 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Notes.organization_capture import (
+    active_coordinator,
+    capture_note_upsert,
+    capture_plan,
+    stable_note_id,
+)
 from tldw_Server_API.app.core.Notes.studio_markdown import (
     NOTE_STUDIO_RENDER_VERSION,
-    normalize_studio_payload,
+    build_derived_studio_payload,
     render_studio_markdown,
     stable_content_hash,
     studio_payload_from_markdown,
 )
 
 NoteStudioAdapter = Callable[[dict[str, Any], dict[str, Any]], Awaitable[dict[str, Any]]]
+
+_LOCAL_STUDIO_PROVIDER = "tldw"
+_LOCAL_DERIVE_MODEL = "notes-studio-deterministic-v1"
+_LOCAL_DIAGRAM_MODEL = "diagram-deterministic-v1"
 
 
 async def _run_notes_studio_generate_adapter(request: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -38,8 +49,64 @@ class NotesStudioService:
     """Focused orchestration for Notes Studio state and sidecar persistence."""
 
     db: CharactersRAGDB
+    user_id: int | str
     generation_adapter: NoteStudioAdapter = _run_notes_studio_generate_adapter
     diagram_adapter: NoteStudioAdapter = _run_diagram_generate_adapter
+
+    @staticmethod
+    def _derive_execution_identity(
+        generated: dict[str, Any],
+        *,
+        provider: str | None,
+        model: str | None,
+    ) -> tuple[str, str]:
+        """Resolve the provider and model that executed Studio derivation.
+
+        Args:
+            generated: Adapter response containing its execution source.
+            provider: Requested LLM provider, when an LLM executed the request.
+            model: Requested LLM model, when an LLM executed the request.
+
+        Returns:
+            The executed ``(provider, model)`` identity, using deterministic
+            local identifiers for non-LLM derivation.
+
+        Raises:
+            InputError: If an LLM result lacks provider or model identity.
+        """
+        if generated.get("source") == "llm":
+            if not provider or not model:
+                raise InputError("Notes Studio LLM execution identity is incomplete.")  # noqa: TRY003
+            return str(provider), str(model)
+        return _LOCAL_STUDIO_PROVIDER, _LOCAL_DERIVE_MODEL
+
+    @staticmethod
+    def _diagram_execution_identity(
+        generated: dict[str, Any],
+    ) -> tuple[str, str]:
+        """Resolve and validate the provider and model for diagram generation.
+
+        Args:
+            generated: Diagram adapter response containing execution metadata.
+
+        Returns:
+            The executed ``(provider, model)`` identity, using deterministic
+            local identifiers only when the adapter omits an execution source.
+
+        Raises:
+            InputError: If the execution source is invalid or a reported
+                execution lacks provider or model identity.
+        """
+        source = generated.get("source")
+        if source is None:
+            return _LOCAL_STUDIO_PROVIDER, _LOCAL_DIAGRAM_MODEL
+        if source not in {"llm", "deterministic_fallback"}:
+            raise InputError("Notes Studio diagram execution source is invalid.")  # noqa: TRY003
+        executed_provider = generated.get("provider")
+        executed_model = generated.get("model")
+        if not executed_provider or not executed_model:
+            raise InputError("Notes Studio diagram execution identity is incomplete.")  # noqa: TRY003
+        return str(executed_provider), str(executed_model)
 
     async def derive_from_excerpt(
         self,
@@ -51,6 +118,72 @@ class NotesStudioService:
         provider: str | None = None,
         model: str | None = None,
     ) -> dict[str, Any]:
+        coordinator = active_coordinator(self.db, user_id=self.user_id)
+        request_fields = {
+            "source_note_id": source_note_id,
+            "excerpt_text": str(excerpt_text or "").strip(),
+            "template_type": template_type,
+            "handwriting_mode": handwriting_mode,
+            "provider": provider,
+            "model": model,
+        }
+        request_fingerprint = (
+            coordinator.request_fingerprint("notes-studio.derive", request_fields)
+            if coordinator is not None
+            else None
+        )
+        capture_key = request_fingerprint
+        if coordinator is not None and capture_key is not None:
+            replay = coordinator.replay_request_plan(
+                source="notes-studio",
+                idempotency_key=capture_key,
+                request_fingerprint=request_fingerprint,
+                result_domain="notes.note",
+            )
+            if replay is not None:
+                replayed_note = capture_plan(
+                    coordinator,
+                    replay,
+                    source="notes-studio",
+                    key=capture_key,
+                )
+                replayed_note_id = str(replayed_note["id"])
+                studio_document = self.db.get_note_studio_document(replayed_note_id)
+                if studio_document is not None:
+                    return self._build_state(
+                        note_id=replayed_note_id,
+                        studio_document=studio_document,
+                    )
+                replayed_markdown = str(replayed_note.get("content") or "")
+                replayed_payload = studio_payload_from_markdown(
+                    replayed_markdown,
+                    template_type=template_type,
+                    handwriting_mode=handwriting_mode,
+                    render_version=NOTE_STUDIO_RENDER_VERSION,
+                    fallback_title=str(replayed_note.get("title") or "Untitled Study Notes"),
+                    source_note_id=source_note_id,
+                    preserve_existing_sections_when_empty=False,
+                )
+                repaired_studio_document = self._ensure_studio_document(
+                    note_id=replayed_note_id,
+                    payload_json=replayed_payload,
+                    template_type=template_type,
+                    handwriting_mode=handwriting_mode,
+                    source_note_id=source_note_id,
+                    excerpt_snapshot=request_fields["excerpt_text"],
+                    excerpt_hash=stable_content_hash(str(request_fields["excerpt_text"])),
+                    diagram_manifest_json=None,
+                    companion_content_hash=stable_content_hash(replayed_markdown),
+                    render_version=NOTE_STUDIO_RENDER_VERSION,
+                    provenance_kind="derive",
+                    provenance_provider=_LOCAL_STUDIO_PROVIDER,
+                    provenance_model=_LOCAL_DERIVE_MODEL,
+                )
+                return self._build_state(
+                    note_id=replayed_note_id,
+                    studio_document=repaired_studio_document,
+                )
+
         source_note = self._require_note(source_note_id)
         excerpt_snapshot = self._validate_excerpt(source_note=source_note, excerpt_text=excerpt_text)
         derived_title = self._build_derived_title(source_note.get("title"))
@@ -71,24 +204,39 @@ class NotesStudioService:
         payload = generated.get("payload")
         if not isinstance(payload, dict) or not payload:
             raise InputError("Notes Studio generation failed to return a canonical payload.")  # noqa: TRY003
-
-        payload = normalize_studio_payload(
-            payload,
-            template_type=template_type,
-            handwriting_mode=handwriting_mode,
-            render_version=NOTE_STUDIO_RENDER_VERSION,
-            fallback_title=derived_title,
-            source_note_id=str(source_note["id"]),
+        try:
+            payload = build_derived_studio_payload(
+                payload,
+                template_type=template_type,
+                handwriting_mode=handwriting_mode,
+                render_version=NOTE_STUDIO_RENDER_VERSION,
+                fallback_title=derived_title,
+                source_note_id=str(source_note["id"]),
+            )
+        except (TypeError, ValueError) as exc:
+            raise InputError(
+                "Notes Studio generation did not return canonical sections."
+            ) from exc
+        executed_provider, executed_model = self._derive_execution_identity(
+            generated,
+            provider=provider,
+            model=model,
         )
 
         markdown = render_studio_markdown(payload)
         note_title = str(payload.get("meta", {}).get("title") or derived_title).strip() or derived_title
-        with self.db.transaction() as conn:
-            note_id = self.db.add_note(title=note_title, content=markdown, conn=conn)
-            if note_id is None:
-                raise InputError("Failed to create derived note.")  # noqa: TRY003
-
-            studio_document = self.db.create_note_studio_document(
+        if coordinator is not None:
+            note_id = stable_note_id("notes-studio", capture_key)
+            capture_note_upsert(
+                coordinator,
+                note_id=note_id,
+                title=note_title,
+                content=markdown,
+                source="notes-studio",
+                key=capture_key,
+                request_fingerprint=request_fingerprint,
+            )
+            studio_document = self._ensure_studio_document(
                 note_id=str(note_id),
                 payload_json=payload,
                 template_type=template_type,
@@ -99,8 +247,32 @@ class NotesStudioService:
                 diagram_manifest_json=None,
                 companion_content_hash=stable_content_hash(markdown),
                 render_version=NOTE_STUDIO_RENDER_VERSION,
-                conn=conn,
+                provenance_kind="derive",
+                provenance_provider=executed_provider,
+                provenance_model=executed_model,
             )
+        else:
+            with self.db.transaction() as conn:
+                note_id = self.db.add_note(title=note_title, content=markdown, conn=conn)
+                if note_id is None:
+                    raise InputError("Failed to create derived note.")  # noqa: TRY003
+
+                studio_document = self.db.create_note_studio_document(
+                    note_id=str(note_id),
+                    payload_json=payload,
+                    template_type=template_type,
+                    handwriting_mode=handwriting_mode,
+                    source_note_id=str(source_note["id"]),
+                    excerpt_snapshot=excerpt_snapshot,
+                    excerpt_hash=stable_content_hash(excerpt_snapshot),
+                    diagram_manifest_json=None,
+                    companion_content_hash=stable_content_hash(markdown),
+                    render_version=NOTE_STUDIO_RENDER_VERSION,
+                    provenance_kind="derive",
+                    provenance_provider=executed_provider,
+                    provenance_model=executed_model,
+                    conn=conn,
+                )
         return self._build_state(note_id=str(note_id), studio_document=studio_document)
 
     async def get_note_studio_state(self, *, note_id: str) -> dict[str, Any]:
@@ -114,6 +286,68 @@ class NotesStudioService:
         expected_version: int,
         current_markdown: str | None = None,
     ) -> dict[str, Any]:
+        coordinator = active_coordinator(self.db, user_id=self.user_id)
+        request_fields = {
+            "note_id": note_id,
+            "expected_version": expected_version,
+            "current_markdown": current_markdown,
+        }
+        request_fingerprint = (
+            coordinator.request_fingerprint("notes-studio.regenerate", request_fields)
+            if coordinator is not None
+            else None
+        )
+        capture_key = request_fingerprint
+        if coordinator is not None and capture_key is not None:
+            replay = coordinator.replay_request_plan(
+                source="notes-studio",
+                idempotency_key=capture_key,
+                request_fingerprint=request_fingerprint,
+                result_domain="notes.note",
+            )
+            if replay is not None:
+                replayed_note = capture_plan(
+                    coordinator,
+                    replay,
+                    source="notes-studio",
+                    key=capture_key,
+                )
+                replayed_note_id = str(replayed_note["id"])
+                studio_document = self._require_studio_document(replayed_note_id)
+                if studio_document.get("companion_content_hash") == stable_content_hash(
+                    str(replayed_note.get("content") or "")
+                ):
+                    return self._build_state(
+                        note_id=replayed_note_id,
+                        studio_document=studio_document,
+                    )
+                payload, markdown, _rebuilt_title = self._rebuild_studio_markdown(
+                    note=replayed_note,
+                    studio_document=studio_document,
+                    current_markdown=current_markdown,
+                )
+                repaired_studio_document = self.db.upsert_note_studio_document(
+                    note_id=replayed_note_id,
+                    payload_json=payload,
+                    template_type=studio_document["template_type"],
+                    handwriting_mode=studio_document["handwriting_mode"],
+                    source_note_id=studio_document.get("source_note_id"),
+                    excerpt_snapshot=studio_document.get("excerpt_snapshot"),
+                    excerpt_hash=studio_document.get("excerpt_hash"),
+                    diagram_manifest_json=studio_document.get("diagram_manifest_json"),
+                    companion_content_hash=stable_content_hash(markdown),
+                    render_version=int(
+                        studio_document.get("render_version") or NOTE_STUDIO_RENDER_VERSION
+                    ),
+                    provenance_kind="regenerate",
+                    provenance_provider=None,
+                    provenance_model=None,
+                )
+                return self._build_state(
+                    note_id=replayed_note_id,
+                    studio_document=repaired_studio_document,
+                )
+
         note = self._require_note(note_id)
         current_version = int(note.get("version") or 0)
         if current_version != expected_version:
@@ -124,9 +358,75 @@ class NotesStudioService:
                 entity_id=note_id,
             )  # noqa: TRY003
         studio_document = self._require_studio_document(note_id)
+        payload, markdown, rebuilt_title = self._rebuild_studio_markdown(
+            note=note,
+            studio_document=studio_document,
+            current_markdown=current_markdown,
+        )
+
+        if coordinator is not None:
+            capture_note_upsert(
+                coordinator,
+                note_id=note_id,
+                title=rebuilt_title,
+                content=markdown,
+                conversation_id=note.get("conversation_id"),
+                message_id=note.get("message_id"),
+                expected_version=expected_version,
+                source="notes-studio",
+                key=capture_key,
+                request_fingerprint=request_fingerprint,
+            )
+            updated_studio_document = self.db.upsert_note_studio_document(
+                note_id=note_id,
+                payload_json=payload,
+                template_type=studio_document["template_type"],
+                handwriting_mode=studio_document["handwriting_mode"],
+                source_note_id=studio_document.get("source_note_id"),
+                excerpt_snapshot=studio_document.get("excerpt_snapshot"),
+                excerpt_hash=studio_document.get("excerpt_hash"),
+                diagram_manifest_json=studio_document.get("diagram_manifest_json"),
+                companion_content_hash=stable_content_hash(markdown),
+                render_version=int(studio_document.get("render_version") or NOTE_STUDIO_RENDER_VERSION),
+                provenance_kind="regenerate",
+                provenance_provider=None,
+                provenance_model=None,
+            )
+        else:
+            with self.db.transaction() as conn:
+                self.db.update_note(
+                    note_id=note_id,
+                    update_data={"title": rebuilt_title, "content": markdown},
+                    expected_version=expected_version,
+                    conn=conn,
+                )
+                updated_studio_document = self.db.upsert_note_studio_document(
+                    note_id=note_id,
+                    payload_json=payload,
+                    template_type=studio_document["template_type"],
+                    handwriting_mode=studio_document["handwriting_mode"],
+                    source_note_id=studio_document.get("source_note_id"),
+                    excerpt_snapshot=studio_document.get("excerpt_snapshot"),
+                    excerpt_hash=studio_document.get("excerpt_hash"),
+                    diagram_manifest_json=studio_document.get("diagram_manifest_json"),
+                    companion_content_hash=stable_content_hash(markdown),
+                    render_version=int(studio_document.get("render_version") or NOTE_STUDIO_RENDER_VERSION),
+                    provenance_kind="regenerate",
+                    provenance_provider=None,
+                    provenance_model=None,
+                    conn=conn,
+                )
+        return self._build_state(note_id=note_id, studio_document=updated_studio_document)
+
+    @staticmethod
+    def _rebuild_studio_markdown(
+        *,
+        note: dict[str, Any],
+        studio_document: dict[str, Any],
+        current_markdown: str | None,
+    ) -> tuple[dict[str, Any], str, str]:
         has_current_markdown_override = isinstance(current_markdown, str)
         markdown_source = current_markdown if has_current_markdown_override else str(note.get("content") or "")
-
         existing_payload = studio_document.get("payload_json")
         if not isinstance(existing_payload, dict):
             raise InputError("Studio document payload is invalid.")  # noqa: TRY003
@@ -141,33 +441,15 @@ class NotesStudioService:
             existing_payload=existing_payload,
             preserve_existing_sections_when_empty=not has_current_markdown_override,
         )
-
         markdown = render_studio_markdown(payload)
-        rebuilt_title = str(payload.get("meta", {}).get("title") or note.get("title") or "Untitled Study Notes").strip()
-        if not rebuilt_title:
-            rebuilt_title = "Untitled Study Notes"
+        rebuilt_title = str(
+            payload.get("meta", {}).get("title") or note.get("title") or "Untitled Study Notes"
+        ).strip() or "Untitled Study Notes"
+        return payload, markdown, rebuilt_title
 
-        with self.db.transaction() as conn:
-            self.db.update_note(
-                note_id=note_id,
-                update_data={"title": rebuilt_title, "content": markdown},
-                expected_version=expected_version,
-                conn=conn,
-            )
-            updated_studio_document = self.db.upsert_note_studio_document(
-                note_id=note_id,
-                payload_json=payload,
-                template_type=studio_document["template_type"],
-                handwriting_mode=studio_document["handwriting_mode"],
-                source_note_id=studio_document.get("source_note_id"),
-                excerpt_snapshot=studio_document.get("excerpt_snapshot"),
-                excerpt_hash=studio_document.get("excerpt_hash"),
-                diagram_manifest_json=studio_document.get("diagram_manifest_json"),
-                companion_content_hash=stable_content_hash(markdown),
-                render_version=int(studio_document.get("render_version") or NOTE_STUDIO_RENDER_VERSION),
-                conn=conn,
-            )
-        return self._build_state(note_id=note_id, studio_document=updated_studio_document)
+    def _ensure_studio_document(self, **fields: Any) -> dict[str, Any]:
+        """Create one sidecar, or accept an identical prior write on retry."""
+        return self.db.ensure_note_studio_document(**fields)
 
     async def update_diagram_manifest(
         self,
@@ -202,6 +484,11 @@ class NotesStudioService:
         )
 
         diagram_code = str(diagram_result.get("diagram") or "").strip()
+        if not diagram_code or diagram_result.get("error"):
+            raise InputError("Notes Studio diagram generation returned no accepted diagram.")  # noqa: TRY003
+        executed_provider, executed_model = self._diagram_execution_identity(
+            diagram_result,
+        )
         render_hash = stable_content_hash(f"{diagram_type}\n{diagram_context['text']}\n{diagram_code}")
         manifest = {
             "diagram_type": diagram_type,
@@ -222,6 +509,9 @@ class NotesStudioService:
             expected_companion_content_hash=expected_companion_content_hash,
             expected_render_version=expected_render_version,
             expected_last_modified=expected_last_modified,
+            provenance_kind="diagram",
+            provenance_provider=executed_provider,
+            provenance_model=executed_model,
         )
         return self._build_state(note_id=note_id, studio_document=updated_studio_document)
 
@@ -259,9 +549,38 @@ class NotesStudioService:
     def _build_state(self, *, note_id: str, studio_document: dict[str, Any]) -> dict[str, Any]:
         note = self._require_note(note_id)
         stale_reason = self._get_stale_reason(note=note, studio_document=studio_document)
+        compatibility_document = dict(studio_document)
+        payload = studio_document.get("payload_json")
+        if isinstance(payload, dict):
+            compatibility_payload = dict(payload)
+            compatibility_payload["meta"] = {
+                "title": str(note.get("title") or ""),
+                "source_note_id": studio_document.get("source_note_id"),
+            }
+            compatibility_payload["layout"] = {
+                "template_type": studio_document["template_type"],
+                "handwriting_mode": studio_document["handwriting_mode"],
+                "render_version": int(studio_document["render_version"]),
+            }
+            compatibility_document["payload_json"] = compatibility_payload
+        manifest = studio_document.get("diagram_manifest_json")
+        if isinstance(manifest, dict):
+            compatibility_manifest = dict(manifest)
+            compatibility_manifest["canonical_source"] = manifest.get("source_graph")
+            compatibility_manifest["generation_status"] = manifest.get("status")
+            source_text = "\n".join(
+                str(item.get("content") or "")
+                for item in (manifest.get("source_graph") or [])
+                if isinstance(item, dict)
+            )
+            compatibility_manifest["cached_svg"] = self._build_svg_preview(
+                diagram_type=str(manifest.get("diagram_type") or "flowchart"),
+                text=source_text,
+            )
+            compatibility_document["diagram_manifest_json"] = compatibility_manifest
         return {
             "note": note,
-            "studio_document": studio_document,
+            "studio_document": compatibility_document,
             "is_stale": stale_reason is not None,
             "stale_reason": stale_reason,
         }
@@ -322,7 +641,7 @@ class NotesStudioService:
 
         combined_text = "\n".join(part for part in text_parts if part).strip()
         return {
-            "source_graph": {"sections": canonical_sections},
+            "source_graph": canonical_sections,
             "text": combined_text or "Notes Studio diagram",
         }
 

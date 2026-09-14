@@ -69,12 +69,13 @@ export async function resolveExtensionId(
     ''
 
   if (!targetUrl) {
+    let createdProbePage: Awaited<ReturnType<BrowserContext['newPage']>> | undefined
+    let session: Awaited<ReturnType<BrowserContext['newCDPSession']>> | undefined
     try {
-      const page =
-        context.backgroundPages()[0] ||
-        context.pages()[0] ||
-        (await context.newPage())
-      const session = await context.newCDPSession(page)
+      const existingPage = context.backgroundPages()[0] || context.pages()[0]
+      const page = existingPage || (await context.newPage())
+      createdProbePage = existingPage ? undefined : page
+      session = await context.newCDPSession(page)
       const { targetInfos } = await session.send('Target.getTargets')
       const extTarget =
         targetInfos.find(
@@ -95,6 +96,17 @@ export async function resolveExtensionId(
     } catch {
       // Best-effort only; fall through to error below if we still
       // cannot determine the extension id.
+    } finally {
+      try {
+        await session?.detach()
+      } catch {
+        // Best-effort probe cleanup must not hide id fallbacks.
+      }
+      try {
+        await createdProbePage?.close()
+      } catch {
+        // Best-effort probe cleanup must not hide id fallbacks.
+      }
     }
   }
 

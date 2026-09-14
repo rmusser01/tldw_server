@@ -1,0 +1,53 @@
+{
+  "Ref": "popb05905i3kinboaodahksb9",
+  "Dockerfile": "Dockerfiles/Dockerfile.prod",
+  "Platform": [
+    "linux/amd64"
+  ],
+  "StartedAt": "2026-09-10T12:40:11.357543461-07:00",
+  "CompletedAt": "2026-09-10T13:12:57.009782549-07:00",
+  "Status": "canceled",
+  "Labels": [
+    {
+      "Name": "org.opencontainers.image.revision",
+      "Value": "910c526513a03b305b2976fec6f1dee73bacc1e9"
+    }
+  ],
+  "Materials": [
+    {
+      "URI": "pkg:docker/python@3.12-slim?platform=linux%2Famd64",
+      "Digests": [
+        "sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea"
+      ]
+    }
+  ],
+  "source_revision": "910c526513a03b305b2976fec6f1dee73bacc1e9",
+  "build_context": "clean git archive of declared source",
+  "exit_code": 130,
+  "stop_reason": "Canceled during final image export after shared host free disk fell to approximately 12 GiB amid concurrent builds.",
+  "dependency_installation": "passed",
+  "runtime_local_package_import_check": "passed: import mcp_unified; import tldw_profile_core",
+  "final_image_exported": false,
+  "image_id": null,
+  "service_started": false,
+  "workload_requests": 0,
+  "telemetry_samples": 0,
+  "soak_result": null,
+  "fixture_cleanup": "repository generator completed, exit 0; subsequent PostgreSQL catalog query verified dedicated database absent",
+  "cache_cleanup": "eleven exact-ID unshared runtime records removed; Docker reported approximately 8.56 GB reclaimed",
+  "shared_cache_retained": {
+    "id": "e7c63pc99fswpg1aaps1wp3kd",
+    "reported_size": "8.311GB"
+  },
+  "host_disk_recovery": "not confirmed; APFS continued reporting approximately 12 GiB after logical cache reclamation",
+  "runtime_source_verification": "not run",
+  "collector_and_bootstrap_runtime_validation": "not run; scripts are retained preparation, not verified runtime evidence",
+  "deployment_cleanup": "verified no capacity containers, volumes or network exist; start never executed",
+  "private_preparation_review_findings": [
+    "cleanup aborts early if an expected container is absent",
+    "runtime file comparison includes Docker-ignored tests and would reject a correct image"
+  ],
+  "host_disk_final_observation": "approximately 7 GiB free during final evidence checks; own capacity build remains stopped",
+  "exclusive_source_context_cleanup": "466 MiB context removed after hashes recorded",
+  "private_generated_credentials_cleanup": "credential JSON and runtime env removed after fixture cleanup and secret scan"
+}

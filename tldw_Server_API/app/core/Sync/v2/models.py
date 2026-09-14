@@ -2,9 +2,21 @@ from __future__ import annotations
 
 """Internal storage models for Sync v2 M1."""
 
-from collections.abc import Sequence
+import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from datetime import datetime, timezone
+from typing import Any, Literal, cast
+from uuid import UUID
+
+from .notes_link_contract import (
+    NOTES_LINK_LABEL_MAX_CHARS,
+    NOTES_LINK_PROPERTIES_MAX_BYTES,
+    NOTES_LINK_PROPERTIES_MAX_DEPTH,
+    NOTES_LINK_PROPERTIES_MAX_KEYS,
+    NOTES_LINK_REASON_MAX_CHARS,
+    NOTES_LINK_WEIGHT_MAX,
+)
 
 SyncDomain = Literal[
     "notes.note",
@@ -17,6 +29,23 @@ SyncDomain = Literal[
     "media.item",
     "media.keyword",
     "media.keyword_link",
+    "notes.keyword",
+    "notes.keyword_link",
+    "notes.keyword_collection",
+    "notes.keyword_collection_link",
+    "notes.folder",
+    "notes.folder_link",
+    "notes.link",
+    "notes.task",
+    "notes.task_activity",
+    "notes.moodboard",
+    "notes.moodboard_note",
+    "notes.studio_document",
+    "personal_context.manifest",
+    "personal_context.scope",
+    "personal_context.record",
+    "personal_context.proposal",
+    "personal_context.purge",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -29,15 +58,37 @@ EncryptionPolicy = Literal[
 SyncKeyWrappedFor = Literal["server", "passphrase", "device", "recovery"]
 SyncKeyRewrapStatus = Literal["not_required", "pending", "complete", "failed", "blocked"]
 ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
-SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
+SyncApplyStatus = Literal["pending", "applied", "failed", "conflict", "superseded"]
 SyncBlobAvailabilityStatus = Literal[
     "metadata_only",
     "uploading",
     "available",
+    "deleting",
     "verify_failed",
     "quarantined",
     "deleted",
 ]
+SyncAttachmentBindingAvailability = Literal["available", "metadata_only"]
+
+
+def normalize_sync_timestamp(value: object | None) -> str | None:
+    """Normalize backend-native and ISO timestamps to the canonical UTC string."""
+
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value)
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return text
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
 SyncBlobUploadStatus = Literal[
     "created",
     "uploading",
@@ -69,6 +120,36 @@ M1_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     "chat.message": ["append", "tombstone"],
     "attachment.ref": ["upsert", "tombstone"],
 }
+NOTES_ORGANIZATION_DOMAINS: tuple[SyncDomain, ...] = (
+    "notes.keyword",
+    "notes.keyword_link",
+    "notes.keyword_collection",
+    "notes.keyword_collection_link",
+    "notes.folder",
+    "notes.folder_link",
+)
+NOTES_ORGANIZATION_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    domain: ["upsert", "tombstone"] for domain in NOTES_ORGANIZATION_DOMAINS
+}
+NOTES_LINK_DOMAINS: tuple[SyncDomain, ...] = ("notes.link",)
+NOTES_LINK_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    "notes.link": ["upsert", "tombstone"]
+}
+NOTES_TASK_SYNC_DOMAINS: tuple[SyncDomain, ...] = (
+    "notes.task",
+    "notes.task_activity",
+)
+NOTES_TASK_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    domain: ["upsert", "tombstone"] for domain in NOTES_TASK_SYNC_DOMAINS
+}
+NOTES_MOODBOARD_STUDIO_DOMAINS: tuple[SyncDomain, ...] = (
+    "notes.moodboard",
+    "notes.moodboard_note",
+    "notes.studio_document",
+)
+NOTES_MOODBOARD_STUDIO_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    domain: ["upsert", "tombstone"] for domain in NOTES_MOODBOARD_STUDIO_DOMAINS
+}
 WORKSPACE_SYNC_DOMAINS: list[SyncDomain] = [
     "workspaces.workspace",
     "workspaces.source_ref",
@@ -91,18 +172,50 @@ MEDIA_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     "media.keyword": ["upsert", "tombstone"],
     "media.keyword_link": ["upsert", "tombstone"],
 }
+PERSONAL_CONTEXT_SYNC_DOMAINS: tuple[SyncDomain, ...] = (
+    "personal_context.manifest",
+    "personal_context.scope",
+    "personal_context.record",
+    "personal_context.proposal",
+    "personal_context.purge",
+)
+PERSONAL_CONTEXT_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    "personal_context.manifest": ["upsert"],
+    "personal_context.scope": ["upsert"],
+    "personal_context.record": ["upsert", "tombstone"],
+    "personal_context.proposal": ["upsert"],
+    "personal_context.purge": ["tombstone"],
+}
 SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     list(M1_SYNC_DOMAINS)
     + list(WORKSPACE_SYNC_DOMAINS)
     + list(SOURCE_CACHE_SYNC_DOMAINS)
     + list(MEDIA_SYNC_DOMAINS)
+    + list(NOTES_ORGANIZATION_DOMAINS)
+    + list(NOTES_LINK_DOMAINS)
+    + list(PERSONAL_CONTEXT_SYNC_DOMAINS)
 )
 SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **M1_SYNC_OPERATIONS,
     **WORKSPACE_SYNC_OPERATIONS,
     **SOURCE_CACHE_SYNC_OPERATIONS,
     **MEDIA_SYNC_OPERATIONS,
+    **NOTES_ORGANIZATION_SYNC_OPERATIONS,
+    **NOTES_LINK_SYNC_OPERATIONS,
+    **PERSONAL_CONTEXT_SYNC_OPERATIONS,
 }
+SYNC_V2_KNOWN_DOMAINS: tuple[SyncDomain, ...] = (
+    *SYNC_V2_SUPPORTED_DOMAINS,
+    *NOTES_TASK_SYNC_DOMAINS,
+    *NOTES_MOODBOARD_STUDIO_DOMAINS,
+)
+SYNC_V2_INTERNAL_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    **SYNC_V2_SUPPORTED_OPERATIONS,
+    **NOTES_TASK_SYNC_OPERATIONS,
+    **NOTES_MOODBOARD_STUDIO_OPERATIONS,
+}
+SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS = 100
+SYNC_V2_MAX_ADAPTER_VERSIONS_PER_DOMAIN = 8
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 SYNC_V2_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
     "server_trusted_v1",
@@ -116,9 +229,17 @@ STRICT_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
     "client_private_v1",
 ]
 CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE = "sync_server_frontend_client_private_disabled"
+SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION = (
+    "sync_rebase_required_after_conflict_resolution"
+)
 CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE = (
     "Server-front-end mutation is disabled for client_private_v1 datasets "
     "because opaque fields cannot be inspected or re-encrypted by the server."
+)
+NOTES_NOTE_TITLE_MAX_CHARS = 255
+NOTES_NOTE_CONTENT_MAX_CHARS = 5_000_000
+NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS: frozenset[str] = frozenset(
+    {"title", "content", "conversation_id", "message_id"}
 )
 SYNC_KEY_WRAPPED_FOR_VALUES: list[SyncKeyWrappedFor] = [
     "server",
@@ -133,6 +254,518 @@ SYNC_KEY_REWRAP_STATUSES: list[SyncKeyRewrapStatus] = [
     "failed",
     "blocked",
 ]
+
+
+def _discoverable_pydantic_object_schema(model: type[Any]) -> dict[str, object]:
+    """Translate a Pydantic object schema into the Sync discovery vocabulary."""
+
+    generated = model.model_json_schema()
+    properties: dict[str, object] = {}
+    key_map = {"minLength": "min_length", "maxLength": "max_length"}
+    for field_name, raw_field in generated["properties"].items():
+        field_schema = {
+            key_map.get(key, key): value
+            for key, value in raw_field.items()
+            if key not in {"title", "default", "const", "anyOf"}
+        }
+        if "const" in raw_field:
+            field_schema["enum"] = [raw_field["const"]]
+        if "anyOf" in raw_field:
+            variants = raw_field["anyOf"]
+            field_schema["type"] = [variant["type"] for variant in variants]
+            for variant in variants:
+                if "maxLength" in variant:
+                    field_schema["max_length"] = variant["maxLength"]
+        if field_name in {"attachment_id", "parent_object_id"}:
+            field_schema["canonical_lowercase"] = True
+        elif field_name == "blob_hash":
+            field_schema.update(format="sha256", canonical_lowercase=True)
+        elif field_name in {"created_at", "last_modified", "deleted_at"}:
+            field_schema["format"] = "date-time"
+        properties[field_name] = field_schema
+    return {
+        "required": generated["required"],
+        "properties": properties,
+        "additional_properties": generated["additionalProperties"],
+    }
+
+
+def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
+    """Return client-discoverable payload contracts for versioned Sync domains."""
+
+    from tldw_profile_core import (
+        ProfileManifest,
+        ProfileProposal,
+        ProfileRecord,
+        ProfileScope,
+    )
+
+    from .attachment_refs_v2 import (
+        AttachmentRefV2Payload,
+        AttachmentRefV2TombstonePayload,
+    )
+
+    keyword_link_schema = {
+        "required": ["subject_type", "subject_id", "keyword_sync_id"],
+        "properties": {
+            "subject_type": {"enum": ["note", "conversation"]},
+            "subject_id": {"type": "string"},
+            "keyword_sync_id": {"type": "string"},
+        },
+        "additional_properties": False,
+    }
+    collection_link_schema = {
+        "required": ["collection_sync_id", "keyword_sync_id"],
+        "properties": {
+            "collection_sync_id": {"type": "string"},
+            "keyword_sync_id": {"type": "string"},
+        },
+        "additional_properties": False,
+    }
+    folder_link_schema = {
+        "required": ["note_id", "folder_sync_id"],
+        "properties": {
+            "note_id": {"type": "string"},
+            "folder_sync_id": {"type": "string"},
+        },
+        "additional_properties": False,
+    }
+    notes_link_required = [
+        "source_note_id",
+        "target_note_id",
+        "type",
+        "directed",
+        "weight",
+        "label",
+        "properties",
+        "created_at",
+        "last_modified",
+        "created_by",
+    ]
+    notes_link_properties = {
+        "source_note_id": {
+            "type": "string",
+            "format": "uuid4",
+            "canonical_lowercase": True,
+        },
+        "target_note_id": {
+            "type": "string",
+            "format": "uuid4",
+            "canonical_lowercase": True,
+        },
+        "type": {"enum": ["manual"]},
+        "directed": {"type": "boolean"},
+        "weight": {"type": "number", "minimum": 0, "maximum": NOTES_LINK_WEIGHT_MAX},
+        "label": {"type": ["string", "null"], "max_length": NOTES_LINK_LABEL_MAX_CHARS},
+        "properties": {
+            "type": "object",
+            "max_properties": NOTES_LINK_PROPERTIES_MAX_KEYS,
+            "max_depth": NOTES_LINK_PROPERTIES_MAX_DEPTH,
+            "max_bytes": NOTES_LINK_PROPERTIES_MAX_BYTES,
+        },
+        "created_at": {"type": "string", "format": "date-time"},
+        "last_modified": {"type": "string", "format": "date-time"},
+        "created_by": {"type": "string"},
+    }
+    notes_link_constraints = {
+        "distinct_endpoints": True,
+        "undirected_endpoint_order": "source_note_id <= target_note_id",
+    }
+    attachment_ref_upsert = _discoverable_pydantic_object_schema(
+        AttachmentRefV2Payload
+    )
+    attachment_ref_tombstone = _discoverable_pydantic_object_schema(
+        AttachmentRefV2TombstonePayload
+    )
+    personal_context_purge_schema = {
+        "type": "object",
+        "required": ["schema_version", "profile_id", "purge_generation"],
+        "properties": {
+            "schema_version": {"const": 1},
+            "profile_id": {"type": "string", "minLength": 1},
+            "purge_generation": {"type": "integer", "minimum": 1},
+        },
+        "additionalProperties": False,
+    }
+    return {
+        "attachment.ref": {
+            "schema_version": 2,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": attachment_ref_upsert,
+            "tombstone": attachment_ref_tombstone,
+            "restore": {
+                "operation": "upsert",
+                "routing_metadata": {"restore_intent": True},
+                "requires_current_base": True,
+            },
+            "derived_fields": [
+                "availability",
+                "resolved_blob_id",
+                "storage_status",
+                "retention_released_at",
+            ],
+        },
+        "notes.note": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": ["title", "content"],
+                "properties": {
+                    "title": {"type": "string", "max_length": NOTES_NOTE_TITLE_MAX_CHARS},
+                    "content": {"type": "string", "max_length": NOTES_NOTE_CONTENT_MAX_CHARS},
+                    "conversation_id": {"type": ["string", "null"]},
+                    "message_id": {"type": ["string", "null"]},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+            "restore": {
+                "operation": "upsert",
+                "routing_metadata": {"restore_intent": True},
+                "requires_current_base": True,
+            },
+        },
+        "notes.keyword": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": ["keyword"],
+                "properties": {"keyword": {"type": "string", "max_length": 100}},
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.keyword_link": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": keyword_link_schema,
+            "tombstone": keyword_link_schema,
+        },
+        "notes.keyword_collection": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "max_length": 255},
+                    "parent_sync_id": {"type": ["string", "null"]},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.keyword_collection_link": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": collection_link_schema,
+            "tombstone": collection_link_schema,
+        },
+        "notes.folder": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "max_length": 500},
+                    "parent_sync_id": {"type": ["string", "null"]},
+                },
+                "additional_properties": False,
+            },
+            "tombstone": {"operation": "tombstone"},
+        },
+        "notes.folder_link": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": folder_link_schema,
+            "tombstone": folder_link_schema,
+        },
+        "notes.link": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": {
+                "required": notes_link_required,
+                "properties": notes_link_properties,
+                "additional_properties": False,
+                "constraints": notes_link_constraints,
+            },
+            "tombstone": {
+                "required": [*notes_link_required, "deleted_at"],
+                "properties": {
+                    **notes_link_properties,
+                    "deleted_at": {"type": "string", "format": "date-time"},
+                    "reason": {
+                        "type": ["string", "null"],
+                        "max_length": NOTES_LINK_REASON_MAX_CHARS,
+                    },
+                },
+                "additional_properties": False,
+                "constraints": notes_link_constraints,
+            },
+        },
+        "personal_context.manifest": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": ProfileManifest.model_json_schema(),
+        },
+        "personal_context.scope": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": ProfileScope.model_json_schema(),
+        },
+        "personal_context.record": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": ProfileRecord.model_json_schema(),
+            "tombstone": ProfileRecord.model_json_schema(),
+        },
+        "personal_context.proposal": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": ProfileProposal.model_json_schema(),
+        },
+        "personal_context.purge": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "tombstone": personal_context_purge_schema,
+        },
+    }
+
+
+def _sync_v2_internal_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
+    """Return private known-domain contracts without advertising dormant domains."""
+
+    from .notes_moodboard_studio_contract import (
+        NotesMoodboardNoteV1,
+        NotesMoodboardV1,
+        NotesStudioDocumentV1,
+    )
+    from .notes_task_contract import (
+        NotesTaskActivityTombstoneV1,
+        NotesTaskActivityV1,
+        NotesTaskV1Payload,
+    )
+
+    schemas = sync_v2_domain_schemas()
+    task_schema = NotesTaskV1Payload.model_json_schema()
+    activity_schema = NotesTaskActivityV1.model_json_schema()
+    activity_tombstone_schema = NotesTaskActivityTombstoneV1.model_json_schema()
+    moodboard_schema = NotesMoodboardV1.model_json_schema()
+    placement_schema = NotesMoodboardNoteV1.model_json_schema()
+    studio_schema = NotesStudioDocumentV1.model_json_schema()
+    schemas.update(
+        {
+            "notes.task": {
+                "schema_version": 1,
+                "operations": ["upsert", "tombstone"],
+                "upsert": task_schema,
+                "tombstone": task_schema,
+            },
+            "notes.task_activity": {
+                "schema_version": 1,
+                "operations": ["upsert", "tombstone"],
+                "upsert": activity_schema,
+                "tombstone": activity_tombstone_schema,
+            },
+            "notes.moodboard": {
+                "schema_version": 1,
+                "operations": ["upsert", "tombstone"],
+                "upsert": moodboard_schema,
+                "tombstone": moodboard_schema,
+            },
+            "notes.moodboard_note": {
+                "schema_version": 1,
+                "operations": ["upsert", "tombstone"],
+                "upsert": placement_schema,
+                "tombstone": placement_schema,
+            },
+            "notes.studio_document": {
+                "schema_version": 1,
+                "operations": ["upsert", "tombstone"],
+                "upsert": studio_schema,
+                "tombstone": studio_schema,
+            },
+        }
+    )
+    return schemas
+
+
+def sync_v2_advertised_domain_schemas(
+    domain_schemas: Mapping[SyncDomain, dict[str, object]],
+    *,
+    advertised_domains: Sequence[SyncDomain],
+) -> dict[SyncDomain, dict[str, object]]:
+    """Select schemas that are already approved for public advertisement."""
+
+    return {
+        domain: domain_schemas[domain]
+        for domain in advertised_domains
+        if domain in domain_schemas
+    }
+
+
+def sync_v2_server_supported_adapter_versions(
+    *,
+    notes_task_sync_ready: bool = False,
+    personal_context_sync_ready: bool = False,
+) -> dict[SyncDomain, list[int]]:
+    """Return bounded server-supported versions independently of writability."""
+
+    domains = [
+        *SYNC_V2_SUPPORTED_DOMAINS,
+        *(NOTES_TASK_SYNC_DOMAINS if notes_task_sync_ready else ()),
+    ]
+    return {
+        domain: (
+            []
+            if domain in PERSONAL_CONTEXT_SYNC_DOMAINS
+            and not personal_context_sync_ready
+            else [1, 2]
+            if domain == "attachment.ref"
+            else [1]
+        )
+        for domain in domains
+    }
+
+
+def sync_v2_dataset_writable_adapter_versions(
+    dataset: SyncDataset | None = None,
+    *,
+    notes_attachment_sync_enabled: bool = False,
+    supports_attachments: bool = False,
+    notes_task_sync_ready: bool = False,
+    personal_context_sync_ready: bool = False,
+) -> dict[SyncDomain, list[int]]:
+    """Return versions writable under one authoritative dataset/settings gate."""
+
+    versions: dict[SyncDomain, list[int]] = {
+        domain: []
+        for domain in SYNC_V2_SUPPORTED_DOMAINS
+    }
+    if dataset is None:
+        return versions
+    enrolled = set(dataset.domains)
+    for domain in SYNC_V2_SUPPORTED_DOMAINS:
+        if domain in PERSONAL_CONTEXT_SYNC_DOMAINS and not personal_context_sync_ready:
+            continue
+        if domain in enrolled and domain != "attachment.ref":
+            versions[domain] = [1]
+    if sync_v2_attachment_ref_v2_is_writable(
+        dataset,
+        notes_attachment_sync_enabled=notes_attachment_sync_enabled,
+        supports_attachments=supports_attachments,
+    ):
+        versions["attachment.ref"] = [2]
+    if notes_task_sync_ready:
+        versions.update(dict.fromkeys(NOTES_TASK_SYNC_DOMAINS, [1]))
+    return versions
+
+
+def sync_v2_attachment_ref_v2_is_writable(
+    dataset: SyncDataset | None,
+    *,
+    notes_attachment_sync_enabled: bool,
+    supports_attachments: bool,
+) -> bool:
+    """Return whether attachment.ref v2 mutations are writable for a dataset."""
+
+    if dataset is None:
+        return False
+    attachment_state = dataset.metadata.get("notes_attachment_v2")
+    return bool(
+        notes_attachment_sync_enabled
+        and supports_attachments
+        and dataset.encryption_policy == DEFAULT_M1_ENCRYPTION_POLICY
+        and {"notes.note", "attachment.ref"}.issubset(dataset.domains)
+        and isinstance(attachment_state, Mapping)
+        and attachment_state.get("state") == "ready"
+    )
+
+
+def normalize_sync_v2_requested_domains(value: object) -> list[SyncDomain]:
+    """Validate, bound, and deduplicate one requested Sync-domain sequence."""
+
+    if not isinstance(value, Sequence) or isinstance(
+        value,
+        (str, bytes, bytearray),
+    ):
+        raise ValueError("requested_domains must be a list")
+    domains = list(value)
+    if len(domains) > SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS:
+        raise ValueError(
+            "requested_domains may contain at most "
+            f"{SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS} domains"
+        )
+    known = set(SYNC_V2_KNOWN_DOMAINS)
+    for domain in domains:
+        if not isinstance(domain, str) or domain not in known:
+            raise ValueError(
+                f"requested_domains contains unknown Sync domain: {domain}"
+            )
+    normalized = [cast(SyncDomain, domain) for domain in dict.fromkeys(domains)]
+    requested_task_domains = set(normalized).intersection(NOTES_TASK_SYNC_DOMAINS)
+    if requested_task_domains and requested_task_domains != set(
+        NOTES_TASK_SYNC_DOMAINS
+    ):
+        raise ValueError("requested_domains must include both Notes task domains")
+    return normalized
+
+
+def normalize_supported_adapter_versions(
+    value: object | None,
+    *,
+    requested_domains: Sequence[str],
+) -> dict[SyncDomain, list[int]]:
+    """Validate a bounded device version map; omission preserves version 1."""
+
+    requested = normalize_sync_v2_requested_domains(requested_domains)
+    if value is None:
+        return {domain: [1] for domain in requested}
+    if not isinstance(value, Mapping):
+        raise ValueError("supported_adapter_versions must be an object")
+    if len(value) > SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS:
+        raise ValueError(
+            "supported_adapter_versions may contain at most "
+            f"{SYNC_V2_MAX_ADAPTER_VERSION_DOMAINS} domains"
+        )
+
+    known = set(SYNC_V2_KNOWN_DOMAINS)
+    requested_set = set(requested)
+    normalized: dict[SyncDomain, list[int]] = {
+        domain: [1] for domain in requested
+    }
+    for raw_domain, raw_versions in value.items():
+        if not isinstance(raw_domain, str) or raw_domain not in known:
+            raise ValueError(
+                f"supported_adapter_versions contains unknown Sync domain: {raw_domain}"
+            )
+        if raw_domain not in requested_set:
+            raise ValueError(
+                "supported_adapter_versions domains must also be requested"
+            )
+        if not isinstance(raw_versions, Sequence) or isinstance(
+            raw_versions, (str, bytes, bytearray)
+        ):
+            raise ValueError(
+                "supported_adapter_versions values must be non-empty version lists"
+            )
+        versions = list(raw_versions)
+        if not versions:
+            raise ValueError(
+                "supported_adapter_versions values must be non-empty version lists"
+            )
+        if len(versions) > SYNC_V2_MAX_ADAPTER_VERSIONS_PER_DOMAIN:
+            raise ValueError(
+                "supported_adapter_versions may contain at most "
+                f"{SYNC_V2_MAX_ADAPTER_VERSIONS_PER_DOMAIN} versions per domain"
+            )
+        if any(isinstance(version, bool) or not isinstance(version, int) or version < 1 for version in versions):
+            raise ValueError(
+                "supported_adapter_versions must contain positive integers"
+            )
+        if len(set(versions)) != len(versions):
+            raise ValueError("supported_adapter_versions contains duplicate adapter versions")
+        normalized[raw_domain] = sorted(versions)
+    return normalized
 
 
 def server_frontend_mutation_enabled_for_policy(policy: EncryptionPolicy | str) -> bool:
@@ -155,6 +788,47 @@ def client_private_server_frontend_limitation_warning() -> dict[str, str]:
     return {
         "code": CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
         "message": CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE,
+    }
+
+
+def validate_notes_note_upsert_payload(
+    payload: Mapping[str, object],
+) -> dict[str, str | None]:
+    """Validate and return the lossless version-1 ``notes.note`` payload."""
+
+    unexpected = set(payload).difference(NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS)
+    if unexpected:
+        raise ValueError(
+            "notes.note upsert payload contains unsupported fields: "
+            + ", ".join(sorted(unexpected))
+        )
+
+    title = payload.get("title")
+    content = payload.get("content")
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("notes.note upsert payload requires a non-empty string title")
+    if len(title) > NOTES_NOTE_TITLE_MAX_CHARS:
+        raise ValueError(
+            f"notes.note title must be at most {NOTES_NOTE_TITLE_MAX_CHARS} characters"
+        )
+    if not isinstance(content, str) or not content:
+        raise ValueError("notes.note upsert payload requires non-empty string content")
+    if len(content) > NOTES_NOTE_CONTENT_MAX_CHARS:
+        raise ValueError(
+            f"notes.note content must be at most {NOTES_NOTE_CONTENT_MAX_CHARS} characters"
+        )
+
+    backlinks: dict[str, str | None] = {}
+    for field_name in ("conversation_id", "message_id"):
+        value = payload.get(field_name)
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"notes.note {field_name} must be a string or null")
+        backlinks[field_name] = value
+
+    return {
+        "title": title,
+        "content": content,
+        **backlinks,
     }
 
 
@@ -338,7 +1012,12 @@ class SyncDeviceDomainAckCreate:
     domain: SyncDomain
     through_server_sequence: int
     applied_at: str
+    adapter_version: int = 1
     idempotency_key: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.adapter_version < 1:
+            raise ValueError("Sync adapter version must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -351,6 +1030,7 @@ class SyncDeviceDomainAck:
     through_server_sequence: int
     applied_at: str
     updated_at: str
+    adapter_version: int = 1
     idempotency_key: str | None = None
 
 
@@ -380,6 +1060,31 @@ class SyncDeviceBlobAck:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncDeviceBlobIdAckCreate:
+    """Immutable blob-ID verification evidence accepted from a v2 device."""
+
+    dataset_id: str
+    device_id: str
+    blob_id: str
+    payload_hash: str
+    verified_at: str
+    idempotency_key: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDeviceBlobIdAck:
+    """Stored immutable blob-ID verification evidence."""
+
+    dataset_id: str
+    device_id: str
+    blob_id: str
+    payload_hash: str
+    verified_at: str
+    updated_at: str
+    idempotency_key: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SyncDeviceAcknowledgmentSummary:
     """Aggregated device acknowledgments for one dataset/device."""
 
@@ -387,6 +1092,8 @@ class SyncDeviceAcknowledgmentSummary:
     device_id: str
     domain_acks: dict[SyncDomain, SyncDeviceDomainAck] = field(default_factory=dict)
     blob_acks: list[SyncDeviceBlobAck] = field(default_factory=list)
+    version_acks: list[SyncDeviceDomainAck] = field(default_factory=list)
+    blob_id_acks: list[SyncDeviceBlobIdAck] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -538,8 +1245,18 @@ class SyncEnvelopeCreate:
     entity_version: str | int | None = None
     client_timestamp: str | None = None
     server_timestamp: str | None = None
+    mutation_group_id: str | None = None
+    mutation_step: int | None = None
+    mutation_step_count: int | None = None
+    mutation_plan_hash: str | None = None
 
     def __post_init__(self) -> None:
+        _validate_mutation_group_metadata(
+            mutation_group_id=self.mutation_group_id,
+            mutation_step=self.mutation_step,
+            mutation_step_count=self.mutation_step_count,
+            mutation_plan_hash=self.mutation_plan_hash,
+        )
         object_id = _coalesce_identity(self.object_id, self.entity_id, field_name="object_id")
         payload, payload_clear = _coalesce_payload(self.payload, self.payload_clear)
         object.__setattr__(self, "object_id", object_id)
@@ -551,10 +1268,11 @@ class SyncEnvelopeCreate:
         object.__setattr__(self, "payload_clear", payload_clear)
         object.__setattr__(self, "schema_version", self.schema_version or self.adapter_version)
         object.__setattr__(self, "adapter_version", self.adapter_version or self.schema_version)
-        if self.created_at_client is None and self.client_timestamp is not None:
-            object.__setattr__(self, "created_at_client", self.client_timestamp)
-        if self.client_timestamp is None and self.created_at_client is not None:
-            object.__setattr__(self, "client_timestamp", self.created_at_client)
+        created_at_client = normalize_sync_timestamp(
+            self.created_at_client or self.client_timestamp
+        )
+        object.__setattr__(self, "created_at_client", created_at_client)
+        object.__setattr__(self, "client_timestamp", created_at_client)
         if self.received_at_server is None and self.server_timestamp is not None:
             object.__setattr__(self, "received_at_server", self.server_timestamp)
         if self.server_timestamp is None and self.received_at_server is not None:
@@ -609,8 +1327,18 @@ class SyncEnvelope:
     entity_version: str | int | None = None
     client_timestamp: str | None = None
     server_timestamp: str | None = None
+    mutation_group_id: str | None = None
+    mutation_step: int | None = None
+    mutation_step_count: int | None = None
+    mutation_plan_hash: str | None = None
 
     def __post_init__(self) -> None:
+        _validate_mutation_group_metadata(
+            mutation_group_id=self.mutation_group_id,
+            mutation_step=self.mutation_step,
+            mutation_step_count=self.mutation_step_count,
+            mutation_plan_hash=self.mutation_plan_hash,
+        )
         object_id = _coalesce_identity(self.object_id, self.entity_id, field_name="object_id")
         server_cursor = self.server_cursor if self.server_cursor is not None else self.server_sequence
         if server_cursor is None:
@@ -624,10 +1352,11 @@ class SyncEnvelope:
         object.__setattr__(self, "payload_clear", payload_clear)
         object.__setattr__(self, "schema_version", self.schema_version or self.adapter_version)
         object.__setattr__(self, "adapter_version", self.adapter_version or self.schema_version)
-        if self.created_at_client is None and self.client_timestamp is not None:
-            object.__setattr__(self, "created_at_client", self.client_timestamp)
-        if self.client_timestamp is None and self.created_at_client is not None:
-            object.__setattr__(self, "client_timestamp", self.created_at_client)
+        created_at_client = normalize_sync_timestamp(
+            self.created_at_client or self.client_timestamp
+        )
+        object.__setattr__(self, "created_at_client", created_at_client)
+        object.__setattr__(self, "client_timestamp", created_at_client)
         if self.received_at_server is None and self.server_timestamp is not None:
             object.__setattr__(self, "received_at_server", self.server_timestamp)
         if self.server_timestamp is None and self.received_at_server is not None:
@@ -636,6 +1365,102 @@ class SyncEnvelope:
             object.__setattr__(self, "base_object_revision", self.base_version)
         if self.object_revision is None and isinstance(self.entity_version, int):
             object.__setattr__(self, "object_revision", self.entity_version)
+
+    @property
+    def authority(self) -> Any | None:
+        """Return validated Personal Context role metadata from persisted routing."""
+
+        if self.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+            return None
+        raw = self.routing_metadata.get("personal_context_authority")
+        if not isinstance(raw, Mapping):
+            return None
+        from .personal_context_ongoing_contract import PersonalContextAuthorityMetadata
+
+        try:
+            return PersonalContextAuthorityMetadata.model_validate(raw)
+        except ValueError:
+            return None
+
+
+def resolve_personal_context_ingress_result_revision(
+    *,
+    object_revision: object,
+    base_server_cursor: object,
+    base_object_revision: object,
+    base_object_hash: object,
+    base_version: object,
+) -> int | None:
+    """Resolve an ingress result revision from its immutable wire lineage."""
+
+    maximum = 2**63 - 1
+    if object_revision is not None:
+        if type(object_revision) is not int or object_revision < 1 or object_revision > maximum:
+            return None
+        return object_revision
+
+    base_values = (base_server_cursor, base_object_revision, base_object_hash)
+    if all(value is None for value in base_values):
+        return 1 if base_version is None else None
+    if any(value is None for value in base_values):
+        return None
+    if (
+        type(base_server_cursor) is not int
+        or base_server_cursor < 1
+        or base_server_cursor > maximum
+        or type(base_object_revision) is not int
+        or base_object_revision < 1
+        or base_object_revision >= maximum
+        or not isinstance(base_object_hash, str)
+        or not base_object_hash.strip()
+    ):
+        return None
+    if base_version is not None and not (
+        (isinstance(base_version, str) and bool(base_version.strip()))
+        or (type(base_version) is int and base_version == base_object_revision)
+    ):
+        return None
+    return base_object_revision + 1
+
+
+def _validate_mutation_group_metadata(
+    *,
+    mutation_group_id: str | None,
+    mutation_step: int | None,
+    mutation_step_count: int | None,
+    mutation_plan_hash: str | None,
+) -> None:
+    values = (
+        mutation_group_id,
+        mutation_step,
+        mutation_step_count,
+        mutation_plan_hash,
+    )
+    if all(value is None for value in values):
+        return
+    if any(value is None for value in values):
+        raise ValueError("Sync mutation group metadata must be supplied as a complete set")
+    if not isinstance(mutation_group_id, str) or not mutation_group_id.strip():
+        raise ValueError("Sync mutation group id must be a non-empty string")
+    if (
+        isinstance(mutation_step, bool)
+        or not isinstance(mutation_step, int)
+        or mutation_step < 0
+    ):
+        raise ValueError("Sync mutation group step must be a zero-based integer")
+    if (
+        isinstance(mutation_step_count, bool)
+        or not isinstance(mutation_step_count, int)
+        or mutation_step_count <= 0
+    ):
+        raise ValueError("Sync mutation group step count must be a positive integer")
+    if mutation_step >= mutation_step_count:
+        raise ValueError("Sync mutation group step must be less than its step count")
+    if (
+        not isinstance(mutation_plan_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", mutation_plan_hash) is None
+    ):
+        raise ValueError("Sync mutation group plan hash must be lowercase SHA-256 hex")
 
 
 @dataclass(frozen=True, slots=True)
@@ -672,7 +1497,17 @@ class SyncDeviceCursor:
     device_id: str
     domain: SyncDomain
     last_pulled_sequence: int
+    adapter_version: int = 1
+    max_delivered_sequence: int = 0
     updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.adapter_version < 1:
+            raise ValueError("Sync adapter version must be positive")
+        if self.last_pulled_sequence < 0 or self.max_delivered_sequence < 0:
+            raise ValueError("Sync cursor sequences must be non-negative")
+        if self.max_delivered_sequence > self.last_pulled_sequence:
+            raise ValueError("Sync delivered watermark cannot exceed scan cursor")
 
 
 @dataclass(frozen=True, slots=True)
@@ -938,13 +1773,190 @@ class SyncAttachment:
         object.__setattr__(self, "entity_id", object_id)
 
 
+def _validate_attachment_binding_identity(
+    *,
+    attachment_id: str,
+    attachment_revision: int,
+    blob_hash: str,
+    size_bytes: int,
+    establishing_server_cursor: int,
+    availability_at_acceptance: SyncAttachmentBindingAvailability,
+) -> None:
+    """Validate immutable attachment-revision binding fields at the store boundary."""
+
+    try:
+        parsed_attachment_id = UUID(attachment_id)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("attachment binding attachment_id must be canonical UUIDv4") from exc
+    if parsed_attachment_id.version != 4 or str(parsed_attachment_id) != attachment_id:
+        raise ValueError("attachment binding attachment_id must be canonical UUIDv4")
+    if isinstance(attachment_revision, bool) or attachment_revision < 1:
+        raise ValueError("attachment binding revision must be positive")
+    if re.fullmatch(r"sha256:[0-9a-f]{64}", blob_hash) is None:
+        raise ValueError("attachment binding blob_hash must be lowercase SHA-256")
+    if isinstance(size_bytes, bool) or size_bytes < 1:
+        raise ValueError("attachment binding size_bytes must be positive")
+    if isinstance(establishing_server_cursor, bool) or establishing_server_cursor < 1:
+        raise ValueError("attachment binding establishing cursor must be positive")
+    if availability_at_acceptance not in {"available", "metadata_only"}:
+        raise ValueError("attachment binding acceptance availability is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class SyncAttachmentRevisionBindingCreate:
+    """Immutable attachment revision binding accepted by the Sync v2 store."""
+
+    dataset_id: str
+    attachment_id: str
+    attachment_revision: int
+    blob_hash: str
+    size_bytes: int
+    establishing_server_cursor: int
+    availability_at_acceptance: SyncAttachmentBindingAvailability
+    resolved_blob_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.dataset_id.strip():
+            raise ValueError("attachment binding dataset_id must be non-empty")
+        _validate_attachment_binding_identity(
+            attachment_id=self.attachment_id,
+            attachment_revision=self.attachment_revision,
+            blob_hash=self.blob_hash,
+            size_bytes=self.size_bytes,
+            establishing_server_cursor=self.establishing_server_cursor,
+            availability_at_acceptance=self.availability_at_acceptance,
+        )
+        if self.resolved_blob_id is not None and not self.resolved_blob_id.strip():
+            raise ValueError("attachment binding resolved_blob_id must be non-empty")
+        if (
+            self.availability_at_acceptance == "available"
+            and self.resolved_blob_id is None
+        ):
+            raise ValueError(
+                "attachment binding available acceptance requires resolved_blob_id"
+            )
+        if (
+            self.availability_at_acceptance == "metadata_only"
+            and self.resolved_blob_id is not None
+        ):
+            raise ValueError(
+                "attachment binding metadata_only acceptance forbids resolved_blob_id"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class SyncAttachmentRevisionBinding:
+    """Stored immutable revision identity plus monotonic blob lifecycle pointers."""
+
+    dataset_id: str
+    attachment_id: str
+    attachment_revision: int
+    blob_hash: str
+    size_bytes: int
+    establishing_server_cursor: int
+    availability_at_acceptance: SyncAttachmentBindingAvailability
+    resolved_blob_id: str | None
+    retention_released_at: str | None
+    created_at: str
+
+    def __post_init__(self) -> None:
+        _validate_attachment_binding_identity(
+            attachment_id=self.attachment_id,
+            attachment_revision=self.attachment_revision,
+            blob_hash=self.blob_hash,
+            size_bytes=self.size_bytes,
+            establishing_server_cursor=self.establishing_server_cursor,
+            availability_at_acceptance=self.availability_at_acceptance,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SyncNotesAttachmentSourceMap:
+    """Stable bootstrap attachment identity for one hashed legacy source key."""
+
+    dataset_id: str
+    bootstrap_id: str
+    source_key_hash: str
+    note_id: str
+    attachment_id: str
+    created_at: str
+
+    def __post_init__(self) -> None:
+        if not self.dataset_id.strip() or not self.bootstrap_id.strip():
+            raise ValueError("attachment source map identity must be non-empty")
+        if not self.note_id.strip():
+            raise ValueError("attachment source map note_id must be non-empty")
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", self.source_key_hash) is None:
+            raise ValueError("attachment source map hash must be lowercase SHA-256")
+        try:
+            parsed_attachment_id = UUID(self.attachment_id)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError("attachment source map ID must be canonical UUIDv4") from exc
+        if parsed_attachment_id.version != 4 or str(parsed_attachment_id) != self.attachment_id:
+            raise ValueError("attachment source map ID must be canonical UUIDv4")
+
+
+@dataclass(frozen=True, slots=True)
+class SyncNotesAttachmentCleanupCandidate:
+    """Non-authoritative legacy source evidence retained after canonical import."""
+
+    dataset_id: str
+    bootstrap_id: str
+    source_key_hash: str
+    attachment_id: str
+    source_relative_path: str = field(repr=False)
+    source_path_hash: str
+    source_blob_hash: str
+    source_size_bytes: int
+    source_modified_ns: int
+    created_at: str
+
+    def __post_init__(self) -> None:
+        if not self.dataset_id.strip() or not self.bootstrap_id.strip():
+            raise ValueError("attachment cleanup identity must be non-empty")
+        if not self.source_relative_path.strip():
+            raise ValueError("attachment cleanup source path must be non-empty")
+        for value in (self.source_key_hash, self.source_path_hash, self.source_blob_hash):
+            if re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None:
+                raise ValueError("attachment cleanup hash must be lowercase SHA-256")
+        try:
+            parsed_attachment_id = UUID(self.attachment_id)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError("attachment cleanup ID must be canonical UUIDv4") from exc
+        if parsed_attachment_id.version != 4 or str(parsed_attachment_id) != self.attachment_id:
+            raise ValueError("attachment cleanup ID must be canonical UUIDv4")
+        if isinstance(self.source_size_bytes, bool) or self.source_size_bytes < 1:
+            raise ValueError("attachment cleanup size must be positive")
+        if isinstance(self.source_modified_ns, bool) or self.source_modified_ns < 0:
+            raise ValueError("attachment cleanup modified time is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDatasetStorageNamespace:
+    """Server-issued opaque physical storage namespace for one dataset."""
+
+    dataset_id: str
+    owner_user_id: str
+    storage_namespace_id: str
+    created_at: str
+
+    def __post_init__(self) -> None:
+        if not self.dataset_id.strip() or not self.owner_user_id.strip():
+            raise ValueError("storage namespace owner and dataset must be non-empty")
+        if re.fullmatch(r"[0-9a-f]{32}", self.storage_namespace_id) is None:
+            raise ValueError("storage namespace ID must be 32 lowercase hexadecimal characters")
+
+
 @dataclass(frozen=True, slots=True)
 class SyncBlobUploadSession:
     """Core metadata for a resumable Sync v2 M2 blob upload session."""
 
     upload_id: str
     dataset_id: str
+    owner_user_id: str
     attachment_id: str
+    domain: SyncDomain
+    object_id: str
     status: SyncBlobUploadStatus
     chunk_size: int
     chunk_count: int
@@ -957,6 +1969,7 @@ class SyncBlobUploadSession:
     quota: dict[str, Any] = field(default_factory=dict)
     expires_at: str | None = None
     blob_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1139,19 +2152,38 @@ __all__ = [
     "EncryptionPolicy",
     "M1_SYNC_DOMAINS",
     "M1_SYNC_OPERATIONS",
+    "NOTES_ORGANIZATION_DOMAINS",
+    "NOTES_ORGANIZATION_SYNC_OPERATIONS",
+    "NOTES_LINK_DOMAINS",
+    "NOTES_LINK_SYNC_OPERATIONS",
+    "NOTES_TASK_SYNC_DOMAINS",
+    "NOTES_TASK_SYNC_OPERATIONS",
+    "NOTES_MOODBOARD_STUDIO_DOMAINS",
+    "NOTES_MOODBOARD_STUDIO_OPERATIONS",
+    "NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS",
+    "NOTES_NOTE_CONTENT_MAX_CHARS",
+    "NOTES_NOTE_TITLE_MAX_CHARS",
     "MEDIA_SYNC_DOMAINS",
     "MEDIA_SYNC_OPERATIONS",
+    "PERSONAL_CONTEXT_SYNC_DOMAINS",
+    "PERSONAL_CONTEXT_SYNC_OPERATIONS",
     "STRICT_ENCRYPTION_POLICIES",
     "SOURCE_CACHE_SYNC_DOMAINS",
     "SOURCE_CACHE_SYNC_OPERATIONS",
     "SYNC_KEY_REWRAP_STATUSES",
     "SYNC_KEY_WRAPPED_FOR_VALUES",
     "SYNC_V2_ENCRYPTION_POLICIES",
+    "SYNC_V2_KNOWN_DOMAINS",
     "SYNC_V2_SUPPORTED_DOMAINS",
     "SYNC_V2_SUPPORTED_OPERATIONS",
     "SyncApplyStatus",
+    "SyncAttachmentBindingAvailability",
     "SyncAttachment",
     "SyncAttachmentCreate",
+    "SyncAttachmentRevisionBinding",
+    "SyncAttachmentRevisionBindingCreate",
+    "SyncNotesAttachmentCleanupCandidate",
+    "SyncNotesAttachmentSourceMap",
     "SyncBackgroundDomainStatus",
     "SyncBackgroundLease",
     "SyncBackgroundLeaseCreate",
@@ -1173,6 +2205,7 @@ __all__ = [
     "SyncConflictCreate",
     "SyncDataset",
     "SyncDatasetCreate",
+    "SyncDatasetStorageNamespace",
     "SyncDevice",
     "SyncDeviceCursor",
     "SyncDeviceUpsert",
@@ -1199,4 +2232,7 @@ __all__ = [
     "client_private_server_frontend_limitation_warning",
     "server_frontend_mutation_blockers_for_policy",
     "server_frontend_mutation_enabled_for_policy",
+    "sync_v2_advertised_domain_schemas",
+    "sync_v2_domain_schemas",
+    "validate_notes_note_upsert_payload",
 ]

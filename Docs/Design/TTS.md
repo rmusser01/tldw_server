@@ -26,6 +26,8 @@ https://www.stavros.io/posts/i-made-a-voice-note-taker/
 https://github.com/skylord123/pebble-home-assistant-ws
 https://community.home-assistant.io/t/my-journey-to-a-reliable-and-enjoyable-locally-hosted-voice-assistant/944860
 https://github.com/ekwek1/soprano?tab=readme-ov-file#installation
+https://github.com/FireRedTeam/FireRedVAD
+https://huggingface.co/collections/OpenMOSS-Team/moss-transcribe
 https://huggingface.co/kyutai
 https://huggingface.co/Echo9Zulu/Kokoro-82M-FP16-OpenVINO
 https://github.com/OpenBMB/VoxCPM
@@ -36,6 +38,7 @@ https://github.com/kyutai-labs/pocket-tts
 https://github.com/supertone-inc/supertonic
 https://github.com/k2-fsa/ZipVoice
 
+https://github.com/snakers4/silero-vad
 
 
 Gemma

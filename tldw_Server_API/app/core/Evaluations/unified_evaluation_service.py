@@ -18,9 +18,14 @@ import uuid
 from contextlib import suppress
 from datetime import datetime
 from enum import Enum
+from functools import partial
 from typing import Any, Optional
 
 from loguru import logger
+
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCallCredentials,
+)
 
 _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -42,7 +47,12 @@ _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
 )
 
-# Import database components
+# Import core components
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     create_evaluations_database as _create_evals_db,
 )
@@ -71,16 +81,17 @@ from tldw_Server_API.app.core.Evaluations.metrics_advanced import advanced_metri
 from tldw_Server_API.app.core.Evaluations.persona_telemetry_metrics import (
     get_persona_telemetry_metrics_summary,
 )
-from tldw_Server_API.app.core.Evaluations.run_state import (
-    can_transition_run_status,
-    normalize_run_status,
-)
 
 # Import evaluation engines
 from tldw_Server_API.app.core.Evaluations.rag_evaluator import RAGEvaluator
 from tldw_Server_API.app.core.Evaluations.response_quality_evaluator import ResponseQualityEvaluator
+from tldw_Server_API.app.core.Evaluations.run_state import (
+    can_transition_run_status,
+    normalize_run_status,
+)
 from tldw_Server_API.app.core.Evaluations.webhook_identity import webhook_user_id_from_value
 from tldw_Server_API.app.core.Evaluations.webhook_manager import WebhookEvent
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.testing import is_test_mode
 
 
@@ -683,8 +694,12 @@ class UnifiedEvaluationService:
         metrics: Optional[list[str]] = None,
         api_name: str = "openai",
         api_key: Optional[str] = None,
+        model: Optional[str] = None,
         user_id: str = "system",
         webhook_user_id: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
     ) -> dict[str, Any]:
         """
         Run G-Eval summarization evaluation.
@@ -707,24 +722,34 @@ class UnifiedEvaluationService:
             # Lazy import to avoid heavy chat stack at module import time
             from tldw_Server_API.app.core.Evaluations.ms_g_eval import run_geval
 
+            geval_call = partial(
+                run_geval,
+                transcript=source_text,
+                summary=summary,
+                api_key=api_key,
+                api_name=api_name,
+                model=model,
+                save=False,
+                app_config=app_config,
+                credentials_resolved=credentials_resolved,
+                provider_credentials=provider_credentials,
+            )
             if advanced_metrics.enabled:
                 with advanced_metrics.track_sli_request("/evaluations/geval"):
-                    result = await asyncio.to_thread(
-                        run_geval,
-                        transcript=source_text,
-                        summary=summary,
-                        api_key=api_key,
-                        api_name=api_name,
-                        save=False
+                    result = await await_owned_worker(
+                        await_bounded_sync_call(
+                            geval_call,
+                            pool=SYNC_ADAPTER_CALL_POOL,
+                            exhaustion_message="G-Eval adapter capacity is exhausted",
+                        )
                     )
             else:
-                result = await asyncio.to_thread(
-                    run_geval,
-                    transcript=source_text,
-                    summary=summary,
-                    api_key=api_key,
-                    api_name=api_name,
-                    save=False
+                result = await await_owned_worker(
+                    await_bounded_sync_call(
+                        geval_call,
+                        pool=SYNC_ADAPTER_CALL_POOL,
+                        exhaustion_message="G-Eval adapter capacity is exhausted",
+                    )
                 )
 
             # Parse and structure results
@@ -789,7 +814,7 @@ class UnifiedEvaluationService:
             }
 
         except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"G-Eval evaluation failed: {e}")
+            logger.error("G-Eval evaluation failed error_type={}", type(e).__name__)
             raise
 
     async def evaluate_rag(
@@ -801,8 +826,12 @@ class UnifiedEvaluationService:
         metrics: Optional[list[str]] = None,
         api_name: str = "openai",
         api_key: Optional[str] = None,
+        model: Optional[str] = None,
         user_id: str = "system",
         webhook_user_id: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
     ) -> dict[str, Any]:
         """
         Run RAG system evaluation.
@@ -823,14 +852,42 @@ class UnifiedEvaluationService:
             start_time = time.time()
 
             # Run evaluation
-            evaluator = self.get_rag_evaluator() if not api_key else RAGEvaluator(api_key=api_key)
-            results = await evaluator.evaluate(
-                query=query,
-                contexts=contexts,
-                response=response,
-                ground_truth=ground_truth,
-                metrics=metrics,
-                api_name=api_name
+            provider_norm = canonical_provider_name(api_name)
+            # LLM credentials are not embedding credentials, even when both
+            # deployments identify as OpenAI. Until embeddings have their own
+            # authoritatively resolved runtime handle, resolved LLM secrets
+            # must use the existing LLM answer-similarity fallback.
+            runtime_credentials = (
+                provider_credentials is not None
+                or credentials_resolved
+            )
+            embedding_kwargs = (
+                {"embedding_provider": None, "embedding_model": None}
+                if runtime_credentials or provider_norm != "openai"
+                else {}
+            )
+            if runtime_credentials:
+                evaluator = RAGEvaluator(
+                    api_key=api_key,
+                    app_config=app_config,
+                    credentials_resolved=True,
+                    provider_credentials=provider_credentials,
+                    **embedding_kwargs,
+                )
+            elif not api_key and provider_norm == "openai":
+                evaluator = self.get_rag_evaluator()
+            else:
+                evaluator = RAGEvaluator(api_key=api_key, **embedding_kwargs)
+            results = await await_owned_worker(
+                evaluator.evaluate(
+                    query=query,
+                    contexts=contexts,
+                    response=response,
+                    ground_truth=ground_truth,
+                    metrics=metrics,
+                    api_name=api_name,
+                    model=model,
+                )
             )
 
             evaluation_time = time.time() - start_time
@@ -894,7 +951,7 @@ class UnifiedEvaluationService:
             }
 
         except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"RAG evaluation failed: {e}")
+            logger.error("RAG evaluation failed error_type={}", type(e).__name__)
             raise
 
     async def evaluate_response_quality(
@@ -905,8 +962,12 @@ class UnifiedEvaluationService:
         custom_criteria: Optional[dict] = None,
         api_name: str = "openai",
         api_key: Optional[str] = None,
+        model: Optional[str] = None,
         user_id: str = "system",
         webhook_user_id: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
     ) -> dict[str, Any]:
         """
         Evaluate response quality.
@@ -926,13 +987,19 @@ class UnifiedEvaluationService:
             start_time = time.time()
 
             # Run evaluation
-            results = await self.get_quality_evaluator().evaluate(
-                prompt=prompt,
-                response=response,
-                expected_format=expected_format,
-                custom_criteria=custom_criteria,
-                api_name=api_name,
-                api_key=api_key,
+            results = await await_owned_worker(
+                self.get_quality_evaluator().evaluate(
+                    prompt=prompt,
+                    response=response,
+                    expected_format=expected_format,
+                    custom_criteria=custom_criteria,
+                    api_name=api_name,
+                    api_key=api_key,
+                    model=model,
+                    app_config=app_config,
+                    credentials_resolved=credentials_resolved,
+                    provider_credentials=provider_credentials,
+                )
             )
 
             evaluation_time = time.time() - start_time
@@ -996,7 +1063,10 @@ class UnifiedEvaluationService:
             }
 
         except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Response quality evaluation failed: {e}")
+            logger.error(
+                "Response quality evaluation failed error_type={}",
+                type(e).__name__,
+            )
             raise
 
     async def evaluate_ocr(

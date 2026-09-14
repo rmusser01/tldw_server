@@ -1,32 +1,76 @@
+"""Prompt management and prompt-improvement API endpoints."""
+
 # tldw_Server_API/app/api/v1/endpoints/prompts.py
 #
 #
 # Imports
 import base64
 import contextlib
+import json
 import os
 import re
+from collections.abc import Mapping
+from dataclasses import asdict
 from typing import Any, Optional, Union
 
 #
 # 3rd-party imports
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, Response, status
+from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import ValidationError
+from starlette.requests import ClientDisconnect
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    AuthPrincipal,
+    TokenScopeGuard,
+    User,
+    consume_deferred_token_quota,
+    enforce_rbac_rate_limit,
+    get_auth_principal,
+    get_request_user,
+    rbac_rate_limit,
+)
+from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
+from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
+    get_request_routing_decision_store,
+)
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
-from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas import prompt_schemas as schemas
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings as get_auth_settings
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
+from tldw_Server_API.app.core.Chat.chat_exceptions import set_request_id
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
     ConflictError,
     DatabaseError,
     InputError,
     PromptsDatabase,
+)
+from tldw_Server_API.app.core.LLM_Calls.routing import InMemoryRoutingDecisionStore
+from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
+    PROMPT_IMPROVEMENT_LIMITS,
+    PromptImprovementError,
+    PromptImprovementInput,
+    improve_prompt,
+    validate_prompt_improvement_input,
+)
+from tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch import (
+    PromptImprovementDispatchError,
+    PromptImprovementDispatchResult,
+    dispatch_prompt_improvement,
+)
+
+#
+# Local Imports
+from tldw_Server_API.app.core.Prompt_Management.Prompts_Interop import (
+    db_export_prompt_keywords_to_csv,
+    db_export_prompts_formatted,  # Using the standalone function from interop
 )
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts import (
     PromptDefinition,
@@ -37,14 +81,9 @@ from tldw_Server_API.app.core.Prompt_Management.structured_prompts import (
     render_legacy_snapshot,
     validate_prompt_definition,
 )
-
-#
-# Local Imports
-from tldw_Server_API.app.core.Prompt_Management.Prompts_Interop import (
-    db_export_prompt_keywords_to_csv,
-    db_export_prompts_formatted,  # Using the standalone function from interop
-)
 from tldw_Server_API.app.core.testing import env_flag_enabled
+
+from .llm_providers import get_configured_providers
 
 #from tldw_Server_API.app.core.DB_Management.DB_Manager import DBManager
 #
@@ -77,6 +116,82 @@ _PROMPTS_DB_OPERATION_EXCEPTIONS = _PROMPTS_LOOKUP_EXCEPTIONS + (
     ConflictError,
     InputError,
 )
+
+_PROMPT_IMPROVEMENT_ERROR_MESSAGES = {
+    "invalid_input": "The prompt improvement request is invalid.",
+    "missing_model": "Select an active chat model and try again.",
+    "unsupported_model": "The selected chat model is not available.",
+    "provider_not_configured": "The active provider is not configured for this request.",
+    "draft_too_large": "The prompt draft exceeds the configured size limit.",
+    "provider_rate_limited": "The active provider is temporarily rate limited.",
+    "provider_timeout": "The active provider timed out.",
+    "provider_unavailable": "The active provider is temporarily unavailable.",
+    "model_refusal": "The active model did not provide an improvement candidate.",
+    "invalid_model_output": "The active model returned an unusable response.",
+    "preservation_failed": "The candidate could not be presented safely.",
+    "internal_error": "The prompt improvement request could not be completed.",
+}
+
+_PROMPT_IMPROVEMENT_ERROR_STATUS = {
+    "invalid_input": status.HTTP_400_BAD_REQUEST,
+    "missing_model": status.HTTP_400_BAD_REQUEST,
+    "unsupported_model": status.HTTP_400_BAD_REQUEST,
+    "provider_not_configured": status.HTTP_503_SERVICE_UNAVAILABLE,
+    "draft_too_large": status.HTTP_413_CONTENT_TOO_LARGE,
+    "provider_rate_limited": status.HTTP_429_TOO_MANY_REQUESTS,
+    "provider_timeout": status.HTTP_504_GATEWAY_TIMEOUT,
+    "provider_unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
+    "model_refusal": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "invalid_model_output": status.HTTP_502_BAD_GATEWAY,
+    "preservation_failed": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "internal_error": status.HTTP_500_INTERNAL_SERVER_ERROR,
+}
+
+_PROMPT_IMPROVEMENT_RETRYABLE_CODES = frozenset(
+    {"provider_rate_limited", "provider_timeout", "provider_unavailable"}
+)
+
+_PROMPT_IMPROVEMENT_ERROR_RESPONSES = {
+    status_code: {
+        "model": schemas.PromptImproveErrorResponse,
+        "description": "Sanitized prompt-improvement failure.",
+    }
+    for status_code in sorted(set(_PROMPT_IMPROVEMENT_ERROR_STATUS.values()))
+}
+
+_PROMPT_IMPROVEMENT_TOKEN_SECURITY = TokenScopeGuard(
+    "any",
+    require_if_present=True,
+    endpoint_id="prompts.improve",
+    count_as="call",
+    defer_count=True,
+)
+_PROMPT_IMPROVEMENT_BILLING_CHECK = require_within_limit(
+    LimitCategory.API_CALLS_DAY,
+    1,
+)
+
+
+def _inline_local_openapi_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Inline Pydantic-local definitions before embedding a schema in OpenAPI."""
+
+    definitions = schema.pop("$defs", {})
+
+    def expand(value: Any) -> Any:
+        if isinstance(value, list):
+            return [expand(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        ref = value.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            name = ref.rsplit("/", 1)[-1]
+            referenced = definitions.get(name)
+            if isinstance(referenced, dict):
+                siblings = {key: item for key, item in value.items() if key != "$ref"}
+                return expand({**referenced, **siblings})
+        return {key: expand(item) for key, item in value.items()}
+
+    return expand(schema)
 
 
 def _extract_template_variables(template: str) -> list[str]:
@@ -408,6 +523,334 @@ async def verify_prompts_user(
         )
     return True
 
+
+def _prompt_improvement_error_response(
+    code: str,
+    *,
+    request_id: str,
+    retryable: bool | None = None,
+    retry_after_seconds: int | None = None,
+) -> JSONResponse:
+    """Build one bounded public failure without echoing untrusted content."""
+
+    public_code = (
+        code if code in _PROMPT_IMPROVEMENT_ERROR_MESSAGES else "internal_error"
+    )
+    should_retry = (
+        public_code in _PROMPT_IMPROVEMENT_RETRYABLE_CODES
+        if retryable is None
+        else bool(retryable)
+    )
+    if retry_after_seconds is not None:
+        try:
+            retry_after_seconds = max(0, min(int(retry_after_seconds), 86_400))
+        except (TypeError, ValueError):
+            retry_after_seconds = None
+    error = schemas.PromptImproveErrorResponse(
+        code=public_code,
+        message=_PROMPT_IMPROVEMENT_ERROR_MESSAGES[public_code],
+        retryable=should_retry,
+        retry_after_seconds=retry_after_seconds,
+        request_id=request_id,
+    )
+    headers = (
+        {"Retry-After": str(retry_after_seconds)}
+        if retry_after_seconds is not None
+        else None
+    )
+    return JSONResponse(
+        status_code=_PROMPT_IMPROVEMENT_ERROR_STATUS[public_code],
+        content=error.model_dump(exclude_none=True),
+        headers=headers,
+    )
+
+
+def _parse_prompt_improvement_payload(
+    payload: Any,
+    *,
+    request_id: str,
+) -> schemas.PromptImproveRequest | JSONResponse:
+    """Validate manually so FastAPI never echoes invalid draft input."""
+
+    if isinstance(payload, Mapping):
+        raw_text = payload.get("text")
+        if (
+            isinstance(raw_text, str)
+            and len(raw_text) > PROMPT_IMPROVEMENT_LIMITS.max_draft_chars
+        ):
+            return _prompt_improvement_error_response(
+                "draft_too_large",
+                request_id=request_id,
+                retryable=False,
+            )
+    try:
+        return schemas.PromptImproveRequest.model_validate(payload)
+    except ValidationError:
+        return _prompt_improvement_error_response(
+            "invalid_input",
+            request_id=request_id,
+            retryable=False,
+        )
+
+
+async def _read_prompt_improvement_payload(
+    request: Request,
+    *,
+    request_id: str,
+) -> schemas.PromptImproveRequest | JSONResponse:
+    """Bound raw request parsing so malformed JSON uses the public error contract."""
+
+    content_type = str(request.headers.get("content-type") or "")
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    if not (
+        media_type == "application/json"
+        or (media_type.startswith("application/") and media_type.endswith("+json"))
+    ):
+        return _prompt_improvement_error_response(
+            "invalid_input",
+            request_id=request_id,
+            retryable=False,
+        )
+
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        normalized_length = content_length.strip()
+        if not normalized_length.isdecimal():
+            return _prompt_improvement_error_response(
+                "invalid_input",
+                request_id=request_id,
+                retryable=False,
+            )
+        if int(normalized_length) > PROMPT_IMPROVEMENT_LIMITS.max_request_bytes:
+            return _prompt_improvement_error_response(
+                "draft_too_large",
+                request_id=request_id,
+                retryable=False,
+            )
+
+    chunks: list[bytes] = []
+    accumulated = 0
+    try:
+        async for chunk in request.stream():
+            accumulated += len(chunk)
+            if accumulated > PROMPT_IMPROVEMENT_LIMITS.max_request_bytes:
+                return _prompt_improvement_error_response(
+                    "draft_too_large",
+                    request_id=request_id,
+                    retryable=False,
+                )
+            if chunk:
+                chunks.append(bytes(chunk))
+    except (ClientDisconnect, RuntimeError):
+        return _prompt_improvement_error_response(
+            "invalid_input",
+            request_id=request_id,
+            retryable=False,
+        )
+
+    raw_payload = b"".join(chunks)
+    if len(raw_payload) > PROMPT_IMPROVEMENT_LIMITS.max_request_bytes:
+        return _prompt_improvement_error_response(
+            "draft_too_large",
+            request_id=request_id,
+            retryable=False,
+        )
+    try:
+        payload = json.loads(raw_payload)
+    except (json.JSONDecodeError, RecursionError, UnicodeDecodeError):
+        return _prompt_improvement_error_response(
+            "invalid_input",
+            request_id=request_id,
+            retryable=False,
+        )
+    return _parse_prompt_improvement_payload(payload, request_id=request_id)
+
+
+async def _run_prompt_improvement_post_validation_gates(
+    *,
+    request: Request,
+    response: Response,
+    principal: AuthPrincipal,
+    x_tldw_org_id: int | None,
+    org_id: int | None,
+) -> None:
+    """Debit and enforce operation gates after bounded domain validation."""
+
+    db_pool = await get_db_pool()
+    await consume_deferred_token_quota(request, db_pool=db_pool)
+    await enforce_rbac_rate_limit(request, "prompts.improve", db_pool)
+    await enforce_llm_budget(request)
+    await _PROMPT_IMPROVEMENT_BILLING_CHECK(
+        response=response,
+        principal=principal,
+        x_tldw_org_id=x_tldw_org_id,
+        org_id=org_id,
+    )
+
+
+@router.get(
+    "/capabilities",
+    response_model=schemas.PromptCapabilitiesResponse,
+    summary="Discover prompt feature capabilities",
+    tags=["prompts"],
+    dependencies=[
+        Depends(get_auth_principal),
+        Depends(rbac_rate_limit("prompts.capabilities")),
+    ],
+)
+async def get_prompt_capabilities() -> schemas.PromptCapabilitiesResponse:
+    """Return fail-closed Track A/Track B flags and centralized limits."""
+
+    return schemas.PromptCapabilitiesResponse(
+        prompt_improvement_v1=schemas.PromptImprovementCapability(
+            supported=True,
+            limits=schemas.PromptImprovementLimitsResponse(
+                **asdict(PROMPT_IMPROVEMENT_LIMITS)
+            ),
+        ),
+        single_text_recipe_v2=schemas.PromptRecipeCapability(supported=False),
+    )
+
+
+@router.post(
+    "/improve",
+    response_model=schemas.PromptImproveResponse,
+    summary="Improve one isolated prompt draft with the active chat model",
+    tags=["prompts"],
+    responses=_PROMPT_IMPROVEMENT_ERROR_RESPONSES,
+    dependencies=[
+        Depends(_PROMPT_IMPROVEMENT_TOKEN_SECURITY),
+        Depends(get_auth_principal),
+    ],
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": _inline_local_openapi_refs(
+                        schemas.PromptImproveRequest.model_json_schema()
+                    )
+                }
+            },
+        }
+    },
+)
+async def improve_prompt_endpoint(
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_request_user),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    routing_decision_store: InMemoryRoutingDecisionStore = Depends(
+        get_request_routing_decision_store
+    ),
+    x_tldw_org_id: int | None = Header(default=None, alias="X-TLDW-Org-Id"),
+    org_id: int | None = Query(default=None),
+) -> schemas.PromptImproveResponse | JSONResponse:
+    """Generate and validate one draft-only candidate without persistence."""
+
+    request_id = set_request_id()
+    try:
+        parsed = await _read_prompt_improvement_payload(request, request_id=request_id)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        improvement_input = PromptImprovementInput(
+            target=parsed.target,
+            text=parsed.text,
+            protected_tokens=tuple(parsed.protected_tokens),
+        )
+        validate_prompt_improvement_input(improvement_input)
+    except PromptImprovementError as exc:
+        return _prompt_improvement_error_response(
+            exc.code,
+            request_id=request_id,
+            retryable=False,
+        )
+    except (AttributeError, KeyError, RecursionError, RuntimeError, TypeError, ValueError):
+        return _prompt_improvement_error_response(
+            "invalid_input",
+            request_id=request_id,
+            retryable=False,
+        )
+
+    await _run_prompt_improvement_post_validation_gates(
+        request=request,
+        response=response,
+        principal=principal,
+        x_tldw_org_id=x_tldw_org_id,
+        org_id=org_id,
+    )
+
+    dispatch_result: PromptImprovementDispatchResult | None = None
+
+    async def generate(messages: list[dict[str, str]]) -> str:
+        nonlocal dispatch_result
+        if dispatch_result is not None:
+            raise PromptImprovementDispatchError("internal_error")
+        dispatch_result = await dispatch_prompt_improvement(
+            request=request,
+            current_user=current_user,
+            routing_decision_store=routing_decision_store,
+            selected_model=parsed.model_selection.selected_model,
+            provider_hint=parsed.model_selection.provider_hint,
+            messages=messages,
+            request_id=request_id,
+            configured_providers_getter=get_configured_providers,
+        )
+        return dispatch_result.text
+
+    try:
+        result = await improve_prompt(
+            improvement_input,
+            generate=generate,
+        )
+        if dispatch_result is None:
+            return _prompt_improvement_error_response(
+                "internal_error",
+                request_id=request_id,
+                retryable=False,
+            )
+        return schemas.PromptImproveResponse(
+            operation_id=parsed.operation_id,
+            status=result.status,
+            improved_text=result.improved_text,
+            findings=[
+                schemas.PromptImproveFinding(
+                    category=finding.category,
+                    issue=finding.issue,
+                    change=finding.change,
+                )
+                for finding in result.findings
+            ],
+            review_required=result.review_required,
+            warnings=list(result.warnings),
+            resolved_model=schemas.PromptResolvedModel(
+                provider=dispatch_result.provider,
+                model=dispatch_result.model,
+                display_name=dispatch_result.display_name,
+            ),
+            meta_prompt_version=result.meta_prompt_version,
+        )
+    except PromptImprovementDispatchError as exc:
+        return _prompt_improvement_error_response(
+            exc.code,
+            request_id=request_id,
+            retryable=exc.retryable,
+            retry_after_seconds=exc.retry_after_seconds,
+        )
+    except PromptImprovementError as exc:
+        return _prompt_improvement_error_response(
+            exc.code,
+            request_id=request_id,
+            retryable=False,
+        )
+    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+        return _prompt_improvement_error_response(
+            "internal_error",
+            request_id=request_id,
+            retryable=False,
+        )
+
+
 @router.get(
     "/health",
     summary="Prompts service health",
@@ -462,7 +905,7 @@ async def prompts_health():
             health["status"] = "degraded"
         if base_dir and exists and not writable:
             health["status"] = "degraded"
-    except _PROMPTS_LOOKUP_EXCEPTIONS as e:
+    except _PROMPTS_LOOKUP_EXCEPTIONS:
         health["status"] = "unhealthy"
         health["error"] = "Prompts health check failed"
 

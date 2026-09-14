@@ -10,9 +10,18 @@ This module tests all 7 LLM adapters:
 7. run_translate_adapter - Translation via LLM
 """
 
+import re
+import threading
+
 import pytest
 
 import tldw_Server_API.app.core.Workflows.adapters as wf_adapters
+from tldw_Server_API.app.core.Moderation.moderation_service import (
+    ModerationPolicy,
+    ModerationService,
+    PatternRule,
+)
+from tldw_Server_API.app.core.Moderation.policy_evaluator import PolicyEvaluator
 from tldw_Server_API.app.core.Workflows.adapters import (
     run_llm_adapter,
     run_llm_with_tools_adapter,
@@ -24,6 +33,19 @@ from tldw_Server_API.app.core.Workflows.adapters import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def _real_moderation_service(policy: ModerationPolicy) -> ModerationService:
+    service = ModerationService.__new__(ModerationService)
+    service._lock = threading.RLock()
+    service._policy_evaluator = PolicyEvaluator()
+    service._max_scan_chars = 200_000
+    service._match_window_chars = 4_096
+    service._max_fallback_scan_chars = 800_000
+    service._max_replacements_per_pattern = 1_000
+    service._global_policy = policy
+    service._user_overrides = {}
+    return service
 
 
 # =============================================================================
@@ -828,6 +850,79 @@ async def test_moderation_adapter_redact(monkeypatch):
     result = await run_moderation_adapter(config, context)
     assert "[REDACTED]" in result["redacted_text"]
     assert result["redaction_count"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_moderation_adapter_check_with_real_service(monkeypatch):
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+    policy = ModerationPolicy(
+        enabled=True,
+        input_action="block",
+        output_action="redact",
+        per_user_overrides=False,
+        block_patterns=[
+            PatternRule(
+                regex=re.compile("secret"),
+                action="block",
+                categories={"confidential"},
+                phase="input",
+            )
+        ],
+    )
+    service = _real_moderation_service(policy)
+    import tldw_Server_API.app.core.Moderation.moderation_service as service_module
+    monkeypatch.setattr(
+        service_module,
+        "get_moderation_service",
+        lambda: service,
+    )
+
+    result = await run_moderation_adapter(
+        {"action": "check", "text": "secret"},
+        {"user_id": "1"},
+    )
+
+    assert result["allowed"] is False
+    assert result["reason"] == "matched:confidential"
+    assert result["matched_rules"] == ["secret"]
+    assert result["action_recommended"] == "block"
+
+
+@pytest.mark.asyncio
+async def test_moderation_adapter_redact_with_real_service_counts_replacements(
+    monkeypatch,
+):
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+    policy = ModerationPolicy(
+        enabled=False,
+        redact_replacement="[REDACTED]",
+        per_user_overrides=False,
+        block_patterns=[
+            PatternRule(
+                regex=re.compile("secret"),
+                action="warn",
+                replacement="[RULE]",
+            )
+        ],
+    )
+    service = _real_moderation_service(policy)
+    import tldw_Server_API.app.core.Moderation.moderation_service as service_module
+    monkeypatch.setattr(
+        service_module,
+        "get_moderation_service",
+        lambda: service,
+    )
+
+    result = await run_moderation_adapter(
+        {"action": "redact", "text": "secret and secret"},
+        {"user_id": "1"},
+    )
+
+    assert result["redacted_text"] == "[RULE] and [RULE]"
+    assert result["text"] == "[RULE] and [RULE]"
+    assert result["redaction_count"] == 2
 
 
 @pytest.mark.asyncio

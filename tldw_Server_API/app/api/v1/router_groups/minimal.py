@@ -3,6 +3,7 @@
 These routers are force-included under MINIMAL_TEST_APP to keep lightweight
 integration tests working without importing the broader endpoint surface.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -44,6 +45,7 @@ MINIMAL_REQUIRED_ROUTER_NAMES = (
     "paper_search",
     "chat",
     "chat_loop",
+    "chat_macros",
     "conversations_alias",
     "characters",
     "character_memory",
@@ -52,13 +54,13 @@ MINIMAL_REQUIRED_ROUTER_NAMES = (
     "workspace_migrations",
     "workspaces",
     "workspace_memberships",
+    "service_prompts",
     "rpg",
     "admin",
     "workspace_eligibility",
 )
 MINIMAL_REQUIRED_ROUTER_OVERRIDES = {
-    name: RouterSpecOverride(skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS)
-    for name in MINIMAL_REQUIRED_ROUTER_NAMES
+    name: RouterSpecOverride(skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS) for name in MINIMAL_REQUIRED_ROUTER_NAMES
 }
 
 
@@ -205,6 +207,31 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
                 attr_name="ws_router",
                 skip_context=minimal_skip_context,
             ),
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.audio.audio_realtime",
+                log_name="audio_realtime",
+                prefix=f"{API_V1_PREFIX}/audio",
+                tags=("audio-realtime",),
+                route_key="audio-realtime",
+                skip_context=minimal_skip_context,
+            ),
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.audio.audio_realtime",
+                log_name="audio_realtime_websocket",
+                prefix=f"{API_V1_PREFIX}/audio",
+                tags=("audio-realtime",),
+                route_key="audio-realtime",
+                attr_name="ws_router",
+                skip_context=minimal_skip_context,
+            ),
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.realtime_compat",
+                log_name="realtime_compat",
+                prefix="/v1",
+                tags=("audio-realtime",),
+                route_key="audio-realtime",
+                skip_context=minimal_skip_context,
+            ),
         ):
             append_imported_router_spec(specs, audio_spec)
     else:
@@ -268,6 +295,12 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             log_name="claims",
             prefix=f"{API_V1_PREFIX}",
             tags=("claims",),
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path=("tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket"),
+            log_name="prompt_studio_websocket",
+            tags=("prompt-studio",),
             skip_context="in minimal test app",
         ),
     ):
@@ -490,12 +523,14 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, workflow_spec)
 
-    specs.append(RouterSpec(
-        router=evaluations_router_factory,
-        prefix=f"{API_V1_PREFIX}",
-        tags=("evaluations",),
-        route_key="evaluations",
-    ))
+    specs.append(
+        RouterSpec(
+            router=evaluations_router_factory,
+            prefix=f"{API_V1_PREFIX}",
+            tags=("evaluations",),
+            route_key="evaluations",
+        )
+    )
 
     for experience_spec in (
         ImportedRouterSpec(
@@ -517,6 +552,14 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             log_name="personalization",
             prefix=f"{API_V1_PREFIX}/personalization",
             tags=("personalization",),
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.personal_context",
+            log_name="personal-context",
+            prefix=f"{API_V1_PREFIX}/personal-context",
+            tags=("personal-context",),
+            route_key="personal-context",
             skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(
@@ -555,6 +598,13 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
         append_imported_router_spec(specs, guardian_safety_spec)
 
     for persona_notes_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.buddies",
+            log_name="buddies",
+            prefix=f"{API_V1_PREFIX}/buddies",
+            tags=("buddies",),
+            skip_context=minimal_skip_context,
+        ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.persona",
             log_name="persona",

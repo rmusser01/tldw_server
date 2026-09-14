@@ -16,11 +16,17 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Research.discovery import executor as executor_module
+from tldw_Server_API.app.core.Research.discovery.clinicaltrials_pubmed_central import (
+    clinicaltrials_pubmed_central_shadow_registry,
+)
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     BudgetCeilings,
     DiscoveryOutcomeIdentity,
+    DispatchAllowance,
+    ExactOrigin,
     ExecutionMode,
     OperationKind,
+    QueryPair,
 )
 from tldw_Server_API.app.core.Research.discovery.executor import (
     DiscoveryAdapterResult,
@@ -32,18 +38,25 @@ from tldw_Server_API.app.core.Research.discovery.executor import (
 from tldw_Server_API.app.core.Research.discovery.gateway import (
     DiscoveryGatewayResponse,
     DiscoveryGatewayTrace,
+    dispatch_once,
 )
 from tldw_Server_API.app.core.Research.discovery.identity import build_fingerprint
 from tldw_Server_API.app.core.Research.discovery.planner import (
     PlanningRequest,
     compile_discovery_plan,
+    expected_dispatch_group_id,
+    expected_logical_attempt_id,
 )
 from tldw_Server_API.app.core.Research.discovery.registry import (
     DiscoveryRegistry,
     foundation_readiness,
     foundation_registry,
 )
-from tldw_Server_API.app.core.Security.http_hop import HTTPHopLimits
+from tldw_Server_API.app.core.Security.http_hop import (
+    HTTPHopLimits,
+    HTTPHopResponse,
+    NormalizedHTTPHopRequest,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -65,6 +78,10 @@ _NORMALIZED_KEYS = {
     "provider",
     "provider_ids",
 }
+
+
+class _StringSubclass(str):
+    pass
 
 
 def _module():
@@ -101,13 +118,18 @@ def _registry_with_response_limit(max_response_bytes: int | None) -> DiscoveryRe
     )
 
 
-def _plan_for(*, result_limit: int = 2, max_response_bytes: int | None = None):
+def _plan_for(
+    *,
+    result_limit: int = 2,
+    max_response_bytes: int | None = None,
+    filters: tuple[QueryPair, ...] = (),
+):
     registry = _registry_with_response_limit(max_response_bytes)
     plan = compile_discovery_plan(
         PlanningRequest(
             source_ids=("pubmed",),
             query="  BOUNDED   Discovery  ",
-            filters=(),
+            filters=filters,
             result_limit=result_limit,
         ),
         registry=registry,
@@ -275,6 +297,7 @@ async def _invoke(
     *,
     result_limit: int = 2,
     max_response_bytes: int | None = None,
+    filters: tuple[QueryPair, ...] = (),
     statuses: list[object] | None = None,
     content_types: list[str | None] | None = None,
     retry_afters: list[object] | None = None,
@@ -283,6 +306,7 @@ async def _invoke(
     registry, plan = _plan_for(
         result_limit=result_limit,
         max_response_bytes=max_response_bytes,
+        filters=filters,
     )
     group = plan.dispatch_groups[0]
     route = registry.get_route(group.route_id)
@@ -518,6 +542,516 @@ async def test_executor_empty_search_creates_only_one_dispatch_id() -> None:
     assert len(gateway_calls) == 1
     assert tuple(record.dispatch_id for record in result.usage.physical_records) == ("pubmed-esearch-dispatch",)
     assert result.usage.accounting.created == result.usage.accounting.debited == 1
+
+
+def _overlay_plan_for(
+    *,
+    result_limit: int = 2,
+    filters: tuple[QueryPair, ...] = (),
+):
+    registry = clinicaltrials_pubmed_central_shadow_registry()
+    plan = compile_discovery_plan(
+        PlanningRequest(
+            source_ids=("pubmed",),
+            query="  BOUNDED   Discovery  ",
+            filters=filters,
+            result_limit=result_limit,
+        ),
+        registry=registry,
+        readiness=foundation_readiness(ExecutionMode.SYNTHETIC),
+        budget=BudgetCeilings(1, 2, 1, 0, 0, 40_000, result_limit),
+    )
+    return registry, plan
+
+
+def _aligned_overlay_group(group, **changes):
+    """Apply coherent group fields to every intent carrying that field."""
+    intent_changes = {name: changes[name] for name in ("route_id", "policy_digest", "limits") if name in changes}
+    intents = tuple(replace(intent, **intent_changes) for intent in group.intents)
+    return replace(group, intents=intents, **changes)
+
+
+def _mutated_overlay_group(mutation: str):
+    _registry, plan = _overlay_plan_for()
+    group = plan.dispatch_groups[0]
+    if mutation == "route_id":
+        return _aligned_overlay_group(group, route_id="forged_pubmed_route")
+    if mutation == "backend_id":
+        return replace(group, backend_id="arxiv_api")
+    if mutation == "policy_digest":
+        return _aligned_overlay_group(group, policy_digest="f" * 64)
+    if mutation == "limits":
+        limits = replace(group.limits, timeout_ms=19_999)
+        return _aligned_overlay_group(group, limits=limits)
+    if mutation == "allowance":
+        return replace(group, allowance=DispatchAllowance(3, 1, 0, 0))
+    if mutation == "logical_source":
+        attempts = tuple(replace(attempt, catalog_source_id="pubmed_forged") for attempt in group.logical_attempts)
+        return replace(group, logical_attempts=attempts)
+    if mutation == "filters":
+        object.__setattr__(group, "filters", (object(),))
+        return group
+    if mutation == "filters_container":
+        object.__setattr__(group, "filters", [QueryPair("year", "2025")])
+        return group
+    if mutation in {"filters_tool", "filters_email"}:
+        name = "tool" if mutation == "filters_tool" else "email"
+        object.__setattr__(group, "filters", (QueryPair(name, "attacker"),))
+        return group
+    if mutation in {"filters_name_type", "filters_value_type"}:
+        pair = QueryPair("year", "2025")
+        field = "name" if mutation == "filters_name_type" else "value"
+        object.__setattr__(pair, field, _StringSubclass(getattr(pair, field)))
+        object.__setattr__(group, "filters", (pair,))
+        return group
+    if mutation == "fallback_order":
+        return replace(group, fallback_order=1)
+    if mutation == "intent_route_alignment":
+        object.__setattr__(group.intents[0], "route_id", "forged_pubmed_route")
+        return group
+    if mutation == "intent_policy_alignment":
+        object.__setattr__(group.intents[0], "policy_digest", "f" * 64)
+        return group
+    if mutation == "intent_limits_alignment":
+        object.__setattr__(group.intents[0], "limits", replace(group.limits, timeout_ms=19_999))
+        return group
+    if mutation == "intent_limits_scalar_type":
+        forged_limits = replace(group.limits)
+        object.__setattr__(forged_limits, "max_pages", True)
+        object.__setattr__(group.intents[0], "limits", forged_limits)
+        return group
+    if mutation == "normalized_query_alignment":
+        search = group.intents[0]
+        query_pairs = list(search.query_pairs)
+        query_pairs[1] = QueryPair("term", "forged query")
+        object.__setattr__(search, "query_pairs", tuple(query_pairs))
+        return group
+    raise AssertionError(f"unknown test mutation: {mutation}")
+
+
+def _forge_plan_group_for_policy(plan, policy_digest: str):
+    """Rebuild deterministic IDs for one otherwise coherent hostile plan."""
+    group = _aligned_overlay_group(plan.dispatch_groups[0], policy_digest=policy_digest)
+    group_id = expected_dispatch_group_id(group)
+    logical_attempts = tuple(
+        replace(
+            attempt,
+            logical_attempt_id=expected_logical_attempt_id(attempt, group_id),
+        )
+        for attempt in group.logical_attempts
+    )
+    return replace(group, dispatch_group_id=group_id, logical_attempts=logical_attempts)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "route_id",
+        "backend_id",
+        "policy_digest",
+        "limits",
+        "allowance",
+        "logical_source",
+        "filters",
+        "filters_container",
+        "filters_tool",
+        "filters_email",
+        "filters_name_type",
+        "filters_value_type",
+        "fallback_order",
+        "intent_route_alignment",
+        "intent_policy_alignment",
+        "intent_limits_alignment",
+        "intent_limits_scalar_type",
+        "normalized_query_alignment",
+    ),
+)
+@pytest.mark.asyncio
+async def test_identity_overlay_adapter_rejects_group_trust_drift_before_dispatch(mutation: str) -> None:
+    group = _mutated_overlay_group(mutation)
+    dispatch = _RecordingDispatch([])
+
+    with pytest.raises(executor_module.DiscoveryAdapterError) as caught:
+        await _module().foundation_gateway_adapters()[_ADAPTER_ID](group, dispatch)
+
+    _assert_typed_error(caught.value, "provider_payload_invalid")
+    assert dispatch.calls == []
+
+
+@pytest.mark.asyncio
+async def test_identity_overlay_preserves_legacy_non_identity_filters() -> None:
+    filters = (QueryPair("year", "2025"), QueryPair("language", "eng"))
+    canonical_filters = tuple(sorted(filters, key=lambda pair: (pair.name, pair.value)))
+    foundation_result, _foundation_dispatch, foundation_group = await _invoke(
+        [_fixture("esearch_success"), _fixture("esummary_success")],
+        filters=filters,
+    )
+    registry, plan = _overlay_plan_for(filters=filters)
+    overlay_group = plan.dispatch_groups[0]
+    route = registry.get_route(overlay_group.route_id)
+    overlay_dispatch = _RecordingDispatch(
+        [
+            _response(route, overlay_group.intents[0], _fixture("esearch_success")),
+            _response(route, overlay_group.intents[1], _fixture("esummary_success")),
+        ]
+    )
+
+    overlay_result = await _module().foundation_gateway_adapters()[_ADAPTER_ID](
+        overlay_group,
+        overlay_dispatch,
+    )
+
+    assert foundation_group.filters == overlay_group.filters == canonical_filters
+    assert tuple(candidate.record for candidate in overlay_result.candidates) == tuple(
+        candidate.record for candidate in foundation_result.candidates
+    )
+    assert len(overlay_dispatch.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_forged_public_origin_registry_and_plan_stop_before_gateway_or_one_hop() -> None:
+    registry, plan = _overlay_plan_for()
+    route = registry.get_route("pubmed_ncbi_eutils_pubmed_direct")
+    forged_policy = replace(
+        route.policy,
+        origin=ExactOrigin("https", "attacker.example", 443),
+        policy_digest="",
+    )
+    forged_route = replace(route, policy=forged_policy)
+    forged_registry = replace(
+        registry,
+        routes=tuple(
+            forged_route if candidate.route_id == route.route_id else candidate for candidate in registry.routes
+        ),
+    )
+    forged_group = _forge_plan_group_for_policy(plan, forged_policy.policy_digest)
+    forged_plan = replace(plan, dispatch_groups=(forged_group,), plan_digest="")
+    gateway_calls: list[object] = []
+    one_hop_calls: list[NormalizedHTTPHopRequest] = []
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        one_hop_calls.append(request)
+        body = _fixture("esearch_empty")
+        return HTTPHopResponse(
+            status_code=200,
+            headers=(("content-type", "application/json"),),
+            body=body,
+            resolved_ips=("93.184.216.34",),
+            connected_ip="93.184.216.34",
+            response_header_bytes=64,
+            wire_bytes=len(body),
+        )
+
+    async def gateway(candidate_route, intent, *, is_policy_active):
+        gateway_calls.append(intent)
+        return await dispatch_once(
+            candidate_route,
+            intent,
+            is_policy_active=is_policy_active,
+            one_hop=one_hop,
+        )
+
+    result = await execute_discovery_plan(
+        forged_plan,
+        registry=forged_registry,
+        adapters={_ADAPTER_ID: _module().foundation_gateway_adapters()[_ADAPTER_ID]},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("forged-public-origin-dispatch",)).__next__,
+    )
+
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.FAILED
+    assert result.logical_outcomes[0].code == "registry_mismatch"
+    assert gateway_calls == []
+    assert one_hop_calls == []
+    assert result.usage.accounting.created == result.usage.accounting.debited == 0
+
+
+async def _execute_overlay_via_one_hop(bodies: list[bytes]):
+    registry, plan = _overlay_plan_for()
+    adapter = _module().foundation_gateway_adapters()[_ADAPTER_ID]
+    raw_bodies = list(bodies)
+    requests: list[NormalizedHTTPHopRequest] = []
+    responses: list[DiscoveryGatewayResponse] = []
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        requests.append(request)
+        body = raw_bodies.pop(0)
+        return HTTPHopResponse(
+            status_code=200,
+            headers=(("content-type", "application/json"),),
+            body=body,
+            resolved_ips=("93.184.216.34",),
+            connected_ip="93.184.216.34",
+            response_header_bytes=64,
+            wire_bytes=len(body),
+        )
+
+    async def gateway(route, intent, *, is_policy_active):
+        response = await dispatch_once(route, intent, is_policy_active=is_policy_active, one_hop=one_hop)
+        responses.append(response)
+        return response
+
+    result = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters={_ADAPTER_ID: adapter},
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=iter(("overlay-search", "overlay-summary")).__next__,
+    )
+    return result, requests, responses
+
+
+@pytest.mark.asyncio
+async def test_identity_overlay_executes_exact_two_hop_identity_shape_without_repr_leaks() -> None:
+    registry, plan = _overlay_plan_for()
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    dispatch = _RecordingDispatch(
+        [
+            _response(route, group.intents[0], _fixture("esearch_success")),
+            _response(route, group.intents[1], _fixture("esummary_success")),
+        ]
+    )
+
+    result = await _module().foundation_gateway_adapters()[_ADAPTER_ID](group, dispatch)
+
+    assert len(result.candidates) == 2
+    assert [tuple((pair.name, pair.value) for pair in call[0].query_pairs) for call in dispatch.calls] == [
+        (
+            ("db", "pubmed"),
+            ("term", "bounded discovery"),
+            ("retstart", "0"),
+            ("retmax", "2"),
+            ("retmode", "json"),
+            ("sort", "relevance"),
+            ("tool", "tldw_server"),
+            ("email", "contact@tldwproject.com"),
+        ),
+        (
+            ("db", "pubmed"),
+            ("retmode", "json"),
+            ("tool", "tldw_server"),
+            ("email", "contact@tldwproject.com"),
+        ),
+    ]
+    assert "tldw_server" not in repr(group)
+    assert "contact@tldwproject.com" not in repr(group)
+    assert "31415926" not in repr(dispatch.calls[1][2])
+
+
+@pytest.mark.parametrize("summary_stage", (False, True))
+@pytest.mark.asyncio
+async def test_identity_overlay_accepts_only_the_documented_json_rate_envelope(summary_stage: bool) -> None:
+    registry, plan = _overlay_plan_for()
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    rate_limited = _response(
+        route,
+        group.intents[1 if summary_stage else 0],
+        _json({"error": "API rate limit exceeded", "count": "11"}),
+    )
+    responses: list[object] = [rate_limited]
+    if summary_stage:
+        responses = [_response(route, group.intents[0], _fixture("esearch_success")), rate_limited]
+    dispatch = _RecordingDispatch(responses)
+
+    with pytest.raises(executor_module.DiscoveryAdapterError, match="provider_rate_limited"):
+        await _module().foundation_gateway_adapters()[_ADAPTER_ID](group, dispatch)
+
+
+@pytest.mark.asyncio
+async def test_identity_overlay_executes_through_executor_gateway_and_one_hop_with_foundation_output() -> None:
+    foundation_result, _dispatch, _group = await _invoke([_fixture("esearch_success"), _fixture("esummary_success")])
+    result, requests, responses = await _execute_overlay_via_one_hop(
+        [_fixture("esearch_success"), _fixture("esummary_success")]
+    )
+
+    assert tuple(candidate.record for candidate in result.candidates) == tuple(
+        candidate.record for candidate in foundation_result.candidates
+    )
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.SUCCEEDED
+    assert result.usage.pages == 1
+    assert result.usage.accounting.created == result.usage.accounting.debited == 2
+    assert [response.trace.query_keys for response in responses] == [
+        ("db", "term", "retstart", "retmax", "retmode", "sort", "tool", "email"),
+        ("db", "retmode", "tool", "email", "id"),
+    ]
+    assert [request.target.split("?", 1)[0] for request in requests] == [
+        "/entrez/eutils/esearch.fcgi",
+        "/entrez/eutils/esummary.fcgi",
+    ]
+    assert all("tldw_server" not in repr(item) and "contact@tldwproject.com" not in repr(item) for item in requests)
+
+
+@pytest.mark.asyncio
+async def test_identity_overlay_empty_esearch_stops_after_one_executor_dispatch() -> None:
+    result, requests, responses = await _execute_overlay_via_one_hop([_fixture("esearch_empty")])
+
+    assert result.logical_outcomes[0].state is LogicalOutcomeState.VALID_EMPTY
+    assert len(requests) == len(responses) == 1
+    assert result.usage.accounting.created == result.usage.accounting.debited == 1
+
+
+@pytest.mark.parametrize("stage", (0, 1))
+@pytest.mark.asyncio
+async def test_identity_overlay_dispatch_cancellation_at_either_stage_propagates_unchanged(stage: int) -> None:
+    registry, plan = _overlay_plan_for()
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    cancelled = asyncio.CancelledError(f"identity-overlay-stage-{stage}-cancelled")
+    responses: list[object] = [cancelled]
+    if stage == 1:
+        responses = [_response(route, group.intents[0], _fixture("esearch_success")), cancelled]
+    dispatch = _RecordingDispatch(responses)
+
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await _module().foundation_gateway_adapters()[_ADAPTER_ID](group, dispatch)
+
+    assert caught.value is cancelled
+
+
+@pytest.mark.asyncio
+async def test_identity_overlay_rejects_conflicting_records_with_one_doi_fingerprint() -> None:
+    registry, plan = _overlay_plan_for()
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    ids = ("31415926", "27182818")
+    same_doi = "10.5555/Shared.Discovery.2026"
+    summary = _esummary(
+        ids,
+        records={
+            ids[0]: _summary_record(
+                ids[0],
+                title="First conflicting DOI record",
+                articleids=(
+                    {"idtype": "pubmed", "value": ids[0]},
+                    {"idtype": "doi", "value": same_doi},
+                ),
+            ),
+            ids[1]: _summary_record(
+                ids[1],
+                title="Second conflicting DOI record",
+                articleids=(
+                    {"idtype": "pubmed", "value": ids[1]},
+                    {"idtype": "doi", "value": same_doi},
+                ),
+            ),
+        },
+    )
+    dispatch = _RecordingDispatch(
+        [
+            _response(route, group.intents[0], _esearch(ids)),
+            _response(route, group.intents[1], summary),
+        ]
+    )
+
+    with pytest.raises(executor_module.DiscoveryAdapterError) as caught:
+        await _module().foundation_gateway_adapters()[_ADAPTER_ID](group, dispatch)
+
+    _assert_typed_error(caught.value, "provider_payload_invalid")
+    assert group.adapter_version == "pubmed-v2-ncbi-identity"
+    assert [call[0] for call in dispatch.calls] == list(group.intents)
+    assert dispatch.calls[1][2] == (NumericCSVBindingValues("pubmed_esearch_ids", (31415926, 27182818)),)
+
+
+@pytest.mark.asyncio
+async def test_shared_ncbi_helper_collapses_byte_identical_same_fingerprint_records() -> None:
+    registry, plan = _overlay_plan_for()
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    binding = group.intents[1].query_bindings[0]
+    profile = _module()._PARSING_PROFILES[(_ADAPTER_ID, group.adapter_version)]
+    normalized = {
+        "title": "Synthetic byte-identical normalized record",
+        "authors": ("Synthetic Author",),
+        "abstract": None,
+        "snippet": None,
+        "doi": "10.5555/synthetic-identical-record",
+        "pmid": "31415926",
+        "pmcid": None,
+        "arxiv_id": None,
+        "url": "https://pubmed.ncbi.nlm.nih.gov/31415926/",
+        "pdf_url": None,
+        "provider": "pubmed",
+        "provider_ids": {"pmid": "31415926", "doi": "10.5555/synthetic-identical-record"},
+    }
+    duplicate = dict(normalized)
+    assert duplicate is not normalized
+    assert duplicate == normalized
+    assert _json(duplicate) == _json(normalized)
+
+    def trusted_inputs(candidate: object):
+        assert candidate is group
+        return group, profile, profile.max_input_bytes, 0, 2, binding
+
+    def parse_esearch_ids(_payload: object, **kwargs: object):
+        assert kwargs == {
+            "profile": profile,
+            "guard": kwargs["guard"],
+            "retstart": 0,
+            "retmax": 2,
+            "binding": binding,
+        }
+        return (("31415926", 31_415_926), ("27182818", 27_182_818))
+
+    def parse_summary_records(_payload: object, **kwargs: object):
+        assert kwargs["expected_ids"] == ("31415926", "27182818")
+        return normalized, duplicate
+
+    dispatch = _RecordingDispatch(
+        [
+            _response(route, group.intents[0], _json({"synthetic": "esearch"})),
+            _response(route, group.intents[1], _json({"synthetic": "esummary"})),
+        ]
+    )
+
+    result = await _module()._execute_ncbi_esearch_summary(
+        group,
+        dispatch,
+        _CountingClock(),
+        trusted_inputs=trusted_inputs,
+        parse_esearch_ids=parse_esearch_ids,
+        parse_summary_records=parse_summary_records,
+        strict_rate_envelope=False,
+    )
+
+    assert len(result.candidates) == 1
+    assert result.candidates[0].record == normalized
+    assert len(dispatch.calls) == 2
+    assert [call[0] for call in dispatch.calls] == list(group.intents)
+    assert dispatch.calls[1][2] == (NumericCSVBindingValues("pubmed_esearch_ids", (31415926, 27182818)),)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {"error": "API rate limit exceeded", "count": "11", "extra": "x"},
+        {"error": "API rate limit exceeded"},
+        {"error": "API rate limit exceeded", "count": 11},
+        {"error": "API rate limit exceeded!", "count": "11"},
+    ),
+)
+@pytest.mark.parametrize("summary_stage", (False, True))
+@pytest.mark.asyncio
+async def test_identity_overlay_rejects_near_match_json_rate_envelopes_as_payload_invalid(
+    payload: dict[str, object], summary_stage: bool
+) -> None:
+    registry, plan = _overlay_plan_for()
+    group = plan.dispatch_groups[0]
+    route = registry.get_route(group.route_id)
+    bodies = [_json(payload)]
+    if summary_stage:
+        bodies = [_fixture("esearch_success"), _json(payload)]
+    dispatch = _RecordingDispatch(
+        [_response(route, group.intents[min(index, 1)], body) for index, body in enumerate(bodies)]
+    )
+
+    with pytest.raises(executor_module.DiscoveryAdapterError) as caught:
+        await _module().foundation_gateway_adapters()[_ADAPTER_ID](group, dispatch)
+
+    _assert_typed_error(caught.value, "provider_payload_invalid")
 
 
 @pytest.mark.asyncio

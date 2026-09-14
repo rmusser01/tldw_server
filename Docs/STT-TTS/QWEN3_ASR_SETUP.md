@@ -24,7 +24,7 @@ Qwen3-ASR is a state-of-the-art speech-to-text model from Alibaba's Qwen team, o
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.11+
 - A working tldw_server installation
 - FFmpeg on your system path
 - For GPU: CUDA-compatible GPU with sufficient VRAM

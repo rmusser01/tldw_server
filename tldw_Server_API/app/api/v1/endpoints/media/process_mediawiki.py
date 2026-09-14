@@ -6,6 +6,7 @@ import json
 import shutil
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Any
 
 import aiofiles
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -13,17 +14,23 @@ from loguru import logger
 from pydantic import ValidationError
 from starlette.responses import StreamingResponse
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.backpressure import (
     guard_backpressure_and_quota,
 )
-from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_mediawiki_deps import (
     get_mediawiki_form_data,
 )
+from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import (
+    media_create_dependencies,
+)
+from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     MediaWikiDumpOptionsForm,
     ProcessedMediaWikiPage,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_repository
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
 )
@@ -111,6 +118,19 @@ def _parse_namespaces(namespaces_str: str | None) -> list[int] | None:
     return [int(ns.strip()) for ns in namespaces_str.split(",")]
 
 
+def _build_mediawiki_checkpoint_scope(*, user_id: str, media_db: Any) -> str:
+    """Return a stable checkpoint identity matching the request's DB scope."""
+    return json.dumps(
+        {
+            "org_id": getattr(media_db, "org_id", None),
+            "team_id": getattr(media_db, "team_id", None),
+            "user_id": user_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 async def _process_mediawiki_dump(
     *,
     form_data: MediaWikiDumpOptionsForm,
@@ -118,6 +138,9 @@ async def _process_mediawiki_dump(
     store_to_db: bool,
     store_to_vector_db: bool,
     filter_item_results: bool,
+    media_writer: Any | None = None,
+    vector_user_id: str | None = None,
+    checkpoint_identity_scope: str | None = None,
 ) -> StreamingResponse:
     """Shared ingestion/processing helper."""
     namespaces = _parse_namespaces(form_data.namespaces_str)
@@ -198,6 +221,9 @@ async def _process_mediawiki_dump(
                     api_name_vector_db=form_data.api_name_vector_db,
                     api_key_vector_db=form_data.api_key_vector_db,
                     allowed_dir=temp_dir_path,
+                    media_writer=media_writer,
+                    vector_user_id=vector_user_id,
+                    checkpoint_identity_scope=checkpoint_identity_scope,
                 ):
                     if filter_item_results and result_event.get("type") == "item_result":
                         page_data = result_event.get("data", {})
@@ -239,7 +265,11 @@ async def _process_mediawiki_dump(
     "/mediawiki/ingest-dump",
     summary="Ingest and process a MediaWiki XML dump, storing results to database and vector store.",
     tags=["MediaWiki Processing"],
-    dependencies=[Depends(guard_backpressure_and_quota), Depends(guard_storage_quota)],
+    dependencies=[
+        *media_create_dependencies(),
+        Depends(guard_backpressure_and_quota),
+        Depends(guard_storage_quota),
+    ],
     response_class=StreamingResponse,
     responses={
         status.HTTP_200_OK: {
@@ -254,6 +284,8 @@ async def ingest_mediawiki_dump_endpoint(
         ...,
         description="MediaWiki XML dump file (.xml, .xml.bz2, .xml.gz).",
     ),
+    db: Any = Depends(get_media_db_for_user),
+    current_user: User = Depends(get_request_user),
 ) -> StreamingResponse:
     """
     MediaWiki ingest endpoint (streaming).
@@ -261,12 +293,20 @@ async def ingest_mediawiki_dump_endpoint(
     Streams ingestion events while processing a MediaWiki XML dump and
     persisting results to the primary database and vector store.
     """
+    media_writer = get_media_repository(db)
+
     return await _process_mediawiki_dump(
         form_data=form_data,
         dump_file=dump_file,
         store_to_db=True,
         store_to_vector_db=True,
         filter_item_results=False,
+        media_writer=media_writer,
+        vector_user_id=current_user.id_str,
+        checkpoint_identity_scope=_build_mediawiki_checkpoint_scope(
+            user_id=current_user.id_str,
+            media_db=db,
+        ),
     )
 
 
@@ -274,7 +314,11 @@ async def ingest_mediawiki_dump_endpoint(
     "/mediawiki/process-dump",
     summary="Process a MediaWiki XML dump and return structured content without database storage.",
     tags=["MediaWiki Processing"],
-    dependencies=[Depends(guard_backpressure_and_quota), Depends(guard_storage_quota)],
+    dependencies=[
+        *media_create_dependencies(),
+        Depends(guard_backpressure_and_quota),
+        Depends(guard_storage_quota),
+    ],
     response_class=StreamingResponse,
     responses={
         status.HTTP_200_OK: {

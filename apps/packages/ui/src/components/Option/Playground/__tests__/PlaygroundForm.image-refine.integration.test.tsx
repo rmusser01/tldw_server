@@ -8,7 +8,9 @@ import type { AttachedResearchContext } from "../research-chat-context"
 import { DICTATION_DIAGNOSTICS_EVENT } from "@/utils/dictation-diagnostics"
 import { fetchChatModels } from "@/services/tldw-server"
 
-const onSubmitMock = vi.hoisted(() => vi.fn(async (_payload: unknown) => null))
+const onSubmitMock = vi.hoisted(() =>
+  vi.fn(async (_payload: unknown) => ({ status: "submitted" as const }))
+)
 const createChatCompletionMock = vi.hoisted(() =>
   vi.fn(async () => ({
     json: async () => ({
@@ -482,6 +484,13 @@ vi.mock("react-router-dom", () => ({
       {children}
     </a>
   ),
+  useLocation: () => ({
+    pathname: "/chat",
+    search: "",
+    hash: "",
+    state: null,
+    key: "test"
+  }),
   useNavigate: () => vi.fn()
 }))
 
@@ -527,6 +536,7 @@ vi.mock("@/store/model", () => ({
       extraBody: "",
       jsonMode: false,
       numCtx: 8192,
+      setActiveSettingsScope: vi.fn(),
       updateSetting: vi.fn(),
       updateSettings: vi.fn()
     })
@@ -562,6 +572,9 @@ vi.mock("@/hooks/useMcpTools", () => ({
     hasMcp: false,
     healthState: "ready",
     tools: [],
+    discoveredTools: [],
+    chatTools: [],
+    toolCounts: { total: 0, enabled: 0 },
     toolsLoading: false,
     catalogs: [],
     catalogsLoading: false,
@@ -574,7 +587,9 @@ vi.mock("@/hooks/useMcpTools", () => ({
     setToolCatalog: vi.fn(),
     setToolCatalogId: vi.fn(),
     setToolModules: vi.fn(),
-    setToolCatalogStrict: vi.fn()
+    setToolCatalogStrict: vi.fn(),
+    setToolEnabled: vi.fn(),
+    resetToolFilter: vi.fn()
   })
 }))
 
@@ -711,6 +726,7 @@ vi.mock("../ComposerToolbar", () => ({
   ComposerToolbar: ({
     toolsButton,
     sendControl,
+    sendControlPlacement,
     speechAvailable,
     speechUsesServer,
     isListening,
@@ -719,6 +735,7 @@ vi.mock("../ComposerToolbar", () => ({
   }: {
     toolsButton?: React.ReactNode
     sendControl?: React.ReactNode
+    sendControlPlacement?: "toolbar" | "external"
     speechAvailable?: boolean
     speechUsesServer?: boolean
     isListening?: boolean
@@ -736,7 +753,7 @@ vi.mock("../ComposerToolbar", () => ({
     return (
       <div data-testid="composer-toolbar">
         {toolsButton}
-        {sendControl}
+        {sendControlPlacement === "toolbar" ? sendControl : null}
         <button
           type="button"
           data-testid="dictation-button"
@@ -936,6 +953,27 @@ vi.mock("@/utils/onboarding-ingestion-telemetry", () => ({
 
 vi.mock("@/utils/resolve-api-provider", () => ({
   resolveApiProviderForModel: vi.fn(async () => "custom")
+}))
+
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: vi.fn(async () => ({
+    definitions: {
+      "image.prompt.refinement": {
+        parts: {
+          system_semantics:
+            "Preserve the subject and important visual details.",
+          rewrite_semantics: "Return one concise production image prompt."
+        }
+      }
+    },
+    requestScope: {
+      config: { serverUrl: "https://captured.example" },
+      userId: null
+    },
+    scopeSignal: new AbortController().signal,
+    scopeInvalidatedSignal: new AbortController().signal,
+    release: vi.fn()
+  }))
 }))
 
 vi.mock("@/hooks/playground", () => ({

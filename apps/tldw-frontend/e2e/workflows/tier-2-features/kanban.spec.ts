@@ -69,10 +69,12 @@ test.describe("Kanban Playground", () => {
       await kanban.goto()
       await kanban.assertPageReady()
 
-      // Either empty state message or board gallery cards should appear
-      const emptyVisible = await kanban.emptyStateMessage
-        .isVisible()
-        .catch(() => false)
+      // Zero boards exposes the primary Create Board action; existing boards
+      // with no selection expose gallery cards instead.
+      const zeroBoardStateVisible = await Promise.all([
+        kanban.emptyStateMessage.isVisible().catch(() => false),
+        kanban.createBoardButton.isVisible().catch(() => false),
+      ]).then(([messageVisible, actionVisible]) => messageVisible && actionVisible)
       const galleryVisible = await kanban.boardGalleryCards
         .first()
         .isVisible()
@@ -81,7 +83,7 @@ test.describe("Kanban Playground", () => {
         .isVisible()
         .catch(() => false)
 
-      expect(emptyVisible || galleryVisible || newBoardCardVisible).toBe(true)
+      expect(zeroBoardStateVisible || galleryVisible || newBoardCardVisible).toBe(true)
 
       await assertNoCriticalErrors(diagnostics)
     })

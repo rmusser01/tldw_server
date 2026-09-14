@@ -3,39 +3,59 @@ from __future__ import annotations
 import asyncio
 import inspect
 from dataclasses import asdict, replace
+from typing import Awaitable, Callable  # noqa: UP035 - required by the Task 3 gateway test contract.
 
 import pytest
 
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     AccessRoute,
+    BackendDefinition,
     BoundedDecimalQueryValuePolicy,
     BoundedTextQueryValuePolicy,
+    BudgetCeilings,
     CredentialRequirement,
+    CredentialStatus,
     DeferredNumericCSVQueryBinding,
     DispatchIntent,
     ExactOrigin,
     ExactQueryValuePolicy,
+    ExecutionMode,
     JSONBodyPair,
     LiteralTermsQueryValuePolicy,
+    OpaqueCursorQueryValuePolicy,
     OperationKind,
     PathSlot,
     PathSlotKind,
     PathTemplate,
     QueryMode,
     QueryPair,
+    ReadinessOverlay,
+    ReadinessState,
     RouteKind,
     RouteLimits,
     RoutePolicy,
+    RouteReadiness,
     SourceConstraint,
+    SourceDefinition,
+    SourceRouteReference,
     canonical_policy_digest,
 )
 from tldw_Server_API.app.core.Research.discovery.gateway import (
     DiscoveryGatewayError,
     DiscoveryGatewayResponse,
+    _snapshot_binding,
     dispatch_once,
     reconstruct_redirect_intent,
 )
-from tldw_Server_API.app.core.Research.discovery.registry import foundation_registry
+from tldw_Server_API.app.core.Research.discovery.planner import (
+    GeneralFreeTextQuery,
+    PlanningRequest,
+    compile_discovery_plan,
+)
+from tldw_Server_API.app.core.Research.discovery.registry import (
+    DiscoveryRegistry,
+    foundation_registry,
+)
 from tldw_Server_API.app.core.Security.http_hop import (
     HTTPHopError,
     HTTPHopLimits,
@@ -195,6 +215,268 @@ def _digest_bound_query_route_and_intent() -> tuple[AccessRoute, DispatchIntent]
         limits=limits,
     )
     return route, intent
+
+
+def _opaque_query_registry() -> tuple[DiscoveryRegistry, ReadinessOverlay]:
+    limits = RouteLimits(2, 0, 0, 250, 65_536, 100, 16_384)
+    policy = RoutePolicy(
+        policy_version="opaque-query-policy-v1",
+        origin=ExactOrigin("https", "clinical.example.test", 443),
+        methods=("GET",),
+        paths=("/api/v2/studies",),
+        allowed_query_keys=("query.term", "pageToken", "format", "pageSize"),
+        limits=limits,
+        pagination_query_key="pageToken",
+        query_value_policies=(
+            LiteralTermsQueryValuePolicy("query.term", "", 8, 32),
+            OpaqueCursorQueryValuePolicy("pageToken", 1_024, required=False),
+            ExactQueryValuePolicy("format", "json"),
+            BoundedDecimalQueryValuePolicy("pageSize", 50),
+        ),
+    )
+    route = AccessRoute(
+        route_id="opaque_query_search",
+        backend_id="opaque_query_backend",
+        adapter_id="opaque_query_adapter",
+        route_kind=RouteKind.DIRECT,
+        query_modes=(QueryMode.GENERAL_FREE_TEXT,),
+        source_constraint=SourceConstraint.NATIVE_CORPUS,
+        attribution_basis="native_response",
+        credential_requirement=CredentialRequirement.NONE,
+        fallback_order=0,
+        max_physical_dispatches=2,
+        adapter_version="opaque-v1",
+        policy=policy,
+    )
+    registry = DiscoveryRegistry(
+        catalog_version="opaque-query-catalog-v1",
+        registry_version="opaque-query-registry-v1",
+        sources=(
+            SourceDefinition(
+                catalog_source_id="opaque_query_source",
+                display_name="Opaque Query Source",
+                aliases=(),
+                categories=("synthetic",),
+                content_types=("records",),
+                surfaces=("standalone_search",),
+                route_references=(SourceRouteReference(route.route_id, None),),
+                site_hosts=("clinical.example.test",),
+                priority=10,
+                catalog_version="opaque-query-catalog-v1",
+            ),
+        ),
+        routes=(route,),
+        backends=(BackendDefinition("opaque_query_backend", "Opaque Query Backend"),),
+    )
+    readiness = ReadinessOverlay(
+        overlay_version="opaque-query-readiness-v1",
+        execution_mode=ExecutionMode.SYNTHETIC,
+        routes=(
+            RouteReadiness(
+                route.route_id,
+                ReadinessState.READY,
+                CredentialStatus.NOT_REQUIRED,
+                "synthetic_ready",
+            ),
+        ),
+    )
+    return registry, readiness
+
+
+def _opaque_query_route_and_intent(
+    token: str | None = None,
+) -> tuple[AccessRoute, DispatchIntent]:
+    registry, readiness = _opaque_query_registry()
+    plan = compile_discovery_plan(
+        PlanningRequest(
+            ("opaque_query_source",),
+            GeneralFreeTextQuery("alpha beta"),
+            (),
+            100,
+        ),
+        registry=registry,
+        readiness=readiness,
+        budget=BudgetCeilings(1, 2, 2, 0, 0, 500, 100),
+    )
+    route = registry.get_route("opaque_query_search")
+    intent = plan.dispatch_groups[0].intents[0]
+    if token is not None:
+        intent = replace(
+            intent,
+            query_pairs=(
+                QueryPair("query.term", '"alpha" AND "beta"'),
+                QueryPair("pageToken", token),
+                QueryPair("format", "json"),
+                QueryPair("pageSize", "50"),
+            ),
+        )
+    return route, intent
+
+
+async def _dispatch_with_token(
+    token: str,
+    one_hop: Callable[[NormalizedHTTPHopRequest], Awaitable[HTTPHopResponse]],
+) -> DiscoveryGatewayResponse:
+    route, intent = _opaque_query_route_and_intent(token)
+    return await dispatch_once(
+        route,
+        intent,
+        is_policy_active=lambda _route_id, _policy_digest: True,
+        one_hop=one_hop,
+    )
+
+
+@pytest.mark.asyncio
+async def test_opaque_query_optional_token_is_omitted_on_first_page() -> None:
+    route, intent = _opaque_query_route_and_intent()
+    calls: list[NormalizedHTTPHopRequest] = []
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        calls.append(request)
+        return _hop_response()
+
+    await dispatch_once(route, intent, is_policy_active=lambda _route_id, _digest: True, one_hop=one_hop)
+
+    assert calls[0].target == "/api/v2/studies?query.term=%22alpha%22%20AND%20%22beta%22&format=json&pageSize=50"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("token", ["", " ", "a b", "line\nbreak", "\x7f", "é", "x" * 1_025])
+async def test_opaque_query_value_fails_before_one_hop(token: str) -> None:
+    calls = 0
+
+    async def one_hop(_: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("must not dispatch")
+
+    with pytest.raises(DiscoveryGatewayError):
+        await _dispatch_with_token(token, one_hop)
+
+    assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_opaque_query_value_is_encoded_once_as_one_value() -> None:
+    token = "!$&'()*+,;=:@/?"
+    calls: list[NormalizedHTTPHopRequest] = []
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        calls.append(request)
+        return _hop_response()
+
+    await _dispatch_with_token(token, one_hop)
+
+    assert calls[0].target.endswith("pageToken=%21%24%26%27%28%29%2A%2B%2C%3B%3D%3A%40%2F%3F&format=json&pageSize=50")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query_pairs", ("duplicate", "unknown"))
+async def test_opaque_query_key_tampering_fails_before_one_hop(query_pairs: str) -> None:
+    route, intent = _opaque_query_route_and_intent("opaque-token")
+    if query_pairs == "duplicate":
+        pairs = (*intent.query_pairs, QueryPair("pageToken", "second-token"))
+    else:
+        pairs = (*intent.query_pairs, QueryPair("unexpected", "opaque-token"))
+    calls = 0
+
+    async def one_hop(_: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("must not dispatch")
+
+    with pytest.raises(DiscoveryGatewayError):
+        await dispatch_once(
+            route,
+            replace(intent, query_pairs=pairs),
+            is_policy_active=lambda _route_id, _digest: True,
+            one_hop=one_hop,
+        )
+
+    assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_opaque_query_reconstructed_mutated_policy_fails_before_one_hop() -> None:
+    route, intent = _opaque_query_route_and_intent("opaque-token")
+    policy = route.policy.query_value_policies[1]
+    object.__setattr__(policy, "max_chars", 0)
+    digest = canonical_policy_digest(route.policy)
+    object.__setattr__(route.policy, "policy_digest", digest)
+    object.__setattr__(intent, "policy_digest", digest)
+    calls = 0
+
+    async def one_hop(_: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("must not dispatch")
+
+    with pytest.raises(DiscoveryGatewayError):
+        await dispatch_once(route, intent, is_policy_active=lambda _route_id, _digest: True, one_hop=one_hop)
+
+    assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_empty_suffix_literal_accepts_only_canonical_quoted_terms() -> None:
+    route, intent = _opaque_query_route_and_intent()
+    calls = 0
+
+    async def one_hop(_: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        nonlocal calls
+        calls += 1
+        return _hop_response()
+
+    await dispatch_once(route, intent, is_policy_active=lambda _route_id, _digest: True, one_hop=one_hop)
+    malformed_pairs = (
+        QueryPair("query.term", "alpha beta"),
+        QueryPair("format", "json"),
+        QueryPair("pageSize", "50"),
+    )
+    with pytest.raises(DiscoveryGatewayError):
+        await dispatch_once(
+            route,
+            replace(intent, query_pairs=malformed_pairs),
+            is_policy_active=lambda _route_id, _digest: True,
+            one_hop=one_hop,
+        )
+
+    assert calls == 1
+
+
+def test_binding_snapshot_repr_hides_query_pair_values() -> None:
+    route, intent = _opaque_query_route_and_intent("opaque-token-sentinel")
+
+    binding = _snapshot_binding(route, intent)
+
+    assert binding is not None
+    assert "opaque-token-sentinel" not in repr(binding)
+
+
+@pytest.mark.asyncio
+async def test_opaque_query_worst_case_target_stays_within_hop_limit() -> None:
+    route, intent = _opaque_query_route_and_intent()
+    four_byte_term = "𐐀" * 32
+    query = " AND ".join(f'"{four_byte_term}"' for _ in range(8))
+    token = ("!$&'()*+,;=:@/?" * 60) + "!!!!"
+    intent = replace(
+        intent,
+        query_pairs=(
+            QueryPair("query.term", query),
+            QueryPair("pageToken", token),
+            QueryPair("format", "json"),
+            QueryPair("pageSize", "50"),
+        ),
+    )
+    calls: list[NormalizedHTTPHopRequest] = []
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        calls.append(request)
+        return _hop_response()
+
+    await dispatch_once(route, intent, is_policy_active=lambda _route_id, _digest: True, one_hop=one_hop)
+
+    assert len(calls[0].target.encode("ascii")) <= calls[0].limits.max_request_target_bytes == 8_192
 
 
 async def _assert_rejected_before_policy_or_hop(route: AccessRoute, intent: DispatchIntent) -> None:

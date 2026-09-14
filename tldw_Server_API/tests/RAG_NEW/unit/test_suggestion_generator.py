@@ -3,10 +3,18 @@ import time
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.core.RAG.rag_service.suggestion_generator import (
     generate_suggestions,
 )
 import tldw_Server_API.app.core.RAG.rag_service.suggestion_generator as suggestion_generator
+from tldw_Server_API.tests.RAG_NEW.unit.test_generation_executor import (
+    _RecordingCredentialRuntime,
+    _install_blocking_sync_chat_adapter,
+    _install_explicit_chat_capture,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -143,3 +151,104 @@ async def test_generate_suggestions_parses_fenced_json_with_think_tags(monkeypat
         "What are the prerequisites?",
         "How do I benchmark this?",
     ]
+
+
+@pytest.mark.asyncio
+async def test_generate_suggestions_uses_explicit_runtime_credentials(monkeypatch):
+    runtime = _RecordingCredentialRuntime()
+    stage_metadata: dict[str, object] = {}
+    captured = _install_explicit_chat_capture(
+        monkeypatch,
+        '["How is credential precedence tested?", "Which failures are terminal?"]',
+    )
+
+    suggestions = await generate_suggestions(
+        query="credential runtime",
+        response_text="Credentials are resolved per effective provider.",
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        num_suggestions=2,
+        credential_runtime=runtime,
+        stage_metadata=stage_metadata,
+    )
+
+    assert suggestions == [
+        "How is credential precedence tested?",
+        "Which failures are terminal?",
+    ]
+    assert runtime.resolved == ["anthropic"]
+    assert runtime.resolved_models == ["claude-test"]
+    assert runtime.marked == [runtime.handle]
+    assert captured["kwargs"]["api_key"] == "runtime-only-key"
+    assert captured["kwargs"]["app_config"] == runtime.handle.app_config
+    assert captured["kwargs"]["credentials_resolved"] is True
+    assert captured["kwargs"][PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] is runtime.handle
+    assert stage_metadata == {"verification_available": True}
+
+
+@pytest.mark.asyncio
+async def test_generate_suggestions_runtime_failure_uses_heuristic_without_failover():
+    class FailingRuntime:
+        def __init__(self) -> None:
+            self.resolved: list[str] = []
+
+        async def resolve(self, provider, *, model=None):
+            self.resolved.append(provider)
+            raise RuntimeError("secret-key /private/credential-store.db")
+
+    runtime = FailingRuntime()
+    stage_metadata: dict[str, object] = {}
+    suggestions = await generate_suggestions(
+        query="credential runtime",
+        response_text="Credentials are resolved per effective provider.",
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        num_suggestions=2,
+        credential_runtime=runtime,
+        stage_metadata=stage_metadata,
+    )
+
+    assert len(suggestions) == 2
+    assert runtime.resolved == ["anthropic"]
+    assert stage_metadata == {
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+    assert "secret-key" not in str(suggestions)
+
+
+@pytest.mark.asyncio
+async def test_suggestion_cancellation_marks_completed_sync_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    entered, release = _install_blocking_sync_chat_adapter(
+        monkeypatch,
+        '["What completed before cancellation?"]',
+    )
+    task = asyncio.create_task(
+        generate_suggestions(
+            query="runtime credentials",
+            response_text="A response",
+            llm_provider="anthropic",
+            llm_model="claude-test",
+            num_suggestions=1,
+            llm_timeout_sec=1.0,
+            credential_runtime=runtime,
+        )
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)
+        task.cancel()
+        await asyncio.sleep(0.03)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert runtime.marked == [runtime.handle]

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { renderWithProviders } from '@web/__tests__/testUtils/renderWithProviders';
@@ -704,6 +704,10 @@ describe('ResearchRunsPage', () => {
 
   it('blocks invalid sources_review edits and submits an edited outline_review patch', async () => {
     const user = userEvent.setup();
+    mocks.subscribeResearchRunEvents.mockImplementation(({ sessionId, onEvent }) => {
+      streamHandlers.set(sessionId, onEvent);
+      return () => {};
+    });
     currentSnapshot = makeSnapshot({
       checkpoint: {
         checkpoint_id: 'chk_outline',
@@ -725,7 +729,13 @@ describe('ResearchRunsPage', () => {
     renderWithProviders(<ResearchRunsPage />);
 
     await screen.findByText('Investigate local evidence');
-    await user.clear(screen.getByLabelText('Section title 1'));
+    // The run list can render before the stream delivers the editable checkpoint.
+    await waitFor(() => expect(streamHandlers.has('rs_1')).toBe(true));
+    expect(screen.queryByLabelText('Section title 1')).not.toBeInTheDocument();
+    await act(async () => {
+      emitStreamEvent('rs_1', { event: 'snapshot', id: 5, payload: currentSnapshot });
+    });
+    await user.clear(await screen.findByLabelText('Section title 1'));
     await user.click(screen.getByRole('button', { name: 'Approve checkpoint' }));
 
     expect(screen.getByText('Every outline section needs a title and focus area.')).toBeInTheDocument();
@@ -808,7 +818,7 @@ describe('ResearchRunsPage', () => {
     renderWithProviders(<ResearchRunsPage />);
 
     await screen.findByText('Investigate local evidence');
-    await user.click(screen.getByRole('button', { name: 'Load trust details' }));
+    await user.click(await screen.findByRole('button', { name: 'Load trust details' }));
 
     await waitFor(() => {
       expect(mocks.getResearchArtifact).toHaveBeenCalledWith('rs_1', 'verification_summary.json');
@@ -841,7 +851,7 @@ describe('ResearchRunsPage', () => {
     renderWithProviders(<ResearchRunsPage />);
 
     await screen.findByText('Investigate local evidence');
-    await user.click(screen.getByRole('button', { name: 'Load verification_summary.json' }));
+    await user.click(await screen.findByRole('button', { name: 'Load verification_summary.json' }));
     await user.click(screen.getByRole('button', { name: 'Load unsupported_claims.json' }));
     await user.click(screen.getByRole('button', { name: 'Load contradictions.json' }));
     await user.click(screen.getByRole('button', { name: 'Load source_trust.json' }));
@@ -873,7 +883,7 @@ describe('ResearchRunsPage', () => {
     renderWithProviders(<ResearchRunsPage />);
 
     await screen.findByText('Investigate local evidence');
-    await user.click(screen.getByRole('button', { name: 'Load verification_summary.json' }));
+    await user.click(await screen.findByRole('button', { name: 'Load verification_summary.json' }));
     await user.click(screen.getByRole('button', { name: 'Load unsupported_claims.json' }));
     await user.click(screen.getByRole('button', { name: 'Load contradictions.json' }));
     await user.click(screen.getByRole('button', { name: 'Load source_trust.json' }));

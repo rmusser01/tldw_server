@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
-import uuid
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
@@ -16,7 +16,7 @@ class MediaFilesRepository:
         self.session = session
 
     @classmethod
-    def from_legacy_db(cls, db: MediaDbLike) -> "MediaFilesRepository":
+    def from_legacy_db(cls, db: MediaDbLike) -> MediaFilesRepository:
         return cls(session=db)
 
     def insert(
@@ -87,7 +87,8 @@ class MediaFilesRepository:
         if not include_deleted:
             clauses.append("deleted = 0")
         where_sql = " AND ".join(clauses)
-        sql = f"SELECT * FROM MediaFiles WHERE {where_sql} LIMIT 1"  # nosec B608
+        # Reuploads keep distinct blobs; serve the latest successfully registered file.
+        sql = f"SELECT * FROM MediaFiles WHERE {where_sql} ORDER BY id DESC LIMIT 1"  # nosec B608
         try:
             rows = db._fetchall_with_connection(conn, sql, params)
             return rows[0] if rows else None
@@ -101,7 +102,6 @@ class MediaFilesRepository:
         include_deleted: bool = False,
     ) -> list[dict[str, Any]]:
         db = self.session
-        conn = db.get_connection()
         clauses: list[str] = ["media_id = :media_id"]
         params: dict[str, Any] = {"media_id": media_id}
         if not include_deleted:
@@ -109,14 +109,37 @@ class MediaFilesRepository:
         where_sql = " AND ".join(clauses)
         sql = f"SELECT * FROM MediaFiles WHERE {where_sql} ORDER BY file_type, id"  # nosec B608
         try:
-            return db._fetchall_with_connection(conn, sql, params)
+            # execute_query owns its connection, including when called from a worker.
+            return [dict(row) for row in db.execute_query(sql, params).fetchall()]
         except Exception as exc:
             raise DatabaseError(f"Failed to list MediaFiles for media_id={media_id}: {exc}") from exc  # noqa: TRY003
+
+    def has_retained_references(self, storage_path: str, excluded_file_ids: set[int]) -> bool:
+        """Protect artifacts and originals that have no newer active replacement.
+
+        Superseded originals cannot protect each other during concurrent retirement:
+        otherwise both cleaners could discard their rows and leave an untracked blob.
+        Deleted originals without an active replacement remain recoverable.
+        """
+        rows = self.session.execute_query(
+            """SELECT ref.id FROM MediaFiles AS ref
+               WHERE ref.storage_path = :storage_path
+                 AND (ref.file_type <> 'original' OR NOT EXISTS (
+                     SELECT 1 FROM MediaFiles AS newer
+                     WHERE newer.media_id = ref.media_id
+                       AND newer.file_type = 'original'
+                       AND newer.deleted = 0
+                       AND newer.id > ref.id
+                 ))""",
+            {"storage_path": storage_path},
+        ).fetchall()
+        return any(row["id"] not in excluded_file_ids for row in rows)
 
     def has_original_file(self, media_id: int) -> bool:
         return self.get_for_media(media_id, "original", include_deleted=False) is not None
 
-    def soft_delete(self, file_id: int) -> None:
+    def soft_delete(self, file_id: int, *, hard_delete: bool = False) -> None:
+        """Delete one file registration, preserving other files and plaintext history."""
         db = self.session
         try:
             with db.transaction() as conn:
@@ -131,6 +154,16 @@ class MediaFilesRepository:
                 file_uuid = row.get("uuid")
                 current_version = int(row.get("version") or 1)
                 new_version = current_version + 1
+                if hard_delete:
+                    cursor = db._execute_with_connection(
+                        conn, "DELETE FROM MediaFiles WHERE id = :id", {"id": file_id},
+                    )
+                    if cursor.rowcount:
+                        db._log_sync_event(
+                            conn, "MediaFiles", file_uuid, "delete", new_version,
+                            {"file_id": file_id, "hard_delete": True},
+                        )
+                    return
                 now = datetime.now(timezone.utc).isoformat()
 
                 db._execute_with_connection(

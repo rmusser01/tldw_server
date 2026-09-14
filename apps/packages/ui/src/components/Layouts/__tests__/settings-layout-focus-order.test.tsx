@@ -70,9 +70,15 @@ vi.mock("@/services/settings/registry", async (importOriginal) => {
   };
 });
 
-vi.mock("@/utils/settings-return", () => ({
-  getSettingsReturnTo: () => null,
-}));
+vi.mock("@/utils/settings-return", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/utils/settings-return")
+  >();
+  return {
+    ...actual,
+    getSettingsReturnTo: () => null,
+  };
+});
 
 const LocationEcho = () => {
   const location = useLocation();

@@ -14,7 +14,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     InputError,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -197,7 +196,7 @@ def test_apply_media_item_update_updates_metadata_logs_sync_and_refreshes_title_
 
     assert result == {
         "media_id": 9,
-        "content_hash": hashlib.sha256("existing body".encode()).hexdigest(),
+        "content_hash": hashlib.sha256(b"existing body").hexdigest(),
         "new_media_version": 4,
         "content_changed": False,
         "document_version_number": None,
@@ -206,7 +205,8 @@ def test_apply_media_item_update_updates_metadata_logs_sync_and_refreshes_title_
     }
     assert execute_calls == [
         (
-            "UPDATE Media SET last_modified = ?, version = ?, client_id = ?, title = ? WHERE id = ? AND version = ?",
+            "UPDATE Media SET last_modified = ?, version = ?, client_id = ?, title = ? "
+            "WHERE id = ? AND version = ? AND system_operation_id IS NULL",
             (
                 "2026-03-22T20:00:00Z",
                 4,
@@ -234,8 +234,8 @@ def test_apply_media_item_update_changes_content_creates_version_logs_sync_and_m
 ) -> None:
     media_item_update_ops_module = _load_media_item_update_ops_module()
 
-    old_hash = hashlib.sha256("existing body".encode()).hexdigest()
-    expected_hash = hashlib.sha256("updated body".encode()).hexdigest()
+    old_hash = hashlib.sha256(b"existing body").hexdigest()
+    expected_hash = hashlib.sha256(b"updated body").hexdigest()
     fetch_rows = [
         _media_row(title="Current Title", content="existing body", content_hash=old_hash, version=1),
         {
@@ -373,7 +373,7 @@ def test_apply_media_item_update_changes_content_creates_version_logs_sync_and_m
 def test_apply_media_item_update_versions_identical_content_without_rechunking_or_fts() -> None:
     media_item_update_ops_module = _load_media_item_update_ops_module()
 
-    existing_hash = hashlib.sha256("existing body".encode()).hexdigest()
+    existing_hash = hashlib.sha256(b"existing body").hexdigest()
     fetch_rows = [
         _media_row(content="existing body", content_hash=existing_hash, version=5),
         _media_row(content="existing body", content_hash=existing_hash, version=6),

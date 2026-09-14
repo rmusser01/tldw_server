@@ -41,6 +41,23 @@ export type ScheduledTaskDefinitionDisabledLockKind =
   | "admin"
   | "security"
   | "system"
+export type ScheduledTaskDefinitionResolutionState = "open" | "solved"
+export type ScheduledTaskRunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped"
+  | "cancelled"
+export type ScheduledTaskRunOutcome =
+  | "finding"
+  | "no_match"
+  | "partial"
+  | "degraded"
+  | "none"
+export type ScheduledTaskReviewState = "unread" | "read" | "dismissed"
+export type ScheduledTaskResultKind = "finding" | "failure"
+export type ScheduledTaskResultAnswerMode = "synthesized" | "evidence_only" | "none"
 
 export interface ScheduledTask {
   id: string
@@ -168,6 +185,12 @@ export interface ScheduledTaskDefinitionResponse {
   created_at?: string | null
   updated_at?: string | null
   archived_at?: string | null
+  resolution_state?: ScheduledTaskDefinitionResolutionState
+  resolved_at?: string | null
+  resolved_by?: string | null
+  resolved_result_id?: string | null
+  finding_policy?: Record<string, unknown>
+  retention_policy?: Record<string, unknown>
 }
 
 export interface ScheduledTaskDefinitionListResponse {
@@ -182,6 +205,82 @@ export interface ScheduledTaskDefinitionListResponse {
 export interface ScheduledTaskDuplicateRequest {
   name?: string | null
   description?: string | null
+}
+
+export interface ScheduledTaskRunResponse {
+  id: string
+  owner_id?: string | null
+  definition_id: string
+  definition_version: number
+  trigger_reason: string
+  status: ScheduledTaskRunStatus
+  outcome: ScheduledTaskRunOutcome
+  job_id?: string | null
+  schedule_slot?: string | null
+  scope_snapshot: Record<string, unknown>
+  finding_policy_snapshot: Record<string, unknown>
+  rag_request_snapshot: Record<string, unknown>
+  run_summary: Record<string, unknown>
+  evidence_summary: Record<string, unknown>
+  failure_reason?: Record<string, unknown> | null
+  created_at?: string | null
+  updated_at?: string | null
+  started_at?: string | null
+  ended_at?: string | null
+}
+
+export interface ScheduledTaskRunListResponse {
+  items: ScheduledTaskRunResponse[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+  next_offset?: number | null
+}
+
+export interface ScheduledTaskResultResponse {
+  id: string
+  owner_id?: string | null
+  definition_id: string
+  run_id: string
+  kind: ScheduledTaskResultKind
+  title: string
+  summary: string
+  answer?: unknown | null
+  answer_mode: ScheduledTaskResultAnswerMode
+  confidence: Record<string, unknown>
+  source_refs: Record<string, unknown>[]
+  dedupe_key: string
+  visibility_destination: Record<string, unknown>
+  review_state: ScheduledTaskReviewState
+  created_at?: string | null
+  updated_at?: string | null
+  reviewed_at?: string | null
+  reviewed_by?: string | null
+  review_note?: string | null
+}
+
+export interface ScheduledTaskResultListResponse {
+  items: ScheduledTaskResultResponse[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+  next_offset?: number | null
+}
+
+export interface ScheduledTaskResultReviewRequest {
+  review_state: ScheduledTaskReviewState
+  review_note?: string | null
+}
+
+export interface ScheduledTaskMarkSolvedRequest {
+  resolved_result_id?: string | null
+}
+
+export interface ScheduledTaskReopenRequest {
+  target_lifecycle?: ScheduledTaskDefinitionCreateLifecycle
+  reason?: string | null
 }
 
 export interface ScheduledTaskAuditEventResponse {
@@ -263,6 +362,21 @@ export interface ScheduledTaskDefinitionListParams {
   created_to?: string | null
 }
 
+export interface ScheduledTaskRunListParams {
+  limit?: number
+  offset?: number
+  status?: ScheduledTaskRunStatus | string | null
+}
+
+export interface ScheduledTaskResultListParams {
+  definition_id?: string | null
+  run_id?: string | null
+  review_state?: ScheduledTaskReviewState | string | null
+  kind?: ScheduledTaskResultKind | string | null
+  limit?: number
+  offset?: number
+}
+
 export interface ScheduledTaskAuditListParams {
   limit?: number
   offset?: number
@@ -329,6 +443,14 @@ const normalizeAutomationDefinitionMutationId = (definitionId: string): string =
   }
   if (normalized.includes(":")) {
     throw new Error("Definition mutations require an automation_definition id")
+  }
+  return normalized
+}
+
+const normalizeScheduledTaskRecordId = (recordId: string, label: string): string => {
+  const normalized = String(recordId || "").trim()
+  if (!normalized) {
+    throw new Error(`${label} is required`)
   }
   return normalized
 }
@@ -539,6 +661,122 @@ export async function duplicateScheduledTaskDefinition(
       `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(
         normalizedDefinitionId
       )}/duplicate`
+    ),
+    method: "POST",
+    body: payload,
+    headers: withIdempotency(options?.idempotencyKey)
+  })
+}
+
+export async function createScheduledTaskRun(
+  definitionId: string,
+  options?: ScheduledTaskMutationOptions
+): Promise<ScheduledTaskRunResponse> {
+  const normalizedDefinitionId = normalizeAutomationDefinitionMutationId(definitionId)
+  return await bgRequest<ScheduledTaskRunResponse>({
+    path: toAllowedPath(
+      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(
+        normalizedDefinitionId
+      )}/runs`
+    ),
+    method: "POST",
+    headers: withIdempotency(options?.idempotencyKey)
+  })
+}
+
+export async function listScheduledTaskRuns(
+  definitionId: string,
+  params?: ScheduledTaskRunListParams
+): Promise<ScheduledTaskRunListResponse> {
+  const normalizedDefinitionId = normalizeAutomationDefinitionMutationId(definitionId)
+  return await bgRequest<ScheduledTaskRunListResponse>({
+    path: toAllowedPath(
+      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(
+        normalizedDefinitionId
+      )}/runs${buildQuery(params)}`
+    ),
+    method: "GET"
+  })
+}
+
+export async function getScheduledTaskRun(
+  runId: string
+): Promise<ScheduledTaskRunResponse> {
+  const normalizedRunId = normalizeScheduledTaskRecordId(runId, "runId")
+  return await bgRequest<ScheduledTaskRunResponse>({
+    path: toAllowedPath(
+      `/api/v1/scheduled-tasks/runs/${encodeURIComponent(normalizedRunId)}`
+    ),
+    method: "GET"
+  })
+}
+
+export async function listScheduledTaskResults(
+  params?: ScheduledTaskResultListParams
+): Promise<ScheduledTaskResultListResponse> {
+  return await bgRequest<ScheduledTaskResultListResponse>({
+    path: toAllowedPath(`/api/v1/scheduled-tasks/results${buildQuery(params)}`),
+    method: "GET"
+  })
+}
+
+export async function getScheduledTaskResult(
+  resultId: string
+): Promise<ScheduledTaskResultResponse> {
+  const normalizedResultId = normalizeScheduledTaskRecordId(resultId, "resultId")
+  return await bgRequest<ScheduledTaskResultResponse>({
+    path: toAllowedPath(
+      `/api/v1/scheduled-tasks/results/${encodeURIComponent(normalizedResultId)}`
+    ),
+    method: "GET"
+  })
+}
+
+export async function updateScheduledTaskResultReview(
+  resultId: string,
+  payload: ScheduledTaskResultReviewRequest,
+  options?: ScheduledTaskMutationOptions
+): Promise<ScheduledTaskResultResponse> {
+  const normalizedResultId = normalizeScheduledTaskRecordId(resultId, "resultId")
+  return await bgRequest<ScheduledTaskResultResponse>({
+    path: toAllowedPath(
+      `/api/v1/scheduled-tasks/results/${encodeURIComponent(normalizedResultId)}/review`
+    ),
+    method: "POST",
+    body: payload,
+    headers: withIdempotency(options?.idempotencyKey)
+  })
+}
+
+export async function markScheduledTaskDefinitionSolved(
+  definitionId: string,
+  payload: ScheduledTaskMarkSolvedRequest = {},
+  options?: ScheduledTaskMutationOptions
+): Promise<ScheduledTaskDefinitionResponse> {
+  const normalizedDefinitionId = normalizeAutomationDefinitionMutationId(definitionId)
+  return await bgRequest<ScheduledTaskDefinitionResponse>({
+    path: toAllowedPath(
+      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(
+        normalizedDefinitionId
+      )}/mark-solved`
+    ),
+    method: "POST",
+    body: payload,
+    headers: withIdempotency(options?.idempotencyKey)
+  })
+}
+
+export async function reopenScheduledTaskDefinition(
+  definitionId: string,
+  payload: ScheduledTaskReopenRequest = {},
+  options?: ScheduledTaskMutationOptions
+): Promise<ScheduledTaskDefinitionResponse> {
+  const normalizedDefinitionId = normalizeAutomationDefinitionMutationId(definitionId)
+  return await bgRequest<ScheduledTaskDefinitionResponse>({
+    path: toAllowedPath(
+      `/api/v1/scheduled-tasks/definitions/${encodeURIComponent(
+        normalizedDefinitionId
+      )}/reopen`
     ),
     method: "POST",
     body: payload,

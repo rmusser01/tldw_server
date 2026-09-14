@@ -5,7 +5,7 @@ Qwen, DeepSeek, HuggingFace, and Custom OpenAI-compatible.
 
 from __future__ import annotations
 
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import pytest
 
@@ -15,14 +15,15 @@ async def test_qwen_async_non_streaming(monkeypatch):
     from tldw_Server_API.app.core.Chat.chat_orchestrator import chat_api_call_async
     from tldw_Server_API.app.core.LLM_Calls.providers.qwen_adapter import QwenAdapter
 
-    async def _fake_achat(self, *args, **kwargs):
+    def _fake_chat(self, *args, **kwargs):
         return {"object": "chat.completion", "choices": [{"index": 0, "message": {"content": "ok"}}]}
 
-    monkeypatch.setattr(QwenAdapter, "achat", _fake_achat, raising=True)
+    monkeypatch.setattr(QwenAdapter, "chat", _fake_chat, raising=True)
 
     resp = await chat_api_call_async(
         api_endpoint="qwen",
         messages_payload=[{"role": "user", "content": "hi"}],
+        api_key="sk-qwen-test",
         model="qwen-2",
         streaming=False,
     )
@@ -58,14 +59,15 @@ async def test_huggingface_async_non_streaming(monkeypatch):
     from tldw_Server_API.app.core.Chat.chat_orchestrator import chat_api_call_async
     from tldw_Server_API.app.core.LLM_Calls.providers.huggingface_adapter import HuggingFaceAdapter
 
-    async def _fake_achat(self, *args, **kwargs):
+    def _fake_chat(self, *args, **kwargs):
         return {"object": "chat.completion", "choices": [{"index": 0, "message": {"content": "ok"}}]}
 
-    monkeypatch.setattr(HuggingFaceAdapter, "achat", _fake_achat, raising=True)
+    monkeypatch.setattr(HuggingFaceAdapter, "chat", _fake_chat, raising=True)
 
     resp = await chat_api_call_async(
         api_endpoint="huggingface",
         messages_payload=[{"role": "user", "content": "hi"}],
+        api_key="sk-hf-test",
         model="meta-llama/Meta-Llama-3-8B-Instruct",
         streaming=False,
     )

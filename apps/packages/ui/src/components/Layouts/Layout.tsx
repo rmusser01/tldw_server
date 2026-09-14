@@ -148,6 +148,11 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     !hideHeader &&
     !hideSidebar &&
     !isMobile
+  const headerSidebarCollapsed = showChatSidebar
+    ? isMobile
+      ? !sidebarOpen
+      : chatSidebarCollapsed
+    : !sidebarOpen
   const isViewportConstrainedRoute = (
     VIEWPORT_CONSTRAINED_PATHS as readonly string[]
   ).includes(location.pathname)
@@ -195,7 +200,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   }
 
   React.useEffect(() => {
-    if (isMobile && !showChatSidebar) return
+    if (!showChatSidebar) return
     if (!isMobile && sidebarOpen) {
       setSidebarOpen(false)
     }
@@ -377,6 +382,14 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
         )}
         style={chatScreenBackgroundStyle}
       >
+        {/* A bypass link is only useful as the FIRST focusable element -
+            before the sidebar and header it exists to skip (#2889). */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-text focus:shadow"
+        >
+          Skip to main content
+        </a>
         {/* Persistent ChatSidebar when feature flag enabled */}
         {shouldRenderChatSidebar && (
           <ChatSidebar
@@ -390,56 +403,51 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           />
         )}
         <main
+          id="main-content"
+          tabIndex={-1}
           className={classNames(
-            "relative flex min-h-0 min-w-0 flex-1 flex-col",
+            "relative flex min-h-0 min-w-0 flex-1 flex-col outline-none",
             hideHeader ? "bg-bg " : ""
           )}
           data-demo-mode={demoEnabled ? "on" : "off"}
         >
-          {hideHeader ? (
-            <div className="relative flex min-h-screen flex-1 flex-col items-center justify-center px-4 py-10 sm:px-8 overflow-auto">
+          <div
+            className={
+              hideHeader
+                ? "contents"
+                : isViewportConstrainedRoute
+                  ? "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto"
+                  : "relative flex min-w-0 flex-col min-h-[135vh]"
+            }
+          >
+            {!hideHeader && (
+              <div
+                key="shell-header"
+                className={classNames(
+                  "relative z-20 w-full min-w-0",
+                  isViewportConstrainedRoute ? "shrink-0" : ""
+                )}
+              >
+                <Header
+                  onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
+                  sidebarCollapsed={headerSidebarCollapsed}
+                  notificationCount={notificationCount}
+                  onOpenNotifications={onOpenNotifications}
+                />
+              </div>
+            )}
+            <div
+              key="route-content"
+              className={
+                hideHeader
+                  ? "relative flex min-h-screen flex-1 flex-col items-center justify-center px-4 py-10 sm:px-8 overflow-auto"
+                  : "relative flex min-h-0 min-w-0 flex-1 flex-col"
+              }
+            >
               {children}
               {shortcutLoading && renderShortcutOverlay()}
             </div>
-          ) : isViewportConstrainedRoute ? (
-            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-              <div className="relative z-20 w-full min-w-0 shrink-0">
-                <Header
-                  onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
-                  sidebarCollapsed={
-                    showChatSidebar && isMobile
-                      ? !sidebarOpen
-                      : chatSidebarCollapsed
-                  }
-                  notificationCount={notificationCount}
-                  onOpenNotifications={onOpenNotifications}
-                />
-              </div>
-              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-                {children}
-                {shortcutLoading && renderShortcutOverlay()}
-              </div>
-            </div>
-          ) : (
-            <div className="relative flex min-w-0 flex-col min-h-[135vh]">
-              <div className="relative z-20 w-full min-w-0">
-                <Header
-                  onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
-                  sidebarCollapsed={
-                    showChatSidebar && isMobile
-                      ? !sidebarOpen
-                      : chatSidebarCollapsed
-                  }
-                  notificationCount={notificationCount}
-                  onOpenNotifications={onOpenNotifications}
-                />
-              </div>
-              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-                {children}
-                {shortcutLoading && renderShortcutOverlay()}
-              </div>
-            </div>
-          )}
+          </div>
           {/* Mobile Drawer for ChatSidebar when the persistent sidebar is enabled */}
           {!hideHeader && showChatSidebar && !hideSidebar && isMobile && (
             <Drawer

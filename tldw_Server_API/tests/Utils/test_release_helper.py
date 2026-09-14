@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess  # nosec B404
 import sys
 from pathlib import Path
@@ -744,6 +745,7 @@ def test_shell_release_runner_refreshes_published_before_staging_and_commit(
     tmp_path: Path,
 ) -> None:
     commands: list[list[str]] = []
+    environments: list[dict[str, str] | None] = []
 
     def _fake_run_command(
         self: ShellReleaseRunner,
@@ -751,8 +753,11 @@ def test_shell_release_runner_refreshes_published_before_staging_and_commit(
         *,
         check: bool = True,
         capture_output: bool = True,
+        env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        del check, capture_output
         commands.append(list(args))
+        environments.append(dict(env) if env is not None else None)
         return subprocess.CompletedProcess(args, 0, "", "")
 
     monkeypatch.setattr(ShellReleaseRunner, "_run_command", _fake_run_command)
@@ -763,22 +768,22 @@ def test_shell_release_runner_refreshes_published_before_staging_and_commit(
         tmp_path / "Docs" / "Published",
     ]
     monkeypatch.setattr(runner, "get_head_sha", lambda: "release-sha")
+    monkeypatch.setenv("TLDW_DOCS_SOURCE_DIR", "hostile-source")
+    monkeypatch.setenv("TLDW_DOCS_PUBLISHED_DIR", "hostile-published")
+    monkeypatch.setenv("TLDW_DOCS_TEST_FAIL_AFTER_BACKUP", "1")
+    monkeypatch.setenv("TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP", "1")
+    monkeypatch.setenv("TLDW_DOCS_TEST_MODE", "1")
+    monkeypatch.setenv("TLDW_RELEASE_TEST_SENTINEL", "preserved")
 
     assert runner.create_release_commit("1.2.3") == "release-sha"
+    assert os.environ["TLDW_DOCS_SOURCE_DIR"] == "hostile-source"
+    assert os.environ["TLDW_DOCS_PUBLISHED_DIR"] == "hostile-published"
+    assert os.environ["TLDW_DOCS_TEST_FAIL_AFTER_BACKUP"] == "1"
+    assert os.environ["TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP"] == "1"
+    assert os.environ["TLDW_DOCS_TEST_MODE"] == "1"
     assert commands == [
         [
-            "/usr/bin/env",
-            "-u",
-            "TLDW_DOCS_SOURCE_DIR",
-            "-u",
-            "TLDW_DOCS_PUBLISHED_DIR",
-            "-u",
-            "TLDW_DOCS_TEST_FAIL_AFTER_BACKUP",
-            "-u",
-            "TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP",
-            "-u",
-            "TLDW_DOCS_TEST_MODE",
-            "/bin/bash",
+            "bash",
             str(tmp_path / "Helper_Scripts" / "refresh_docs_published.sh"),
         ],
         [
@@ -790,6 +795,19 @@ def test_shell_release_runner_refreshes_published_before_staging_and_commit(
         ],
         ["git", "commit", "-m", release_module.release_commit_message("1.2.3")],
     ]
+    assert environments[0] is not None
+    assert environments[0]["TLDW_RELEASE_TEST_SENTINEL"] == "preserved"
+    assert not any(
+        name in environments[0]
+        for name in (
+            "TLDW_DOCS_SOURCE_DIR",
+            "TLDW_DOCS_PUBLISHED_DIR",
+            "TLDW_DOCS_TEST_FAIL_AFTER_BACKUP",
+            "TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP",
+            "TLDW_DOCS_TEST_MODE",
+        )
+    )
+    assert environments[1:] == [None, None]
 
 
 def test_shell_release_runner_refresh_failure_blocks_staging_and_commit(
@@ -797,15 +815,29 @@ def test_shell_release_runner_refresh_failure_blocks_staging_and_commit(
     tmp_path: Path,
 ) -> None:
     commands: list[list[str]] = []
+    environments: list[dict[str, str]] = []
 
     def _fake_run(
         command_args: list[str],
         **kwargs: object,
     ) -> subprocess.CompletedProcess[str]:
         commands.append(list(command_args))
+        environments.append(dict(kwargs["env"]))
         return subprocess.CompletedProcess(command_args, 1, "", "refresh failed")
 
+    bash_path = tmp_path / "bin" / "bash"
+    monkeypatch.setattr(
+        release_module.shutil,
+        "which",
+        lambda executable: str(bash_path) if executable == "bash" else None,
+    )
     monkeypatch.setattr(release_module.subprocess, "run", _fake_run)
+    monkeypatch.setenv("TLDW_DOCS_SOURCE_DIR", "hostile-source")
+    monkeypatch.setenv("TLDW_DOCS_PUBLISHED_DIR", "hostile-published")
+    monkeypatch.setenv("TLDW_DOCS_TEST_FAIL_AFTER_BACKUP", "1")
+    monkeypatch.setenv("TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP", "1")
+    monkeypatch.setenv("TLDW_DOCS_TEST_MODE", "1")
+    monkeypatch.setenv("TLDW_RELEASE_TEST_SENTINEL", "preserved")
     runner = ShellReleaseRunner(repo_root=tmp_path, dry_run=False)
     runner._prepared_paths = [tmp_path / "Docs" / "Published"]
 
@@ -814,21 +846,21 @@ def test_shell_release_runner_refresh_failure_blocks_staging_and_commit(
 
     assert commands == [
         [
-            "/usr/bin/env",
-            "-u",
-            "TLDW_DOCS_SOURCE_DIR",
-            "-u",
-            "TLDW_DOCS_PUBLISHED_DIR",
-            "-u",
-            "TLDW_DOCS_TEST_FAIL_AFTER_BACKUP",
-            "-u",
-            "TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP",
-            "-u",
-            "TLDW_DOCS_TEST_MODE",
-            "/bin/bash",
+            str(bash_path),
             str(tmp_path / "Helper_Scripts" / "refresh_docs_published.sh"),
         ]
     ]
+    assert environments[0]["TLDW_RELEASE_TEST_SENTINEL"] == "preserved"
+    assert not any(
+        name in environments[0]
+        for name in (
+            "TLDW_DOCS_SOURCE_DIR",
+            "TLDW_DOCS_PUBLISHED_DIR",
+            "TLDW_DOCS_TEST_FAIL_AFTER_BACKUP",
+            "TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP",
+            "TLDW_DOCS_TEST_MODE",
+        )
+    )
 
 
 def test_shell_release_runner_run_command_uses_absolute_executable_path(

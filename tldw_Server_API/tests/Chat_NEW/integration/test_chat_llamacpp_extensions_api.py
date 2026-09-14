@@ -74,10 +74,10 @@ def test_chat_completions_resolves_saved_grammar_into_llamacpp_payload(
 
 
 def test_chat_completions_rejects_llamacpp_fields_for_resolved_non_llamacpp_provider(
-    test_client,
+    credentialed_test_client,
     auth_headers,
 ):
-    response = test_client.post(
+    response = credentialed_test_client.post(
         "/api/v1/chat/completions",
         json={
             "api_provider": "openai",

@@ -44,9 +44,13 @@ describe("Next dev watch guard", () => {
     return mod.default
   }
 
-  it("uses webpack for default local dev so watch ignores are honored", () => {
-    expect(packageJson.scripts?.dev).toBe("next dev --webpack")
+  it("uses the qualified Turbopack runtime while preserving an explicit webpack fallback", () => {
+    expect(packageJson.scripts?.dev).toBe("next dev")
+    expect(packageJson.scripts?.["dev:webpack"]).toBe("next dev --webpack")
     expect(packageJson.scripts?.["dev:turbopack"]).toBe("next dev")
+    expect(packageJson.scripts?.["dev:webpack"]).not.toBe(
+      packageJson.scripts?.["dev:turbopack"],
+    )
   })
 
   it("ignores backend runtime output for webpack dev fallback", () => {

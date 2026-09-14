@@ -12,14 +12,23 @@ async def test_run_shutdown_post_worker_non_worker_cleanup_runs_personalization(
     from tldw_Server_API.app.services import shutdown_post_worker_services as shutdown_services
 
     calls: list[dict[str, object]] = []
+    recovery_calls: list[str] = []
 
     async def _record_personalization(**kwargs):
         calls.append(kwargs)
+
+    async def _record_override_recovery() -> None:
+        recovery_calls.append("provider-overrides")
 
     monkeypatch.setattr(
         shutdown_services,
         "_shutdown_personalization_consolidation",
         _record_personalization,
+    )
+    monkeypatch.setattr(
+        shutdown_services,
+        "_shutdown_llm_provider_override_recovery",
+        _record_override_recovery,
     )
 
     handles = await shutdown_services.run_shutdown_post_worker_non_worker_cleanup(
@@ -28,6 +37,7 @@ async def test_run_shutdown_post_worker_non_worker_cleanup_runs_personalization(
 
     assert isinstance(handles, shutdown_services.PostWorkerNonWorkerCleanupHandles)
     assert calls == [{"guard_exceptions": (RuntimeError,)}]
+    assert recovery_calls == ["provider-overrides"]
 
 
 @pytest.mark.asyncio

@@ -35,4 +35,5 @@ The extension sidepanel chat is optimized for browser context. It can open from 
 - [Advanced character roleplay](../WebUI_Extension/Advanced_Character_Roleplay_Guide.md)
 - [Chat dictionaries guide](../WebUI_Extension/Chat_Dictionaries_Guide.md)
 - [Persona user guide](../Server/Personas_User_Guide.md)
+- [Buddy and Persona management](Buddy_And_Persona_Management.md)
 - [Extension sidebar docs](https://github.com/rmusser01/tldw_server/blob/main/apps/extension/docs/sidebar/index.md)

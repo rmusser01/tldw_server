@@ -9,12 +9,12 @@ from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
-    get_db_transaction,
     get_password_service_dep,
     get_session_manager_dep,
 )
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import AdminPrivilegedActionRequest
 from tldw_Server_API.app.api.v1.schemas.auth_schemas import MessageResponse, SessionResponse
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.services import admin_sessions_mfa_service
 
@@ -42,7 +42,7 @@ async def admin_revoke_user_session(
     request: AdminPrivilegedActionRequest,
     principal: AuthPrincipal = Depends(get_auth_principal),
     session_manager=Depends(get_session_manager_dep),
-    db=Depends(get_db_transaction),
+    db=Depends(get_db_pool),
     password_service=Depends(get_password_service_dep),
 ) -> MessageResponse:
     """Revoke a specific session for a user (admin scope)."""
@@ -63,7 +63,7 @@ async def admin_revoke_all_user_sessions(
     request: AdminPrivilegedActionRequest,
     principal: AuthPrincipal = Depends(get_auth_principal),
     session_manager=Depends(get_session_manager_dep),
-    db=Depends(get_db_transaction),
+    db=Depends(get_db_pool),
     password_service=Depends(get_password_service_dep),
 ) -> MessageResponse:
     """Revoke all sessions for a user (admin scope)."""
@@ -129,7 +129,7 @@ async def admin_disable_user_mfa(
     user_id: int,
     request: AdminPrivilegedActionRequest,
     principal: AuthPrincipal = Depends(get_auth_principal),
-    db=Depends(get_db_transaction),
+    db=Depends(get_db_pool),
     password_service=Depends(get_password_service_dep),
 ) -> MessageResponse:
     """Disable MFA for a user (admin scope)."""

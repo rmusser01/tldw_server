@@ -99,11 +99,25 @@ describe("MlxAdminPage", () => {
     ).toBeTruthy()
   })
 
-  it("gates controls when admin APIs are unavailable", async () => {
+  it("names the runtime outage on a 503 instead of blaming missing admin APIs", async () => {
     apiMock.getMlxStatus.mockRejectedValueOnce(
       new Error(
         "Request failed: 503 (GET /api/v1/admin/mlx/status) config=/Users/dev/.config/tldw/config.txt"
       )
+    )
+
+    render(<MlxAdminPage />)
+
+    const alert = await expectDesignSystemAlertForText(
+      "The MLX runtime is not available on this server. MLX requires Apple Silicon; install or start it, then retry."
+    )
+    expect(alert).toHaveAttribute("role", "alert")
+    expect(screen.queryByText("Admin APIs not available")).toBeNull()
+  })
+
+  it("gates controls when admin APIs are genuinely missing (404)", async () => {
+    apiMock.getMlxStatus.mockRejectedValueOnce(
+      new Error("Request failed: 404 (GET /api/v1/admin/mlx/status)")
     )
 
     render(<MlxAdminPage />)

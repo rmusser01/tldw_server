@@ -20,7 +20,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 
-
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 _COLLECTIONS_DB = load_collections_database_cls()
 _OWNED_UPDATE_FIELDS = frozenset({"title", "author", "type", "content"})
@@ -58,6 +57,7 @@ def apply_media_item_update(
                 SELECT id, uuid, title, content, content_hash, version
                 FROM Media
                 WHERE id = ? AND deleted = 0 AND is_trash = 0
+                  AND system_operation_id IS NULL
                 """,
                 (media_id,),
             )
@@ -122,7 +122,7 @@ def apply_media_item_update(
                     )
 
             sql_set_clause = ", ".join(set_parts)
-            update_query = f"UPDATE Media SET {sql_set_clause} WHERE id = ? AND version = ?"  # nosec B608
+            update_query = f"UPDATE Media SET {sql_set_clause} WHERE id = ? AND version = ? AND system_operation_id IS NULL"  # nosec B608
             update_params = tuple(params + [media_id, current_media_version])
 
             update_cursor = self._execute_with_connection(
@@ -155,7 +155,7 @@ def apply_media_item_update(
 
             updated_row = self._fetchone_with_connection(
                 conn,
-                "SELECT * FROM Media WHERE id = ?",
+                "SELECT * FROM Media WHERE id = ? AND system_operation_id IS NULL",
                 (media_id,),
             ) or {}
             updated_media_data = dict(updated_row)

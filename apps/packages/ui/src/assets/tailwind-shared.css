@@ -398,6 +398,11 @@ body {
   border-color: rgb(var(--color-border)) !important;
 }
 
+.ant-drawer-body {
+  background-color: rgb(var(--color-elevated)) !important;
+  color: rgb(var(--color-text)) !important;
+}
+
 .ant-card-head,
 .ant-modal-title,
 .ant-modal-body,

@@ -8,6 +8,7 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError, InputError
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import MediaDbLike
 
+
 class ChunksRepository:
     """Repository for MediaChunks persistence."""
 
@@ -15,7 +16,7 @@ class ChunksRepository:
         self.session = session
 
     @classmethod
-    def from_legacy_db(cls, db: MediaDbLike) -> "ChunksRepository":
+    def from_legacy_db(cls, db: MediaDbLike) -> ChunksRepository:
         return cls(session=db)
 
     def add(
@@ -46,7 +47,8 @@ class ChunksRepository:
             with db.transaction() as conn:
                 media_info = db._fetchone_with_connection(
                     conn,
-                    "SELECT uuid FROM Media WHERE id = ? AND deleted = 0",
+                    "SELECT uuid FROM Media WHERE id = ? AND deleted = 0 "
+                    "AND system_operation_id IS NULL",
                     (media_id,),
                 )
                 if not media_info:
@@ -134,7 +136,8 @@ class ChunksRepository:
             with db.transaction() as conn:
                 parent_exists = db._fetchone_with_connection(
                     conn,
-                    "SELECT 1 FROM Media WHERE id = ? AND deleted = 0",
+                    "SELECT 1 FROM Media WHERE id = ? AND deleted = 0 "
+                    "AND system_operation_id IS NULL",
                     (media_id,),
                 )
                 if not parent_exists:

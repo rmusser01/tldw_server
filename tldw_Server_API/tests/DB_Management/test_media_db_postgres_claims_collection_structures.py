@@ -8,7 +8,6 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -142,9 +141,53 @@ def test_ensure_postgres_claims_extensions_executes_representative_claims_ddls_a
         'CREATE INDEX IF NOT EXISTS "idx_claims_monitoring_events_delivered"' in query
         for query in queries
     )
+    assert any(
+        'CREATE INDEX IF NOT EXISTS "idx_claims_monitoring_events_user_created_id" '
+        'ON "claims_monitoring_events" ("user_id", "created_at", "id")' in query
+        for query in queries
+    )
+    assert any(
+        'CREATE INDEX IF NOT EXISTS "idx_claims_monitoring_events_user_id" '
+        'ON "claims_monitoring_events" ("user_id", "id")' in query
+        for query in queries
+    )
+    assert any("CREATE OR REPLACE FUNCTION tldw_claims_safe_json" in query for query in queries)
+    assert any("CREATE OR REPLACE FUNCTION tldw_claims_compact_json" in query for query in queries)
     assert any('CREATE TABLE IF NOT EXISTS "claim_clusters"' in query for query in queries)
     assert any(
         'CREATE TABLE IF NOT EXISTS "claim_cluster_membership"' in query
+        for query in queries
+    )
+
+    analytics_export_table = next(
+        query
+        for query in queries
+        if 'CREATE TABLE IF NOT EXISTS "claims_analytics_exports"' in query
+    )
+    assert "job_id BIGINT" in analytics_export_table
+    assert "error_code TEXT" in analytics_export_table
+    assert "snapshot_at TIMESTAMPTZ" in analytics_export_table
+    assert "snapshot_event_id BIGINT" in analytics_export_table
+    assert "job_status" not in analytics_export_table
+    assert any(
+        'CREATE INDEX IF NOT EXISTS "idx_claims_analytics_exports_job_id" '
+        'ON "claims_analytics_exports" ("job_id")' in query
+        for query in queries
+    )
+    assert any(
+        'CREATE INDEX IF NOT EXISTS "idx_claims_analytics_exports_user_status_export_id" '
+        'ON "claims_analytics_exports" ("user_id", "status", "export_id")' in query
+        for query in queries
+    )
+    assert any(
+        'CREATE INDEX IF NOT EXISTS "idx_claims_analytics_exports_user_status_updated_export_id" '
+        'ON "claims_analytics_exports" '
+        '("user_id", "status", "updated_at", "export_id")' in query
+        for query in queries
+    )
+    assert not any(
+        'ALTER COLUMN "job_id" TYPE' in query
+        or 'ALTER COLUMN "snapshot_at" TYPE' in query
         for query in queries
     )
 

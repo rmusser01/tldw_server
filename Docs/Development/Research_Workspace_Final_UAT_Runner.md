@@ -73,6 +73,28 @@ bun run e2e:research-workspace:uat -- \
   --grep "opens and closes workspace search"
 ```
 
+## Shared Recipient CI Coverage
+
+The deterministic recipient spec uses stubbed canonical API responses to cover
+desktop and mobile interaction behavior:
+
+```bash
+bunx playwright test e2e/workflows/research-workspace.shared-recipient.spec.ts \
+  --project=chromium --reporter=line --workers=1
+```
+
+This is CI interaction coverage only. While a `shared` query parameter is
+active, its request ledger fails on local workspace, Studio, notes, MCP, ACP,
+sandbox, artifact, source mutation, extension writable-destination, and removed
+full-media requests. Recipient API traffic must stay under the canonical
+`/api/v1/sharing/shared-with-me/{share_id}/...` paths.
+
+Task 11 remains the live product-truth gate. Its real backend, WebUI, and CDP
+evidence must exercise owner, member, and nonmember identities; source changes;
+membership and share revocation; recipient credentials; request correlation;
+and the absence of local or owner sentinel leakage. A passing stubbed spec does
+not certify those live boundaries.
+
 ## Evidence
 
 The runner writes two files by default:

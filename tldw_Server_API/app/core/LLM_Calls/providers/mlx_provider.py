@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 MLX-backed local LLM provider (Apple Silicon first).
 
@@ -9,18 +7,27 @@ enforces a small concurrency cap, and provides optional compile/warmup on load
 to avoid first-token stalls.
 """
 
+from __future__ import annotations
+
 import contextlib
 import importlib
+import math
 import os
+import queue
 import threading
 import time
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    BoundedDaemonPool,
+    DaemonCapacityError,
+    run_bounded_daemon_with_timeout,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatBadRequestError,
     ChatProviderError,
@@ -54,6 +61,117 @@ _MLX_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
+
+_MLX_GENERATION_TIMEOUT_SECONDS = 120.0
+_MLX_STREAM_TIMEOUT_SECONDS = 120.0
+_MLX_EMBEDDINGS_TIMEOUT_SECONDS = 60.0
+
+_WORKER_SUCCESS = "success"
+_WORKER_BAD_REQUEST = "bad_request"
+_WORKER_RATE_LIMIT = "rate_limit"
+_WORKER_PROVIDER_ERROR = "provider_error"
+
+
+def _resolve_timeout(timeout: float | None, *, default: float) -> float:
+    value = default if timeout is None else timeout
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value <= 0
+    ):
+        raise ValueError("MLX timeout must be a positive finite number")
+    return float(value)
+
+
+def _safe_worker_outcome(
+    call: Callable[[], Any],
+    *,
+    operation: str,
+) -> tuple[str, Any]:
+    """Run provider-owned code without retaining or surfacing raw failures."""
+
+    try:
+        return _WORKER_SUCCESS, call()
+    except ChatRateLimitError:
+        return _WORKER_RATE_LIMIT, None
+    except ChatBadRequestError:
+        return _WORKER_BAD_REQUEST, None
+    except Exception as exc:  # noqa: BLE001 - provider callbacks can raise arbitrary exceptions
+        logger.error(
+            "MLX worker failed operation={} error_type={}",
+            operation,
+            type(exc).__name__,
+        )
+        return _WORKER_PROVIDER_ERROR, None
+
+
+def _unwrap_worker_outcome(outcome: tuple[str, Any]) -> Any:
+    kind, value = outcome
+    if kind == _WORKER_SUCCESS:
+        return value
+    if kind == _WORKER_RATE_LIMIT:
+        raise ChatRateLimitError(
+            provider="mlx",
+            message="MLX busy (max concurrency reached)",
+        )
+    if kind == _WORKER_BAD_REQUEST:
+        raise ChatBadRequestError(
+            provider="mlx",
+            message="MLX model is unavailable for this request",
+        )
+    raise ChatProviderError(
+        provider="mlx",
+        message="MLX provider request failed",
+    )
+
+
+def _run_worker_with_deadline(
+    registry: MLXSessionRegistry,
+    call: Callable[[], Any],
+    *,
+    operation: str,
+    timeout_seconds: float,
+    timeout_message: str,
+) -> Any:
+    capacity_exhausted = False
+    try:
+        outcome = run_bounded_daemon_with_timeout(
+            lambda: _safe_worker_outcome(call, operation=operation),
+            pool=_RegistryWorkerPoolView(registry),  # type: ignore[arg-type]
+            name=f"mlx-{operation}",
+            timeout_seconds=timeout_seconds,
+            timeout_message=timeout_message,
+        )
+    except DaemonCapacityError:
+        capacity_exhausted = True
+        outcome = None
+    if capacity_exhausted:
+        raise ChatRateLimitError(
+            provider="mlx",
+            message="MLX busy (max concurrency reached)",
+        )
+    return _unwrap_worker_outcome(outcome)
+
+
+class _RegistryWorkerPoolView:
+    """Expose registry-synchronized admission to the generic deadline helper."""
+
+    def __init__(self, registry: MLXSessionRegistry) -> None:
+        self._registry = registry
+
+    def start(
+        self,
+        target: Callable[[], Any],
+        *,
+        name: str,
+        released_event: threading.Event | None = None,
+    ) -> threading.Thread:
+        return self._registry.start_worker(
+            target,
+            name=name,
+            released_event=released_event,
+        )
 
 
 def _coerce_int(val: str | None, default: int | None = None) -> int | None:
@@ -133,7 +251,9 @@ class MLXSessionRegistry:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._worker_pool_lock = threading.Lock()
         self._sema = threading.BoundedSemaphore(1)
+        self._worker_pool = BoundedDaemonPool(1)
         self._max_concurrent: int = 1
         self._session: MLXSession | None = None
         self._inflight: int = 0
@@ -142,9 +262,41 @@ class MLXSessionRegistry:
 
     def _set_concurrency(self, max_concurrent: int) -> None:
         max_concurrent = max(1, int(max_concurrent))
-        self._max_concurrent = max_concurrent
-        self._sema = threading.BoundedSemaphore(max_concurrent)
+        with self._worker_pool_lock:
+            if max_concurrent == self._max_concurrent:
+                set_gauge("mlx_max_concurrent", float(max_concurrent))
+                return
+            if self._inflight or self._worker_pool.active_count:
+                raise ChatProviderError(
+                    provider="mlx",
+                    message="MLX concurrency cannot change while requests are active",
+                )
+            self._max_concurrent = max_concurrent
+            self._sema = threading.BoundedSemaphore(max_concurrent)
+            self._worker_pool = BoundedDaemonPool(max_concurrent)
         set_gauge("mlx_max_concurrent", float(max_concurrent))
+
+    def start_worker(
+        self,
+        target: Callable[[], Any],
+        *,
+        name: str,
+        released_event: threading.Event | None = None,
+    ) -> threading.Thread:
+        """Atomically admit work against the same pool generation used by reloads."""
+
+        with self._worker_pool_lock:
+            return self._worker_pool.start(
+                target,
+                name=name,
+                released_event=released_event,
+            )
+
+    @property
+    def worker_pool(self) -> BoundedDaemonPool:
+        """Return the capacity pool paired with the active registry limit."""
+
+        return self._worker_pool
 
     def _ensure_metrics(self) -> None:
         if self._metrics_registered:
@@ -270,8 +422,8 @@ class MLXSessionRegistry:
             applied = False
             with self._lock:
                 if load_generation == self._load_generation:
-                    self._session = session
                     self._set_concurrency(settings.get("max_concurrent", 1))
+                    self._session = session
                     applied = True
             try:
                 duration = time.time() - start
@@ -427,7 +579,12 @@ def get_active_mlx_tokenizer(model_id: str | None = None) -> tuple[Any, str] | N
     return get_mlx_registry().get_active_tokenizer(model_id=model_id)
 
 
-def _messages_to_prompt(messages: Any, tokenizer: Any, system_message: str | None, template_override: str | None) -> str:
+def _messages_to_prompt(
+    messages: Any,
+    tokenizer: Any,
+    system_message: str | None,
+    template_override: str | None,
+) -> str:
     """Convert OpenAI-style messages to a prompt string using tokenizer chat template when available."""
     msgs = messages or []
     if system_message:
@@ -444,7 +601,10 @@ def _messages_to_prompt(messages: Any, tokenizer: Any, system_message: str | Non
                         tokenizer.chat_template = original_template
             return tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
     except _MLX_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"MLX chat template application failed; falling back: {exc}")
+        logger.debug(
+            "MLX chat template application failed; falling back error_type={}",
+            type(exc).__name__,
+        )
     # Fallback: naive concatenation
     parts = []
     for m in msgs:
@@ -493,133 +653,282 @@ class MLXChatAdapter(ChatProvider):
         return out
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
-        with get_mlx_registry().session_scope() as session:
-            prompt = _messages_to_prompt(
-                request.get("messages"),
-                session.tokenizer,
-                request.get("system_message"),
-                request.get("prompt_template") or session.config.get("prompt_template"),
-            )
-            generate_kwargs = self._generate_kwargs(request)
-            start_time = time.time()
-            try:
-                output = session.generate_fn(
-                    session.model,
-                    session.tokenizer,
-                    prompt,
-                    stream=False,
-                    verbose=False,
-                    **generate_kwargs,
-                )
-            except TypeError:
-                output = session.generate_fn(session.model, session.tokenizer, prompt)
-            content = output if isinstance(output, str) else str(output)
-            created = int(time.time())
-            tokens = len(str(content).split())
-            try:
-                observe_histogram(
-                    "mlx_chat_latency_seconds",
-                    float(time.time() - start_time),
-                    labels={"model": session.model_id, "streaming": "false"},
-                )
-                increment_counter(
-                    "mlx_tokens_generated_total",
-                    value=float(tokens),
-                    labels={"model": session.model_id, "streaming": "false"},
-                )
-            except _MLX_NONCRITICAL_EXCEPTIONS:
-                pass
-            return {
-                "id": f"chatcmpl-{uuid.uuid4()}",
-                "object": "chat.completion",
-                "created": created,
-                "model": session.model_id,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {"role": "assistant", "content": content},
-                        "finish_reason": "stop",
-                    }
-                ],
-            }
+        messages = request.get("messages") or []
+        system_message = request.get("system_message")
+        prompt_template = request.get("prompt_template")
+        generate_kwargs = self._generate_kwargs(request)
+        timeout_seconds = _resolve_timeout(
+            timeout,
+            default=_MLX_GENERATION_TIMEOUT_SECONDS,
+        )
+        registry = get_mlx_registry()
+        del request
 
-    def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
-        request = validate_payload(self.name, request or {})
-        with get_mlx_registry().session_scope() as session:
-            prompt = _messages_to_prompt(
-                request.get("messages"),
-                session.tokenizer,
-                request.get("system_message"),
-                request.get("prompt_template") or session.config.get("prompt_template"),
-            )
-            generate_kwargs = self._generate_kwargs(request)
-            start_time = time.time()
-            if callable(session.generate_stream_fn):
+        def generate() -> dict[str, Any]:
+            with registry.session_scope() as session:
+                prompt = _messages_to_prompt(
+                    messages,
+                    session.tokenizer,
+                    system_message,
+                    prompt_template or session.config.get("prompt_template"),
+                )
+                start_time = time.time()
                 try:
-                    stream = session.generate_stream_fn(
+                    output = session.generate_fn(
                         session.model,
                         session.tokenizer,
                         prompt,
+                        stream=False,
                         verbose=False,
                         **generate_kwargs,
                     )
                 except TypeError:
-                    stream = session.generate_stream_fn(session.model, session.tokenizer, prompt)
+                    output = session.generate_fn(session.model, session.tokenizer, prompt)
+                content = output if isinstance(output, str) else str(output)
+                created = int(time.time())
+                tokens = len(str(content).split())
                 try:
-                    total_tokens = 0
-                    for chunk in stream:
-                        if chunk:
-                            total_tokens += len(str(chunk).split())
-                            yield openai_delta_chunk(str(chunk))
+                    observe_histogram(
+                        "mlx_chat_latency_seconds",
+                        float(time.time() - start_time),
+                        labels={"model": session.model_id, "streaming": "false"},
+                    )
+                    increment_counter(
+                        "mlx_tokens_generated_total",
+                        value=float(tokens),
+                        labels={"model": session.model_id, "streaming": "false"},
+                    )
+                except _MLX_NONCRITICAL_EXCEPTIONS:
+                    pass
+                return {
+                    "id": f"chatcmpl-{uuid.uuid4()}",
+                    "object": "chat.completion",
+                    "created": created,
+                    "model": session.model_id,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": content},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                }
+
+        return _run_worker_with_deadline(
+            registry,
+            generate,
+            operation="chat-generation",
+            timeout_seconds=timeout_seconds,
+            timeout_message="MLX generation timed out",
+        )
+
+    def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
+        request = validate_payload(self.name, request or {})
+        messages = request.get("messages") or []
+        system_message = request.get("system_message")
+        prompt_template = request.get("prompt_template")
+        generate_kwargs = self._generate_kwargs(request)
+        timeout_seconds = _resolve_timeout(
+            timeout,
+            default=_MLX_STREAM_TIMEOUT_SECONDS,
+        )
+        registry = get_mlx_registry()
+        del request
+
+        items: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
+        stop_event = threading.Event()
+
+        def put_item(kind: str, value: Any = None) -> bool:
+            while not stop_event.is_set():
+                try:
+                    items.put((kind, value), timeout=0.05)
+                except queue.Full:
+                    continue
+                return True
+            return False
+
+        def close_stream(stream: Any) -> None:
+            close = getattr(stream, "close", None)
+            if not callable(close):
+                return
+            try:
+                close()
+            except Exception as exc:  # noqa: BLE001 - third-party stream cleanup is best effort
+                logger.debug(
+                    "MLX stream close failed error_type={}",
+                    type(exc).__name__,
+                )
+
+        def worker() -> None:
+            outcome_kind = _WORKER_SUCCESS
+            try:
+                with registry.session_scope() as session:
+                    prompt = _messages_to_prompt(
+                        messages,
+                        session.tokenizer,
+                        system_message,
+                        prompt_template or session.config.get("prompt_template"),
+                    )
+                    start_time = time.time()
+                    if callable(session.generate_stream_fn):
+                        stream = None
+                        stream_failed = False
+                        streamed_any = False
+                        try:
+                            try:
+                                stream = session.generate_stream_fn(
+                                    session.model,
+                                    session.tokenizer,
+                                    prompt,
+                                    verbose=False,
+                                    **generate_kwargs,
+                                )
+                            except TypeError:
+                                stream = session.generate_stream_fn(
+                                    session.model,
+                                    session.tokenizer,
+                                    prompt,
+                                )
+                            total_tokens = 0
+                            for chunk in stream:
+                                if stop_event.is_set():
+                                    return
+                                if chunk:
+                                    text = str(chunk)
+                                    total_tokens += len(text.split())
+                                    if not put_item("data", openai_delta_chunk(text)):
+                                        return
+                                    streamed_any = True
+                            try:
+                                observe_histogram(
+                                    "mlx_chat_latency_seconds",
+                                    float(time.time() - start_time),
+                                    labels={"model": session.model_id, "streaming": "true"},
+                                )
+                                if total_tokens:
+                                    increment_counter(
+                                        "mlx_tokens_generated_total",
+                                        value=float(total_tokens),
+                                        labels={"model": session.model_id, "streaming": "true"},
+                                    )
+                            except _MLX_NONCRITICAL_EXCEPTIONS:
+                                pass
+                            for final_chunk in finalize_stream(None):
+                                if not put_item("data", final_chunk):
+                                    return
+                            put_item("done")
+                            return
+                        except _MLX_NONCRITICAL_EXCEPTIONS as exc:
+                            stream_failed = True
+                            logger.error(
+                                "MLX streaming failed phase={} error_type={}",
+                                "after_output" if streamed_any else "before_output",
+                                type(exc).__name__,
+                            )
+                        finally:
+                            if stream is not None:
+                                close_stream(stream)
+                        if not stream_failed or stop_event.is_set():
+                            return
+                        if streamed_any:
+                            put_item(_WORKER_PROVIDER_ERROR)
+                            return
+
+                    try:
+                        output = session.generate_fn(
+                            session.model,
+                            session.tokenizer,
+                            prompt,
+                            stream=False,
+                            verbose=False,
+                            **generate_kwargs,
+                        )
+                    except TypeError:
+                        output = session.generate_fn(session.model, session.tokenizer, prompt)
+                    content = output if isinstance(output, str) else str(output)
+                    tokens = len(content.split())
                     try:
                         observe_histogram(
                             "mlx_chat_latency_seconds",
                             float(time.time() - start_time),
                             labels={"model": session.model_id, "streaming": "true"},
                         )
-                        if total_tokens:
+                        if tokens:
                             increment_counter(
                                 "mlx_tokens_generated_total",
-                                value=float(total_tokens),
+                                value=float(tokens),
                                 labels={"model": session.model_id, "streaming": "true"},
                             )
                     except _MLX_NONCRITICAL_EXCEPTIONS:
                         pass
-                    yield from finalize_stream(None)
+                    if not put_item("data", openai_delta_chunk(content)):
+                        return
+                    for final_chunk in finalize_stream(None):
+                        if not put_item("data", final_chunk):
+                            return
+                    put_item("done")
                     return
-                except _MLX_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.error(f"MLX streaming failed, falling back to non-stream: {exc}")
-            # Fallback to single-shot if streaming not available
-            try:
-                output = session.generate_fn(
-                    session.model,
-                    session.tokenizer,
-                    prompt,
-                    stream=False,
-                    verbose=False,
-                    **generate_kwargs,
+            except ChatRateLimitError:
+                outcome_kind = _WORKER_RATE_LIMIT
+            except ChatBadRequestError:
+                outcome_kind = _WORKER_BAD_REQUEST
+            except Exception as exc:  # noqa: BLE001 - provider callbacks can raise arbitrary exceptions
+                outcome_kind = _WORKER_PROVIDER_ERROR
+                logger.error(
+                    "MLX worker failed operation=stream error_type={}",
+                    type(exc).__name__,
                 )
-            except TypeError:
-                output = session.generate_fn(session.model, session.tokenizer, prompt)
-            content = output if isinstance(output, str) else str(output)
-            tokens = len(str(content).split())
-            try:
-                observe_histogram(
-                    "mlx_chat_latency_seconds",
-                    float(time.time() - start_time),
-                    labels={"model": session.model_id, "streaming": "true"},
-                )
-                if tokens:
-                    increment_counter(
-                        "mlx_tokens_generated_total",
-                        value=float(tokens),
-                        labels={"model": session.model_id, "streaming": "true"},
+            put_item(outcome_kind)
+
+        capacity_exhausted = False
+        try:
+            registry.start_worker(worker, name="mlx-stream")
+        except DaemonCapacityError:
+            capacity_exhausted = True
+        if capacity_exhausted:
+            raise ChatRateLimitError(
+                provider="mlx",
+                message="MLX busy (max concurrency reached)",
+            )
+
+        deadline = time.monotonic() + timeout_seconds
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("MLX streaming timed out")
+                timed_out = False
+                try:
+                    kind, value = items.get(timeout=remaining)
+                except queue.Empty:
+                    timed_out = True
+                    kind, value = "", None
+                if timed_out:
+                    raise TimeoutError("MLX streaming timed out")
+                if kind == "data":
+                    yield value
+                elif kind == "done":
+                    return
+                elif kind == _WORKER_RATE_LIMIT:
+                    raise ChatRateLimitError(
+                        provider="mlx",
+                        message="MLX busy (max concurrency reached)",
                     )
-            except _MLX_NONCRITICAL_EXCEPTIONS:
-                pass
-            yield openai_delta_chunk(content)
-            yield from finalize_stream(None)
+                elif kind == _WORKER_BAD_REQUEST:
+                    raise ChatBadRequestError(
+                        provider="mlx",
+                        message="MLX model is unavailable for this request",
+                    )
+                else:
+                    raise ChatProviderError(
+                        provider="mlx",
+                        message="MLX provider request failed",
+                    )
+        finally:
+            stop_event.set()
 
 
 class MLXEmbeddingsAdapter(EmbeddingsProvider):
@@ -641,39 +950,54 @@ class MLXEmbeddingsAdapter(EmbeddingsProvider):
         inputs = request.get("input")
         if inputs is None:
             raise ChatBadRequestError(provider="mlx", message="'input' is required for embeddings")
-        with self.registry.session_scope() as session:
-            start_time = time.time()
-            if not session.supports_embeddings or not callable(session.embed_fn):
-                raise ChatBadRequestError(
-                    provider="mlx",
-                    message="Active MLX model does not support embeddings",
-                )
-            try:
+        timeout_seconds = _resolve_timeout(
+            timeout,
+            default=_MLX_EMBEDDINGS_TIMEOUT_SECONDS,
+        )
+        inputs_are_list = isinstance(inputs, list)
+        registry = self.registry
+        del request
+
+        def create_embeddings() -> tuple[Any, str]:
+            with registry.session_scope() as session:
+                start_time = time.time()
+                if not session.supports_embeddings or not callable(session.embed_fn):
+                    raise ChatBadRequestError(
+                        provider="mlx",
+                        message="Active MLX model does not support embeddings",
+                    )
                 if isinstance(inputs, list):
                     vectors = [session.embed_fn(session.model, session.tokenizer, text) for text in inputs]
                 else:
                     vectors = session.embed_fn(session.model, session.tokenizer, inputs)
-            except Exception as exc:
-                raise ChatProviderError(provider="mlx", message=str(exc)) from exc
-            try:
-                observe_histogram(
-                    "mlx_embeddings_latency_seconds",
-                    float(time.time() - start_time),
-                    labels={"model": session.model_id},
-                )
-                increment_counter(
-                    "mlx_embeddings_requests_total",
-                    labels={"model": session.model_id},
-                )
-            except _MLX_NONCRITICAL_EXCEPTIONS:
-                pass
+                try:
+                    observe_histogram(
+                        "mlx_embeddings_latency_seconds",
+                        float(time.time() - start_time),
+                        labels={"model": session.model_id},
+                    )
+                    increment_counter(
+                        "mlx_embeddings_requests_total",
+                        labels={"model": session.model_id},
+                    )
+                except _MLX_NONCRITICAL_EXCEPTIONS:
+                    pass
+                return vectors, session.model_id
+
+        vectors, model_id = _run_worker_with_deadline(
+            registry,
+            create_embeddings,
+            operation="embeddings",
+            timeout_seconds=timeout_seconds,
+            timeout_message="MLX embeddings timed out",
+        )
 
         # Normalize to OpenAI-like response shape
-        if isinstance(inputs, list):
+        if inputs_are_list:
             data = [{"index": i, "embedding": vec} for i, vec in enumerate(vectors)]  # type: ignore[arg-type]
         else:
             data = [{"index": 0, "embedding": vectors}]  # type: ignore[list-item]
-        return {"data": data, "object": "list", "model": session.model_id}
+        return {"data": data, "object": "list", "model": model_id}
 
 
 __all__ = [

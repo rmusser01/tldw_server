@@ -21,7 +21,7 @@ from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .models import RunPhase, RunSpec, RunStatus, RuntimeType, Session, SessionSpec, TrustLevel
-from .policy import SandboxPolicy, SandboxPolicyConfig
+from .policy import SandboxPolicy, SandboxPolicyConfig, compute_policy_hash
 from .store import IdempotencyConflict as StoreIdemConflict
 from .store import get_store
 from .utils import coerce_optional_nonempty_string
@@ -523,6 +523,17 @@ class SandboxOrchestrator:
             except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:
                 pass
             # Otherwise synthesize minimal queued status
+            stored_policy_hash = stored.get("policy_hash")
+            policy_hash = (
+                stored_policy_hash.strip()
+                if isinstance(stored_policy_hash, str) and stored_policy_hash.strip()
+                else None
+            )
+            if policy_hash is None:
+                try:
+                    policy_hash = compute_policy_hash(self.policy.cfg)
+                except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:
+                    policy_hash = None
             return RunStatus(
                 id=rid,
                 phase=RunPhase.queued,
@@ -534,6 +545,7 @@ class SandboxOrchestrator:
                 workspace_id=spec.workspace_id,
                 workspace_group_id=spec.workspace_group_id,
                 scope_snapshot_id=spec.scope_snapshot_id,
+                policy_hash=policy_hash,
             )
 
         # Enforce queue capacity: prune TTL then check max length
@@ -629,6 +641,10 @@ class SandboxOrchestrator:
 
         # Create new run in queued state
         rid = str(uuid.uuid4())
+        try:
+            policy_hash = compute_policy_hash(self.policy.cfg)
+        except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:
+            policy_hash = None
         status = RunStatus(
             id=rid,
             phase=RunPhase.queued,
@@ -640,6 +656,7 @@ class SandboxOrchestrator:
             workspace_id=spec.workspace_id,
             workspace_group_id=spec.workspace_group_id,
             scope_snapshot_id=spec.scope_snapshot_id,
+            policy_hash=policy_hash,
         )
         # Optional: estimated start time based on queue length and a per-run estimate
         try:
@@ -682,6 +699,7 @@ class SandboxOrchestrator:
             "workspace_id": spec.workspace_id,
             "workspace_group_id": spec.workspace_group_id,
             "scope_snapshot_id": spec.scope_snapshot_id,
+            "policy_hash": status.policy_hash,
             "exit_code": status.exit_code,
         })
         return status

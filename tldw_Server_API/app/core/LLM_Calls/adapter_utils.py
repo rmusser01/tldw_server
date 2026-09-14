@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import copy
 import os
-from typing import Any, Optional
+from typing import Any
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    is_runtime_issued_provider_call_credentials,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
 from tldw_Server_API.app.core.config import load_and_log_configs
@@ -48,6 +54,57 @@ def normalize_provider(provider: str | None) -> str:
     return (provider or "").strip().lower()
 
 
+def bind_provider_call_credentials(
+    provider: str,
+    request: dict[str, Any] | None,
+    *,
+    consume: bool,
+) -> tuple[dict[str, Any], ProviderCallCredentials | None]:
+    """Authenticate and bind one execution-scoped provider credential handle.
+
+    Legacy calls remain unchanged only when neither the runtime marker nor a
+    credential handle is present. A genuine handle is authoritative for both
+    the API key and provider configuration; adapter boundaries consume the
+    opaque handle before generic payload validation.
+    """
+
+    bound = dict(request or {})
+    credentials = bound.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY)
+    if credentials is None:
+        if bound.get("credentials_resolved") is True:
+            raise ChatConfigurationError(
+                provider=normalize_provider(provider),
+                message="Provider credentials require an active runtime capability.",
+            )
+        return bound, None
+
+    if not is_runtime_issued_provider_call_credentials(
+        credentials,
+        provider=provider,
+    ):
+        raise ChatConfigurationError(
+            provider=normalize_provider(provider),
+            message="Provider credentials were not issued by the active runtime.",
+        )
+
+    try:
+        app_config = copy.deepcopy(credentials.app_config or {})
+    except Exception:  # noqa: BLE001 - mutated capability metadata fails closed
+        raise ChatConfigurationError(
+            provider=normalize_provider(provider),
+            message="Provider credential configuration is unavailable.",
+        ) from None
+
+    bound["api_key"] = credentials.api_key
+    bound["app_config"] = app_config
+    bound["credentials_resolved"] = True
+    if consume:
+        bound.pop(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY, None)
+    else:
+        bound[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = credentials
+    return bound, credentials
+
+
 def resolve_provider_section(provider: str) -> str:
     normalized = normalize_provider(provider)
     if not normalized:
@@ -59,6 +116,28 @@ def resolve_provider_section(provider: str) -> str:
         normalized,
         f"{normalized.replace('.', '_').replace('-', '_')}_api",
     )
+
+
+def provider_auth_is_resolved(
+    provider: str,
+    *,
+    api_key: Any,
+    app_config: dict[str, Any] | None,
+    credentials_resolved: bool,
+) -> bool:
+    """Return whether an execution-scoped provider auth contract is usable."""
+    if isinstance(api_key, str) and api_key.strip():
+        return True
+    provider_norm = normalize_provider(provider)
+    if provider_norm != "bedrock" or credentials_resolved is not True:
+        return False
+    if not isinstance(app_config, dict):
+        return False
+    section = resolve_provider_section(provider_norm)
+    provider_config = app_config.get(section) or {}
+    if not isinstance(provider_config, dict):
+        return False
+    return provider_config.get("_runtime_auth_source") == "aws_default_chain"
 
 
 def ensure_app_config(app_config: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -179,7 +258,7 @@ def _resolve_openai_api_base(openai_cfg: dict[str, Any]) -> str:
     return (cfg_base or env_api_base or 'https://api.openai.com/v1')
 
 
-def _parse_data_url_for_multimodal(data_url: str) -> Optional[tuple[str, str]]:
+def _parse_data_url_for_multimodal(data_url: str) -> tuple[str, str] | None:
     """Parses a data URL (e.g., data:image/png;base64,xxxx) into (mime_type, base64_data)."""
     if data_url.startswith("data:") and ";base64," in data_url:
         try:

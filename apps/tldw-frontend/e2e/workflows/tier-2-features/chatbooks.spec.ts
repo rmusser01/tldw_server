@@ -125,7 +125,9 @@ test.describe("Chatbooks Backup & Import", () => {
       await expect(chatbooks.exportTab).toBeVisible()
       await chatbooks.switchToTab("export")
 
-      await authedPage.getByPlaceholder(/^Name$/i).fill(`E2E Backup All ${Date.now()}`)
+      await authedPage
+        .getByRole("textbox", { name: /^Name$/i })
+        .fill(`E2E Backup All ${Date.now()}`)
       await authedPage
         .getByPlaceholder(/Description/i)
         .fill("E2E full-account Backup all export")

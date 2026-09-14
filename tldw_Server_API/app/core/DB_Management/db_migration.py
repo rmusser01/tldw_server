@@ -23,16 +23,15 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.DB_Backups import (
+    _sqlite_error_is_busy,
+    restore_sqlite_database_file,
+)
 from tldw_Server_API.app.core.Infrastructure.distributed_lock import acquire_migration_lock
 from tldw_Server_API.app.core.testing import (
     is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
 )
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
-
-from tldw_Server_API.app.core.DB_Management.DB_Backups import (
-    _sqlite_error_is_busy,
-    restore_sqlite_database_file,
-)
 from tldw_Server_API.app.core.Utils.path_utils import resolve_path
 
 
@@ -102,6 +101,19 @@ class DatabaseMigrator:
         r"^\s*ALTER\s+TABLE\s+(?P<table>[A-Za-z0-9_]+)\s+ADD\s+COLUMN\s+(?P<column>[A-Za-z0-9_]+)\b",
         re.IGNORECASE,
     )
+    _BEGIN_TRANSACTION_RE = re.compile(
+        r"^\s*BEGIN(?:\s+(?:DEFERRED|IMMEDIATE|EXCLUSIVE))?(?:\s+TRANSACTION)?\s*;?\s*$",
+        re.IGNORECASE,
+    )
+    _END_TRANSACTION_RE = re.compile(
+        r"^\s*(?:COMMIT|END)(?:\s+TRANSACTION)?\s*;?\s*$",
+        re.IGNORECASE,
+    )
+    _FOREIGN_KEYS_PRAGMA_RE = re.compile(
+        r"^\s*PRAGMA\s+foreign_keys\s*(?:=\s*(?:ON|OFF|0|1)|"
+        r"\(\s*(?:ON|OFF|0|1)\s*\))\s*;?\s*$",
+        re.IGNORECASE,
+    )
 
     def __init__(self, db_path: str, migrations_dir: Optional[str] = None):
         if self._is_memory_db_path(db_path):
@@ -146,6 +158,15 @@ class DatabaseMigrator:
             if name and str(name).lower() == column.lower():
                 return True
         return False
+
+    @staticmethod
+    def _sqlite_table_exists(conn: sqlite3.Connection, table: str) -> bool:
+        """Check optional schema metadata without suppressing database errors."""
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table,),
+        ).fetchone()
+        return row is not None
 
     @staticmethod
     def _is_memory_db_path(db_path: str) -> bool:
@@ -308,13 +329,115 @@ class DatabaseMigrator:
 
     @staticmethod
     def _strip_sql_comments(sql: str) -> str:
-        lines = []
-        for line in sql.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("--"):
+        """Remove comments for classification while preserving quoted SQL tokens."""
+        return re.sub(
+            r"('(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|`(?:``|[^`])*`|\[[^\]]*\])"
+            r"|--[^\n]*|/\*[\s\S]*?(?:\*/|$)",
+            lambda match: match.group(1) or " ",
+            sql,
+        ).strip()
+
+    @classmethod
+    def _split_sql_statements(cls, sql: str) -> list[str]:
+        """Split at complete SQLite statements, retaining triggers and literals."""
+        statements: list[str] = []
+        buffer: list[str] = []
+
+        for char in sql:
+            buffer.append(char)
+            if char == ";":
+                candidate = "".join(buffer).strip()
+                if candidate and sqlite3.complete_statement(candidate):
+                    if cls._strip_sql_comments(candidate):
+                        statements.append(candidate)
+                    buffer = []
+
+        trailing = "".join(buffer).strip()
+        if cls._strip_sql_comments(trailing):
+            statements.append(trailing)
+
+        return statements
+
+    @classmethod
+    def _prepare_migration_statements(
+        cls,
+        sql: str,
+    ) -> tuple[list[str], list[str], list[str]]:
+        """Separate connection PRAGMAs and a legacy outer transaction wrapper."""
+        # Normalize only execution input; the original SQL remains the checksum source.
+        statements = cls._split_sql_statements(sql.removeprefix("\ufeff"))
+        pre_transaction: list[str] = []
+        post_transaction: list[str] = []
+
+        while statements:
+            normalized = cls._strip_sql_comments(statements[0])
+            if not cls._FOREIGN_KEYS_PRAGMA_RE.match(normalized):
+                break
+            pre_transaction.append(statements.pop(0))
+
+        while statements:
+            normalized = cls._strip_sql_comments(statements[-1])
+            if not cls._FOREIGN_KEYS_PRAGMA_RE.match(normalized):
+                break
+            post_transaction.insert(0, statements.pop())
+
+        # Preserve shipped SQL bytes/checksums while taking ownership of their
+        # transaction. Any remaining transaction control is denied by SQLite.
+        if (
+            len(statements) >= 2
+            and cls._BEGIN_TRANSACTION_RE.match(cls._strip_sql_comments(statements[0]))
+            and cls._END_TRANSACTION_RE.match(cls._strip_sql_comments(statements[-1]))
+        ):
+            statements = statements[1:-1]
+
+        return pre_transaction, statements, post_transaction
+
+    @staticmethod
+    def _authorize_migration_statement(
+        action: int,
+        name: Optional[str],
+        value: Optional[str],
+        _database: Optional[str],
+        _trigger: Optional[str],
+    ) -> int:
+        """Let SQLite enforce ownership regardless of SQL comments or spelling."""
+        if action in (sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT):
+            return sqlite3.SQLITE_DENY
+        if (
+            action == sqlite3.SQLITE_PRAGMA
+            and name
+            and name.lower() == "foreign_keys"
+            and value is not None
+        ):
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    def _execute_migration_statements(
+        self,
+        conn: sqlite3.Connection,
+        migration: Migration,
+        direction: str,
+        statements: list[str],
+    ) -> None:
+        """Execute complete statements, skipping already-present idempotent columns."""
+        for statement in statements:
+            executable_statement = self._strip_sql_comments(statement)
+            if not executable_statement:
                 continue
-            lines.append(line)
-        return "\n".join(lines).strip()
+            if direction == "up" and migration.idempotent:
+                match = self._ADD_COLUMN_RE.match(executable_statement)
+                if match:
+                    table = match.group("table")
+                    column = match.group("column")
+                    if self._sqlite_column_exists(conn, table, column):
+                        logger.info(
+                            "Skipping duplicate column {}.{} for migration {}",
+                            table,
+                            column,
+                            migration.name,
+                        )
+                        continue
+            conn.execute(statement)
 
     @staticmethod
     def _extract_version_from_sql(filepath: Path, sql: str) -> int:
@@ -347,6 +470,22 @@ class DatabaseMigrator:
                 return stripped.split(":", 1)[1].strip()
         return ""
 
+    @staticmethod
+    def _extract_idempotent_from_sql(sql: str) -> bool:
+        for line in sql.splitlines():
+            stripped = line.strip()
+            if not stripped.lower().startswith("-- idempotent:"):
+                continue
+
+            value = stripped.split(":", 1)[1].strip().lower()
+            if value in {"true", "1", "yes", "on"}:
+                return True
+            if value in {"false", "0", "no", "off"}:
+                return False
+            raise ValueError(f"Invalid SQL migration idempotent metadata: {value}")
+
+        return False
+
     def _load_sql_migration(self, filepath: Path) -> Optional[Migration]:
         try:
             sql_text = filepath.read_text()
@@ -363,6 +502,7 @@ class DatabaseMigrator:
         version = self._extract_version_from_sql(filepath, sql_text)
         name = self._extract_name_from_sql(filepath)
         description = self._extract_description_from_sql(sql_text)
+        idempotent = self._extract_idempotent_from_sql(sql_text)
 
         return Migration(
             version=version,
@@ -370,6 +510,7 @@ class DatabaseMigrator:
             up_sql=sql_text,
             down_sql=None,
             description=description,
+            idempotent=idempotent,
         )
 
     def create_backup(self, description: str = "") -> str:
@@ -426,78 +567,72 @@ class DatabaseMigrator:
                 f"Migration {migration.name} (v{migration.version}) does not define executable SQL."
             )
         start_time = datetime.now(timezone.utc)
+        post_transaction: list[str] = []
 
         with self._get_connection() as conn:
             try:
-                # Clean up any prior failed attempt for this version so retries work
-                if direction == "up":
-                    conn.execute(
-                        "DELETE FROM schema_migrations WHERE version = ? AND success = 0",
-                        (migration.version,),
-                    )
-                    conn.commit()
+                pre_transaction, statements, post_transaction = self._prepare_migration_statements(sql)
 
-                # Execute migration SQL
-                if direction == "up" and migration.idempotent:
-                    statements = [stmt.strip() for stmt in sql.split(";") if stmt.strip()]
-                    for statement in statements:
-                        match = self._ADD_COLUMN_RE.match(statement)
-                        if match:
-                            table = match.group("table")
-                            column = match.group("column")
-                            if self._sqlite_column_exists(conn, table, column):
-                                logger.info(
-                                    "Skipping duplicate column {}.{} for migration {}",
-                                    table,
-                                    column,
-                                    migration.name,
-                                )
-                                continue
-                        conn.execute(statement)
-                else:
-                    if ";" in sql:
-                        # Multiple statements
-                        conn.executescript(sql)
-                    else:
-                        # Single statement
-                        conn.execute(sql)
+                for statement in pre_transaction:
+                    conn.execute(statement)
 
-                conn.commit()
+                with conn:
+                    conn.execute("BEGIN IMMEDIATE")
 
-                execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
-
-                # Record successful migration
-                if direction == "up":
-                    conn.execute("""
-                        INSERT INTO schema_migrations
-                        (version, name, checksum, applied_at, execution_time, success)
-                        VALUES (?, ?, ?, ?, ?, 1)
-                    """, (
-                        migration.version,
-                        migration.name,
-                        migration.checksum,
-                        datetime.now(timezone.utc),
-                        execution_time
-                    ))
-                else:
-                    # Remove migration record on rollback
-                    conn.execute("""
-                        DELETE FROM schema_migrations WHERE version = ?
-                    """, (migration.version,))
-
-                conn.commit()
-
-                # Update schema_version table if it exists (for compatibility with MediaDB)
-                try:
                     if direction == "up":
-                        conn.execute("UPDATE schema_version SET version = ? WHERE 1=1", (migration.version,))
+                        # Clean up any prior failed attempt for this version so retries work
+                        conn.execute(
+                            "DELETE FROM schema_migrations WHERE version = ? AND success = 0",
+                            (migration.version,),
+                        )
+
+                    conn.set_authorizer(self._authorize_migration_statement)
+                    try:
+                        self._execute_migration_statements(conn, migration, direction, statements)
+                    finally:
+                        conn.set_authorizer(None)
+
+                    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+
+                    # Record successful migration
+                    if direction == "up":
+                        conn.execute("""
+                            INSERT INTO schema_migrations
+                            (version, name, checksum, applied_at, execution_time, success)
+                            VALUES (?, ?, ?, ?, ?, 1)
+                        """, (
+                            migration.version,
+                            migration.name,
+                            migration.checksum,
+                            datetime.now(timezone.utc),
+                            execution_time
+                        ))
                     else:
-                        # On downgrade, set to previous version
-                        conn.execute("UPDATE schema_version SET version = ? WHERE 1=1", (migration.version - 1,))
-                    conn.commit()
-                except sqlite3.OperationalError:
-                    # Table doesn't exist, that's fine
-                    pass
+                        # Remove migration record on rollback
+                        conn.execute("""
+                            DELETE FROM schema_migrations WHERE version = ?
+                        """, (migration.version,))
+
+                    # Update schema_version table if it exists (for compatibility with MediaDB)
+                    if self._sqlite_table_exists(conn, "schema_version"):
+                        if direction == "up":
+                            conn.execute("UPDATE schema_version SET version = ? WHERE 1=1", (migration.version,))
+                        else:
+                            # On downgrade, set to previous version
+                            conn.execute("UPDATE schema_version SET version = ? WHERE 1=1", (migration.version - 1,))
+
+                for statement in post_transaction:
+                    try:
+                        conn.execute(statement)
+                    except sqlite3.Error as pragma_err:
+                        logger.bind(
+                            migration_name=migration.name,
+                            migration_version=migration.version,
+                            direction=direction,
+                            phase="after_success",
+                        ).opt(exception=pragma_err).warning(
+                            "Failed to restore migration connection PRAGMA after success",
+                        )
 
                 logger.info(
                     f"Executed migration {migration.name} ({direction}) "
@@ -507,25 +642,36 @@ class DatabaseMigrator:
                 return execution_time
 
             except Exception as e:
-                conn.rollback()
+                for statement in post_transaction:
+                    try:
+                        conn.execute(statement)
+                    except sqlite3.Error as pragma_err:
+                        logger.bind(
+                            migration_name=migration.name,
+                            migration_version=migration.version,
+                            direction=direction,
+                            phase="after_error",
+                        ).opt(exception=pragma_err).warning(
+                            "Failed to restore migration connection PRAGMA after error",
+                        )
 
                 # Record failed migration
                 if direction == "up":
                     try:
-                        conn.execute("""
-                            INSERT OR REPLACE INTO schema_migrations
-                            (version, name, checksum, applied_at, execution_time,
-                             success, error_message)
-                            VALUES (?, ?, ?, ?, ?, 0, ?)
-                        """, (
-                            migration.version,
-                            migration.name,
-                            migration.checksum,
-                            datetime.now(timezone.utc),
-                            (datetime.now(timezone.utc) - start_time).total_seconds(),
-                            str(e)
-                        ))
-                        conn.commit()
+                        with conn:
+                            conn.execute("""
+                                INSERT OR REPLACE INTO schema_migrations
+                                (version, name, checksum, applied_at, execution_time,
+                                 success, error_message)
+                                VALUES (?, ?, ?, ?, ?, 0, ?)
+                            """, (
+                                migration.version,
+                                migration.name,
+                                migration.checksum,
+                                datetime.now(timezone.utc),
+                                (datetime.now(timezone.utc) - start_time).total_seconds(),
+                                str(e)
+                            ))
                     except Exception as log_err:
                         logger.debug(f"Failed to log migration failure: migration={migration.name}, error={log_err}")
 

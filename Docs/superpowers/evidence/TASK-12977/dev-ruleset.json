@@ -1,0 +1,58 @@
+{
+  "_links": {
+    "html": {
+      "href": "https://github.com/rmusser01/tldw_server/rules/19362594"
+    },
+    "self": {
+      "href": "https://api.github.com/repos/rmusser01/tldw_server/rulesets/19362594"
+    }
+  },
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": [
+        "refs/heads/dev"
+      ]
+    }
+  },
+  "created_at": "2026-07-21T00:43:49.911-07:00",
+  "current_user_can_bypass": "never",
+  "enforcement": "active",
+  "id": 19362594,
+  "name": "frontend-license-gate-dev",
+  "node_id": "RRS_lACqUmVwb3NpdG9yec4vVoZ_zgEncyI",
+  "rules": [
+    {
+      "parameters": {
+        "allowed_merge_methods": [
+          "merge"
+        ],
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_approving_review_count": 0,
+        "required_review_thread_resolution": false,
+        "required_reviewers": []
+      },
+      "type": "pull_request"
+    },
+    {
+      "parameters": {
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "frontend-license-policy/trusted/dev",
+            "integration_id": 15368
+          }
+        ],
+        "strict_required_status_checks_policy": false
+      },
+      "type": "required_status_checks"
+    }
+  ],
+  "source": "rmusser01/tldw_server",
+  "source_type": "Repository",
+  "target": "branch",
+  "updated_at": "2026-07-21T00:43:49.962-07:00"
+}

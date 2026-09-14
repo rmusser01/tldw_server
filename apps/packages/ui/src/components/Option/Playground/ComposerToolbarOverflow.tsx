@@ -1,4 +1,5 @@
 import React from "react"
+import { useBuddyManagementStore } from "@/store/buddy-management"
 import { useTranslation } from "react-i18next"
 import { Popover } from "antd"
 import {
@@ -19,6 +20,7 @@ export type ComposerToolbarRolePlayActions = {
 }
 
 export type ComposerToolbarOverflowProps = {
+  serverChatId?: string | null
   isProMode: boolean
   isConnectionReady: boolean
   contextToolsOpen: boolean
@@ -94,6 +96,26 @@ export const ComposerToolbarOverflow = React.memo(function ComposerToolbarOverfl
 
   const overflowItems = React.useMemo(() => {
     const items: React.ReactNode[] = []
+    items.push(
+      <OverflowItem
+        key="buddy-persona"
+        icon={<Users className="h-4 w-4" />}
+        label={t("sidepanel:buddyManagement.entry", {
+          defaultValue: "Buddy & Persona"
+        })}
+        onClick={() => {
+          setOverflowOpen(false)
+          useBuddyManagementStore
+            .getState()
+            .show(
+              props.serverChatId
+                ? { scope_type: "conversation", scope_id: props.serverChatId }
+                : null,
+              rolePlayActions?.onOpenRolePlaySetup
+            )
+        }}
+      />
+    )
     items.push(
       <OverflowItem
         key="search"
@@ -195,7 +217,7 @@ export const ComposerToolbarOverflow = React.memo(function ComposerToolbarOverfl
     onToggleWebSearch, hasDictation, speechAvailable,
     speechUsesServer, isServerDictating, isListening, voiceChatEnabled,
     onDictationToggle, onOpenModelSettings, isProMode, temporaryChat,
-    isConnectionReady, onFocusConnectionCard, t
+    isConnectionReady, onFocusConnectionCard, props.serverChatId, t
   ])
 
   if (overflowItems.length === 0) return null

@@ -44,7 +44,7 @@ natural continuation of research and study.
 
 - Full PowerPoint or Keynote feature parity.
 - Collaborative real-time multi-user slide editing.
-- Arbitrary user-authored JavaScript in exported presentations.
+- Arbitrary JavaScript execution, preview, or rendering inside tldw.
 - Unbounded image generation or media rendering.
 - Replacing existing notes, media, RAG, or quiz workflows.
 
@@ -214,6 +214,15 @@ Potential later schema fields:
 - Keep data local/self-hosted; external LLM calls must follow existing provider
   configuration and user intent.
 - Preserve per-user DB boundaries.
+
+### Narrow Standalone HTML Exception
+
+Standalone JavaScript may be generated, stored, edited, versioned, and
+downloaded only as bounded opaque text. This exception does not permit tldw to
+execute, preview, render, navigate to, or load resources from that text. The
+storage validator enforces a fixed document contract; it does not sanitize the
+document into safety. The browser extension remains source-free and hands
+standalone projects to the WebUI using source-free metadata.
 
 ## Success Metrics
 

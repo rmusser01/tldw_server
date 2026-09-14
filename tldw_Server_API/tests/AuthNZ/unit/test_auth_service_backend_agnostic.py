@@ -1,12 +1,26 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+    ProfileUserWriteRejected,
+    _guard_sql,
+)
 from tldw_Server_API.app.services import auth_service
+
+
+def _profile_candidate(user_id: int) -> list[dict[str, Any]]:
+    return [
+        {
+            "source_tag": "user",
+            "source_id": user_id,
+            "candidate_value": datetime(2026, 2, 9, 11, 0, tzinfo=timezone.utc),
+        }
+    ]
 
 
 class _Cursor:
@@ -15,6 +29,30 @@ class _Cursor:
 
     async def fetchone(self) -> Any:
         return self._row
+
+
+@pytest.mark.unit
+def test_versioned_user_gateway_prefers_explicit_sqlite_backend_marker() -> None:
+    class _SqliteAdapterWithFetch:
+        _authnz_profile_user_backend = "sqlite"
+
+        async def fetch(self, query: str, *args: Any) -> list[Any]:
+            del query, args
+            return []
+
+    gateway = auth_service._versioned_user_gateway(_SqliteAdapterWithFetch())
+
+    assert gateway.backend == "sqlite"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("marker", ["mysql", 1])
+def test_versioned_user_gateway_rejects_invalid_backend_marker(marker: Any) -> None:
+    class _InvalidBackendAdapter:
+        _authnz_profile_user_backend = marker
+
+    with pytest.raises(ProfileUserWriteRejected):
+        auth_service._versioned_user_gateway(_InvalidBackendAdapter())
 
 
 @pytest.mark.unit
@@ -116,17 +154,62 @@ async def test_fetch_active_user_by_id_normalizes_sqlite_tuple_boolean() -> None
 @pytest.mark.asyncio
 async def test_update_user_last_login_uses_adapter_query_shape() -> None:
     now = datetime(2026, 2, 9, 12, 0, 0)
+    expected_now = now.replace(tzinfo=timezone.utc)
     db = AsyncMock()
-    db.execute = AsyncMock()
+    identity = object()
+    db._authnz_profile_user_backend = "postgres"
+    db._authnz_profile_user_guard_identity = identity
+    executed: list[tuple[str, tuple[Any, ...]]] = []
+
+    async def _execute(statement: Any, *parameters: Any) -> str:
+        executed.append(
+            (
+                _guard_sql(
+                    statement,
+                    backend="postgres",
+                    connection_identity=identity,
+                    operation="execute",
+                ),
+                parameters,
+            )
+        )
+        return "UPDATE 1"
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.fetch = AsyncMock(return_value=_profile_candidate(17))
     db.commit = AsyncMock()
 
     await auth_service.update_user_last_login(db, 17, now)
 
-    db.execute.assert_awaited_once_with(
-        "UPDATE users SET last_login = $1 WHERE id = $2",
-        now,
-        17,
-    )
+    assert (
+        "UPDATE public.users SET last_login = $1 WHERE id = $2",
+        (expected_now, 17),
+    ) in executed
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_managed_sqlite_service_does_not_commit_caller_transaction() -> None:
+    class _ManagedSqliteConn:
+        _authnz_profile_user_backend = "sqlite"
+        _authnz_profile_user_guard_identity = object()
+
+        def __init__(self) -> None:
+            self.commits = 0
+
+        async def execute(self, query: str, params: tuple[Any, ...]) -> None:
+            assert query == "UPDATE users SET password_hash = ? WHERE id = ?"
+            assert params == ("new-hash", 42)
+
+        async def commit(self) -> None:
+            self.commits += 1
+
+    db = _ManagedSqliteConn()
+
+    await auth_service.update_user_password_hash(db, 42, "new-hash")
+
+    assert db.commits == 0
 
 
 @pytest.mark.unit
@@ -194,6 +277,7 @@ async def test_fetch_password_reset_token_record_sqlite_fallback_dynamic_in_clau
 async def test_verify_user_email_once_uses_postgres_update_count_when_available() -> None:
     db = AsyncMock()
     db.execute = AsyncMock(return_value="UPDATE 1")
+    db.fetch = AsyncMock(return_value=_profile_candidate(9))
     db.fetchrow = AsyncMock()
     db.commit = AsyncMock()
 
@@ -205,4 +289,78 @@ async def test_verify_user_email_once_uses_postgres_update_count_when_available(
     )
 
     assert updated == 1
+    update_parameters = db.execute.await_args_list[0].args[1:]
+    assert update_parameters[1] == datetime(
+        2026,
+        2,
+        9,
+        13,
+        0,
+        tzinfo=timezone.utc,
+    )
     db.fetchrow.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_mark_user_verified_normalizes_naive_postgres_timestamp_to_utc() -> None:
+    db = AsyncMock()
+    db._authnz_profile_user_backend = "postgres"
+    db.execute = AsyncMock(return_value="UPDATE 1")
+    db.fetch = AsyncMock(return_value=_profile_candidate(11))
+
+    await auth_service.mark_user_verified(
+        db,
+        user_id=11,
+        now_utc=datetime(2026, 2, 9, 14, 0, 0),
+    )
+
+    update_parameters = db.execute.await_args_list[0].args[1:]
+    assert update_parameters[1] == datetime(
+        2026,
+        2,
+        9,
+        14,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_apply_password_reset_normalizes_naive_postgres_timestamps_to_utc() -> None:
+    db = AsyncMock()
+    db._authnz_profile_user_backend = "postgres"
+    db.execute = AsyncMock(return_value="UPDATE 1")
+
+    await auth_service.apply_password_reset(
+        db,
+        user_id=12,
+        new_password_hash="hash",
+        token_record_id=34,
+        now_utc=datetime(2026, 2, 9, 15, 0, 0),
+    )
+
+    expected = datetime(2026, 2, 9, 15, 0, tzinfo=timezone.utc)
+    assert db.execute.await_args_list[0].args[2] == expected
+    assert db.execute.await_args_list[1].args[1] == expected
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_verify_user_email_once_preserves_zero_for_missing_user() -> None:
+    db = AsyncMock()
+    db.fetch = AsyncMock(return_value=[])
+    db.execute = AsyncMock()
+    db.commit = AsyncMock()
+
+    updated = await auth_service.verify_user_email_once(
+        db,
+        user_id=404,
+        email="missing@example.com",
+        now_utc=datetime(2026, 2, 9, 13, 0, 0),
+    )
+
+    assert updated == 0
+    db.execute.assert_not_awaited()
+    db.commit.assert_awaited_once_with()

@@ -59,6 +59,8 @@ class GroqAdapter(ChatProvider):
                 base = g.get("api_base_url")
                 if isinstance(base, str) and base.strip():
                     return base.strip()
+        if request.get("credentials_resolved") is True:
+            return "https://api.groq.com/openai/v1"
         return self._base_url()
 
     def _resolve_timeout(self, request: dict[str, Any], fallback: float | None) -> float:
@@ -124,6 +126,7 @@ class GroqAdapter(ChatProvider):
         return payload
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
         if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():
             api_key = request.get("api_key")
@@ -138,14 +141,17 @@ class GroqAdapter(ChatProvider):
                 with http_client_factory(timeout=resolved_timeout) as client:
                     resp = client.post(url, headers=headers, json=payload)
                     resp.raise_for_status()
-                    return resp.json()
+                    data = resp.json()
+                    self._raise_if_in_band_provider_error(data, phase="chat_response")
+                    return data
             except Exception as e:
-                raise self.normalize_error(e) from e
+                self._raise_sanitized_provider_failure(e, phase="chat")
 
         # Native disabled -> error to avoid legacy recursion
         raise RuntimeError("GroqAdapter native HTTP disabled by configuration")
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
         if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():
             api_key = request.get("api_key")
@@ -168,6 +174,10 @@ class GroqAdapter(ChatProvider):
                                 line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
                             except Exception:
                                 line = str(raw)
+                            self._raise_if_in_band_provider_error(
+                                line,
+                                phase="stream_response",
+                            )
                             if is_done_line(line):
                                 if not seen_done:
                                     seen_done = True
@@ -179,7 +189,7 @@ class GroqAdapter(ChatProvider):
                         yield from finalize_stream(response=resp, done_already=seen_done)
                 return
             except Exception as e:
-                raise self.normalize_error(e) from e
+                self._raise_sanitized_provider_failure(e, phase="stream")
 
         # Native disabled -> error to avoid legacy recursion
         raise RuntimeError("GroqAdapter native HTTP disabled by configuration")
@@ -192,47 +202,5 @@ class GroqAdapter(ChatProvider):
             yield item
 
     def normalize_error(self, exc: Exception):  # type: ignore[override]
-        """Parse Groq HTTP error payloads and map to Chat*Error with better messages.
-
-        Groq uses an OpenAI-compatible surface; errors often include {error: {message, type}}.
-        """
-        from tldw_Server_API.app.core.LLM_Calls.error_utils import (
-            get_http_error_text,
-            get_http_status_from_exception,
-            is_http_status_error,
-            log_http_400_body,
-        )
-        if is_http_status_error(exc):
-            from tldw_Server_API.app.core.Chat.Chat_Deps import (
-                ChatAPIError,
-                ChatAuthenticationError,
-                ChatBadRequestError,
-                ChatProviderError,
-                ChatRateLimitError,
-            )
-            resp = getattr(exc, "response", None)
-            status = get_http_status_from_exception(exc)
-            body = None
-            try:
-                body = resp.json()
-            except Exception:
-                body = None
-            log_http_400_body(self.name, exc, body)
-            detail = None
-            if isinstance(body, dict) and isinstance(body.get("error"), dict):
-                eobj = body["error"]
-                msg = (eobj.get("message") or "").strip()
-                typ = (eobj.get("type") or "").strip()
-                detail = (f"{typ} {msg}" if typ else msg) or str(exc)
-            else:
-                detail = get_http_error_text(exc)
-            if status in (400, 404, 422):
-                return ChatBadRequestError(provider=self.name, message=str(detail))
-            if status in (401, 403):
-                return ChatAuthenticationError(provider=self.name, message=str(detail))
-            if status == 429:
-                return ChatRateLimitError(provider=self.name, message=str(detail))
-            if status and 500 <= status < 600:
-                return ChatProviderError(provider=self.name, message=str(detail), status_code=status)
-            return ChatAPIError(provider=self.name, message=str(detail), status_code=status or 500)
+        """Delegate to the shared bounded error policy."""
         return super().normalize_error(exc)

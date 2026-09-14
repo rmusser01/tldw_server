@@ -1,7 +1,7 @@
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, useLocation } from "react-router-dom"
 import { usePromptStudioStore } from "../../../../store/prompt-studio"
 import {
   StudioTabContainer,
@@ -16,7 +16,11 @@ const state = vi.hoisted(() => ({
 
 const useQueryMock = vi.hoisted(() => vi.fn())
 const useMutationMock = vi.hoisted(() => vi.fn())
-const invalidateQueriesMock = vi.hoisted(() => vi.fn())
+const queryClientMocks = vi.hoisted(() => ({
+  invalidateQueries: vi.fn(),
+  setQueryData: vi.fn()
+}))
+const invalidateQueriesMock = queryClientMocks.invalidateQueries
 const getConfigMock = vi.hoisted(() => vi.fn())
 const setPromptStudioDefaultsMock = vi.hoisted(() => vi.fn())
 const promptStudioServiceMocks = vi.hoisted(() => ({
@@ -27,6 +31,11 @@ const promptStudioServiceMocks = vi.hoisted(() => ({
 
 let latestSocket: MockWebSocket | null = null
 let settingsProjectsQueryOptions: any = null
+
+const LocationSearchProbe = (): React.ReactElement => {
+  const location = useLocation()
+  return <output data-testid="location-search">{location.search}</output>
+}
 
 class MockWebSocket {
   static CONNECTING = 0
@@ -88,11 +97,7 @@ vi.mock("@tanstack/react-query", () => ({
     (useQueryMock as (...args: unknown[]) => unknown)(...args),
   useMutation: (...args: unknown[]) =>
     (useMutationMock as (...args: unknown[]) => unknown)(...args),
-  useQueryClient: () => ({
-    invalidateQueries: (...args: unknown[]) =>
-      (invalidateQueriesMock as (...args: unknown[]) => unknown)(...args),
-    setQueryData: vi.fn()
-  })
+  useQueryClient: () => queryClientMocks
 }))
 
 vi.mock("antd", () => ({
@@ -217,6 +222,7 @@ describe("StudioTabContainer stage 6 navigation and polling", () => {
     latestSocket = null
     ;(globalThis as any).WebSocket = MockWebSocket
     invalidateQueriesMock.mockReset()
+    queryClientMocks.setQueryData.mockReset()
     getConfigMock.mockReset()
     setPromptStudioDefaultsMock.mockReset()
     setPromptStudioDefaultsMock.mockImplementation(async (updates: any) => ({
@@ -387,26 +393,49 @@ describe("StudioTabContainer stage 6 navigation and polling", () => {
     expect(usePromptStudioStore.getState().activeSubTab).toBe("projects")
   })
 
-  it("lets onboarding steps deep-link into gated tabs when no project is selected", () => {
-    render(
-      <MemoryRouter>
-        <StudioTabContainer />
-      </MemoryRouter>
-    )
+  it.each([
+    [2, "prompts"],
+    [3, "testCases"],
+    [4, "evaluations"],
+    [5, "optimizations"]
+  ] as const)(
+    "lets onboarding step %i deep-link into %s when no project is selected",
+    (step, tab) => {
+      render(
+        <React.StrictMode>
+          <MemoryRouter>
+            <StudioTabContainer />
+            <LocationSearchProbe />
+          </MemoryRouter>
+        </React.StrictMode>
+      )
 
-    const steps: Array<[number, string]> = [
-      [2, "prompts"],
-      [3, "testCases"],
-      [4, "evaluations"],
-      [5, "optimizations"]
-    ]
-
-    for (const [step, tab] of steps) {
       const stepButton = screen.getByTestId(`studio-onboarding-step-${step}`)
       expect(stepButton).not.toBeDisabled()
       fireEvent.click(stepButton)
       expect(usePromptStudioStore.getState().activeSubTab).toBe(tab)
+      expect(screen.getByTestId("location-search")).toHaveTextContent(
+        `subtab=${tab}`
+      )
     }
+  )
+
+  it("preserves an initial sub-tab deep link under React Strict Mode", async () => {
+    render(
+      <React.StrictMode>
+        <MemoryRouter initialEntries={["/?subtab=evaluations"]}>
+          <StudioTabContainer />
+          <LocationSearchProbe />
+        </MemoryRouter>
+      </React.StrictMode>
+    )
+
+    await waitFor(() => {
+      expect(usePromptStudioStore.getState().activeSubTab).toBe("evaluations")
+      expect(screen.getByTestId("location-search")).toHaveTextContent(
+        "subtab=evaluations"
+      )
+    })
   })
 
   it("guards against non-array studio project settings payloads", () => {

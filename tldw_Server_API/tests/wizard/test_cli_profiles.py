@@ -4,14 +4,13 @@ from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet
-from typer.testing import CliRunner
 
 from tldw_Server_API.app.core.AuthNZ.api_key_crypto import format_api_key, parse_api_key
 from tldw_Server_API.cli.wizard import cli as wizard_cli
-from tldw_Server_API.cli.wizard.cli import app
 from tldw_Server_API.cli.wizard import profiles
+from tldw_Server_API.cli.wizard.cli import app
+from tldw_Server_API.tests.wizard.cli_runner import CliRunner
 from tldw_Server_API.tests.wizard.helpers import assert_action_field, assert_wizard_json
-
 
 runner = CliRunner()
 

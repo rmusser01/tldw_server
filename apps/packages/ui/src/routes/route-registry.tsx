@@ -16,6 +16,7 @@ import {
   WORKSPACES_PATH
 } from "@/routes/route-paths"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
 import { isHostedVisibleOptionPath } from "./option-route-visibility"
 
 import OptionIndex from "./option-index"
@@ -38,8 +39,8 @@ const OptionModal = createSettingsRoute(
   "ModelsBody"
 )
 const OptionPrompt = createSettingsRoute(
-  () => import("~/components/Option/Settings/WorkspaceLinks"),
-  "PromptWorkspaceSettings"
+  () => import("~/components/Option/Settings/ServicePromptsSettings"),
+  "ServicePromptsSettings"
 )
 const OptionShare = createSettingsRoute(
   () => import("~/components/Option/Share"),
@@ -113,9 +114,26 @@ const OptionAdminLlamacpp = lazy(() => import("./option-admin-llamacpp"))
 const OptionAdminMlx = lazy(() => import("./option-admin-mlx"))
 const OptionAdminRuntimeConfig = lazy(() => import("./option-admin-runtime-config"))
 const OptionAdminMonitoring = lazy(() => import("./option-admin-monitoring"))
+const OptionAdminWatchlistsRuns = lazy(
+  () => import("./option-admin-watchlists-runs")
+)
+const OptionAdminApiKeys = lazy(() => import("./option-admin-api-keys"))
+const OptionAdminBilling = lazy(() => import("./option-admin-billing"))
+const OptionAdminDataOps = lazy(() => import("./option-admin-data-ops"))
+const OptionAdminMaintenance = lazy(() => import("./option-admin-maintenance"))
+const OptionAdminOrgs = lazy(() => import("./option-admin-orgs"))
+const OptionAdminRateLimiting = lazy(() => import("./option-admin-rate-limiting"))
+const OptionAdminRbac = lazy(() => import("./option-admin-rbac"))
+const OptionAdminUsage = lazy(() => import("./option-admin-usage"))
+const OptionAdminWatchlistsItems = lazy(() => import("./option-admin-watchlists-items"))
+const OptionAdminOverview = lazy(() => import("./option-admin"))
 const OptionChatSettings = createSettingsRoute(
   () => import("~/components/Option/Settings/ChatSettings"),
   "ChatSettings"
+)
+const OptionChatMacrosSettings = createSettingsRoute(
+  () => import("~/components/Option/Settings/ChatMacrosSettings"),
+  "ChatMacrosSettings"
 )
 const OptionUiCustomization = createSettingsRoute(
   () => import("~/components/Option/Settings/ui-customization"),
@@ -169,6 +187,13 @@ const OptionPresentationStudioNew = lazy(() => import("./option-presentation-stu
 const OptionPresentationStudioStart = lazy(() => import("./option-presentation-studio-start"))
 const OptionPresentationStudioDetail = lazy(
   () => import("./option-presentation-studio-detail")
+)
+const ExtensionPresentationProjectPanel = lazy(() =>
+  import("@/components/Option/PresentationStudio/ExtensionStartPanel").then(
+    ({ ExtensionPresentationProjectPanel }) => ({
+      default: ExtensionPresentationProjectPanel
+    })
+  )
 )
 const OptionChatWorkflows = lazy(() => import("./option-chat-workflows"))
 const OptionWorkflowEditor = lazy(() => import("./option-workflow-editor"))
@@ -231,6 +256,11 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
     kind: "options",
     path: "/settings/chat",
     element: <OptionChatSettings />,
+  },
+  {
+    kind: "options",
+    path: "/settings/chat-macros",
+    element: <OptionChatMacrosSettings />,
   },
   {
     kind: "options",
@@ -436,7 +466,11 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   {
     kind: "options",
     path: "/presentation-studio/new",
-    element: <OptionPresentationStudioNew />
+    element: isExtensionRuntime() ? (
+      <Navigate to="/presentation-studio/start" replace />
+    ) : (
+      <OptionPresentationStudioNew />
+    )
   },
   {
     kind: "options",
@@ -446,7 +480,13 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   {
     kind: "options",
     path: "/presentation-studio/:projectId",
-    element: <OptionPresentationStudioDetail />
+    element: isExtensionRuntime() ? (
+      <ExtensionPresentationProjectPanel
+        structuredDetail={<OptionPresentationStudioDetail />}
+      />
+    ) : (
+      <OptionPresentationStudioDetail />
+    )
   },
   {
     kind: "options",
@@ -564,6 +604,72 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
     kind: "options",
     path: "/admin/monitoring",
     element: <OptionAdminMonitoring />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/watchlists-runs",
+    element: <OptionAdminWatchlistsRuns />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin",
+    element: <OptionAdminOverview />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/api-keys",
+    element: <OptionAdminApiKeys />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/billing",
+    element: <OptionAdminBilling />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/data-ops",
+    element: <OptionAdminDataOps />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/maintenance",
+    element: <OptionAdminMaintenance />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/orgs",
+    element: <OptionAdminOrgs />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/rate-limiting",
+    element: <OptionAdminRateLimiting />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/rbac",
+    element: <OptionAdminRbac />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/usage",
+    element: <OptionAdminUsage />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: "/admin/watchlists-items",
+    element: <OptionAdminWatchlistsItems />,
     targets: ALL_TARGETS,
   },
   {

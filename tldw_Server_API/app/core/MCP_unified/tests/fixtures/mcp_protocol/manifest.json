@@ -1,0 +1,39 @@
+{
+  "upstream": {
+    "repository": "https://github.com/modelcontextprotocol/modelcontextprotocol",
+    "commit": "5f5440bb26a62e2cf3440b92da5a667efa03b267",
+    "license": "Apache-2.0"
+  },
+  "fixtures": [
+    {
+      "revision": "2026-07-28",
+      "path": "2026-07-28/schema.json",
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2026-07-28/schema.json",
+      "sha256": "ef70b61f99b6d2e5e3b46863822eab08dff6a45bedc7a08914e0e5b133f40203"
+    },
+    {
+      "revision": "2025-11-25",
+      "path": "2025-11-25/schema.json",
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2025-11-25/schema.json",
+      "sha256": "268a5f82ba70fd7e4b6dc4aa1e64f116f74b4d0edcb69dc046829c79dd4e97e7"
+    },
+    {
+      "revision": "2025-06-18",
+      "path": "2025-06-18/schema.json",
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2025-06-18/schema.json",
+      "sha256": "af845e7e5b9d27107d1690f0936022546177a1403e63ffb11470135b296a2e01"
+    },
+    {
+      "revision": "2025-03-26",
+      "path": "2025-03-26/schema.json",
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2025-03-26/schema.json",
+      "sha256": "e720669548c8100a4282c49e580efd6ddf7f28899ea786fc8db251dbdb356131"
+    },
+    {
+      "revision": "2024-11-05",
+      "path": "2024-11-05/schema.json",
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2024-11-05/schema.json",
+      "sha256": "61cea2392d4f284092d09bc84b9ac488c0d5618ac2b38a56942fc5b99fd960ce"
+    }
+  ]
+}

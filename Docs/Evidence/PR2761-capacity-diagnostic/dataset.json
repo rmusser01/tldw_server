@@ -1,0 +1,4 @@
+[
+  {"name": "authenticated-current-user", "category": "authentication", "method": "GET", "path": "/api/v1/users/me", "success_statuses": [200]},
+  {"name": "completed-local-prompt-workflow", "category": "workflow", "method": "POST", "path": "/api/v1/workflows/run?mode=sync", "success_statuses": [200], "response_equals": {"status": "succeeded", "outputs": {"text": "PR2761 capacity sentinel"}}, "json": {"definition": {"name": "capacity-render", "version": 1, "steps": [{"id": "render", "type": "prompt", "config": {"template": "PR2761 capacity sentinel"}}]}, "inputs": {}}}
+]

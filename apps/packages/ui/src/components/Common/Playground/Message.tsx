@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react"
-import { Tag, Image, Tooltip, Collapse, Avatar, Modal, message } from "antd"
+import { App, Tag, Image, Tooltip, Collapse, Avatar, Modal } from "antd"
 import { LoadingStatus } from "./ActionInfo"
 import {
   AlertTriangle,
@@ -213,7 +213,7 @@ type Props = {
   onRegenerate: () => void
   onEditFormSubmit: (value: string, isSend: boolean) => void
   isProcessing: boolean
-  webSearch?: {}
+  webSearch?: Record<string, unknown>
   isSearchingInternet?: boolean
   sources?: any[]
   hideEditAndRegenerate?: boolean
@@ -372,6 +372,7 @@ export const PlaygroundMessage = (props: Props) => {
   const [ttsProvider] = useStorage("ttsProvider", DEFAULT_TTS_PROVIDER)
   const [tldwTtsModel] = useStorage("tldwTtsModel", DEFAULT_TLDW_TTS_MODEL)
   const { t } = useTranslation(["common", "playground"])
+  const { message: messageApi } = App.useApp()
   const { capabilities } = useServerCapabilities()
   const uiMode = useUiModeStore((state) => state.mode)
   const isProMode = uiMode === "pro"
@@ -1137,7 +1138,7 @@ export const PlaygroundMessage = (props: Props) => {
     if (!props.serverChatId || !props.serverMessageId) return
     const snippet = (errorFriendlyText || props.message || "").trim()
     if (!snippet) {
-      message.error(t("saveToNotesEmpty", "Nothing to save yet."))
+      messageApi.error(t("saveToNotesEmpty", "Nothing to save yet."))
       return
     }
     setSavingKnowledge(makeFlashcard ? "flashcard" : "note")
@@ -1152,7 +1153,7 @@ export const PlaygroundMessage = (props: Props) => {
         },
         props.scope ? { scope: props.scope } : undefined
       )
-      message.success(
+      messageApi.success(
         makeFlashcard
           ? t("savedToFlashcards", "Saved to Flashcards")
           : t("savedToNotes", "Saved to Notes")
@@ -1160,7 +1161,7 @@ export const PlaygroundMessage = (props: Props) => {
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error ? err.message : t("somethingWentWrong")
-      message.error(errorMessage)
+      messageApi.error(errorMessage)
     } finally {
       setSavingKnowledge(null)
     }
@@ -1331,13 +1332,13 @@ export const PlaygroundMessage = (props: Props) => {
         try {
           await props.onDeleteMessage?.()
           if (!props.suppressDeleteSuccessToast) {
-            message.success(t("common:deleted", "Deleted"))
+            messageApi.success(t("common:deleted", "Deleted"))
           }
         } catch (err) {
           console.error("Failed to delete message:", err)
           const fallback = t("common:deleteFailed", "Delete failed")
           const errorMessage = err instanceof Error ? err.message : ""
-          message.error(errorMessage || fallback)
+          messageApi.error(errorMessage || fallback)
         }
       }
     })
@@ -1482,7 +1483,7 @@ export const PlaygroundMessage = (props: Props) => {
   )
   const handleEnableProviderFallback = React.useCallback(() => {
     updateChatModelSetting("apiProvider", undefined)
-    message.info(
+    messageApi.info(
       apiProviderOverride
         ? t(
             "playground:errorRecovery.fallbackClearedProvider",

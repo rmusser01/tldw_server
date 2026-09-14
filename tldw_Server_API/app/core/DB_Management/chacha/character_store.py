@@ -289,17 +289,18 @@ class CharacterStore:
             logger.error(f"Database error fetching character card IDs {normalized_ids}: {e}")
             raise
 
-    def get_character_card_by_name(self, name: str) -> dict[str, Any] | None:
+    def get_character_card_by_name(self, name: str, *, include_deleted: bool = False) -> dict[str, Any] | None:
         """
         Retrieve a specific character card by its unique name.
 
-        Only non-deleted cards are returned.  JSON fields (see
+        Only non-deleted cards are returned unless explicitly requested.  JSON fields (see
         ``_CHARACTER_CARD_JSON_FIELDS``) are deserialized.  Name comparison
         is case-sensitive as per default SQLite behavior because the schema
         column "name" does not specify ``COLLATE NOCASE``.
 
         Args:
             name: The unique name of the character card.
+            include_deleted: Include tombstones when checking reserved names.
 
         Returns:
             A dictionary containing character card data if found and not
@@ -308,9 +309,13 @@ class CharacterStore:
         Raises:
             CharactersRAGDBError: For database errors during fetching.
         """
-        query = "SELECT * FROM character_cards WHERE name = ? AND deleted = ?"
+        query = "SELECT * FROM character_cards WHERE name = ?"
+        params: tuple[Any, ...] = (name,)
+        if not include_deleted:
+            query += " AND deleted = ?"
+            params += (self._deleted_value(False),)
         try:
-            cursor = self._db.execute_query(query, (name, self._deleted_value(False)))
+            cursor = self._db.execute_query(query, params)
             row = cursor.fetchone()
             return self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
         except CharactersRAGDBError as e:
@@ -320,7 +325,7 @@ class CharacterStore:
                 )
                 try:
                     self._db.ensure_character_tables_ready()
-                    cursor = self._db.execute_query(query, (name, self._deleted_value(False)))
+                    cursor = self._db.execute_query(query, params)
                     row = cursor.fetchone()
                     return self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
                 except (CharactersRAGDBError, SchemaError):

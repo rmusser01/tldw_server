@@ -37,6 +37,26 @@ bodies, chat content, source-cache text, wrapped keys, and similar private
 values must not appear in `payload_clear`, restore manifests, error details, or
 logs.
 
+### `notes.note` contract
+
+The `GET /api/v1/sync/capabilities` response advertises the versioned payload
+contract in `domain_schemas.notes.note`. A version-1 `server_trusted_v1` upsert
+uses exactly these fields:
+
+- required strings: `title`, `content`
+- optional nullable strings: `conversation_id`, `message_id`
+
+The server preserves accepted title and Markdown content exactly. It rejects
+unknown fields and values beyond the advertised limits rather than trimming,
+escaping, or truncating them. A tombstone remains the `tombstone` operation.
+
+Restore is an `upsert` with the full canonical payload and
+`routing_metadata.restore_intent: true`. Its base cursor, object revision, and
+object hash must identify the current tombstone head. Ordinary upserts against
+deleted notes, stale restores, and restore requests against active notes become
+whole-object conflicts. Replaying the same accepted restore envelope is
+idempotent.
+
 ## Restore Manifest
 
 `GET /api/v1/sync/restore-manifest` accepts repeated `dataset_id` and `domain`
@@ -101,6 +121,26 @@ Restore manifests summarize persisted attachment availability and size classes
 without exposing attachment payloads.
 
 ## Conflict Policy
+
+### Listing pages
+
+`GET /api/v1/sync/conflicts` returns at most 20 matching conflicts per request.
+Use `limit` (1–20, default 20) and `offset` (non-negative, default 0), keeping
+`dataset_id`, `status`, and `domain` filters unchanged while paging. Results
+are ordered by creation time, then conflict ID. Advance the offset by the number
+returned until a short or empty page is received; a 20-item response is not a
+complete inventory. Offset paging is not a snapshot: resolving conflicts while
+filtering by status can shift later pages, so fetch before resolving or restart
+at offset 0 after mutations.
+
+A page containing Personal Context conflicts requires `device_id` and a valid
+`personal_context_activation_epoch` / `personal_context_continuity_token` pair.
+Proof verification covers the selected page before any conflict is returned.
+Such responses wrap the list in `conflicts` alongside `dataset_id` and the
+verified `personal_context_exchange`; pages without Personal Context entries
+retain the bare-list response, including empty pages.
+
+### Resolution
 
 Domain adapters decide whether an incoming envelope is accepted, rejected, or
 converted into a durable conflict. Sync v2 currently has adapters for notes,

@@ -290,7 +290,7 @@ describe("SourcesTab delete confirmation copy", () => {
   it("shows undo-window copy for single-feed delete confirmation", async () => {
     render(<SourcesTab />)
 
-    fireEvent.click(screen.getAllByLabelText("Delete")[0])
+    fireEvent.click(screen.getByLabelText("Delete source: Feed 101"))
 
     await waitFor(() => {
       expect(mocks.modalConfirmMock).toHaveBeenCalledTimes(1)
@@ -317,7 +317,7 @@ describe("SourcesTab delete confirmation copy", () => {
 
     render(<SourcesTab />)
 
-    fireEvent.click(screen.getAllByLabelText("Delete")[0])
+    fireEvent.click(screen.getByLabelText("Delete source: Feed 101"))
 
     await waitFor(() => {
       expect(mocks.modalConfirmMock).toHaveBeenCalledTimes(1)

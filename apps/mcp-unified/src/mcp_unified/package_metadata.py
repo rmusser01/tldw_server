@@ -7,17 +7,13 @@ from typing import Final
 
 PACKAGE_NAME: Final = "mcp-unified"
 PACKAGE_IMPORT_NAME: Final = "mcp_unified"
-PACKAGE_STATUS: Final = "internal-experimental"
+PACKAGE_STATUS: Final = "public-alpha"
 PUBLISHING_STATUS: Final = "published"
 LICENSE_EXPRESSION: Final = "GPL-3.0-only"
 SOURCE_DISTRIBUTION: Final = "tldw-server"
 DEPENDENCY_VERSION_POLICY: Final = "names-only"
-PACKAGE_AUTHORS: Final = (
-    {"name": "Robert Musser", "email": "contact@tldwproject.com"},
-)
-PACKAGE_MAINTAINERS: Final = (
-    {"name": "Robert Musser", "email": "contact@tldwproject.com"},
-)
+PACKAGE_AUTHORS: Final = ({"name": "Robert Musser", "email": "contact@tldwproject.com"},)
+PACKAGE_MAINTAINERS: Final = ({"name": "Robert Musser", "email": "contact@tldwproject.com"},)
 PACKAGE_KEYWORDS: Final = (
     "mcp",
     "model-context-protocol",
@@ -59,6 +55,7 @@ NETWORK_DEPENDENCIES: Final = (
 PROJECT_DEPENDENCIES: Final = (
     *CORE_DEPENDENCIES,
     *NETWORK_DEPENDENCIES,
+    "jsonschema",
 )
 FASTAPI_DEPENDENCIES: Final = (
     "fastapi",
@@ -80,6 +77,7 @@ GATEWAY_DEPENDENCIES: Final = (
 DEV_DEPENDENCIES: Final = (
     "build",
     "setuptools",
+    "wheel",
     "tomli",
     "pytest",
     "pytest-asyncio",
@@ -118,8 +116,5 @@ def package_metadata_summary() -> dict[str, object]:
         "urls": dict(PACKAGE_URLS),
         "license_files": list(LICENSE_FILES),
         "base_dependencies": list(PROJECT_DEPENDENCIES),
-        "optional_extras": {
-            extra: list(dependencies)
-            for extra, dependencies in OPTIONAL_EXTRAS.items()
-        },
+        "optional_extras": {extra: list(dependencies) for extra, dependencies in OPTIONAL_EXTRAS.items()},
     }

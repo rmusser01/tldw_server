@@ -4,21 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import os
 import platform
 import signal
+
 # Used without shell for managed llama-server process control.
 import subprocess  # nosec B404
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from loguru import logger
 
 from tldw_Server_API.app.core.Local_LLM import handler_utils, http_utils
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNotFoundError, ServerError
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 from tldw_Server_API.app.core.Local_LLM.llamacpp_provider_service import _redact_log_line
 from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppPortPolicy,
@@ -30,9 +31,15 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_server_args import (
     CORE_SERVER_ARG_KEYS,
     PATH_ARG_KEYS,
     RESERVED_STRUCTURED_ARG_KEYS,
+    SNAPSHOT_OWNED_ARG_KEYS,
     clean_server_args,
     server_arg_formatters,
 )
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNotFoundError, ServerError
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
+
+from .llamacpp_snapshot_compatibility import build_fingerprint
+from .llamacpp_snapshot_operations import disk_call
 
 _MAX_LOG_LINES = 1000
 _MAX_LOG_BYTES = 256 * 1024
@@ -62,6 +69,8 @@ def validate_profile_server_args(
 ) -> None:
     """Validate user-supplied llama-server args before persistence or launch."""
     args = _clean_server_args(profile.server_args)
+    if any(key.lstrip("-").replace("-", "_") in SNAPSHOT_OWNED_ARG_KEYS for key in args):
+        raise ServerError("Slot snapshot launch flags are supervisor-owned.")
     try:
         handler_utils.check_denylist(
             args,
@@ -72,14 +81,11 @@ def validate_profile_server_args(
 
     allowed_structured_args = allowed_structured_args or set()
     reserved = sorted(
-        key
-        for key in args
-        if key in _RESERVED_STRUCTURED_ARG_KEYS and key not in allowed_structured_args
+        key for key in args if key in _RESERVED_STRUCTURED_ARG_KEYS and key not in allowed_structured_args
     )
     if reserved:
         raise ServerError(
-            "Reserved llama.cpp server args must be set through profile fields, "
-            f"not server_args: {reserved}"
+            f"Reserved llama.cpp server args must be set through profile fields, not server_args: {reserved}"
         )
 
     formatters = _server_arg_formatters()
@@ -169,6 +175,13 @@ class LlamaCppProcessRunner:
         self._failed = False
         self._message: str | None = None
         self._stream_drain_tasks: list[asyncio.Task[None]] = []
+        self.snapshot_store = None
+        self.snapshot_generation: str | None = None
+        self.snapshot_working: Path | None = None
+        self.snapshot_process = None
+        self.snapshot_executable: Path | None = None
+        self.snapshot_options: list[str] = []
+        self.snapshot_fingerprint = None
 
     def _is_port_free(self, host: str, port: int) -> bool:
         return handler_utils.is_port_free(host, port)
@@ -178,7 +191,8 @@ class LlamaCppProcessRunner:
 
     async def start(self, model_path: Path, profile: LlamaCppProfile) -> LlamaCppRuntime:
         """Start this runner's process for the supplied profile and model."""
-        if self._process is not None and self._process.returncode is None:
+        owned = self._process or self.snapshot_process
+        if owned is not None and owned.returncode is None:
             await self.stop()
 
         resolved_model_path = self._validate_model_path(model_path)
@@ -189,27 +203,57 @@ class LlamaCppProcessRunner:
         args = _clean_server_args(profile.server_args)
         self._check_denylist(args)
         host = handler_utils.strip_host_brackets(profile.host or self.config.default_host or "127.0.0.1")
+        if profile.snapshots_enabled:
+            try:
+                loopback = ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                loopback = False
+            if not loopback:
+                raise ServerError("Snapshots require a numeric loopback bind; use 127.0.0.1 or ::1.")
         port = self._resolve_port(host, profile)
         command = self._build_command(executable_path, resolved_model_path, host, port, args)
+        self.snapshot_generation = uuid4().hex
+        self.snapshot_working = None
+        self.snapshot_process = None
+        self.snapshot_fingerprint = None
+        self.snapshot_executable = executable_path.resolve()
+        # Exclude executable/model/origin, which have separate content/origin identity.
+        self.snapshot_options = command[7:]
         redacted_command = http_utils.redact_cmd_args(command)
-        stdout_target, stderr_target, log_handle, log_file_path = self._open_log_targets()
-        client_host = handler_utils.resolve_client_host(host)
-        base_url = handler_utils.build_base_url(client_host, port)
-
-        self._record_start_attempt(
-            profile=profile,
-            model_path=resolved_model_path,
-            host=host,
-            port=port,
-            endpoint=base_url,
-            log_handle=log_handle,
-            log_file_path=log_file_path,
-            redacted_command=redacted_command,
-        )
-
+        log_handle = None
         try:
+            if profile.snapshots_enabled:
+                if self.snapshot_store is None:
+                    raise ServerError("Snapshot storage owner is unavailable.")
+                self.snapshot_working = await disk_call(
+                    self.snapshot_store.launch_directory, self.profile_id, self.snapshot_generation
+                )
+                command.extend(["--slots", "--slot-save-path", str(self.snapshot_working)])
+                self.snapshot_fingerprint = await disk_call(
+                    build_fingerprint,
+                    model=resolved_model_path,
+                    executable=self.snapshot_executable,
+                    effective_options=self.snapshot_options,
+                    adapters=[],
+                )
+            stdout_target, stderr_target, log_handle, log_file_path = self._open_log_targets()
+            client_host = handler_utils.resolve_client_host(host)
+            base_url = handler_utils.build_base_url(client_host, port)
+
+            self._record_start_attempt(
+                profile=profile,
+                model_path=resolved_model_path,
+                host=host,
+                port=port,
+                endpoint=base_url,
+                log_handle=log_handle,
+                log_file_path=log_file_path,
+                redacted_command=redacted_command,
+            )
+
             process = await self._spawn(command, stdout_target=stdout_target, stderr_target=stderr_target)
             self._process = process
+            self.snapshot_process = process
             self._start_stream_drainers(process)
             readiness_timeout = getattr(self.config, "readiness_timeout", 30.0) or 30.0
             is_ready = await wait_for_http_ready(base_url, timeout_total=readiness_timeout, interval=0.5)
@@ -218,9 +262,18 @@ class LlamaCppProcessRunner:
                 message = "Llama.cpp server failed to start or become ready."
                 self._record_failure(message, process)
                 raise ServerError(message)
-        except Exception as exc:
-            if log_handle is not None and not log_handle.closed:
-                self._close_log_handle()
+        except BaseException as exc:
+            try:
+                if profile.snapshots_enabled and self.snapshot_store is not None and self.snapshot_process is None:
+                    # disk_call finishes a cancelled directory creation but discards its
+                    # result. The known generation still identifies the unowned files.
+                    await disk_call(self.snapshot_store.cleanup_launch, self.profile_id, self.snapshot_generation)
+                    self.snapshot_working = None
+            finally:
+                if log_handle is not None and not log_handle.closed:
+                    log_handle.close()
+            if not isinstance(exc, Exception):
+                raise
             if isinstance(exc, ServerError):
                 raise
             message = f"Exception starting Llama.cpp server: {exc}"
@@ -240,7 +293,7 @@ class LlamaCppProcessRunner:
 
     async def stop(self) -> LlamaCppRuntime:
         """Stop this runner's process if it is currently running."""
-        process = self._process
+        process = self._process or self.snapshot_process
         if process is None:
             self._stopped_at = self._stopped_at or _utc_now()
             return self.status()
@@ -249,6 +302,8 @@ class LlamaCppProcessRunner:
             await self._terminate_process(process)
         else:
             self._exit_code = process.returncode
+        if process.returncode is None:
+            raise ServerError("Managed child exit is not confirmed.")
         self._stop_stream_drainers()
         self._close_log_handle()
         self._process = None
@@ -319,7 +374,7 @@ class LlamaCppProcessRunner:
 
     def cleanup_sync(self) -> None:
         """Best-effort synchronous cleanup for app shutdown paths."""
-        process = self._process
+        process = self._process or self.snapshot_process
         if process is not None and process.returncode is None:
             with contextlib.suppress(Exception):
                 if platform.system() == "Windows":
@@ -340,6 +395,7 @@ class LlamaCppProcessRunner:
     ) -> LlamaCppRuntime:
         return LlamaCppRuntime(
             profile_id=self.profile_id,
+            launch_generation=self.snapshot_generation,
             state=state,
             pid=pid,
             host=self._host,
@@ -538,6 +594,7 @@ class LlamaCppProcessRunner:
         return log_handle, log_handle, log_handle, log_path
 
     async def _spawn(self, command: list[str], *, stdout_target: Any, stderr_target: Any) -> asyncio.subprocess.Process:
+        """Spawn a child without losing its ownership if startup is cancelled."""
         create_kwargs: dict[str, Any] = {"stdout": stdout_target, "stderr": stderr_target}
         if platform.system() == "Windows":
             create_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -545,7 +602,22 @@ class LlamaCppProcessRunner:
             create_kwargs["process_group"] = 0
         else:
             create_kwargs["preexec_fn"] = os.setsid
-        return await asyncio.create_subprocess_exec(*command, **create_kwargs)
+        task = asyncio.create_task(asyncio.create_subprocess_exec(*command, **create_kwargs))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # Creation may already have forked a child. Resolve the spawn before
+            # the supervisor records this generation or releases storage ownership.
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+            process = task.result()
+            self._process = process
+            self.snapshot_process = process
+            self._start_stream_drainers(process)
+            raise
 
     async def _drain_stream(self, stream: Any, label: str) -> None:
         try:

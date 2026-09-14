@@ -19,6 +19,9 @@ const FROZEN_SEED = Object.freeze({
   items_sha256: "cef8c83a2f6cf0640d88e6300f54205363654d800927263c2d918060e6a28339",
   page_sha256: "170f16c7bbb34a41d3a1f5ed33e3e411d38288dbc9b9cd636b31d005c1fb0221",
 });
+const CLINICALTRIALS_PMC_IMPLEMENTATION_REVISION = "2d0f968a7f45d2f6a7ed9b73fed4bfdadc204b29";
+const CLINICALTRIALS_PMC_IMPLEMENTATION_PATH = "tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py";
+const CLINICALTRIALS_PMC_IMPLEMENTATION_REFERENCE = `https://github.com/rmusser01/tldw_server/blob/${CLINICALTRIALS_PMC_IMPLEMENTATION_REVISION}/${CLINICALTRIALS_PMC_IMPLEMENTATION_PATH}`;
 const REQUIRED_SOURCES = Object.freeze({
   "sourclip-2026-07-13-0021": Object.freeze({
     canonicalTarget: "biorxiv",
@@ -92,6 +95,64 @@ const REQUIRED_SOURCES = Object.freeze({
       sourcePredicate: null,
       attributionBasis: "native_response",
       evidenceHosts: Object.freeze(["api.biorxiv.org"]),
+    }),
+  }),
+});
+const REQUIRED_IMPLEMENTED_SOURCES = Object.freeze({
+  "sourclip-2026-07-13-0026": Object.freeze({
+    sourceSnapshotSha256: "cbc4a8445252460ef4502924edf409c7fc8098eb6987745b83cc426bd2fc8e73",
+    canonicalTarget: "clinicaltrials_gov",
+    declaredSurfaces: Object.freeze(["standalone_search", "deep_research"]),
+    capabilities: Object.freeze(["search", "detail", "metadata", "snippet"]),
+    route: Object.freeze({
+      id: "clinicaltrials_gov_studies_search_direct",
+      routeKind: "direct",
+      backendId: "clinicaltrials_gov_api_v2",
+      queryModes: Object.freeze(["general_free_text"]),
+      sourceConstraint: "native_corpus",
+      sourcePredicate: null,
+      attributionBasis: "native_response",
+      evidenceHosts: Object.freeze(["clinicaltrials.gov"]),
+    }),
+    implementationState: "implemented",
+    fixtureState: "passed",
+    liveState: "not_run",
+    certifications: Object.freeze([]),
+    implementationEvidence: Object.freeze({
+      referenceType: "https_url",
+      host: "github.com",
+      path: CLINICALTRIALS_PMC_IMPLEMENTATION_PATH,
+      revision: CLINICALTRIALS_PMC_IMPLEMENTATION_REVISION,
+      reference: CLINICALTRIALS_PMC_IMPLEMENTATION_REFERENCE,
+      claim: "Checked-in synthetic fixtures prove the bounded ClinicalTrials.gov adapter and modified metadata projection without live or product-surface certification.",
+    }),
+  }),
+  "sourclip-2026-07-13-0027": Object.freeze({
+    sourceSnapshotSha256: "34d7fc36d4b64b2dca99c0472ad3d804c7ed9ff5a96574a8146947133913b32b",
+    canonicalTarget: "pubmed_central",
+    declaredSurfaces: Object.freeze(["standalone_search", "deep_research"]),
+    capabilities: Object.freeze(["search", "detail", "metadata"]),
+    route: Object.freeze({
+      id: "pubmed_central_esearch_summary_direct",
+      routeKind: "direct",
+      backendId: "ncbi_eutils_pmc",
+      queryModes: Object.freeze(["general_free_text"]),
+      sourceConstraint: "native_corpus",
+      sourcePredicate: null,
+      attributionBasis: "native_response",
+      evidenceHosts: Object.freeze(["www.ncbi.nlm.nih.gov"]),
+    }),
+    implementationState: "implemented",
+    fixtureState: "passed",
+    liveState: "not_run",
+    certifications: Object.freeze([]),
+    implementationEvidence: Object.freeze({
+      referenceType: "https_url",
+      host: "github.com",
+      path: CLINICALTRIALS_PMC_IMPLEMENTATION_PATH,
+      revision: CLINICALTRIALS_PMC_IMPLEMENTATION_REVISION,
+      reference: CLINICALTRIALS_PMC_IMPLEMENTATION_REFERENCE,
+      claim: "Checked-in synthetic fixtures prove bounded PMC ESearch and ESummary metadata execution without live, abstract, full-text, or product-surface certification.",
     }),
   }),
 });
@@ -361,6 +422,14 @@ function sameStringSet(left, right) {
 }
 
 
+function sameStringArray(left, right) {
+  return Array.isArray(left)
+    && Array.isArray(right)
+    && left.length === right.length
+    && left.every((value, index) => value === right[index]);
+}
+
+
 function routeMatchesRequirement(candidate, requirement) {
   return candidate?.route_candidate_id === requirement.id
     && candidate?.route_kind === requirement.routeKind
@@ -378,6 +447,62 @@ function routeMatchesRequirement(candidate, requirement) {
 function hasEvidence(row, kind) {
   return Array.isArray(row?.evidence)
     && row.evidence.some((entry) => isObject(entry) && entry.kind === kind);
+}
+
+
+function implementationEvidenceIdentity(entry) {
+  let host = null;
+  let implementationPath = null;
+  let revision = null;
+  if (isHttpsUrl(entry?.reference)) {
+    const parsed = new URL(entry.reference);
+    host = parsed.hostname.toLowerCase();
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    if (segments.length >= 5 && segments[2] === "blob") {
+      revision = segments[3];
+      implementationPath = segments.slice(4).join("/");
+    }
+  }
+  return {
+    kind: entry?.kind ?? null,
+    reference_type: entry?.reference_type ?? null,
+    host,
+    path: implementationPath,
+    revision,
+    reference: entry?.reference ?? null,
+    claim: entry?.claim ?? null,
+  };
+}
+
+
+function exactImplementationEvidenceState(row, requirement) {
+  const entries = Array.isArray(row?.evidence)
+    ? row.evidence.filter((entry) => isObject(entry) && entry.kind === "implementation")
+    : [];
+  const entryIdentities = entries.map(implementationEvidenceIdentity);
+  const required = {
+    reference_type: requirement?.referenceType ?? null,
+    host: requirement?.host ?? null,
+    path: requirement?.path ?? null,
+    revision: requirement?.revision ?? null,
+    reference: requirement?.reference ?? null,
+    claim: requirement?.claim ?? null,
+  };
+  const exactMatches = entryIdentities.filter((identity) => (
+    identity.kind === "implementation"
+      && identity.reference_type === required.reference_type
+      && identity.host === required.host
+      && identity.path === required.path
+      && identity.revision === required.revision
+      && identity.reference === required.reference
+      && identity.claim === required.claim
+  ));
+  return {
+    required,
+    entries: entryIdentities,
+    implementation_entry_count: entries.length,
+    exact_match_count: exactMatches.length,
+  };
 }
 
 
@@ -717,6 +842,7 @@ export function validateInventoryDocuments(
     asOf = new Date().toISOString().slice(0, 10),
     schema = null,
     requiredSources = REQUIRED_SOURCES,
+    requiredImplementedSources = REQUIRED_IMPLEMENTED_SOURCES,
     schemaValidated = false,
     schemaErrors = [],
     artifactDigests = {},
@@ -1274,6 +1400,59 @@ export function validateInventoryDocuments(
     .filter(([, state]) => !state.mapping_satisfied)
     .map(([inventoryId]) => inventoryId);
 
+  const requiredImplementedSourceStates = {};
+  for (const [inventoryId, requirement] of Object.entries(requiredImplementedSources)) {
+    const row = ledgerById.get(inventoryId);
+    const matchingRoutes = Array.isArray(row?.route_candidates)
+      ? row.route_candidates.filter((candidate) => (
+        routeMatchesRequirement(candidate, requirement.route)
+      ))
+      : [];
+    const substantiveTriage = row
+      ? isSubstantivelyTriaged(row, asOf, trustedReviewers)
+      : false;
+    const implementationEvidenceIdentity = exactImplementationEvidenceState(
+      row,
+      requirement.implementationEvidence,
+    );
+    const implementationEvidence = implementationEvidenceIdentity
+      .implementation_entry_count === 1
+      && implementationEvidenceIdentity.exact_match_count === 1;
+    const implementationSatisfied = row?.resolution === "mapped"
+      && row?.source_snapshot_sha256 === requirement.sourceSnapshotSha256
+      && sameStringArray(row?.canonical_targets, [requirement.canonicalTarget])
+      && sameStringArray(row?.declared_surfaces, requirement.declaredSurfaces)
+      && sameStringArray(row?.capabilities, requirement.capabilities)
+      && matchingRoutes.length === 1
+      && row?.implementation_state === requirement.implementationState
+      && row?.fixture_state === requirement.fixtureState
+      && row?.live_state === requirement.liveState
+      && canonicalJson(row?.certifications) === canonicalJson(requirement.certifications)
+      && implementationEvidence
+      && substantiveTriage;
+    requiredImplementedSourceStates[inventoryId] = {
+      source_snapshot_sha256: requirement.sourceSnapshotSha256,
+      canonical_target: requirement.canonicalTarget,
+      required_route_id: requirement.route.id,
+      captured_label: manifestById.get(inventoryId)?.label ?? null,
+      resolution: row?.resolution ?? null,
+      canonical_targets: Array.isArray(row?.canonical_targets) ? [...row.canonical_targets] : [],
+      declared_surfaces: Array.isArray(row?.declared_surfaces) ? [...row.declared_surfaces] : [],
+      capabilities: Array.isArray(row?.capabilities) ? [...row.capabilities] : [],
+      implementation_state: row?.implementation_state ?? null,
+      fixture_state: row?.fixture_state ?? null,
+      live_state: row?.live_state ?? null,
+      certifications: Array.isArray(row?.certifications) ? [...row.certifications] : [],
+      implementation_evidence: implementationEvidence,
+      implementation_evidence_identity: implementationEvidenceIdentity,
+      substantively_triaged: substantiveTriage,
+      implementation_satisfied: implementationSatisfied,
+    };
+  }
+  const requiredImplementedSourceBlockers = Object.entries(requiredImplementedSourceStates)
+    .filter(([, state]) => !state.implementation_satisfied)
+    .map(([inventoryId]) => inventoryId);
+
   for (const item of manifestById.values()) {
     if (!ledgerById.has(item.inventory_id)) {
       errors.push(`ledger is missing inventory_id ${item.inventory_id}`);
@@ -1337,7 +1516,8 @@ export function validateInventoryDocuments(
   const contractFreezeReady = structurallyValid
     && manifestItems.length > 0
     && triaged === manifestItems.length
-    && requiredSourceBlockers.length === 0;
+    && requiredSourceBlockers.length === 0
+    && requiredImplementedSourceBlockers.length === 0;
   return {
     errors,
     schema_validated: schemaValidated,
@@ -1348,6 +1528,8 @@ export function validateInventoryDocuments(
     blockers,
     required_sources: requiredSourceStates,
     required_source_blockers: requiredSourceBlockers,
+    required_implemented_sources: requiredImplementedSourceStates,
+    required_implemented_source_blockers: requiredImplementedSourceBlockers,
     digests: {
       manifest: sha256(canonicalJson(manifest)),
       ledger: sha256(canonicalJson(ledger)),

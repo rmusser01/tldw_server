@@ -32,6 +32,12 @@ const mocks = vi.hoisted(() => ({
   )
 }))
 
+// Artwork transport and image-load gating are exercised in BuddyStarterCatalogPicker.preview.test.tsx.
+vi.mock("../BuddyStarterArtwork", () => ({ BuddyStarterArtwork: ({ title, onReadyChange }: { title: string; onReadyChange: (ready: boolean) => void }) => {
+  React.useEffect(() => { onReadyChange(true) }, [onReadyChange])
+  return <div>{title} preview</div>
+} }))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (...args: Parameters<typeof mocks.translate>) => mocks.translate(...args)
@@ -81,6 +87,8 @@ const findGuidedBuilder = async () => {
 
 const selectBuddyBuilderSource = async (name: string) => {
   const sourcePicker = await screen.findByTestId("buddy-builder-source-picker")
+  const disclosure = sourcePicker.closest("details")
+  if (disclosure && !disclosure.open) fireEvent.click(disclosure.querySelector("summary")!)
   fireEvent.click(within(sourcePicker).getByRole("button", { name }))
 }
 
@@ -250,6 +258,38 @@ describe("VisualPackEditor", () => {
     )
   })
 
+  it("retries a failed bundled catalog without replacing the active Buddy", async () => {
+    const pack = makeVisualPack({ status: "active" })
+    const retry = deferredResponse<Awaited<ReturnType<typeof okResponse>>>()
+    let catalogReads = 0
+    mocks.fetchWithAuth.mockImplementation((path: string) => {
+      if (path === "/api/v1/persona/visual-starter-packs") {
+        catalogReads += 1
+        return catalogReads === 1
+          ? Promise.resolve({ ok: false, status: 0, error: "Failed to fetch", json: async () => null })
+          : retry.promise
+      }
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs") {
+        return okResponse({ packs: [pack], active_pack: pack })
+      }
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1") return okResponse(pack)
+      if (path === "/api/v1/persona/catalog") return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      return okResponse({ items: [], candidates: [] })
+    })
+    render(<VisualPackEditor selectedPersonaId="persona-1" selectedPersonaName="Garden Helper" isActive />)
+    const catalog = await screen.findByTestId("buddy-builder-starter-catalog")
+    await waitFor(() => expect(catalog).toHaveTextContent("Failed to fetch"))
+    fireEvent.click(within(catalog).getByRole("button", { name: "Retry catalog" }))
+    expect(within(catalog).getByRole("button", { name: "Refresh catalog" })).toBeDisabled()
+    fireEvent.click(within(catalog).getByRole("button", { name: "Refresh catalog" }))
+    expect(catalogReads).toBe(2)
+    await act(async () => retry.resolve(await okResponse(starterCatalogPayload)))
+    await waitFor(() => expect(catalog).toHaveTextContent("Search Lens Buddy"))
+    expect(within(catalog).queryByText("Failed to fetch")).not.toBeInTheDocument()
+    expect(screen.getByTestId("buddy-guided-builder-active-pack")).toHaveTextContent("Animated pack")
+    expect(mocks.fetchWithAuth.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true)
+  })
+
   it("shows the guided builder when there is no active pack and no packs", async () => {
     mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
       const method = init?.method || "GET"
@@ -282,7 +322,7 @@ describe("VisualPackEditor", () => {
     )
 
     const builder = await findGuidedBuilder()
-    expect(builder).toHaveTextContent("Buddy builder")
+    expect(builder).toHaveTextContent("Choose a ready-made Buddy")
     expect(builder).toHaveTextContent("Search Lens Buddy")
   })
 
@@ -864,9 +904,11 @@ describe("VisualPackEditor", () => {
     expect(screen.getByTestId("persona-visual-upload-button")).toBeInTheDocument()
     expect(screen.getByTestId("persona-visual-activate-button")).toBeInTheDocument()
     expect(screen.queryByText(/Unhandled path:/)).not.toBeInTheDocument()
-    expect(
-      screen.queryByTestId("persona-visual-management-attention-action")
-    ).not.toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("persona-visual-management-attention-action")
+      ).not.toBeInTheDocument()
+    )
   })
 
   it("does not show setup choices before active pack state is known", async () => {
@@ -1720,33 +1762,10 @@ describe("VisualPackEditor", () => {
     const picker = await screen.findByTestId("buddy-builder-starter-alt-starter")
     expect(picker).toHaveTextContent("Alt Starter")
     expect(picker).toHaveTextContent("Alternate bundled starter")
-    expect(picker).toHaveTextContent("sprite_frames")
-    expect(picker).toHaveTextContent("alt")
-    expect(picker).toHaveTextContent("bundled-alt")
-    expect(picker).toHaveTextContent(/scaffold/i)
-    expect(picker).toHaveTextContent(/intermediate/i)
-    expect(picker).toHaveTextContent(/neutral anchor/i)
-    expect(picker).toHaveTextContent(/static talking reaction sheet/i)
-    expect(picker).toHaveTextContent("Scaffold fixture only")
-    expect(picker).toHaveTextContent("Secondary motion pass still needs review")
-    expect(mocks.translate).toHaveBeenCalledWith(
-      "sidepanel:personaGarden.visuals.metadata.productionStatus.scaffold",
-      expect.objectContaining({ defaultValue: "Scaffold" })
-    )
-    expect(mocks.translate).toHaveBeenCalledWith(
-      "sidepanel:personaGarden.visuals.metadata.complexityTier.intermediate",
-      expect.objectContaining({ defaultValue: "Intermediate" })
-    )
-    expect(mocks.translate).toHaveBeenCalledWith(
-      "sidepanel:personaGarden.visuals.setup.neutralAnchorRequired",
-      expect.objectContaining({ defaultValue: "Neutral anchor required" })
-    )
-    expect(mocks.translate).toHaveBeenCalledWith(
-      "sidepanel:personaGarden.visuals.setup.expectedAssetsLabel",
-      expect.objectContaining({ defaultValue: "Expected assets:" })
-    )
+    expect(picker).toHaveTextContent("Template only. Add artwork before activation.")
+    fireEvent.click(screen.getByText("Custom artwork templates"))
 
-    fireEvent.click(within(picker).getByRole("button", { name: "Copy production packet" }))
+    fireEvent.click(within(picker).getByRole("button", { name: "Copy template as draft" }))
 
     await waitFor(() =>
       expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue(
@@ -2602,9 +2621,9 @@ describe("VisualPackEditor", () => {
     expect(emptyState).toHaveTextContent(
       "Garden Helper's Persona Buddy does not have a visual pack yet."
     )
-    expect(emptyState).toHaveTextContent("Create a draft visual pack first.")
+    expect(emptyState).toHaveTextContent("Choose a ready-made Buddy above, or create a custom draft here.")
     expect(emptyState).toHaveTextContent(
-      "After a draft exists, upload frames, map states, import or export packs, queue generation, review candidates, and activate a valid pack."
+      "Custom drafts support uploaded artwork, state animations, and generation. Review and activate when ready."
     )
     expect(emptyState).not.toHaveTextContent("VN")
     expect(emptyState).not.toHaveTextContent("CYOA")
@@ -2696,6 +2715,10 @@ describe("VisualPackEditor", () => {
       expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
         "draft"
       )
+    )
+    // Pack metadata renders before the manifest-derived controls initialize.
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-state-idle-select")).toHaveValue("idle")
     )
     fireEvent.change(screen.getByTestId("persona-visual-state-speaking-select"), {
       target: { value: "idle" }
@@ -2812,6 +2835,9 @@ describe("VisualPackEditor", () => {
 
     expect(await screen.findByTestId("buddy-state-configuration-panel")).toHaveTextContent(
       "Configure visual states"
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-state-idle-select")).toHaveValue("idle")
     )
     fireEvent.click(
       screen.getByRole("button", { name: "Save visual state configuration" })
@@ -3139,6 +3165,8 @@ describe("VisualPackEditor", () => {
         "POST /api/v1/persona/profiles/persona-1/visual-packs/pack-1/candidates/candidate-1/review"
       )
     )
+    // The request being sent does not mean AntD's loading buttons are ready.
+    expect(await screen.findByText("Candidate accepted.")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("persona-visual-candidate-reject-candidate-1"))
     await waitFor(() =>
       expect(
@@ -3147,6 +3175,7 @@ describe("VisualPackEditor", () => {
         )
       ).toHaveLength(2)
     )
+    expect(await screen.findByText("Candidate rejected.")).toBeInTheDocument()
   })
 
   it("clamps stale generation target states after switching packs", async () => {
@@ -3224,6 +3253,13 @@ describe("VisualPackEditor", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue("pack-1")
+    )
+    // The selected pack ID is available before its custom-state options.
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId("persona-visual-generation-target-state-select"))
+          .getByRole("option", { name: "tool.notes_search" })
+      ).toHaveValue("tool.notes_search")
     )
     fireEvent.change(screen.getByTestId("persona-visual-generation-target-state-select"), {
       target: { value: "tool.notes_search" }

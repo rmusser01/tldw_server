@@ -14,12 +14,32 @@ The legacy chat monolith has been split into focused modules, and the compatibil
 ⚠️ **Needs Attention**
 - Keep documentation aligned with module responsibilities.
 
+## 2026-06-24 Integrated Completion Pipeline Refactor
+Validated review findings fixed:
+
+- Non-streaming response safety now processes every returned choice.
+- Local tool auto-execution rejects multi-choice requests before provider calls.
+- Sensitive Chat logs use metadata summaries instead of raw prompt, message, tool, or assistant content.
+- Document prompt versions allow repeated inactive versions while enforcing one active prompt per document type.
+- Slash-command dispatch and user-visible listing use one fail-closed authorization decision.
+- Legacy history replacement soft-deletes old messages and inserts replacements in one transaction.
+
+The public Chat completion API remains compatible except for the intentional safety rejection of multi-choice local tool auto-execution.
+
 ## Module Inventory (Today)
 - `chat_orchestrator.py` - source of truth for orchestration (`achat` canonical, `chat` sync wrapper) and provider routing helpers.
 - `chat_history.py` - persistence/export helpers extracted in Phase 2.
 - `chat_dictionary.py` - dictionary parsing, matching, and token-budget utilities (new in Phase 3).
 - `chat_characters.py` - adapter for character CRUD that delegates to the Character_Chat modules (new in Phase 4).
-- `chat_service.py` - endpoint orchestration helpers for `/api/v1/chat/completions`.
+- `chat_service.py` - compatibility facade and endpoint orchestration helpers for `/api/v1/chat/completions`.
+- `completion_pipeline.py` - `ChatCompletionPipeline` coordinator for non-streaming and streaming execution.
+- `response_processor.py` - response choice extraction, content mutation, structured validation, usage estimates, and assistant-name injection.
+- `moderation_pipeline.py` - output moderation, self-monitoring, topic monitoring, and moderation audit/review records.
+- `persistence_service.py` - assistant and tool-message persistence helpers.
+- `tool_execution_service.py` - local tool auto-execution eligibility checks and orchestration.
+- `streaming_pipeline.py` - streaming response assembly while preserving existing SSE handler behavior.
+- `command_authorization.py` - fail-closed slash-command authorization decisions.
+- `chat_logging.py` - safe summaries for prompt, content, tool, and exception logs.
 - `chat_helpers.py` - request validation, conversation/character lookup, and async DB helpers.
 - Adapter registry - provider dispatch mappings.
 - `chat_metrics.py`, `streaming_utils.py`, `request_queue.py` - supporting utilities already decoupled.

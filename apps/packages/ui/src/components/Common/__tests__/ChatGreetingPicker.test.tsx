@@ -326,7 +326,7 @@ describe("ChatGreetingPicker", () => {
       async (patch: Partial<ChatSettingsRecord>) =>
         normalizeChatSettingsRecord({
           greetingSelectionId: patch.greetingSelectionId,
-          greetingSelectionChecksum: patch.greetingSelectionChecksum,
+          greetingsChecksum: patch.greetingsChecksum,
           greetingEnabled: true
         })
     )
@@ -343,7 +343,7 @@ describe("ChatGreetingPicker", () => {
       renderPicker(
         {
           greetingSelectionId: alternateGreetingId,
-          greetingSelectionChecksum: checksum,
+          greetingsChecksum: checksum,
           greetingEnabled: true
         },
         updateSettings,

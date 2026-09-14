@@ -8,27 +8,43 @@ class _StubDB:
     def __init__(self):
         self.client_id = "test-client"
         self._next_opt_id = 100
+        self.created_optimizations = 0
 
     def get_prompt_with_project(self, prompt_id: int, include_deleted: bool = False):
         # Always return a fake project association for the provided prompt
-        return {"id": prompt_id, "project_id": 123}
+        return {"id": prompt_id, "project_id": 123, "project_user_id": "1"}
+
+    def get_test_cases_by_ids(self, test_case_ids: list[int]):
+        return [
+            {"id": test_case_id, "project_id": 123, "deleted": False}
+            for test_case_id in test_case_ids
+        ]
 
     def create_optimization(self, **kwargs):
-
+        self.created_optimizations += 1
         oid = self._next_opt_id
         self._next_opt_id += 1
-        return {"id": oid, **kwargs}
+        return {"id": oid, "uuid": f"optimization-{oid}", **kwargs}
 
     def update_optimization(self, optimization_id: int, updates: dict):
-        return {"id": optimization_id, **updates}
+        return {
+            "id": optimization_id,
+            "uuid": f"optimization-{optimization_id}",
+            **updates,
+        }
 
 
 @pytest.fixture
 def override_db_dependency(monkeypatch):
     from tldw_Server_API.app.api.v1.API_Deps import prompt_studio_deps as deps
+    from tldw_Server_API.app.api.v1.endpoints.prompt_studio import (
+        prompt_studio_optimization as pso,
+    )
+
+    db = _StubDB()
 
     async def _override_db():
-        return _StubDB()
+        return db
 
     app.dependency_overrides[deps.get_prompt_studio_db] = _override_db
 
@@ -36,11 +52,9 @@ def override_db_dependency(monkeypatch):
     async def _ok(*args, **kwargs):
         return True
 
-    monkeypatch.setattr(
-        deps, "require_project_write_access", _ok, raising=True
-    )
+    monkeypatch.setattr(pso, "require_project_write_access", _ok, raising=True)
 
-    yield
+    yield db
     app.dependency_overrides.pop(deps.get_prompt_studio_db, None)
 
 
@@ -71,14 +85,17 @@ def test_compare_strategies_propagates_request_id_for_each_job(monkeypatch, over
     monkeypatch.setattr(ps_jobs.PromptStudioJobsAdapter, "create_job", fake_create_job, raising=True)
 
     client = TestClient(app)
-    strategies = ["iterative", "mipro", "genetic"]
+    strategies = ["iterative", "mipro", "bootstrap"]
     r = client.post(
         "/api/v1/prompt-studio/optimizations/compare-strategies",
         json={
             "prompt_id": 1,
             "test_case_ids": [1, 2],
             "strategies": strategies,
-            "model_configuration": {"model_name": "gpt-4o-mini"},
+            "model_configuration": {
+                "provider": "openai",
+                "model_name": "gpt-4o-mini",
+            },
         },
         headers={
             "X-API-KEY": "test-api-key-12345",
@@ -88,6 +105,11 @@ def test_compare_strategies_propagates_request_id_for_each_job(monkeypatch, over
     assert r.status_code == 200, r.text
     assert len(captured_payloads) == len(strategies)
     assert all(p.get("request_id") == "req-ps-compare-001" for p in captured_payloads)
+    assert [p.get("optimization_uuid") for p in captured_payloads] == [
+        "optimization-100",
+        "optimization-101",
+        "optimization-102",
+    ]
 
 
 def test_compare_strategies_mixed_case_request_id_header(monkeypatch, override_db_dependency):
@@ -121,8 +143,11 @@ def test_compare_strategies_mixed_case_request_id_header(monkeypatch, override_d
         json={
             "prompt_id": 1,
             "test_case_ids": [3, 4],
-            "strategies": ["iterative"],
-            "model_configuration": {"model_name": "gpt-4o-mini"},
+            "strategies": ["iterative", "mipro"],
+            "model_configuration": {
+                "provider": "openai",
+                "model_name": "gpt-4o-mini",
+            },
         },
         headers={
             "X-API-KEY": "test-api-key-12345",
@@ -130,5 +155,43 @@ def test_compare_strategies_mixed_case_request_id_header(monkeypatch, override_d
         },
     )
     assert r.status_code == 200, r.text
-    assert len(captured_payloads) == 1
-    assert captured_payloads[0].get("request_id") == "req-ps-compare-mixed-01"
+    assert len(captured_payloads) == 2
+    assert all(
+        payload.get("request_id") == "req-ps-compare-mixed-01"
+        for payload in captured_payloads
+    )
+
+
+def test_compare_rejects_unsupported_strategy_before_side_effects(
+    monkeypatch,
+    override_db_dependency,
+):
+    captured_payloads = []
+
+    from tldw_Server_API.app.core.Prompt_Management.prompt_studio import jobs_adapter as ps_jobs
+
+    def fake_create_job(self, **kwargs):
+        captured_payloads.append(kwargs.get("payload"))
+        return {"id": 7001, "status": "queued"}
+
+    monkeypatch.setattr(
+        ps_jobs.PromptStudioJobsAdapter,
+        "create_job",
+        fake_create_job,
+        raising=True,
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/prompt-studio/optimizations/compare-strategies",
+        json={
+            "prompt_id": 1,
+            "test_case_ids": [1],
+            "strategies": ["iterative", "quantum_search"],
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert response.status_code == 422
+    assert override_db_dependency.created_optimizations == 0
+    assert captured_payloads == []

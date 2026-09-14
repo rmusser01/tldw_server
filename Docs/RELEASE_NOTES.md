@@ -4,7 +4,112 @@ This page is the release notes index placeholder for published versions.
 
 ## Unreleased
 
-No published changes yet.
+## 0.1.42 - 2026-09-10
+
+This candidate refreshes the frozen development train through PR #2941
+(`6c4bdcbc48f4fe4bab7019d59ad8cf962ab240da`). See `CHANGELOG.md` for the
+complete grouped rollup and the release-refresh plan for outstanding gates.
+
+### Chat, notes, research, and personal context
+
+- Added chat macros, prompt improvement workflows, scoped history, resumable
+  character chat, and customizable service prompts across ingestion, titles,
+  summaries, study assistance, and writing.
+- Expanded notes and task-activity synchronization, attachment/link/organization
+  contracts, shared-workspace cloning, personal-context profiles and ongoing
+  sync, article extraction, ClinicalTrials/PMC discovery, and Research Workspace
+  usability.
+- Added Migu/persona voice and buddy workflows, OpenRouter/generic and audio.cpp
+  TTS support, realtime speech, and MCP Unified HTTP/SSE transports.
+
+- Preserve artwork credits across Buddy copies and native visual-pack
+  export/import, with lifecycle regression coverage for bounded pack loads
+  during route updates (#2940, #2941).
+
+### Administration and upgrade preparation
+
+- Added durable webhook delivery and producer activation, admin improvements,
+  automation-definition/agent-task execution, and a production reference
+  deployment with health, backup, and rollback checks.
+- Hardened trusted-proxy login isolation, embeddings authentication, migration
+  durability, media cleanup, schema compatibility, and required CI enforcement.
+- Repaired full-account export of registered media artifacts and excluded
+  unexpected credential fields from saved speech preferences. Slash-command
+  parsing also avoids quadratic backtracking on malformed multiline input.
+- Fixed worker package/configuration inputs and added backend image import checks.
+  Erasure now honors SQLite foreign keys and keeps private exception details out
+  of logs; ACP health and embedding requeue warnings also redact raw errors.
+- Aligned shared frontend dependency majors and added an incremental strict
+  TypeScript check for URL/API-key guards and request timeout selection. Restored
+  shared UI hook enforcement and corrected moderation expiry/workflow clocks.
+- Validate local model directories before loading and reject audio input
+  symlinks before path resolution. Manual CI comparisons honor the selected base.
+- Prevent delayed voice-message saves from discarding newer turns, retain zero
+  tokens after clearing a conversation, and redact additional DSR diagnostics.
+- Repository rollups 0.1.39–0.1.41 are not published-artifact evidence. At
+  candidate preparation, GitHub and GHCR app `latest` were 0.1.38; public PyPI
+  listed 0.1.32. Identify the installed digest before choosing a rollback baseline.
+- Back up persistent databases, content, and configuration before upgrading.
+  Conversation, authentication, notes sync, personal-context, presentations, and
+  webhook schemas have changed. Use a compatible backup for rollback; see
+  `Docs/Deployment/Production_Reference_Deployment.md` and
+  `Docs/Admin_Webhooks_Migration_Runbook.md`.
+
+### Presentation Studio
+
+- Added standalone HTML + JavaScript presentations as a separately gated,
+  default-off project kind. Generation runs asynchronously through Jobs and an
+  administrator-selected built-in provider adapter. Saved projects remain
+  readable when generation or provider egress is disabled.
+- The WebUI edits the complete document as inert text, offers a bounded
+  text-only Safe outline, uses explicit strong-ETag saves, and downloads exact
+  bytes as an attachment. It never previews or executes the document. Opening
+  a downloaded HTML file outside tldw can execute its JavaScript and should be
+  treated accordingly.
+- The browser extension remains source-free for standalone projects and offers
+  a metadata-only handoff to the canonical WebUI. Operators should complete the
+  schema-v2 backup and default-off rollout steps in
+  `Docs/Deployment/Standalone_HTML_Presentations.md` before enabling
+  generation.
+
+### Provider credentials and embeddings
+
+- Consolidated server-side provider credential resolution across Chat, RAG,
+  embeddings, and audio, with fail-closed BYOK handling and safer streaming.
+- Added the inline embeddings workflow facade and hardened its runtime and CI
+  contracts.
+
+### Operations and CI
+
+- DSR previews query only requested categories and explicitly fail when embedding
+  coverage cannot be counted, preventing misleading zero/partial intake summaries.
+- RAG search input ownership now passes compiler ref validation without changing
+  query, filter or focus behavior.
+- Notification counts recover after account changes while keeping previous
+  account data hidden. Notification adapters support immutable shared APIs;
+  web-clipper extension storage now has required strict TypeScript coverage.
+- The API image includes the local Personal Context core package needed at
+  startup. Its build now checks imports of both local Python packages.
+- Hardened Jobs admission transactions, quotas, idempotency, and concurrent
+  capacity enforcement.
+- Added strict live-integration certification for Skills.
+- Added a required WebUI TypeScript check and a reusable capacity runner with
+  explicit overload/recovery and resource-measurement thresholds. See
+  `Docs/Development/Release_Capacity_Soak.md`; a real artifact run is still
+  required to establish a supported operating envelope.
+- Established the protected frontend source-available boundary, trusted license
+  gate, protected-branch prerequisites, and license-first PR sequencing.
+
+### Licensing
+
+- The tagged source release includes protected frontend source under PolyForm
+  Perimeter 1.0.1. The release-specific Countdown grant adds
+  `AGPL-3.0-only` as an additional option on September 10, 2028 at 12:00 UTC.
+- The immutable record, completed grant, exact source revision, and file
+  manifest are in `LICENSES/releases/0.1.42/`.
+- This release publishes no protected frontend binaries. The Python package and
+  `app`, `worker`, and `audio-worker` images remain server-only under
+  GPL-3.0-only.
 
 ## 0.1.41 - 2026-07-16
 

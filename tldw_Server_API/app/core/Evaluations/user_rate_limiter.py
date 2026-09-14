@@ -23,11 +23,13 @@ import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from collections.abc import Callable
 from typing import Any, Optional
 
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 from tldw_Server_API.app.core.Evaluations.config_manager import (
     get_rate_limit_config,
 )
@@ -198,6 +200,10 @@ class RateLimitConfig:
         return fallback_configs.get(tier, fallback_configs[UserTier.FREE])
 
 
+# Evaluations SQLite connections wait this long for a lock before failing.
+_SQLITE_BUSY_TIMEOUT_MS = 10_000
+
+
 class UserRateLimiter:
     """Per-user rate limiter with tier-based limits."""
 
@@ -219,12 +225,65 @@ class UserRateLimiter:
         self._cache: dict[str, dict[str, Any]] = {}
         self._cache_ttl = 60  # seconds
 
+    def _connect(
+        self,
+        *,
+        detect_types: int = 0,
+        timeout: float | None = None,
+    ) -> sqlite3.Connection:
+        """Open a policy-configured connection to the evaluations database.
+
+        Applies the shared pragma policy (WAL, ``synchronous=NORMAL``, a busy
+        timeout). Without a busy timeout SQLite fails a contended statement
+        immediately with "database is locked" rather than waiting, so these
+        connections must never be opened raw.
+        """
+        kwargs: dict[str, Any] = {"check_same_thread": False}
+        if detect_types:
+            kwargs["detect_types"] = detect_types
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        conn = sqlite3.connect(self.db_path, **kwargs)
+        configure_sqlite_connection(conn, busy_timeout_ms=_SQLITE_BUSY_TIMEOUT_MS)
+        return conn
+
+    async def _run_db(
+        self,
+        work: Callable[[sqlite3.Connection], Any],
+        *,
+        detect_types: int = 0,
+        timeout: float | None = None,
+    ) -> Any:
+        """Run a synchronous database callable off the event loop.
+
+        These methods are awaited on the request path. Now that connections wait
+        on locks instead of failing fast, running them inline would stall every
+        other request in the worker for the duration of the wait.
+
+        ``work`` receives an open connection; the surrounding context manager
+        commits on success and rolls back on error, matching the previous
+        ``with sqlite3.connect(...)`` semantics, and the connection is always
+        closed.
+        """
+
+        def _invoke() -> Any:
+            """Open a configured connection, run the callable, always close."""
+            conn = self._connect(detect_types=detect_types, timeout=timeout)
+            try:
+                with conn:
+                    return work(conn)
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_invoke)
+
     def _init_database(self):
         """Initialize rate limiting tables."""
         # Register explicit adapters to avoid deprecated defaults on Python 3.12+
         with contextlib.suppress(_USER_RATE_LIMIT_NONCRITICAL_EXCEPTIONS):
             sqlite3.register_adapter(datetime, lambda d: d.isoformat(sep=" "))
-        with sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
+        conn = self._connect(detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+        with contextlib.closing(conn), conn:
             # User rate limits table (created in migration)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS user_rate_limits (
@@ -386,7 +445,7 @@ class UserRateLimiter:
                 return cached["config"]
 
         # Query database
-        with sqlite3.connect(self.db_path) as conn:
+        def _load(conn: sqlite3.Connection) -> RateLimitConfig:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT tier, evaluations_per_minute, batch_evaluations_per_minute,
@@ -437,7 +496,13 @@ class UserRateLimiter:
                         max_cost_per_month=row[7]
                     )
             else:
-                # Create default configuration for new user
+                # Create default configuration for new user.
+                #
+                # The insert is idempotent because this runs in a worker thread:
+                # two first-time requests for the same user can both observe no
+                # row and both reach here, and user_id is the primary key. DO
+                # NOTHING plus a re-read makes both callers converge on whichever
+                # row actually persisted instead of one raising IntegrityError.
                 config = RateLimitConfig.for_tier(UserTier.FREE)
 
                 cursor.execute("""
@@ -446,6 +511,7 @@ class UserRateLimiter:
                         evaluations_per_day, total_tokens_per_day, burst_size,
                         max_cost_per_day, max_cost_per_month
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id) DO NOTHING
                 """, (
                     user_id, config.tier.value, config.evaluations_per_minute,
                     config.batch_evaluations_per_minute, config.evaluations_per_day,
@@ -453,6 +519,29 @@ class UserRateLimiter:
                     config.max_cost_per_day, config.max_cost_per_month
                 ))
                 conn.commit()
+
+                cursor.execute("""
+                    SELECT tier, evaluations_per_minute, batch_evaluations_per_minute,
+                           evaluations_per_day, total_tokens_per_day, burst_size,
+                           max_cost_per_day, max_cost_per_month
+                    FROM user_rate_limits
+                    WHERE user_id = ?
+                """, (user_id,))
+                persisted = cursor.fetchone()
+                if persisted:
+                    config = RateLimitConfig(
+                        tier=UserTier(persisted[0]),
+                        evaluations_per_minute=persisted[1],
+                        batch_evaluations_per_minute=persisted[2],
+                        evaluations_per_day=persisted[3],
+                        total_tokens_per_day=persisted[4],
+                        burst_size=persisted[5],
+                        max_cost_per_day=persisted[6],
+                        max_cost_per_month=persisted[7],
+                    )
+            return config
+
+        config = await self._run_db(_load)
 
         # Cache the configuration
         self._cache[cache_key] = {
@@ -512,13 +601,12 @@ class UserRateLimiter:
         if LedgerEntry is None:
             return
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
+            row = await self._run_db(
+                lambda conn: conn.execute(
                     "SELECT total_evaluations, total_tokens FROM daily_usage WHERE user_id = ? AND date = ?",
                     (user_id, str(day_utc)),
-                )
-                row = cursor.fetchone()
+                ).fetchone()
+            )
             if not row:
                 return
             total_evaluations = int(row[0] or 0)
@@ -563,14 +651,13 @@ class UserRateLimiter:
 
         today = datetime.now(timezone.utc).date()
         day_str = str(today)
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
+        row = await self._run_db(
+            lambda conn: conn.execute(
                 "SELECT total_cost FROM daily_usage WHERE user_id = ? AND date = ?",
                 (user_id, day_str),
-            )
-            row = cursor.fetchone()
-            total_cost = float(row[0] or 0.0) if row else 0.0
+            ).fetchone()
+        )
+        total_cost = float(row[0] or 0.0) if row else 0.0
 
         if total_cost + cost > float(config.max_cost_per_day):
             reset_at = datetime.combine(
@@ -637,7 +724,9 @@ class UserRateLimiter:
         normalized_tokens = max(0, int(tokens_used or 0))
         cost_remaining: Optional[float] = None
 
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        # Already dispatched to a worker thread by _reserve_request_usage();
+        # keep it synchronous and only take the connection policy from _connect().
+        conn = self._connect(timeout=30.0)
         try:
             conn.execute("BEGIN IMMEDIATE")
             try:
@@ -722,7 +811,9 @@ class UserRateLimiter:
         normalized_tokens = max(0, int(tokens_used or 0))
         normalized_cost = float(cost or 0.0)
 
-        conn = sqlite3.connect(self.db_path)
+        # Already dispatched to a worker thread by _record_request(); keep it
+        # synchronous and only take the connection policy from _connect().
+        conn = self._connect()
         try:
             self._write_request_usage(
                 conn,
@@ -865,7 +956,7 @@ class UserRateLimiter:
                     if hasattr(config, key):
                         setattr(config, key, value)
 
-            with sqlite3.connect(self.db_path) as conn:
+            def _apply(conn: sqlite3.Connection) -> None:
                 cursor = conn.cursor()
                 cursor.execute("""
                     UPDATE user_rate_limits
@@ -899,6 +990,8 @@ class UserRateLimiter:
 
                 conn.commit()
 
+            await self._run_db(_apply)
+
             # Clear cache
             cache_key = f"config_{user_id}"
             if cache_key in self._cache:
@@ -924,7 +1017,7 @@ class UserRateLimiter:
         config = await self._get_user_config(user_id)
         today = datetime.now(timezone.utc).date()
 
-        with sqlite3.connect(self.db_path) as conn:
+        def _summary(conn: sqlite3.Connection):
             cursor = conn.cursor()
 
             # Get today's usage
@@ -950,6 +1043,9 @@ class UserRateLimiter:
             """, (user_id, str(month_start)))
 
             monthly_cost = cursor.fetchone()[0] or 0.0
+            return total_evaluations, total_tokens, total_cost, monthly_cost
+
+        total_evaluations, total_tokens, total_cost, monthly_cost = await self._run_db(_summary)
 
         return {
             "user_id": user_id,

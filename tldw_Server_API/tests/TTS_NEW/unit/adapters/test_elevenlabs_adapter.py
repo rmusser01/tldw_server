@@ -139,6 +139,34 @@ class TestRequestValidation:
             await adapter.validate_request(request)
 
     @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_legacy_model_alias_keeps_request_case_and_sends_canonical_payload(self):
+        captured: dict[str, object] = {}
+
+        async def _stream(**kwargs):
+            captured.update(kwargs)
+            yield b"audio"
+
+        adapter = ElevenLabsTTSAdapter({"api_key": "test-key"})
+        adapter.client = object()
+        request = TTSRequest(
+            text="Hello",
+            voice="rachel",
+            model="ELEVEN_MULTILINGUAL_V2",
+        )
+
+        await adapter.validate_request(request)
+        with patch(
+            "tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter.astream_bytes",
+            _stream,
+        ):
+            chunks = [chunk async for chunk in adapter.generate_stream(request)]
+
+        assert chunks == [b"audio"]
+        assert request.model == "ELEVEN_MULTILINGUAL_V2"
+        assert captured["json"]["model_id"] == "eleven_multilingual_v2"
+
+    @pytest.mark.unit
     async def test_validate_text_too_long(self):
         """Test validation rejects text exceeding limit."""
         adapter = ElevenLabsTTSAdapter({"api_key": "test-key"})
@@ -427,12 +455,13 @@ class TestErrorHandling:
     @patch('tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter.afetch')
     async def test_handle_invalid_voice_error(self, mock_post):
         """Test handling of invalid voice errors."""
+        raw_marker = "RAW_ELEVENLABS_INVALID_VOICE_BODY_SECRET"
         mock_response = MagicMock()
         mock_response.status_code = 400
         mock_response.json.return_value = {
             "detail": {
                 "status": "invalid_voice_id",
-                "message": "Voice not found"
+                "message": raw_marker,
             }
         }
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
@@ -446,7 +475,10 @@ class TestErrorHandling:
         with pytest.raises(TTSValidationError) as exc_info:
             await adapter.generate(request)
 
-        assert "Voice not found" in str(exc_info.value)
+        assert "Invalid voice id" in str(exc_info.value)
+        assert raw_marker not in str(exc_info.value)
+        assert exc_info.value.__cause__ is None
+        assert exc_info.value.__context__ is None
 
 # ========================================================================
 # Usage and Quota Tests

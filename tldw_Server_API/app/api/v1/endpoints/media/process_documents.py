@@ -5,25 +5,38 @@ import functools
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile, status
 from loguru import logger
 from starlette.responses import JSONResponse
 
 import tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files as docs
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import propagate_billing_headers, require_within_limit
-from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
-from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
     get_process_documents_form,
+)
+from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import (
+    media_create_dependencies,
 )
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
+from tldw_Server_API.app.api.v1.endpoints.media.deprecation_signals import (
+    apply_media_legacy_headers,
+    build_media_legacy_signal,
+)
+from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
+    normalize_urls_field,
+    validate_media_inputs,
+)
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessDocumentsForm
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
     async_resolve_chunking_for_result,
@@ -31,25 +44,20 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     resolve_chunking_options_and_plan,
     uses_hierarchical_chunking,
 )
-from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
-    TempDirManager,
-    save_uploaded_files as core_save_uploaded_files,
-)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils import (
     download_url_async as core_download_url_async,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
+    TempDirManager,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
+    save_uploaded_files as core_save_uploaded_files,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.pipeline import (
     ProcessItem,
     run_batch_processor,
 )
-from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
-    normalize_urls_field,
-    validate_media_inputs,
-)
-from tldw_Server_API.app.api.v1.endpoints.media.deprecation_signals import (
-    apply_media_legacy_headers,
-    build_media_legacy_signal,
-)
+from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
 
 router = APIRouter()
 
@@ -73,12 +81,14 @@ ALLOWED_DOC_EXTENSIONS = [
     summary="Extract, chunk, analyse Documents (NO DB Persistence)",
     tags=["Media Processing (No DB)"],
     dependencies=[
+        *media_create_dependencies(),
         Depends(guard_storage_quota),
         Depends(require_within_limit(LimitCategory.STORAGE_MB, 1)),
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
     ],
 )
 async def process_documents_endpoint(
+    request: Request,
     injected_response: Response,
     db: Any = Depends(get_media_db_for_user),
     form_data: ProcessDocumentsForm = Depends(get_process_documents_form),
@@ -87,6 +97,7 @@ async def process_documents_endpoint(
         description="Document file uploads (.txt, .md, .markdown, .docx, .rtf, .html, .htm, .xhtml, .xml, .json)",
     ),
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
+    current_user: User = Depends(get_request_user),
 ):
     """
     Process Documents (No Persistence).
@@ -107,7 +118,7 @@ async def process_documents_endpoint(
         # Usage logging is best-effort; never fail the request.
         logger.debug("Document process endpoint usage logging failed")
     logger.debug(
-        "Form data for /process-documents: has_urls={}, has_files={}, " "perform_analysis={}, perform_chunking={}",
+        "Form data for /process-documents: has_urls={}, has_files={}, perform_analysis={}, perform_chunking={}",
         bool(form_data.urls),
         bool(files),
         form_data.perform_analysis,
@@ -133,6 +144,24 @@ async def process_documents_endpoint(
         form_data.urls,
         files,
     )
+
+    system_prompt = form_data.system_prompt
+    # FastAPI maps an empty optional Form string to None. Preserve an explicit
+    # empty system field so a saved customization cannot replace it.
+    if system_prompt is None and (await request.form()).get("system_prompt") == "":
+        system_prompt = ""
+    if form_data.perform_analysis and form_data.api_name and system_prompt is None:
+        prompts_db = await get_prompts_db_for_user(request, current_user)
+
+        def resolve_system_prompt() -> str:
+            """Resolve the request snapshot and release this worker's connection."""
+            try:
+                return resolve_service_prompt(prompts_db, "media.document.summarization").parts["system"]
+            finally:
+                prompts_db.close_connection()
+
+        # Freeze one value before any upload/download or concurrent model work.
+        system_prompt = await asyncio.to_thread(resolve_system_prompt)
 
     # --- Prepare result structure ---
     batch_result: dict[str, Any] = {
@@ -398,7 +427,7 @@ async def process_documents_endpoint(
                     api_name=form_data.api_name,
                     api_key=None,
                     custom_prompt=form_data.custom_prompt,
-                    system_prompt=form_data.system_prompt,
+                    system_prompt=system_prompt,
                     title_override=form_data.title,
                     author_override=form_data.author,
                     keywords=form_data.keywords,
@@ -502,13 +531,13 @@ async def process_documents_endpoint(
     elif batch_result.get("processed_count", 0) == 0 and batch_result.get("errors_count", 0) == 0:
         final_status_code = status.HTTP_207_MULTI_STATUS if batch_result["results"] else status.HTTP_400_BAD_REQUEST
     else:
-        logger.warning("Reached unexpected state for final status code determination " "in /process-documents.")
+        logger.warning("Reached unexpected state for final status code determination in /process-documents.")
         final_status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
 
     log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
     logger.log(
         log_level,
-        "/process-documents request finished with status {}. " "Processed: {}, Errors: {}",
+        "/process-documents request finished with status {}. Processed: {}, Errors: {}",
         final_status_code,
         batch_result.get("processed_count", 0),
         batch_result.get("errors_count", 0),

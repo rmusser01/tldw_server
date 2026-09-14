@@ -59,4 +59,5 @@ def test_list_ocr_backends_returns_safe_mineru_stub_on_describe_error(monkeypatc
     assert payload["mineru"]["document_level"] is True
     assert payload["mineru"]["opt_in_only"] is True
     assert payload["mineru"]["mode"] == "cli"
-    assert payload["mineru"]["error"] == "bad MinerU command"
+    assert payload["mineru"]["error"] == "MinerU backend discovery failed"
+    assert "bad MinerU command" not in payload["mineru"]["error"]

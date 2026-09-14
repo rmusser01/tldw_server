@@ -21,6 +21,13 @@ from pydantic import (
     model_validator,
 )
 
+from tldw_Server_API.app.core.Workspaces.eligibility import (
+    WorkspaceEligibilityOperation,
+    WorkspaceEligibilityOperationCategory,
+    WorkspaceEligibilityPermissionState,
+    WorkspaceEligibilityReasonCode,
+    WorkspaceEligibilityRuntimeState,
+)
 from tldw_Server_API.app.core.Workspaces.membership_models import (
     WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES,
     WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES,
@@ -28,13 +35,6 @@ from tldw_Server_API.app.core.Workspaces.membership_models import (
 )
 from tldw_Server_API.app.core.Workspaces.runtime_bindings import (
     normalize_runtime_binding_payload,
-)
-from tldw_Server_API.app.core.Workspaces.eligibility import (
-    WorkspaceEligibilityOperation,
-    WorkspaceEligibilityOperationCategory,
-    WorkspaceEligibilityPermissionState,
-    WorkspaceEligibilityReasonCode,
-    WorkspaceEligibilityRuntimeState,
 )
 
 WORKSPACE_MIGRATION_MAX_MANIFEST_BYTES = 256 * 1024
@@ -502,7 +502,7 @@ class WorkspaceEffectiveAssistantDefault(BaseModel):
     degraded_reason: WorkspaceAssistantDefaultDegradedReason | None = None
 
     @model_validator(mode="after")
-    def _validate_status_relations(self) -> "WorkspaceEffectiveAssistantDefault":
+    def _validate_status_relations(self) -> WorkspaceEffectiveAssistantDefault:
         if self.status == "available":
             if self.assistant_kind is None or self.assistant_id is None:
                 raise ValueError("available assistant defaults require assistant_kind and assistant_id")
@@ -546,7 +546,7 @@ class WorkspacePatchRequest(BaseModel):
     version: int = Field(..., description="Current version for optimistic locking")
 
     @model_validator(mode="after")
-    def _validate_assistant_default_confirmation(self) -> "WorkspacePatchRequest":
+    def _validate_assistant_default_confirmation(self) -> WorkspacePatchRequest:
         if self.assistant_defaults is None:
             if self.confirm_read_write_assistant_default is not None:
                 raise ValueError("confirm_read_write_assistant_default only applies to assistant_defaults")
@@ -1160,7 +1160,7 @@ class WorkspaceRuntimeBindingDescriptorUpsertRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_runtime_binding_contract(self) -> "WorkspaceRuntimeBindingDescriptorUpsertRequest":
+    def _validate_runtime_binding_contract(self) -> WorkspaceRuntimeBindingDescriptorUpsertRequest:
         persistence_payload = self.model_dump()
         try:
             normalized = normalize_runtime_binding_payload(persistence_payload)
@@ -1226,7 +1226,9 @@ WorkspaceOperationStatus = Literal[
 ]
 
 
-class WorkspaceOperationResponse(BaseModel):
+class WorkspaceOperationBase(BaseModel):
+    """Serialized operation fields shared by Workspace-domain APIs."""
+
     operation_id: str
     workspace_id: str
     command: str
@@ -1236,6 +1238,10 @@ class WorkspaceOperationResponse(BaseModel):
     retryable: bool = False
     diagnostics: dict[str, Any] = Field(default_factory=dict)
     poll_href: str
+
+
+class WorkspaceOperationResponse(WorkspaceOperationBase):
+    """Canonical operation response used by existing Workspace endpoints."""
 
 
 class WorkspaceRootResponse(WorkspaceProjectRoot):
@@ -1432,7 +1438,7 @@ class WorkspaceMigrationCreateRequest(BaseModel):
         )
 
     @model_validator(mode="after")
-    def _validate_declared_chunk_ids(self) -> "WorkspaceMigrationCreateRequest":
+    def _validate_declared_chunk_ids(self) -> WorkspaceMigrationCreateRequest:
         ids = [chunk.id for chunk in self.declared_chunks]
         if len(ids) != len(set(ids)):
             raise ValueError("declared_chunks must use unique chunk ids")

@@ -9,31 +9,41 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
+    Request,
     Response,
     UploadFile,
     status,
 )
 from loguru import logger
 from starlette.responses import JSONResponse
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import propagate_billing_headers, require_within_limit
-from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
-from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
     get_process_videos_form,
+)
+from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import (
+    media_create_dependencies,
 )
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
-from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessVideosForm
-from tldw_Server_API.app.core.AuthNZ.permissions import (
-    MEDIA_CREATE,
+from tldw_Server_API.app.api.v1.endpoints.media.deprecation_signals import (
+    apply_media_legacy_headers,
+    build_media_legacy_signal,
 )
+from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
+    normalize_urls_field,
+    validate_media_inputs,
+)
+from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessVideosForm
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
     async_resolve_chunking_for_result,
@@ -45,14 +55,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     save_uploaded_files,
 )
-from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
-    normalize_urls_field,
-    validate_media_inputs,
-)
-from tldw_Server_API.app.api.v1.endpoints.media.deprecation_signals import (
-    apply_media_legacy_headers,
-    build_media_legacy_signal,
-)
 
 router = APIRouter()
 
@@ -62,14 +64,14 @@ router = APIRouter()
     summary="Transcribe / chunk / analyse videos and return the full artefacts (no DB write)",
     tags=["Media Processing (No DB)"],
     dependencies=[
-        Depends(RequirePermission(MEDIA_CREATE)),
-        Depends(rbac_rate_limit("media.create")),
+        *media_create_dependencies(),
         Depends(guard_storage_quota),
         Depends(require_within_limit(LimitCategory.STORAGE_MB, 1)),
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
     ],
 )
 async def process_videos_endpoint(
+    request: Request,
     background_tasks: BackgroundTasks,
     injected_response: Response,
     db: Any = Depends(get_media_db_for_user),
@@ -80,7 +82,7 @@ async def process_videos_endpoint(
     ),
     current_user: User = Depends(get_request_user),
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
-):
+) -> JSONResponse:
     """
     Process videos without persisting to the Media DB.
 
@@ -94,6 +96,7 @@ async def process_videos_endpoint(
 
     # Lazy import to avoid import-time hard failures from optional transcriber backends.
     from tldw_Server_API.app.core.Ingestion_Media_Processing.video_batch import (
+        resolve_video_summary_prompts,
         run_video_batch,
     )
 
@@ -127,6 +130,10 @@ async def process_videos_endpoint(
         "video",
         form_data.urls,
         files,
+    )
+
+    final_summary_prompt = await resolve_video_summary_prompts(
+        form_data, lambda: get_prompts_db_for_user(request, current_user)
     )
 
     batch_result: dict[str, Any] = {
@@ -225,6 +232,7 @@ async def process_videos_endpoint(
 
         # --- Call process_videos via helper ---
         batch_result = await run_video_batch(
+            final_summary_prompt=final_summary_prompt,
             all_inputs_to_process=all_inputs_to_process,
             form_data=form_data,
             current_user=current_user,
@@ -257,7 +265,7 @@ async def process_videos_endpoint(
     log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
     logger.log(
         log_level,
-        "/process-videos request finished with status {}. Results count: {}, " "Errors: {}",
+        "/process-videos request finished with status {}. Results count: {}, Errors: {}",
         final_status_code,
         total_items,
         final_error_count,

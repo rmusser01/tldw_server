@@ -1,0 +1,29 @@
+============================= test session starts ==============================
+collected 52 items
+
+tldw_Server_API/tests/Persona/test_buddy_turns.py .................      [ 32%]
+tldw_Server_API/tests/Persona/test_buddy_turn_ledger.py .........        [ 50%]
+tldw_Server_API/tests/Persona/test_independent_buddies.py ...........s.. [ 76%]
+............                                                             [100%]2026-09-08 22:14:15.203 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:209 - Determined ACTUAL_PROJECT_ROOT for database paths: /private/tmp/tldw-server-buddy-persona-ux
+2026-09-08 22:14:15.205 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:209 - No .env/.ENV file found in /private/tmp/tldw-server-buddy-persona-ux/tldw_Server_API, /private/tmp/tldw-server-buddy-persona-ux/tldw_Server_API/Config_Files, /private/tmp/tldw-server-buddy-persona-ux, or /private/tmp/tldw-server-buddy-persona-ux/Config_Files; using config.txt and system env
+2026-09-08 22:14:15.206 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:209 - Attempting to load comprehensive config from: /private/tmp/tldw-server-buddy-persona-ux/tldw_Server_API/Config_Files/config.txt
+2026-09-08 22:14:15.209 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:209 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-08 22:14:15.212 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:209 - Ensured main SQLite database directory exists: /private/tmp/tldw-server-buddy-persona-ux/Databases
+2026-09-08 22:14:15.213 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:209 - Ensured user data base directory exists: Databases/user_databases
+2026-09-08 22:14:15.214 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-08 22:14:15.214 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-08 22:14:15.217 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-08 22:14:15.217 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-08 22:14:15.218 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:77 - Detected database backend: sqlite
+2026-09-08 22:14:15.218 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.database:close:1665 - Database pool closed
+2026-09-08 22:14:15.219 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:shutdown:885 - Shutting down MCP Server
+2026-09-08 22:14:15.219 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:shutdown_all:530 - Shutting down all modules
+2026-09-08 22:14:15.219 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:shutdown_all:559 - All modules shut down
+2026-09-08 22:14:15.220 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-f2ee3a2b
+2026-09-08 22:14:15.223 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-f2ee3a2b/1/workflows/workflows_scheduler.db
+2026-09-08 22:14:15.224 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-08 22:14:15.224 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-08 22:14:15.225 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+
+
+============ 51 passed, 1 skipped, 3 warnings in 113.78s (0:01:53) =============

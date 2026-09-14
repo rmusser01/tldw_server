@@ -222,7 +222,7 @@ class PropositionChunkingStrategy(BaseChunkingStrategy):
                 if not nlp.has_pipe("sentencizer"):
                     nlp.add_pipe("sentencizer")
         except Exception as e:
-            logger.warning(f"Failed to initialize spaCy pipeline: {e}")
+            logger.warning("Failed to initialize spaCy pipeline; error_type={}", type(e).__name__)
             return []
 
         doc = nlp(text)
@@ -284,7 +284,10 @@ class PropositionChunkingStrategy(BaseChunkingStrategy):
                 if props:
                     results.extend(props)
             except Exception as e:
-                logger.warning(f"LLM proposition extraction failed on a window: {e}")
+                logger.warning(
+                    "LLM proposition extraction failed on a window; error_type={}",
+                    type(e).__name__,
+                )
                 continue
 
         if not results:
@@ -354,6 +357,13 @@ class PropositionChunkingStrategy(BaseChunkingStrategy):
     def _call_llm(self, prompt: str) -> Optional[str]:
         try:
             config = self.llm_config.copy()
+            snapshot_kwargs = {}
+            if 'app_config' in config:
+                snapshot_kwargs['app_config'] = config['app_config']
+            if 'credentials_resolved' in config:
+                snapshot_kwargs['credentials_resolved'] = config['credentials_resolved']
+            if 'provider_credentials' in config:
+                snapshot_kwargs['provider_credentials'] = config['provider_credentials']
             result = self.llm_call_func(
                 config.get('api_name', 'openai'),
                 prompt,
@@ -364,14 +374,15 @@ class PropositionChunkingStrategy(BaseChunkingStrategy):
                 False,
                 False,
                 False,
-                config.get('model_override')
+                model_override=config.get('model_override'),
+                **snapshot_kwargs,
             )
             if result and isinstance(result, tuple) and len(result) > 0:
                 return result[0]
             elif isinstance(result, str):
                 return result
         except Exception as e:
-            logger.error(f"Error calling LLM for propositions: {e}")
+            logger.error("Error calling LLM for propositions; error_type={}", type(e).__name__)
         return None
 
     def _parse_llm_props(self, output: Optional[str]) -> list[str]:
@@ -384,8 +395,11 @@ class PropositionChunkingStrategy(BaseChunkingStrategy):
             data = json.loads(output)
             if isinstance(data, list):
                 return [str(x).strip() for x in data if isinstance(x, (str, int, float)) and str(x).strip()]
-        except Exception as json_parse_error:
-            logger.debug("Proposition chunking JSON parse failed; falling back to line parsing", exc_info=json_parse_error)
+        except Exception as e:
+            logger.debug(
+                "Proposition chunking JSON parse failed; falling back to line parsing; error_type={}",
+                type(e).__name__,
+            )
         # Fallback: parse lines starting with hyphen/number
         lines = [l.strip("- ") for l in output.splitlines() if l.strip()]
         return [l for l in lines if len(l) > 0]

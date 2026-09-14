@@ -16,17 +16,21 @@ This module encapsulates raw SQL per project guidelines.
 import json
 import sqlite3
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
     require_trusted_database_parent_exists,
 )
-from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
+from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
 
 
 def _utcnow_iso() -> str:
@@ -53,11 +57,11 @@ class SemanticMemory:
 
 class PersonalizationDB:
     @classmethod
-    def for_path(cls, db_path: str | Path) -> "PersonalizationDB":
+    def for_path(cls, db_path: str | Path) -> PersonalizationDB:
         return cls(Path(db_path))
 
     @classmethod
-    def for_user(cls, user_id: str | int) -> "PersonalizationDB":
+    def for_user(cls, user_id: str | int) -> PersonalizationDB:
         return cls.for_path(DatabasePaths.get_personalization_db_path(user_id))
 
     def __init__(self, db_path: str | Path) -> None:
@@ -80,6 +84,18 @@ class PersonalizationDB:
             configure_sqlite_connection(conn)
         except Exception as pragma_error:
             _ = pragma_error  # proceed with defaults if pragmas fail
+        try:
+            secure_delete = conn.execute("PRAGMA secure_delete = ON").fetchone()
+            if secure_delete is None or int(secure_delete[0]) != 1:
+                logger.warning(
+                    "SQLite secure_delete is unavailable for PersonalizationDB; "
+                    "encrypted Personal Context values remain protected"
+                )
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            logger.warning(
+                "Could not enable SQLite secure_delete for PersonalizationDB: {}",
+                exc,
+            )
         return conn
 
     def _ensure_schema(self) -> None:
@@ -211,12 +227,304 @@ class PersonalizationDB:
                     );
                     CREATE INDEX IF NOT EXISTS idx_companion_goals_user_updated
                         ON companion_goals(user_id, updated_at DESC);
+
+                    CREATE TABLE IF NOT EXISTS personal_context_profile_keys (
+                        profile_id TEXT PRIMARY KEY,
+                        key_version INTEGER NOT NULL,
+                        integrity_key_version INTEGER NOT NULL,
+                        wrapped_profile_key BLOB NOT NULL,
+                        wrap_nonce BLOB NOT NULL,
+                        wrapped_integrity_key BLOB NOT NULL,
+                        integrity_wrap_nonce BLOB NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_object_versions (
+                        profile_id TEXT NOT NULL,
+                        object_type TEXT NOT NULL,
+                        object_id TEXT NOT NULL,
+                        version_id TEXT NOT NULL,
+                        parent_version_id TEXT,
+                        schema_version INTEGER NOT NULL,
+                        algorithm TEXT NOT NULL,
+                        key_version INTEGER NOT NULL,
+                        nonce BLOB NOT NULL,
+                        wrapped_dek BLOB NOT NULL,
+                        wrapped_dek_nonce BLOB NOT NULL,
+                        ciphertext BLOB NOT NULL,
+                        integrity_tag TEXT NOT NULL,
+                        payload_size_bytes INTEGER NOT NULL,
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY (profile_id, object_type, object_id, version_id)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_object_heads (
+                        profile_id TEXT NOT NULL,
+                        object_type TEXT NOT NULL,
+                        object_id TEXT NOT NULL,
+                        current_version_id TEXT NOT NULL,
+                        PRIMARY KEY (profile_id, object_type, object_id)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_runtime_heads (
+                        profile_id TEXT NOT NULL,
+                        scope_id TEXT NOT NULL,
+                        current_version_id TEXT NOT NULL,
+                        PRIMARY KEY (profile_id, scope_id)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_receipts (
+                        profile_id TEXT NOT NULL,
+                        receipt_id TEXT NOT NULL,
+                        version_id TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY (profile_id, receipt_id)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_publication_profiles (
+                        profile_id TEXT PRIMARY KEY,
+                        next_sequence INTEGER NOT NULL CHECK (next_sequence >= 1),
+                        activation_covered_through_sequence INTEGER NOT NULL DEFAULT 0,
+                        purge_generation INTEGER NOT NULL CHECK (purge_generation >= 0),
+                        activation_epoch TEXT,
+                        continuity_token TEXT,
+                        updated_at TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_publication_relay_leases (
+                        profile_id TEXT PRIMARY KEY,
+                        owner_token TEXT NOT NULL,
+                        expires_at_ns INTEGER NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_activations (
+                        activation_id TEXT PRIMARY KEY,
+                        profile_id TEXT NOT NULL,
+                        device_id TEXT NOT NULL,
+                        baseline_digest TEXT NOT NULL,
+                        purge_generation INTEGER NOT NULL CHECK (purge_generation >= 0),
+                        publication_watermark INTEGER NOT NULL CHECK (publication_watermark >= 0),
+                        state TEXT NOT NULL CHECK (state IN ('prepared','installed','active','expired')),
+                        sync_receipt_id TEXT,
+                        home_server_cursor INTEGER,
+                        activation_epoch TEXT,
+                        continuity_token TEXT,
+                        algorithm TEXT NOT NULL,
+                        key_version INTEGER NOT NULL,
+                        nonce BLOB NOT NULL,
+                        wrapped_dek BLOB NOT NULL,
+                        wrapped_dek_nonce BLOB NOT NULL,
+                        ciphertext BLOB NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_personal_context_activation_device
+                        ON personal_context_activations(profile_id, device_id, created_at);
+                    CREATE TABLE IF NOT EXISTS personal_context_activation_devices (
+                        activation_id TEXT NOT NULL,
+                        device_id TEXT NOT NULL,
+                        dataset_id TEXT NOT NULL,
+                        baseline_digest TEXT NOT NULL,
+                        local_receipt_id TEXT NOT NULL,
+                        sync_ack_receipt_id TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY (activation_id, device_id)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_publication_relay_attention (
+                        profile_id TEXT NOT NULL,
+                        profile_publication_sequence INTEGER NOT NULL,
+                        error_code TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY (profile_id, profile_publication_sequence)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_purge_cleanup_intents (
+                        intent_id TEXT PRIMARY KEY,
+                        profile_id TEXT NOT NULL,
+                        old_generation_through INTEGER NOT NULL CHECK (old_generation_through >= 0),
+                        purge_generation INTEGER NOT NULL CHECK (purge_generation = old_generation_through + 1),
+                        origin TEXT NOT NULL CHECK (origin = 'direct_confirmed_full_profile_purge'),
+                        state TEXT NOT NULL CHECK (state IN ('pending','claimed','complete')),
+                        owner_token TEXT,
+                        claim_expires_at_ns INTEGER,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        completed_at TEXT,
+                        CHECK (
+                            (state = 'pending' AND owner_token IS NULL AND claim_expires_at_ns IS NULL AND completed_at IS NULL)
+                            OR (state = 'claimed' AND owner_token IS NOT NULL AND claim_expires_at_ns IS NOT NULL AND completed_at IS NULL)
+                            OR (state = 'complete' AND owner_token IS NOT NULL AND claim_expires_at_ns IS NULL AND completed_at IS NOT NULL)
+                        ),
+                        UNIQUE (profile_id, purge_generation)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_publication_batches (
+                        profile_id TEXT NOT NULL,
+                        profile_publication_sequence INTEGER NOT NULL,
+                        publication_batch_id TEXT NOT NULL,
+                        purge_generation INTEGER NOT NULL,
+                        batch_size INTEGER NOT NULL CHECK (batch_size >= 1),
+                        status TEXT NOT NULL CHECK (status IN ('pending','relaying','complete','covered_by_activation','purge_terminal')),
+                        activation_id TEXT,
+                        baseline_digest TEXT,
+                        sync_receipt_id TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY (profile_id, profile_publication_sequence),
+                        UNIQUE (profile_id, publication_batch_id)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_publication_rows (
+                        profile_id TEXT NOT NULL,
+                        profile_publication_sequence INTEGER NOT NULL,
+                        publication_batch_id TEXT NOT NULL,
+                        batch_ordinal INTEGER NOT NULL CHECK (batch_ordinal >= 0),
+                        batch_size INTEGER NOT NULL CHECK (batch_size >= 1),
+                        purge_generation INTEGER NOT NULL CHECK (purge_generation >= 0),
+                        role TEXT NOT NULL CHECK (role IN ('semantic','manifest','purge_barrier')),
+                        opaque_object_id TEXT NOT NULL,
+                        opaque_version_id TEXT NOT NULL,
+                        operation TEXT NOT NULL CHECK (operation IN ('upsert','tombstone')),
+                        algorithm TEXT NOT NULL,
+                        key_version INTEGER NOT NULL,
+                        nonce BLOB NOT NULL,
+                        wrapped_dek BLOB NOT NULL,
+                        wrapped_dek_nonce BLOB NOT NULL,
+                        ciphertext BLOB NOT NULL,
+                        integrity_tag TEXT NOT NULL,
+                        payload_size_bytes INTEGER NOT NULL CHECK (payload_size_bytes >= 0),
+                        deterministic_envelope_id TEXT NOT NULL,
+                        sync_server_cursor INTEGER,
+                        row_state TEXT NOT NULL CHECK (row_state IN ('pending','staged','acknowledged','shredded')),
+                        PRIMARY KEY (profile_id, profile_publication_sequence, batch_ordinal),
+                        UNIQUE (profile_id, deterministic_envelope_id),
+                        FOREIGN KEY (profile_id, profile_publication_sequence)
+                            REFERENCES personal_context_publication_batches(profile_id, profile_publication_sequence)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS personal_context_ingress_receipts (
+                        dataset_id TEXT NOT NULL,
+                        device_id TEXT NOT NULL,
+                        client_envelope_id TEXT NOT NULL,
+                        canonical_payload_digest TEXT NOT NULL,
+                        purge_generation INTEGER NOT NULL CHECK (purge_generation >= 0),
+                        wire_entity_version TEXT NOT NULL,
+                        resulting_object_id TEXT NOT NULL,
+                        resulting_version_id TEXT NOT NULL,
+                        resulting_manifest_revision INTEGER NOT NULL CHECK (resulting_manifest_revision >= 0),
+                        resulting_manifest_version_id TEXT NOT NULL,
+                        publication_batch_id TEXT NOT NULL,
+                        profile_publication_sequence INTEGER NOT NULL CHECK (profile_publication_sequence >= 1),
+                        receipt_id TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY (dataset_id, device_id, client_envelope_id),
+                        UNIQUE (receipt_id)
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_personal_context_heads_type
+                        ON personal_context_object_heads(profile_id, object_type, object_id);
+                    CREATE INDEX IF NOT EXISTS idx_personal_context_publication_rows_state
+                        ON personal_context_publication_rows(profile_id, row_state, profile_publication_sequence, batch_ordinal);
+                    CREATE INDEX IF NOT EXISTS idx_personal_context_publication_batches_status
+                        ON personal_context_publication_batches(profile_id, status, profile_publication_sequence);
+                    CREATE INDEX IF NOT EXISTS idx_personal_context_purge_cleanup_state
+                        ON personal_context_purge_cleanup_intents(state, created_at, intent_id);
                     """
                 )
                 conn.commit()
             finally:
                 conn.close()
         self._migrate_schema()
+
+    @contextmanager
+    def transaction(self, *, immediate: bool = False) -> Iterator[sqlite3.Connection]:
+        """Open one parameterized transaction on this user's database."""
+
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
+                yield connection
+                connection.commit()
+                self._truncate_wal_if_possible(connection)
+            except BaseException:
+                try:
+                    connection.rollback()
+                except sqlite3.Error as rollback_error:
+                    logger.opt(exception=rollback_error).error(
+                        "PersonalizationDB rollback failed for {}",
+                        self.db_path,
+                    )
+                raise
+            finally:
+                connection.close()
+
+    @staticmethod
+    def _truncate_wal_if_possible(connection: sqlite3.Connection) -> bool:
+        """Release checkpointed WAL history without waiting on active readers."""
+
+        try:
+            mode = connection.execute("PRAGMA journal_mode").fetchone()
+            if mode is None or str(mode[0]).lower() != "wal":
+                return True
+            prior_timeout = connection.execute("PRAGMA busy_timeout").fetchone()
+            connection.execute("PRAGMA busy_timeout = 0")
+            try:
+                checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            finally:
+                timeout = 5000 if prior_timeout is None else int(prior_timeout[0])
+                connection.execute(f"PRAGMA busy_timeout = {timeout}")
+            return checkpoint is not None and int(checkpoint[0]) == 0
+        except (sqlite3.Error, TypeError, ValueError):
+            return False
+
+    def checkpoint_retention_history(self) -> bool:
+        """Rewrite free pages and require an empty application-owned WAL."""
+
+        with self._lock:
+            connection = self._connect()
+            try:
+                if not self.retention_prerequisites_verified(connection):
+                    return False
+                connection.execute("VACUUM")
+                freelist = connection.execute("PRAGMA freelist_count").fetchone()
+                if freelist is None or int(freelist[0]) != 0:
+                    return False
+                prior_timeout = connection.execute("PRAGMA busy_timeout").fetchone()
+                connection.execute("PRAGMA busy_timeout = 0")
+                try:
+                    checkpoint = connection.execute(
+                        "PRAGMA wal_checkpoint(TRUNCATE)"
+                    ).fetchone()
+                finally:
+                    timeout = 5000 if prior_timeout is None else int(prior_timeout[0])
+                    connection.execute(f"PRAGMA busy_timeout = {timeout}")
+                if checkpoint is None or tuple(map(int, checkpoint)) != (0, 0, 0):
+                    return False
+                wal_path = Path(f"{self.db_path}-wal")
+                return not wal_path.exists() or wal_path.stat().st_size == 0
+            except (OSError, sqlite3.Error, TypeError, ValueError):
+                return False
+            finally:
+                connection.close()
+
+    @staticmethod
+    def retention_prerequisites_verified(connection: sqlite3.Connection) -> bool:
+        """Return whether destructive retention work is safe on this connection."""
+
+        try:
+            secure_delete = connection.execute("PRAGMA secure_delete").fetchone()
+            journal_mode = connection.execute("PRAGMA journal_mode").fetchone()
+            return (
+                secure_delete is not None
+                and int(secure_delete[0]) == 1
+                and journal_mode is not None
+                and str(journal_mode[0]).lower() == "wal"
+            )
+        except (sqlite3.Error, TypeError, ValueError):
+            return False
 
     def _migrate_schema(self) -> None:
         """Add columns that may be missing in databases created before schema updates."""
@@ -242,15 +550,17 @@ class PersonalizationDB:
             ("companion_goals", "progress_mode", "TEXT NOT NULL DEFAULT 'manual'"),
             ("companion_goals", "derivation_key", "TEXT"),
             ("companion_goals", "evidence_json", "TEXT NOT NULL DEFAULT '[]'"),
+            (
+                "personal_context_ingress_receipts",
+                "wire_entity_version",
+                "TEXT NOT NULL DEFAULT ''",
+            ),
         ]
         with self._lock:
             conn = self._connect()
             try:
                 for table, column, col_def in migrations:
-                    existing = {
-                        row[1]
-                        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
-                    }
+                    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
                     if column not in existing:
                         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
                 conn.commit()
@@ -274,7 +584,8 @@ class PersonalizationDB:
                 cur = conn.execute("SELECT * FROM profiles WHERE user_id = ?", (str(user_id),))
                 row = cur.fetchone()
                 if row:
-                    return {k: row[k] for k in row.keys()}
+                    # sqlite3.Row iteration yields values, unlike dict iteration.
+                    return {key: row[key] for key in row.keys()}  # noqa: SIM118
                 now = _utcnow_iso()
                 conn.execute(
                     """
@@ -305,10 +616,19 @@ class PersonalizationDB:
         if not fields:
             return self.get_or_create_profile(user_id)
         allowed = {
-            "enabled", "alpha", "beta", "gamma", "recency_half_life_days",
-            "proactive_enabled", "proactive_frequency", "proactive_types",
-            "quiet_hours_start", "quiet_hours_end", "response_style",
-            "preferred_format", "session_continuity_enabled",
+            "enabled",
+            "alpha",
+            "beta",
+            "gamma",
+            "recency_half_life_days",
+            "proactive_enabled",
+            "proactive_frequency",
+            "proactive_types",
+            "quiet_hours_start",
+            "quiet_hours_end",
+            "response_style",
+            "preferred_format",
+            "session_continuity_enabled",
             "session_summaries_enabled",
             "companion_reflections_enabled",
             "companion_daily_reflections_enabled",
@@ -371,6 +691,7 @@ class PersonalizationDB:
     # Usage events
     def insert_usage_event(self, evt: UsageEvent) -> str:
         import uuid
+
         self.get_or_create_profile(evt.user_id)
         eid = uuid.uuid4().hex
         ts = evt.timestamp or _utcnow_iso()
@@ -402,6 +723,7 @@ class PersonalizationDB:
     # Memories
     def add_semantic_memory(self, mem: SemanticMemory) -> str:
         import uuid
+
         self.get_or_create_profile(mem.user_id)
         mid = uuid.uuid4().hex
         tags_json = json.dumps(mem.tags) if mem.tags else None
@@ -494,7 +816,9 @@ class PersonalizationDB:
         placeholders = ", ".join(["?"] * len(memory_ids))
         params: list[Any] = [now, str(user_id)] + [str(mid) for mid in memory_ids]
         memory_ids_clause = f"({placeholders})"
-        validate_sql_template = "UPDATE semantic_memories SET last_validated = ? WHERE user_id = ? AND id IN {memory_ids_clause}"
+        validate_sql_template = (
+            "UPDATE semantic_memories SET last_validated = ? WHERE user_id = ? AND id IN {memory_ids_clause}"
+        )
         validate_sql = validate_sql_template.format_map(locals())  # nosec B608
         with self._lock:
             conn = self._connect()
@@ -539,15 +863,17 @@ class PersonalizationDB:
                 rows = cur.fetchall()
                 items: list[dict[str, Any]] = []
                 for r in rows:
-                    items.append({
-                        "id": r["id"],
-                        "type": "semantic",
-                        "content": r["content"],
-                        "pinned": bool(r["pinned"]),
-                        "hidden": bool(r["hidden"]),
-                        "tags": (json.loads(r["tags"]) if r["tags"] else None),
-                        "timestamp": datetime.fromisoformat(r["created_at"]) if r["created_at"] else None,
-                    })
+                    items.append(
+                        {
+                            "id": r["id"],
+                            "type": "semantic",
+                            "content": r["content"],
+                            "pinned": bool(r["pinned"]),
+                            "hidden": bool(r["hidden"]),
+                            "tags": (json.loads(r["tags"]) if r["tags"] else None),
+                            "timestamp": datetime.fromisoformat(r["created_at"]) if r["created_at"] else None,
+                        }
+                    )
                 total = int(conn.execute(count_sql, params).fetchone()[0])
                 return items, total
             finally:
@@ -561,6 +887,7 @@ class PersonalizationDB:
     def bulk_add_memories(self, user_id: str, memories: list[dict[str, Any]]) -> int:
         """Bulk-insert semantic memories from import data. Returns count inserted."""
         import uuid
+
         self.get_or_create_profile(user_id)
         count = 0
         with self._lock:
@@ -590,6 +917,7 @@ class PersonalizationDB:
     # Topics
     def upsert_topic(self, user_id: str, label: str, score: float, last_seen: str | None = None) -> None:
         import uuid
+
         last = last_seen or _utcnow_iso()
         with self._lock:
             conn = self._connect()
@@ -660,13 +988,15 @@ class PersonalizationDB:
                         tags = json.loads(r["tags"]) if r["tags"] else None
                     except Exception:
                         tags = None
-                    out.append({
-                        "id": r["id"],
-                        "timestamp": r["timestamp"],
-                        "type": r["type"],
-                        "resource_id": r["resource_id"],
-                        "tags": tags or [],
-                    })
+                    out.append(
+                        {
+                            "id": r["id"],
+                            "timestamp": r["timestamp"],
+                            "type": r["type"],
+                            "resource_id": r["resource_id"],
+                            "tags": tags or [],
+                        }
+                    )
                 return out
             finally:
                 conn.close()
@@ -746,9 +1076,7 @@ class PersonalizationDB:
             try:
                 existing_dedupe_keys: set[str] = set()
                 dedupe_keys = [
-                    str(event.get("dedupe_key"))
-                    for event in events
-                    if str(event.get("dedupe_key", "")).strip()
+                    str(event.get("dedupe_key")) for event in events if str(event.get("dedupe_key", "")).strip()
                 ]
                 if dedupe_keys:
                     placeholders = ", ".join(["?"] * len(dedupe_keys))

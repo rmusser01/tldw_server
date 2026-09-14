@@ -23,7 +23,9 @@ from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.routing import APIRoute
@@ -31,13 +33,27 @@ from loguru import logger
 from starlette import status as _starlette_status
 from starlette.requests import ClientDisconnect
 from starlette.responses import FileResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 from starlette.staticfiles import StaticFiles
 
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
 from tldw_Server_API.app.core.startup_logging import (
+    normalize_startup_log_level as _normalize_startup_log_level,
     startup_api_key_log_value as _startup_api_key_log_value,
 )
 from tldw_Server_API.app.core.Logging.access_log_middleware import (
     redact_access_log_message as _redact_access_log_message,
+)
+from tldw_Server_API.app.core.Security.drain_gate_middleware import (
+    CORS_EXPOSE_HEADERS,
+    CORS_EXPOSE_HEADERS_VALUE,
+    merge_vary_origin,
+)
+from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
+    StandaloneHtmlRequestGuardMiddleware,
+    is_standalone_sensitive_route,
+    standalone_request_validation_response,
+    standalone_response_invalid_response,
 )
 from tldw_Server_API.app.api.v1.router_registry import include_router_idempotent, register_router_specs
 from tldw_Server_API.app.services.app_lifecycle import (
@@ -45,6 +61,9 @@ from tldw_Server_API.app.services.app_lifecycle import (
     mark_lifecycle_startup,  # noqa: F401 - re-exported for lifecycle contract tests.
     get_or_create_lifecycle_state,
 )
+from tldw_Server_API.app.services import readiness_service
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission
+from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.services import shutdown_coordinated_runtime as _shutdown_coordinated_runtime
 from tldw_Server_API.app.services import shutdown_owned_job_pollers as _shutdown_owned_job_pollers
 from tldw_Server_API.app.services import startup_pg_rls as _startup_pg_rls
@@ -119,6 +138,7 @@ _REQUEST_GUARD_EXCEPTIONS = (
     ValueError,
 )
 _READINESS_GUARD_EXCEPTIONS = _REQUEST_GUARD_EXCEPTIONS + (
+    DatabaseError,
     ImportError,
     ModuleNotFoundError,
 )
@@ -750,7 +770,7 @@ def _unwrap_stderr(stream):
 
 # Reset Loguru and configure a single, thread-safe sink
 logger.remove()
-_log_level = "DEBUG"
+_log_level = _normalize_startup_log_level(_early_os.getenv("LOG_LEVEL"))
 _force_color = _shared_env_flag_enabled("FORCE_COLOR") or _shared_env_flag_enabled("PY_COLORS")
 _sink_choice = _early_os.getenv("LOG_STREAM", "stderr").lower()
 _stderr = _unwrap_stderr(sys.__stderr__ or sys.stderr)
@@ -1740,16 +1760,16 @@ _swagger_ui_params = {
 
 app = FastAPI(
     title="tldw API",
-    version="0.1.41",
+    version="0.1.42",
     description=APP_DESCRIPTION,
-    terms_of_service="https://github.com/cpacker/tldw_server",
+    terms_of_service="https://github.com/rmusser01/tldw_server",
     contact={
         "name": "tldw_server Maintainers",
-        "url": "https://github.com/cpacker/tldw_server/issues",
+        "url": "https://github.com/rmusser01/tldw_server/issues",
     },
     license_info={
-        "name": "GNU GPL v2.0",
-        "url": "https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html",
+        "name": "Apache License 2.0 (OpenAPI contract only)",
+        "identifier": "Apache-2.0",
     },
     openapi_tags=OPENAPI_TAGS,
     swagger_ui_parameters=_swagger_ui_params,
@@ -1923,12 +1943,12 @@ def _apply_runtime_cors_headers(request: Request, response: Any) -> Any:
 
     response.headers.setdefault("Access-Control-Allow-Origin", allow_origin)
     if allow_origin != "*":
-        response.headers.setdefault("Vary", "Origin")
+        merge_vary_origin(response.headers)
     if _cors_allow_credentials:
         response.headers.setdefault("Access-Control-Allow-Credentials", "true")
     response.headers.setdefault(
         "Access-Control-Expose-Headers",
-        "X-Request-ID, traceparent, X-Trace-Id"
+        CORS_EXPOSE_HEADERS_VALUE,
     )
     return response
 
@@ -1938,10 +1958,12 @@ def _apply_runtime_cors_headers(request: Request, response: Any) -> Any:
 # layers would otherwise swallow, producing only a bare
 # "Exception in ASGI application" in the uvicorn log.
 # ---------------------------------------------------------------------------
-from tldw_Server_API.app.api.v1.utils.exception_handlers import (  # noqa: E402
+from tldw_Server_API.app.api.v1.utils.exception_handlers import (  # noqa: E402, I001
     client_disconnect_handler as _client_disconnect_handler,
     global_unhandled_exception_handler as _global_handler,
+    tts_public_http_exception_handler as _tts_public_http_handler,
 )
+from tldw_Server_API.app.core.exceptions import TTSPublicHTTPException  # noqa: E402
 
 
 def _run_startup_config_validation() -> None:
@@ -1956,13 +1978,72 @@ def _run_startup_config_validation() -> None:
 
 @app.exception_handler(Exception)
 async def _global_unhandled_exception_handler(request, exc):
+    if is_standalone_sensitive_route(request.method, request.url.path):
+        logger.error(
+            "Standalone Slides response failed",
+            request_id=getattr(request.state, "request_id", None),
+            route="standalone_slides_route",
+            code="standalone_html_response_invalid",
+        )
+        return _apply_runtime_cors_headers(
+            request,
+            standalone_response_invalid_response(),
+        )
     response = await _global_handler(request, exc)
     return _apply_runtime_cors_headers(request, response)
+
+
+@app.exception_handler(RequestValidationError)
+async def _standalone_request_validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError,
+):
+    if is_standalone_sensitive_route(request.method, request.url.path):
+        response = standalone_request_validation_response(request, exc)
+        logger.warning(
+            "Standalone Slides request validation rejected",
+            request_id=getattr(request.state, "request_id", None),
+            route="standalone_slides_route",
+            code="standalone_html_request_invalid",
+            error_count=min(len(exc.errors()), 20),
+        )
+    else:
+        response = await request_validation_exception_handler(request, exc)
+    return _apply_runtime_cors_headers(request, response)
+
+
+@app.exception_handler(ResponseValidationError)
+async def _standalone_response_validation_exception_handler(
+    request: Request,
+    exc: ResponseValidationError,
+):
+    if not is_standalone_sensitive_route(request.method, request.url.path):
+        response = await _global_handler(request, exc)
+        return _apply_runtime_cors_headers(request, response)
+    logger.error(
+        "Standalone Slides response validation failed",
+        request_id=getattr(request.state, "request_id", None),
+        route="standalone_slides_route",
+        code="standalone_html_response_invalid",
+    )
+    return _apply_runtime_cors_headers(
+        request,
+        standalone_response_invalid_response(),
+    )
 
 
 @app.exception_handler(ClientDisconnect)
 async def _client_disconnect_exception_handler(request: Request, exc: ClientDisconnect):
     response = await _client_disconnect_handler(request, exc)
+    return _apply_runtime_cors_headers(request, response)
+
+
+@app.exception_handler(TTSPublicHTTPException)
+async def _tts_public_http_exception_handler(
+    request: Request,
+    exc: TTSPublicHTTPException,
+):
+    response = await _tts_public_http_handler(request, exc)
     return _apply_runtime_cors_headers(request, response)
 
 
@@ -2000,49 +2081,90 @@ except _STARTUP_GUARD_EXCEPTIONS as _rg_mw_err:
     logger.debug(f"RGSimpleMiddleware not enabled: {_rg_mw_err}")
 
 
-@app.middleware("http")
-async def _guard_workflow_templates_traversal(request, call_next):
-    try:
-        p = request.url.path or ""
-        # Only inspect under the workflows templates prefix
-        prefix = "/api/v1/workflows/templates/"
-        if p.startswith(prefix):
-            tail = p[len(prefix) :]
-            # If any traversal segments are found in the raw path, reject early with 400
-            # This runs before route resolution so it also handles router-level 404 shortcuts.
-            if ".." in tail.split("/"):
-                return JSONResponse({"detail": "Invalid template name"}, status_code=400)
-    except _REQUEST_GUARD_EXCEPTIONS:
-        pass
-    return await call_next(request)
+class _WorkflowTemplateTraversalGuard:
+    """Reject `..` segments under the workflows templates prefix, before routing.
+
+    Pure ASGI rather than @app.middleware("http"): this runs on every request but
+    acts on one prefix, and a BaseHTTPMiddleware layer costs ~0.08 ms per request
+    for its anyio task group regardless of how little work it does.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        """Wrap the downstream ASGI application."""
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Reject traversal under the templates prefix, else delegate."""
+        if scope["type"] == "http":
+            try:
+                p = scope.get("path") or ""
+                # Only inspect under the workflows templates prefix
+                prefix = "/api/v1/workflows/templates/"
+                if p.startswith(prefix):
+                    tail = p[len(prefix) :]
+                    # If any traversal segments are found in the raw path, reject early with 400
+                    # This runs before route resolution so it also handles router-level 404 shortcuts.
+                    if ".." in tail.split("/"):
+                        response = JSONResponse(
+                            {"detail": "Invalid template name"}, status_code=400
+                        )
+                        await response(scope, receive, send)
+                        return
+            except _REQUEST_GUARD_EXCEPTIONS:
+                pass
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_WorkflowTemplateTraversalGuard)
 
 
 # Early middleware to guard sandbox artifact path traversal/double-slash before Starlette routing
-@app.middleware("http")
-async def _guard_sandbox_artifact_path(request: Request, call_next):
-    try:
-        # Inspect raw ASGI path first to avoid client/Starlette normalization
-        raw_path = request.scope.get("raw_path")
-        path_raw = (
-            raw_path.decode("utf-8", "ignore") if isinstance(raw_path, (bytes, bytearray)) else (request.url.path or "")
-        )
-        # Debug logging removed after verification
-        # Quick filter: only check sandbox artifact endpoints
-        # Example: /api/v1/sandbox/runs/{run_id}/artifacts/{path}
-        if "/api/v1/sandbox/runs/" in path_raw and "/artifacts/" in path_raw:
-            from urllib.parse import unquote
+class _SandboxArtifactPathGuard:
+    """Reject traversal / absolute / double-slash sandbox artifact paths.
 
-            # Segment after /artifacts/
-            idx = path_raw.find("/artifacts/")
-            tail = path_raw[idx + len("/artifacts/") :]
-            tail_unquoted = unquote(tail)
-            # Reject traversal attempts and absolute/double-slash paths
-            if ".." in tail_unquoted.split("/") or tail_unquoted.startswith("/") or "//" in tail:
-                return JSONResponse({"detail": "invalid_path"}, status_code=400)
-    except _REQUEST_GUARD_EXCEPTIONS:
-        # Fail open: if guard fails, let the request proceed
-        pass
-    return await call_next(request)
+    Pure ASGI for the same reason as _WorkflowTemplateTraversalGuard above.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        """Wrap the downstream ASGI application."""
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Reject unsafe sandbox artifact paths, else delegate."""
+        if scope["type"] == "http":
+            try:
+                # Inspect raw ASGI path first to avoid client/Starlette normalization
+                raw_path = scope.get("raw_path")
+                path_raw = (
+                    raw_path.decode("utf-8", "ignore")
+                    if isinstance(raw_path, (bytes, bytearray))
+                    else (scope.get("path") or "")
+                )
+                # Quick filter: only check sandbox artifact endpoints
+                # Example: /api/v1/sandbox/runs/{run_id}/artifacts/{path}
+                if "/api/v1/sandbox/runs/" in path_raw and "/artifacts/" in path_raw:
+                    from urllib.parse import unquote
+
+                    # Segment after /artifacts/
+                    idx = path_raw.find("/artifacts/")
+                    tail = path_raw[idx + len("/artifacts/") :]
+                    tail_unquoted = unquote(tail)
+                    # Reject traversal attempts and absolute/double-slash paths
+                    if (
+                        ".." in tail_unquoted.split("/")
+                        or tail_unquoted.startswith("/")
+                        or "//" in tail
+                    ):
+                        response = JSONResponse({"detail": "invalid_path"}, status_code=400)
+                        await response(scope, receive, send)
+                        return
+            except _REQUEST_GUARD_EXCEPTIONS:
+                # Fail open: if guard fails, let the request proceed
+                pass
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_SandboxArtifactPathGuard)
 
 
 _OPENAPI_HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head", "trace"}
@@ -2083,8 +2205,12 @@ def custom_openapi():
         description=app.description,
         routes=app.routes,
         tags=OPENAPI_TAGS,
+        terms_of_service=app.terms_of_service,
+        contact=app.contact,
+        license_info=app.license_info,
     )
     _ensure_openapi_operation_tags_declared(openapi_schema)
+    openapi_schema.setdefault("info", {})["x-server-code-license"] = "GPL-3.0-only"
 
     # Servers for common deployments
     openapi_schema["servers"] = [
@@ -2317,6 +2443,17 @@ from tldw_Server_API.app.core.config import (
     should_disable_cors,
 )
 
+# Starlette wraps later middleware around earlier middleware. Register LLM
+# budget first so receive-time admission runs before its JSON body parsing.
+from tldw_Server_API.app.core.AuthNZ.llm_budget_middleware import LLMBudgetMiddleware
+
+try:
+    app.add_middleware(LLMBudgetMiddleware)
+except _STARTUP_GUARD_EXCEPTIONS as _e:
+    logger.debug(f"Skipping LLMBudgetMiddleware: {_e}")
+
+app.add_middleware(StandaloneHtmlRequestGuardMiddleware)
+
 # FIXME - CORS
 if should_disable_cors():
     logger.warning("CORS middleware disabled via configuration/ENV flag.")
@@ -2382,7 +2519,7 @@ else:
             "allow_origin_regex": _cors_allow_origin_regex,
             "allow_credentials": _cors_allow_credentials,
             "allowed_origins": _cors_allowed_openapi_origins,
-            "expose_headers": "X-Request-ID, traceparent, X-Trace-Id",
+            "expose_headers": CORS_EXPOSE_HEADERS_VALUE,
         }
     except _STARTUP_GUARD_EXCEPTIONS:
         pass
@@ -2394,7 +2531,7 @@ else:
         allow_credentials=_cors_allow_credentials,
         allow_methods=["*"],  # Must include OPTIONS, GET, POST, DELETE etc.
         allow_headers=["*"],
-        expose_headers=["X-Request-ID", "traceparent", "X-Trace-Id"],
+        expose_headers=CORS_EXPOSE_HEADERS,
     )
 
     # Ensure OpenAPI schema is consumable across common local origins (helpful when docs are
@@ -2415,10 +2552,10 @@ else:
                 if allow_origin:
                     response.headers.setdefault("Access-Control-Allow-Origin", allow_origin)
                     if allow_origin != "*":
-                        response.headers.setdefault("Vary", "Origin")
+                        merge_vary_origin(response.headers)
                 response.headers.setdefault("Access-Control-Allow-Methods", "GET, OPTIONS")
                 response.headers.setdefault("Access-Control-Allow-Headers", "*")
-                response.headers.setdefault("Access-Control-Expose-Headers", "X-Request-ID, traceparent, X-Trace-Id")
+                response.headers.setdefault("Access-Control-Expose-Headers", CORS_EXPOSE_HEADERS_VALUE)
         except _REQUEST_GUARD_EXCEPTIONS:
             pass
         return response
@@ -2442,7 +2579,6 @@ except _STARTUP_GUARD_EXCEPTIONS as _csrf_e:
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 # Security middleware (headers + request size limit)
-from tldw_Server_API.app.core.AuthNZ.llm_budget_middleware import LLMBudgetMiddleware
 from tldw_Server_API.app.core.AuthNZ.usage_logging_middleware import UsageLoggingMiddleware
 from tldw_Server_API.app.core.Metrics.http_middleware import HTTPMetricsMiddleware
 from tldw_Server_API.app.core.Sandbox.middleware import SandboxArtifactTraversalGuardMiddleware
@@ -2641,12 +2777,6 @@ else:
         return response
 
 
-# Always apply LLM budget middleware (guarded by settings) even in tests so allowlists/budgets are enforced
-try:
-    app.add_middleware(LLMBudgetMiddleware)
-except _STARTUP_GUARD_EXCEPTIONS as _e:
-    logger.debug(f"Skipping LLMBudgetMiddleware: {_e}")
-
 # Request ID context should be available before the drain gate, and the drain gate
 # should reject work before the LLM budget middleware gets a chance to do heavier setup.
 app.add_middleware(DrainGateMiddleware)
@@ -2749,6 +2879,11 @@ async def api_metrics():
     return registry.get_all_metrics()
 
 
+async def _set_diagnostics_no_store(response: Response) -> None:
+    """Prevent caching for direct dictionary-based diagnostic aliases."""
+    response.headers["Cache-Control"] = "no-store"
+
+
 # Router for health monitoring endpoints (NEW)
 if _ULTRA_MINIMAL_APP:
     # Ultra-minimal mode relies exclusively on control-plane health routes
@@ -2801,14 +2936,42 @@ if _shared_env_flag_enabled("ENABLE_ADMIN_E2E_TEST_MODE"):
 
 try:
     if route_enabled("metrics"):
-        app.add_api_route("/metrics", metrics, include_in_schema=False)
-        app.add_api_route(f"{API_V1_PREFIX}/metrics", api_metrics, methods=["GET"], tags=["monitoring"])
+        app.add_api_route(
+            "/metrics",
+            metrics,
+            include_in_schema=False,
+            dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
+        )
+        app.add_api_route(
+            f"{API_V1_PREFIX}/metrics",
+            api_metrics,
+            methods=["GET"],
+            tags=["monitoring"],
+            dependencies=[
+                Depends(RequirePermission(SYSTEM_LOGS)),
+                Depends(_set_diagnostics_no_store),
+            ],
+        )
     else:
         logger.info("Route disabled by policy: metrics")
 except _STARTUP_GUARD_EXCEPTIONS as _metrics_rt_err:
     logger.warning(f"Route gating error for metrics; including by default. Error: {_metrics_rt_err}")
-    app.add_api_route("/metrics", metrics, include_in_schema=False)
-    app.add_api_route(f"{API_V1_PREFIX}/metrics", api_metrics, methods=["GET"], tags=["monitoring"])
+    app.add_api_route(
+        "/metrics",
+        metrics,
+        include_in_schema=False,
+        dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
+    )
+    app.add_api_route(
+        f"{API_V1_PREFIX}/metrics",
+        api_metrics,
+        methods=["GET"],
+        tags=["monitoring"],
+        dependencies=[
+            Depends(RequirePermission(SYSTEM_LOGS)),
+            Depends(_set_diagnostics_no_store),
+        ],
+    )
 
 # Router for trash endpoints - deletion of media items / trash file handling (FIXME: Secure delete vs lag on delete?)
 # app.include_router(trash_router, prefix=f"{API_V1_PREFIX}/trash", tags=["trash"])
@@ -2819,152 +2982,34 @@ except _STARTUP_GUARD_EXCEPTIONS as _metrics_rt_err:
 
 
 # Health check (registered conditionally below)
-async def health_check():
-    body = {"status": "healthy"}
-    # Always attempt to include RG policy snapshot: prefer app.state, fallback to configured file
-    try:
-        rgv = getattr(app.state, "rg_policy_version", None)
-        if rgv is not None:
-            body["rg_policy_version"] = int(rgv)
-            body["rg_policy_store"] = getattr(app.state, "rg_policy_store", None)
-            body["rg_policy_count"] = getattr(app.state, "rg_policy_count", None)
-        else:
-            # Fallback to RG_POLICY_PATH (file-based) when loader not initialized
-            import os as _os
-            from pathlib import Path as _Path
-
-            import yaml as _yaml
-
-            p = _os.getenv("RG_POLICY_PATH")
-            if p and _Path(p).exists():
-                try:
-                    with _Path(p).open("r", encoding="utf-8") as _f:
-                        _data = _yaml.safe_load(_f) or {}
-                    body["rg_policy_version"] = int(_data.get("version") or 1)
-                    body["rg_policy_store"] = _os.getenv("RG_POLICY_STORE", "file")
-                    body["rg_policy_count"] = len((_data.get("policies") or {}).keys())
-                except _REQUEST_GUARD_EXCEPTIONS:
-                    pass
-    except _REQUEST_GUARD_EXCEPTIONS:
-        pass
-    return body
+_NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 
 
-# Readiness check (verifies critical dependencies) - registered conditionally below
+async def health_check() -> JSONResponse:
+    """Return the immutable public liveness contract."""
+    return JSONResponse({"status": "ok"}, headers=_NO_STORE_HEADERS)
+
+
+async def internal_readiness_check(request: Request) -> JSONResponse:
+    """Serve only loopback, detail-free readiness for local orchestrators."""
+    if not readiness_service.is_loopback_peer(request):
+        return JSONResponse({"detail": "Not Found"}, status_code=404, headers=_NO_STORE_HEADERS)
+    snapshot = await readiness_service.collect_readiness_snapshot(request.app)
+    return JSONResponse(
+        readiness_service.internal_readiness_payload(snapshot),
+        status_code=200 if snapshot.ready else 503,
+        headers=_NO_STORE_HEADERS,
+    )
+
+
 async def readiness_check(request: Request) -> JSONResponse:
-    """Readiness probe for orchestrators and load balancers."""
-    try:
-        lifecycle = get_or_create_lifecycle_state(request.app)
-        if lifecycle.draining or lifecycle.phase == "draining":
-            return JSONResponse(
-                {"status": "not_ready", "reason": "shutdown_in_progress"},
-                status_code=503,
-            )
-        # Engine stats
-        try:
-            from tldw_Server_API.app.core.Workflows.engine import WorkflowScheduler as _WS
-
-            engine_stats = _WS.instance().stats()
-        except _REQUEST_GUARD_EXCEPTIONS:
-            engine_stats = {"queue_depth": None, "active_tenants": None, "active_workflows": None}
-
-        # DB health (AuthNZ pool basic health for API; Workflows DB schema check below)
-        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-
-        db_pool = await get_db_pool()
-        db_health = await db_pool.health_check()
-
-        # Workflows backend schema check
-        try:
-            from tldw_Server_API.app.core.DB_Management.DB_Manager import (
-                create_workflows_database,
-                get_content_backend_instance,
-            )
-            from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase as _WDB
-
-            backend = get_content_backend_instance()
-            wdb: _WDB = create_workflows_database(backend=backend)
-            if wdb._using_backend():
-                with wdb.backend.transaction() as conn:  # type: ignore[union-attr]
-                    try:
-                        wf_schema_version = int(wdb._get_backend_schema_version(conn))  # type: ignore[attr-defined]
-                        wf_expected_version = int(wdb._CURRENT_SCHEMA_VERSION)  # type: ignore[attr-defined]
-                    except _REQUEST_GUARD_EXCEPTIONS:
-                        wf_schema_version = None
-                        wf_expected_version = None
-            else:
-                wf_schema_version = None
-                wf_expected_version = None
-        except _REQUEST_GUARD_EXCEPTIONS:
-            wf_schema_version = None
-            wf_expected_version = None
-
-        # Provider manager health (if initialized)
-        try:
-            from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
-
-            pm = get_provider_manager()
-            provider_health = pm.get_health_report() if pm else {}
-            providers_ok = pm is not None
-        except _REQUEST_GUARD_EXCEPTIONS:
-            provider_health = {}
-            providers_ok = False
-
-        # OTEL status
-        from tldw_Server_API.app.core.Metrics import OTEL_AVAILABLE
-
-        ready = db_health.get("status") == "healthy"
-        # If workflows backend reports schema version, ensure it matches expected
-        if wf_schema_version is not None and wf_expected_version is not None:
-            ready = ready and (wf_schema_version == wf_expected_version)
-        body = {
-            "status": "ready" if ready else "not_ready",
-            "database": db_health,
-            "workflows_db": {
-                "schema_version": wf_schema_version,
-                "expected_version": wf_expected_version,
-            },
-            "engine": engine_stats,
-            "providers_initialized": providers_ok,
-            "provider_health": provider_health,
-            "otel_available": bool(OTEL_AVAILABLE),
-        }
-        # Include Resource Governor policy metadata; prefer app.state and fallback to RG_POLICY_PATH
-        try:
-            rgv = getattr(app.state, "rg_policy_version", None)
-            if rgv is not None:
-                body["rg_policy"] = {
-                    "version": int(rgv),
-                    "store": getattr(app.state, "rg_policy_store", None),
-                    "policies": getattr(app.state, "rg_policy_count", None),
-                }
-            else:
-                import os as _os
-                from pathlib import Path as _Path
-
-                import yaml as _yaml
-
-                p = _os.getenv("RG_POLICY_PATH")
-                if p and _Path(p).exists():
-                    try:
-                        with _Path(p).open("r", encoding="utf-8") as _f:
-                            _data = _yaml.safe_load(_f) or {}
-                        body["rg_policy"] = {
-                            "version": int(_data.get("version") or 1),
-                            "store": _os.getenv("RG_POLICY_STORE", "file"),
-                            "policies": len((_data.get("policies") or {}).keys()),
-                        }
-                    except _REQUEST_GUARD_EXCEPTIONS:
-                        pass
-        except _REQUEST_GUARD_EXCEPTIONS:
-            pass
-        return JSONResponse(body, status_code=(200 if ready else 503))
-    except _READINESS_GUARD_EXCEPTIONS as exc:
-        logger.debug(f"Readiness check failed: {type(exc).__name__}: {exc}")
-        return JSONResponse(
-            {"status": "not_ready", "reason": "dependency_check_failed"},
-            status_code=503,
-        )
+    """Return the authenticated operator readiness projection."""
+    snapshot = await readiness_service.collect_readiness_snapshot(request.app)
+    return JSONResponse(
+        readiness_service.operator_readiness_payload(snapshot),
+        status_code=200 if snapshot.ready else 503,
+        headers=_NO_STORE_HEADERS,
+    )
 
 
 # /health/ready alias for some orchestrators (registered conditionally below)
@@ -2978,19 +3023,42 @@ def _add_public_control_plane_route(path: str, endpoint: Any) -> None:
     app.add_api_route(path, endpoint, methods=["HEAD"], **route_kwargs)
 
 
+def _add_operator_readiness_route(path: str, endpoint: Any) -> None:
+    """Register authenticated readiness without duplicating OpenAPI operation IDs."""
+
+    route_kwargs = {
+        "tags": ["health"],
+        "dependencies": [Depends(RequirePermission(SYSTEM_LOGS))],
+    }
+    app.add_api_route(path, endpoint, methods=["GET"], **route_kwargs)
+    app.add_api_route(path, endpoint, methods=["HEAD"], **route_kwargs)
+
+
 # Register control-plane health endpoints (works in both minimal and full modes)
 try:
     if route_enabled("health"):
         _add_public_control_plane_route("/health", health_check)
-        _add_public_control_plane_route("/ready", readiness_check)
-        _add_public_control_plane_route("/health/ready", readiness_alias)
+        app.add_api_route(
+            "/internal/ready",
+            internal_readiness_check,
+            methods=["GET", "HEAD"],
+            include_in_schema=False,
+        )
+        _add_operator_readiness_route("/ready", readiness_check)
+        _add_operator_readiness_route("/health/ready", readiness_alias)
     else:
         logger.info("Route disabled by policy: health (/health, /ready, /health/ready)")
 except _STARTUP_GUARD_EXCEPTIONS as _health_rt_err:
     logger.warning(f"Route gating error for health; including by default. Error: {_health_rt_err}")
     _add_public_control_plane_route("/health", health_check)
-    _add_public_control_plane_route("/ready", readiness_check)
-    _add_public_control_plane_route("/health/ready", readiness_alias)
+    app.add_api_route(
+        "/internal/ready",
+        internal_readiness_check,
+        methods=["GET", "HEAD"],
+        include_in_schema=False,
+    )
+    _add_operator_readiness_route("/ready", readiness_check)
+    _add_operator_readiness_route("/health/ready", readiness_alias)
 
 # Import-time CI/startup guard: fail immediately if the route table contains duplicates.
 _fail_on_duplicate_route_method_pairs(app, context="module import")

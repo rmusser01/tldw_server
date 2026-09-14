@@ -1,8 +1,16 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
 import { ChatPane } from "../ChatPane"
+
+const createDeferred = <T,>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver
+  })
+  return { promise, resolve }
+}
 
 const mockCheckConnectionOnce = vi.fn()
 const mockSaveWorkspaceChatSession = vi.fn()
@@ -257,7 +265,7 @@ describe("ChatPane Stage 4 lorebook activity", () => {
   })
 
   it("caps rendered turn cards for long diagnostic responses", async () => {
-    tldwClientMock.getChatLorebookDiagnostics.mockResolvedValueOnce({
+    const diagnosticsResponse = {
       chat_id: "server-chat-a",
       total_turns_with_diagnostics: 120,
       turns: Array.from({ length: 120 }, (_, index) => ({
@@ -267,15 +275,28 @@ describe("ChatPane Stage 4 lorebook activity", () => {
       })),
       page: 1,
       size: 8
-    })
+    }
+    const diagnosticsDeferred = createDeferred<typeof diagnosticsResponse>()
+    tldwClientMock.getChatLorebookDiagnostics.mockReturnValueOnce(
+      diagnosticsDeferred.promise
+    )
 
     renderChatPane()
 
-    await waitFor(() => {
-      expect(tldwClientMock.getChatLorebookDiagnostics).toHaveBeenCalled()
-    })
+    expect(
+      await screen.findByText("Loading lorebook activity…")
+    ).toBeInTheDocument()
+    expect(screen.queryAllByText(/entries fired/)).toHaveLength(0)
 
-    const turnCards = screen.getAllByText(/entries fired/)
-    expect(turnCards.length).toBeLessThanOrEqual(8)
+    diagnosticsDeferred.resolve(diagnosticsResponse)
+
+    const turnCards = await screen.findAllByText(/entries fired/)
+    expect(turnCards).toHaveLength(8)
+    expect(
+      screen.queryByText("Loading lorebook activity…")
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByText("Showing 8 of 120 turns with diagnostics.")
+    ).toBeInTheDocument()
   })
 })

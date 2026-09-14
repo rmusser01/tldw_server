@@ -1,21 +1,22 @@
 """HTTP coverage for persistent single-user cookie sessions."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_auth_rate_limit
 from tldw_Server_API.app.api.v1.endpoints import auth as auth_endpoints
 from tldw_Server_API.app.api.v1.schemas.auth_schemas import (
     SingleUserSessionLogoutResponse,
     SingleUserSessionResponse,
 )
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_auth_rate_limit
 from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
 from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import SessionError, SessionRevokedException
 from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile
-from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
-from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager, reset_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
 from tldw_Server_API.app.services.registration_service import reset_registration_service
@@ -47,6 +48,11 @@ async def single_user_cookie_client(tmp_path, monkeypatch):
 
     await bootstrap_single_user_profile()
     app = reload_app_main().app
+    # The minimal test app omits this optional router; retain its real dependencies.
+    from tldw_Server_API.app.api.v1.endpoints import ingestion_sources
+
+    if not any(route.path == "/api/v1/ingestion-sources/capabilities" for route in app.routes):
+        app.include_router(ingestion_sources.router, prefix="/api/v1")
 
     with TestClient(app) as client:
         yield client, get_settings().SINGLE_USER_API_KEY
@@ -74,10 +80,7 @@ def test_single_user_session_routes_use_auth_rate_limit(method):
         if route.path.endswith("/single-user/session") and method in route.methods
     )
 
-    assert any(
-        dependency.dependency is check_auth_rate_limit
-        for dependency in route.dependencies
-    )
+    assert any(dependency.dependency is check_auth_rate_limit for dependency in route.dependencies)
 
 
 @pytest.mark.parametrize("method", ["POST", "DELETE"])
@@ -88,11 +91,7 @@ def test_single_user_session_routes_declare_response_models(method):
         if route.path.endswith("/single-user/session") and method in route.methods
     )
 
-    expected = (
-        SingleUserSessionResponse
-        if method == "POST"
-        else SingleUserSessionLogoutResponse
-    )
+    expected = SingleUserSessionResponse if method == "POST" else SingleUserSessionLogoutResponse
     assert route.response_model is expected
 
 
@@ -371,3 +370,133 @@ def test_single_user_session_logout_unavailable_in_multi_user_mode(
     # CSRF middleware rejects the state-changing request before the
     # single-user-only route can conceal itself with a 404.
     assert response.status_code == 403
+
+
+LEGACY_USER_PATHS = (
+    "/api/v1/persona/profiles",
+    "/api/v1/notifications",
+    "/api/v1/ingestion-sources/capabilities",
+)
+
+
+@pytest.mark.parametrize("path", LEGACY_USER_PATHS)
+def test_cookie_authenticates_legacy_user_routes(
+    single_user_cookie_client,
+    monkeypatch,
+    tmp_path,
+    path,
+):
+    client, api_key = single_user_cookie_client
+    monkeypatch.setenv("PERSONA_ENABLED", "true")
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
+    assert _mint(client, api_key).status_code == 200
+
+    response = client.get(path)
+
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize("session_state", ["absent", "invalid", "expired", "revoked", "wrong_type"])
+def test_legacy_user_routes_reject_unusable_cookie_sessions(
+    single_user_cookie_client,
+    monkeypatch,
+    session_state,
+):
+    client, api_key = single_user_cookie_client
+    if session_state in {"expired", "wrong_type"}:
+        original_create = SessionManager.create_session
+
+        async def create_unusable_session(self, *args, **kwargs):
+            if session_state == "expired":
+                kwargs["expires_at_override"] = datetime.now(timezone.utc) - timedelta(days=1)
+            else:
+                kwargs["device_id"] = "ordinary-device"
+            return await original_create(self, *args, **kwargs)
+
+        monkeypatch.setattr(SessionManager, "create_session", create_unusable_session)
+
+    if session_state in {"expired", "revoked", "wrong_type"}:
+        assert _mint(client, api_key).status_code == 200
+    if session_state == "revoked":
+        cookie = client.cookies["tldw_single_user_session"]
+        csrf = client.cookies["csrf_token"]
+        assert (
+            client.delete(
+                "/api/v1/auth/single-user/session",
+                headers={"X-CSRF-Token": csrf},
+            ).status_code
+            == 200
+        )
+        client.cookies.set("tldw_single_user_session", cookie, path="/api")
+    elif session_state == "invalid":
+        client.cookies.set("tldw_single_user_session", "invalid-cookie", path="/api")
+
+    for path in LEGACY_USER_PATHS:
+        response = client.get(path)
+        assert response.status_code == 401, (path, response.text)
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Authorization": "Bearer invalid-key"},
+        {"Authorization": "Basic invalid"},
+        {"Authorization": ""},
+        {"X-API-KEY": "invalid-key"},
+        {"X-API-KEY": ""},
+    ],
+)
+def test_legacy_user_routes_do_not_fall_back_from_explicit_headers_to_cookie(
+    single_user_cookie_client,
+    headers,
+):
+    client, api_key = single_user_cookie_client
+    assert _mint(client, api_key).status_code == 200
+
+    for path in LEGACY_USER_PATHS:
+        response = client.get(path, headers=headers)
+        assert response.status_code == 401, (path, response.text)
+
+
+def test_legacy_persona_cookie_mutation_keeps_csrf_and_owner_scope(
+    single_user_cookie_client,
+    monkeypatch,
+    tmp_path,
+):
+    client, api_key = single_user_cookie_client
+    monkeypatch.setenv("PERSONA_ENABLED", "true")
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
+    assert _mint(client, api_key).status_code == 200
+    payload = {"name": "Cookie-owned persona"}
+    assert client.post("/api/v1/persona/profiles", json=payload).status_code == 403
+    response = client.post(
+        "/api/v1/persona/profiles",
+        json=payload,
+        headers={"X-CSRF-Token": client.cookies["csrf_token"]},
+    )
+    assert response.status_code == 201, response.text
+    profile = response.json()
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
+
+    user_id = get_settings().SINGLE_USER_FIXED_ID
+    db = client.portal.call(get_chacha_db_for_user_id, user_id)
+    stored = db.get_persona_profile(profile["id"], user_id=str(user_id))
+    assert stored["user_id"] == str(user_id)
+    other_profile_id = db.create_persona_profile({"name": "Other owner", "user_id": "other-user"})
+    assert client.get(f"/api/v1/persona/profiles/{other_profile_id}").status_code == 404
+    listing = client.get("/api/v1/persona/profiles")
+    assert listing.status_code == 200
+    assert profile["id"] in {row["id"] for row in listing.json()}
+
+
+def test_legacy_user_cookie_is_not_accepted_in_multi_user_mode(
+    single_user_cookie_client,
+    monkeypatch,
+):
+    client, api_key = single_user_cookie_client
+    assert _mint(client, api_key).status_code == 200
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    reset_settings()
+
+    for path in LEGACY_USER_PATHS:
+        assert client.get(path).status_code == 401

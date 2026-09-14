@@ -79,8 +79,97 @@ def test_publish_ghcr_main_workflow_remains_push_to_main_driven() -> None:
     assert "workflow_dispatch" not in on
 
 
-def test_publish_ghcr_main_matrix_remains_app_webui_admin_ui() -> None:
+def test_publish_ghcr_main_matrix_is_backend_only_during_frontend_freeze() -> None:
     workflow = _load(".github/workflows/publish-ghcr-main.yml")
     matrix = workflow["jobs"]["publish-ghcr-main"]["strategy"]["matrix"]["include"]
 
-    assert [entry["name"] for entry in matrix] == ["app", "webui", "admin-ui"]
+    assert matrix == [
+        {
+            "name": "app",
+            "dockerfile": "Dockerfiles/Dockerfile.prod",
+            "image_suffix": "",
+            "build_args": "",
+        }
+    ]
+
+
+def test_publish_ghcr_main_preserves_backend_publish_controls() -> None:
+    workflow = _load(".github/workflows/publish-ghcr-main.yml")
+    steps = workflow["jobs"]["publish-ghcr-main"]["steps"]
+    metadata = _get_step(steps, "Extract metadata (tags, labels) for GHCR")
+    publish = _get_step(steps, "Build and push Docker images")
+    attestation = _get_step(steps, "Generate artifact attestation (GHCR)")
+
+    assert metadata["with"]["tags"].splitlines() == [
+        "type=raw,value=main",
+        "type=sha,format=short",
+    ]
+    assert publish["with"] == {
+        "context": ".",
+        "file": "${{ matrix.dockerfile }}",
+        "push": True,
+        "build-args": "${{ matrix.build_args }}",
+        "tags": "${{ steps.meta.outputs.tags }}",
+        "labels": "${{ steps.meta.outputs.labels }}",
+        "cache-from": "type=gha",
+        "cache-to": "type=gha,mode=max",
+    }
+    assert attestation["with"] == {
+        "subject-name": "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}",
+        "subject-digest": "${{ steps.push.outputs.digest }}",
+        "push-to-registry": True,
+    }
+
+
+def test_container_build_check_covers_workers_without_publishing_images() -> None:
+    workflow = _load(".github/workflows/container-build-check.yml")
+    job = workflow["jobs"]["build"]
+    matrix = job["strategy"]["matrix"]["include"]
+    build = _get_step(job["steps"], "Build container images")
+
+    assert [entry["name"] for entry in matrix] == ["app", "worker", "audio-worker", "webui", "admin-ui"]
+    assert [entry["dockerfile"] for entry in matrix] == [
+        "Dockerfiles/Dockerfile.prod",
+        "Dockerfiles/Dockerfile.worker",
+        "Dockerfiles/Dockerfile.audio_gpu_worker",
+        "Dockerfiles/Dockerfile.webui",
+        "Dockerfiles/Dockerfile.admin-ui",
+    ]
+    assert build["with"]["push"] is False
+    assert workflow["permissions"] == {"contents": "read"}
+    assert [entry["backend"] for entry in matrix] == [True, True, True, False, False]
+    assert build["with"]["load"] == "${{ matrix.backend }}"
+
+
+def test_container_backend_smoke_uses_the_built_image_and_isolated_imports() -> None:
+    """Backend packaging omissions must fail before the matrix result is green."""
+    workflow = _load(".github/workflows/container-build-check.yml")
+    steps = workflow["jobs"]["build"]["steps"]
+    build = _get_step(steps, "Build container images")
+    smoke = _get_step(steps, "Verify backend local package imports")
+
+    assert steps.index(smoke) > steps.index(build)
+    assert smoke["if"] == "matrix.backend"
+    assert smoke["env"]["IMAGE_REF"] == build["with"]["tags"]
+    assert "docker image inspect --format" in smoke["run"]
+    assert '"$image_id" -I -c' in smoke["run"]
+    assert "--entrypoint python" in smoke["run"]
+    assert "import mcp_unified; import tldw_profile_core" in smoke["run"]
+    assert "--network none" in smoke["run"]
+    assert "--read-only" in smoke["run"]
+    assert not smoke.get("continue-on-error", False)
+
+
+def test_frontend_required_enforces_shared_hooks_and_preserves_full_lint() -> None:
+    """Shared UI must reach the hook gate even though frontend lint runs locally."""
+    workflow = _load(".github/workflows/frontend-required.yml")
+    steps = workflow["jobs"]["frontend-required"]["steps"]
+    lint = _get_step(steps, "Run frontend lint")
+    hooks = _get_step(steps, "Run shared UI hook enforcement")
+
+    assert lint["run"] == "bun run lint"
+    assert lint["working-directory"] == "apps/tldw-frontend"
+    assert hooks["if"] == lint["if"]
+    assert hooks["working-directory"] == "apps/tldw-frontend"
+    assert hooks["run"] == "bun scripts/check-shared-hooks.mjs"
+    assert not hooks.get("continue-on-error", False)

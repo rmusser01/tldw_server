@@ -1,4 +1,5 @@
 import React from "react"
+import type { PersonaBuddyStreamFeedback } from "@/types/persona-buddy"
 
 import { buildPersonaWebSocketUrl } from "@/services/persona-stream"
 import {
@@ -117,6 +118,12 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
   const [pendingFocusSessionId, setPendingFocusSessionId] =
     React.useState<string | null>(null)
 
+  const [streamFeedback, setStreamFeedback] = React.useState<PersonaBuddyStreamFeedback | null>(null)
+  const feedbackRef = React.useRef<PersonaBuddyStreamFeedback | null>(null)
+  const updateFeedback = React.useCallback((next: PersonaBuddyStreamFeedback | null) => {
+    feedbackRef.current = next
+    setStreamFeedback(next)
+  }, [])
   const sessionsRef = React.useRef(sessions)
   const focusedSessionIdRef = React.useRef(focusedSessionId)
   const wsRef = React.useRef<WebSocket | null>(null)
@@ -124,6 +131,8 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
   const streamConnectTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const streamConnectRejectRef = React.useRef<((error: Error) => void) | null>(null)
   const mountedRef = React.useRef(true)
+  const mountGenerationRef = React.useRef(0)
+  const reloadRequestRef = React.useRef(0)
 
   React.useEffect(() => {
     sessionsRef.current = sessions
@@ -143,13 +152,23 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
 
   const applyFocusedSession = React.useCallback(
     (session: PersonaLiveSessionSummary) => {
+      // A successful Start/Focus supersedes list snapshots requested earlier.
+      reloadRequestRef.current += 1
+      setLoading(false)
       setSessions((current) => upsertSession(current, session, { focused: true }))
+      focusedSessionIdRef.current = session.sessionId
       setFocusedSessionId(session.sessionId)
     },
     []
   )
 
   const reload = React.useCallback(async (): Promise<PersonaLiveSessionList> => {
+    const generation = mountGenerationRef.current
+    const request = ++reloadRequestRef.current
+    const isCurrentRequest = () =>
+      mountedRef.current &&
+      generation === mountGenerationRef.current &&
+      request === reloadRequestRef.current
     setLoading(true)
     setError(null)
     try {
@@ -157,18 +176,24 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
         personaId: normalizedDefaultPersonaId,
         surface: normalizedSurface
       })
-      setSessions(payload.sessions)
-      setFocusedSessionId(chooseFocusedSessionId(payload))
+      if (isCurrentRequest()) {
+        setSessions(payload.sessions)
+        setFocusedSessionId(chooseFocusedSessionId(payload))
+      }
       return payload
     } catch (err) {
       const message = getSessionErrorMessage(
         err,
         "Failed to load Persona live sessions"
       )
-      setError(message)
+      if (isCurrentRequest()) {
+        setError(message)
+      }
       throw err
     } finally {
-      setLoading(false)
+      if (isCurrentRequest()) {
+        setLoading(false)
+      }
     }
   }, [normalizedDefaultPersonaId, normalizedSurface])
 
@@ -180,9 +205,13 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
     void reload().catch(() => undefined)
   }, [autoLoad, reload])
 
-  React.useEffect(
-    () => () => {
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => {
       mountedRef.current = false
+      // Strict Mode reuses refs on setup. Work from the discarded mount must
+      // remain cancelled even after mountedRef becomes true again.
+      mountGenerationRef.current += 1
       streamConnectPromiseRef.current = null
       if (streamConnectTimerRef.current) {
         clearTimeout(streamConnectTimerRef.current)
@@ -199,13 +228,13 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
         ws.onopen = null
         ws.onerror = null
         ws.onclose = null
+        ws.onmessage = null
         if (ws.readyState < WebSocket.CLOSING) {
           ws.close()
         }
       }
-    },
-    []
-  )
+    }
+  }, [])
 
   const focusSession = React.useCallback(
     async (sessionId: string): Promise<PersonaLiveSessionSummary> => {
@@ -235,6 +264,7 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
 
   const startTextSession = React.useCallback(
     async (personaId?: string | null): Promise<PersonaLiveSessionSummary> => {
+      const generation = mountGenerationRef.current
       const normalizedPersonaId =
         normalizeOptionalString(personaId) ?? normalizedDefaultPersonaId
       if (!normalizedPersonaId) {
@@ -247,7 +277,13 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
         idempotencyKey: generateStableId("persona-live"),
         surface: normalizedSurface
       })
-      applyFocusedSession(session)
+      // Start persists or resumes a user-owned session, not a mount-owned
+      // resource. Preserve a successful result after unmount: stopping it could
+      // close the session already resumed by another mount/client. Only fence
+      // local state here; sendText separately cancels stale send continuations.
+      if (mountedRef.current && generation === mountGenerationRef.current) {
+        applyFocusedSession(session)
+      }
       return session
     },
     [applyFocusedSession, normalizedDefaultPersonaId, normalizedSurface]
@@ -264,6 +300,7 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
       const stoppedSession = await stopPersonaLiveSession(normalizedSessionId)
       setSessions((current) => upsertSession(current, stoppedSession))
       if (focusedSessionIdRef.current === normalizedSessionId) {
+        focusedSessionIdRef.current = null
         setFocusedSessionId(null)
       }
       await reload().catch(() => undefined)
@@ -273,6 +310,10 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
   )
 
   const ensureStreamSocket = React.useCallback(async (): Promise<WebSocket> => {
+    const generation = mountGenerationRef.current
+    if (!mountedRef.current) {
+      throw new Error(STREAM_CONNECT_ERROR)
+    }
     const current = wsRef.current
     if (current?.readyState === WebSocket.OPEN) {
       return current
@@ -287,13 +328,54 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
       .then((config) => {
         // Bail if the hook unmounted during the awaits so we don't create a
         // socket that nothing will ever close.
-        if (!mountedRef.current) {
-          streamConnectPromiseRef.current = null
+        if (!mountedRef.current || generation !== mountGenerationRef.current) {
           throw new Error(STREAM_CONNECT_ERROR)
         }
         const { url, protocols } = buildPersonaWebSocketUrl(config)
         const ws = new WebSocket(url, protocols)
         wsRef.current = ws
+        const lastSequence = new Map<string, number>()
+        ws.onmessage = (event) => {
+          if (!mountedRef.current || generation !== mountGenerationRef.current || wsRef.current !== ws) return
+          if (typeof event.data !== "string") return
+          let payload: Record<string, unknown>
+          try {
+            const parsed: unknown = JSON.parse(event.data)
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return
+            payload = parsed as Record<string, unknown>
+          } catch { return }
+          const currentFeedback = feedbackRef.current
+          if (!currentFeedback || currentFeedback.sessionId !== focusedSessionIdRef.current) return
+          if (payload.session_id !== currentFeedback.sessionId) return
+          if (payload.persona_id && payload.persona_id !== currentFeedback.personaId) return
+          if (payload.client_message_id && payload.client_message_id !== currentFeedback.clientMessageId) return
+          if (typeof payload.event_seq === "number") {
+            if (!Number.isSafeInteger(payload.event_seq) || payload.event_seq < 0) return
+            if (payload.event_seq <= (lastSequence.get(currentFeedback.sessionId) ?? -1)) return
+            lastSequence.set(currentFeedback.sessionId, payload.event_seq)
+          }
+          const eventType = payload.event || payload.type
+          const boundedText = (value: unknown) => typeof value === "string" ? value.slice(0, 4000) : ""
+          if (eventType === "assistant_delta") {
+            const delta = boundedText(payload.text_delta)
+            if (!delta) return
+            updateFeedback({ ...currentFeedback, status: "reply", text: (
+              (currentFeedback.status === "reply" ? currentFeedback.text : "") + delta
+            ).slice(0, 4000) })
+          } else if (eventType === "tool_plan" && typeof payload.plan_id === "string" && payload.plan_id) {
+            updateFeedback({ ...currentFeedback, status: "review", planId: payload.plan_id,
+              text: "A plan is ready. Open Full Live View to review it before anything runs." })
+          } else if (eventType === "tool_result" && payload.approval) {
+            updateFeedback({ ...currentFeedback, status: "review", text: "A tool needs approval. Review it in Full Live View." })
+          } else if (eventType === "notice" || eventType === "error") {
+            const text = boundedText(payload.message)
+            if (!text) return
+            const isError = eventType === "error" || payload.level === "error"
+            // Processing notices must not erase an already received reply or plan.
+            if (!isError && currentFeedback.status !== "pending") return
+            updateFeedback({ ...currentFeedback, status: isError ? "error" : "notice", text })
+          }
+        }
 
         return new Promise<WebSocket>((resolve, reject) => {
           let settled = false
@@ -354,13 +436,19 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
             clearConnectTimer()
             if (wsRef.current === ws) {
               setStreamState("closed")
+              const pending = feedbackRef.current
+              if (pending && (pending.status === "pending" || pending.status === "notice")) {
+                updateFeedback({ ...pending, status: "error", text: "The stream disconnected before a reply arrived. Reconnect or send again." })
+              }
             }
           }
         })
       })
       .catch((err) => {
-        streamConnectPromiseRef.current = null
-        if (mountedRef.current) {
+        if (streamConnectPromiseRef.current === connectPromise) {
+          streamConnectPromiseRef.current = null
+        }
+        if (mountedRef.current && generation === mountGenerationRef.current) {
           setStreamState("error")
         }
         throw err
@@ -368,7 +456,7 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
 
     streamConnectPromiseRef.current = connectPromise
     return connectPromise
-  }, [])
+  }, [updateFeedback])
 
   const ensureSendableSession = React.useCallback(async () => {
     const focusedId = focusedSessionIdRef.current
@@ -398,10 +486,24 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
           error: "Message text is required"
         }
       }
+      const generation = mountGenerationRef.current
+      const assertCurrentMount = () => {
+        if (!mountedRef.current || generation !== mountGenerationRef.current) {
+          throw new Error(STREAM_CONNECT_ERROR)
+        }
+      }
       setLastSendError(null)
       try {
+        assertCurrentMount()
         const session = await ensureSendableSession()
+        assertCurrentMount()
         const ws = await ensureStreamSocket()
+        assertCurrentMount()
+        if (focusedSessionIdRef.current !== session.sessionId) {
+          throw new Error("The focused session changed before the message could be sent")
+        }
+        updateFeedback({ sessionId: session.sessionId, personaId: session.personaId,
+          clientMessageId, status: "pending", text: "Waiting for your buddy…" })
         ws.send(
           JSON.stringify({
             type: "user_message",
@@ -416,8 +518,12 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
           err,
           "Failed to send Persona live message"
         )
-        if (mountedRef.current) {
+        if (mountedRef.current && generation === mountGenerationRef.current) {
           setLastSendError(message)
+          const pending = feedbackRef.current
+          if (pending?.clientMessageId === clientMessageId) {
+            updateFeedback({ ...pending, status: "error", text: message })
+          }
         }
         return {
           ok: false,
@@ -426,10 +532,16 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
         }
       }
     },
-    [ensureSendableSession, ensureStreamSocket]
+    [ensureSendableSession, ensureStreamSocket, updateFeedback]
   )
 
+  const feedback = streamFeedback?.sessionId === focusedSessionId &&
+    streamFeedback.personaId === focusedSession?.personaId &&
+    (!normalizedDefaultPersonaId || streamFeedback.personaId === normalizedDefaultPersonaId)
+    ? streamFeedback : null
+
   return {
+    feedback,
     sessions,
     focusedSessionId,
     focusedSession,

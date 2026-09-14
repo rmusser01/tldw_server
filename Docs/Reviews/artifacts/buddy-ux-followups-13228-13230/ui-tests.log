@@ -1,0 +1,43 @@
+
+ RUN  v4.0.18 /private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui
+
+stderr | src/components/Common/PersonaBuddy/__tests__/IndependentBuddyHost.test.tsx > loads an attached Buddy directly when it is outside the first page
+react-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: 'NO_I18NEXT_INSTANCE' }
+
+ ✓ src/components/Common/PersonaBuddy/__tests__/IndependentBuddyHost.test.tsx (15 tests) 5634ms
+   ✓ loads an attached Buddy directly when it is outside the first page  446ms
+   ✓ retains conversation drafts when the attached artwork changes  715ms
+   ✓ keeps fetched profile pages through periodic refresh  350ms
+   ✓ clears private drafts when authMode changes with the same credentials  312ms
+   ✓ clears private drafts when authSource changes with the same credentials  350ms
+   ✓ clears private drafts when orgId changes with the same credentials  303ms
+   ✓ keeps later workspace conversation choices and drafts through refresh and artwork changes  1354ms
+stderr | src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx > BuddyShellHost > keeps expanded controls in the viewport and restores their usable position on remount
+react-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: 'NO_I18NEXT_INSTANCE' }
+
+ ✓ src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx (38 tests) 536ms
+stderr | src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx > distinguishes duplicate result titles while replies and acknowledgements retain exact IDs
+react-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: 'NO_I18NEXT_INSTANCE' }
+
+ ✓ src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx (10 tests) 1188ms
+   ✓ distinguishes duplicate result titles while replies and acknowledgements retain exact IDs  420ms
+stderr | src/components/Common/PersonaBuddy/__tests__/BuddyManagementModal.test.tsx > Cancel does not attach the selected Buddy or change a Persona
+react-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: 'NO_I18NEXT_INSTANCE' }
+
+ ✓ src/components/Common/PersonaBuddy/__tests__/BuddyManagementModal.test.tsx (10 tests) 4381ms
+   ✓ Cancel does not attach the selected Buddy or change a Persona  530ms
+   ✓ attaches existing artwork to a named conversation without requiring a Persona  338ms
+   ✓ resolves a composer conversation into its workspace before allowing Apply  362ms
+   ✓ waits for preview and prevents follow-up attachment writes after unmount  423ms
+   ✓ applies the new entry-point target when the open modal is retargeted  417ms
+   ✓ retains saved artwork without attaching or replacing the new draft after retargeting during creation  887ms
+   ✓ preserves the new editor after retargeting during attachment completion  505ms
+   ✓ preserves the new editor after retargeting during refresh completion  533ms
+ ✓ src/services/__tests__/buddies.test.ts (12 tests) 61ms
+ ✓ src/store/__tests__/persona-buddy-shell.test.ts (6 tests) 16ms
+ ✓ src/components/Common/PersonaBuddy/__tests__/buddy-conversation-labels.test.ts (3 tests) 15ms
+
+ Test Files  7 passed (7)
+      Tests  94 passed (94)
+   Start at  23:33:11
+   Duration  20.77s (transform 1.06s, setup 872ms, import 4.47s, tests 11.83s, environment 2.92s)

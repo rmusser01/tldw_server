@@ -5,10 +5,10 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from tldw_Server_API.app.core.Persona.visual_artwork import ARTWORK_MANIFEST_KEY, validate_artwork_record
 from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
     get_persona_visual_renderer_capability,
 )
-
 
 VISUAL_STATE_IDS = {
     "idle",
@@ -111,25 +111,16 @@ def validate_visual_manifest(
         allowed_states=allowed_states,
     )
 
-    resolved_required = {
-        state: _resolve_state(state, normalized)
-        for state in REQUIRED_VISUAL_STATES
-    }
+    resolved_required = {state: _resolve_state(state, normalized) for state in REQUIRED_VISUAL_STATES}
     if require_activatable:
-        missing = sorted(
-            state for state, animation_id in resolved_required.items() if not animation_id
-        )
+        missing = sorted(state for state, animation_id in resolved_required.items() if not animation_id)
         if missing:
-            raise PersonaVisualManifestError(
-                "Required visual states do not resolve: " + ", ".join(missing)
-            )
+            raise PersonaVisualManifestError("Required visual states do not resolve: " + ", ".join(missing))
 
     return PersonaVisualManifestValidation(
         manifest=normalized,
         resolved_required_states={
-            state: animation_id
-            for state, animation_id in resolved_required.items()
-            if animation_id
+            state: animation_id for state, animation_id in resolved_required.items() if animation_id
         },
     )
 
@@ -143,21 +134,21 @@ def _normalize_manifest_shape(
         raise PersonaVisualManifestError("Manifest must be an object")
 
     normalized = deepcopy(manifest)
+    if ARTWORK_MANIFEST_KEY in normalized:
+        try:
+            normalized[ARTWORK_MANIFEST_KEY] = validate_artwork_record(normalized[ARTWORK_MANIFEST_KEY])
+        except ValueError as exc:
+            raise PersonaVisualManifestError("artwork_attribution_invalid") from exc
     renderer_type = normalized.get("renderer_type")
     renderer_type_for_error = _format_renderer_type_for_error(renderer_type)
     capability = get_persona_visual_renderer_capability(str(renderer_type or ""))
     if capability is None or not capability.can_validate:
-        raise PersonaVisualManifestError(
-            f"unsupported renderer_type: {renderer_type_for_error}"
-        )
+        raise PersonaVisualManifestError(f"unsupported renderer_type: {renderer_type_for_error}")
     if require_activatable and not capability.can_activate:
-        raise PersonaVisualManifestError(
-            f"unsupported renderer_type for activation: {renderer_type_for_error}"
-        )
+        raise PersonaVisualManifestError(f"unsupported renderer_type for activation: {renderer_type_for_error}")
     if normalized.get("manifest_version") not in capability.manifest_versions:
         raise PersonaVisualManifestError(
-            "manifest_version must be one of "
-            f"{', '.join(str(version) for version in capability.manifest_versions)}"
+            "manifest_version must be one of " f"{', '.join(str(version) for version in capability.manifest_versions)}"
         )
 
     states = normalized.setdefault("states", {})
@@ -191,12 +182,7 @@ def _normalize_manifest_shape(
 
 def _format_renderer_type_for_error(renderer_type: Any) -> str:
     value = str(renderer_type or "")
-    value = (
-        value.replace("\\", "\\\\")
-        .replace("\r", "\\r")
-        .replace("\n", "\\n")
-        .replace("\t", "\\t")
-    )
+    value = value.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
     if len(value) > MAX_RENDERER_TYPE_ERROR_LENGTH:
         return value[:MAX_RENDERER_TYPE_ERROR_LENGTH] + "..."
     return value or "<empty>"
@@ -210,13 +196,9 @@ def _normalize_animation_frames(
     asset_ids = animation.get("asset_ids")
     if frames is None:
         if asset_ids is None:
-            raise PersonaVisualManifestError(
-                f"Animation {animation_id} must define frames or asset_ids"
-            )
+            raise PersonaVisualManifestError(f"Animation {animation_id} must define frames or asset_ids")
         if not isinstance(asset_ids, list):
-            raise PersonaVisualManifestError(
-                f"Animation {animation_id} asset_ids must be a list"
-            )
+            raise PersonaVisualManifestError(f"Animation {animation_id} asset_ids must be a list")
         frames = [{"asset_id": asset_id} for asset_id in asset_ids]
     elif not isinstance(frames, list):
         raise PersonaVisualManifestError(f"Animation {animation_id} frames must be a list")
@@ -224,9 +206,7 @@ def _normalize_animation_frames(
     normalized_frames: list[dict[str, Any]] = []
     for index, frame in enumerate(frames):
         if not isinstance(frame, dict):
-            raise PersonaVisualManifestError(
-                f"Animation {animation_id} frame {index} must be an object"
-            )
+            raise PersonaVisualManifestError(f"Animation {animation_id} frame {index} must be an object")
         normalized_frames.append(deepcopy(frame))
     return normalized_frames
 
@@ -240,9 +220,7 @@ def _validate_animation(
 ) -> None:
     frame_rate = animation.get("frame_rate", 1)
     if not isinstance(frame_rate, (int, float)) or not 1 <= frame_rate <= 60:
-        raise PersonaVisualManifestError(
-            f"Animation {animation_id} frame_rate must be between 1 and 60"
-        )
+        raise PersonaVisualManifestError(f"Animation {animation_id} frame_rate must be between 1 and 60")
 
     alignment = animation.get("alignment")
     if alignment is not None:
@@ -260,13 +238,9 @@ def _validate_animation(
     for index, frame in enumerate(frames):
         asset_id = frame.get("asset_id")
         if not isinstance(asset_id, str) or not asset_id:
-            raise PersonaVisualManifestError(
-                f"Animation {animation_id} frame {index} asset_id is required"
-            )
+            raise PersonaVisualManifestError(f"Animation {animation_id} frame {index} asset_id is required")
         if asset_id not in available_asset_ids:
-            raise PersonaVisualManifestError(
-                f"Animation {animation_id} references unknown asset_id {asset_id}"
-            )
+            raise PersonaVisualManifestError(f"Animation {animation_id} references unknown asset_id {asset_id}")
         frame_asset_ids.add(asset_id)
         _validate_frame_duration(animation_id, index, frame)
         _validate_frame_region(
@@ -280,9 +254,7 @@ def _validate_animation(
     preview_frame = animation.get("preview_frame")
     if preview_frame is not None:
         if not isinstance(preview_frame, int) or not 0 <= preview_frame < len(frames):
-            raise PersonaVisualManifestError(
-                f"Animation {animation_id} preview_frame must be a valid frame index"
-            )
+            raise PersonaVisualManifestError(f"Animation {animation_id} preview_frame must be a valid frame index")
 
     preview_asset_id = animation.get("preview_asset_id")
     if preview_asset_id is not None:
@@ -298,9 +270,7 @@ def _validate_alignment(animation_id: str, alignment: Any) -> None:
     for axis in ("x", "y"):
         value = alignment.get(axis)
         if not isinstance(value, (int, float)) or not 0 <= value <= 1:
-            raise PersonaVisualManifestError(
-                f"Animation {animation_id} alignment.{axis} must be between 0 and 1"
-            )
+            raise PersonaVisualManifestError(f"Animation {animation_id} alignment.{axis} must be between 0 and 1")
 
 
 def _validate_frame_duration(
@@ -311,10 +281,7 @@ def _validate_frame_duration(
     duration_ms = frame.get("duration_ms")
     if duration_ms is None:
         return
-    if (
-        not isinstance(duration_ms, int)
-        or not MIN_FRAME_DURATION_MS <= duration_ms <= MAX_FRAME_DURATION_MS
-    ):
+    if not isinstance(duration_ms, int) or not MIN_FRAME_DURATION_MS <= duration_ms <= MAX_FRAME_DURATION_MS:
         raise PersonaVisualManifestError(
             f"Animation {animation_id} frame {index} duration_ms must be between "
             f"{MIN_FRAME_DURATION_MS} and {MAX_FRAME_DURATION_MS}"
@@ -333,51 +300,37 @@ def _validate_frame_region(
     if region is None:
         return
     if not isinstance(region, dict):
-        raise PersonaVisualManifestError(
-            f"Animation {animation_id} frame {index} region must be an object"
-        )
+        raise PersonaVisualManifestError(f"Animation {animation_id} frame {index} region must be an object")
 
     for key in ("x", "y", "width", "height"):
         value = region.get(key)
         if not isinstance(value, int):
-            raise PersonaVisualManifestError(
-                f"Animation {animation_id} frame {index} region.{key} must be an integer"
-            )
+            raise PersonaVisualManifestError(f"Animation {animation_id} frame {index} region.{key} must be an integer")
 
     if region["x"] < 0 or region["y"] < 0 or region["width"] <= 0 or region["height"] <= 0:
-        raise PersonaVisualManifestError(
-            f"Animation {animation_id} frame {index} region has invalid bounds"
-        )
+        raise PersonaVisualManifestError(f"Animation {animation_id} frame {index} region has invalid bounds")
 
     dimensions = available_asset_dimensions.get(asset_id)
     if not dimensions:
         return
     width, height = dimensions
     if region["x"] + region["width"] > width or region["y"] + region["height"] > height:
-        raise PersonaVisualManifestError(
-            f"Animation {animation_id} frame {index} region exceeds asset bounds"
-        )
+        raise PersonaVisualManifestError(f"Animation {animation_id} frame {index} region exceeds asset bounds")
 
 
 def _validate_state_catalog(state_catalog: dict[str, Any]) -> None:
     """Validate optional custom visual states declared by a sprite manifest."""
     if len(state_catalog) > MAX_CUSTOM_VISUAL_STATES:
-        raise PersonaVisualManifestError(
-            f"state_catalog may define at most {MAX_CUSTOM_VISUAL_STATES} custom states"
-        )
+        raise PersonaVisualManifestError(f"state_catalog may define at most {MAX_CUSTOM_VISUAL_STATES} custom states")
 
     for state_id, entry in state_catalog.items():
         state_id_error = _custom_state_id_error(state_id)
         if state_id_error:
             raise PersonaVisualManifestError(state_id_error)
         if state_id in VISUAL_STATE_IDS:
-            raise PersonaVisualManifestError(
-                f"state_catalog custom state {state_id} is reserved"
-            )
+            raise PersonaVisualManifestError(f"state_catalog custom state {state_id} is reserved")
         if not isinstance(entry, dict):
-            raise PersonaVisualManifestError(
-                f"state_catalog[{state_id}] must be an object"
-            )
+            raise PersonaVisualManifestError(f"state_catalog[{state_id}] must be an object")
 
         label = entry.get("label")
         if (
@@ -394,8 +347,7 @@ def _validate_state_catalog(state_catalog: dict[str, Any]) -> None:
         kind = entry.get("kind")
         if kind not in SUPPORTED_STATE_CATALOG_KINDS:
             raise PersonaVisualManifestError(
-                f"state_catalog[{state_id}].kind must be one of "
-                f"{sorted(SUPPORTED_STATE_CATALOG_KINDS)}"
+                f"state_catalog[{state_id}].kind must be one of " f"{sorted(SUPPORTED_STATE_CATALOG_KINDS)}"
             )
 
         description = entry.get("description")
@@ -418,8 +370,7 @@ def _validate_state_catalog_tags(state_id: str, tags: Any) -> None:
     """Validate bounded user-facing tags for a custom visual state."""
     if not isinstance(tags, list) or len(tags) > MAX_STATE_CATALOG_TAGS:
         raise PersonaVisualManifestError(
-            f"state_catalog[{state_id}].tags must be a list of at most "
-            f"{MAX_STATE_CATALOG_TAGS} strings"
+            f"state_catalog[{state_id}].tags must be a list of at most " f"{MAX_STATE_CATALOG_TAGS} strings"
         )
     for index, tag in enumerate(tags):
         if (
@@ -444,10 +395,7 @@ def _custom_state_id_error(state_id: Any) -> str | None:
     if not isinstance(state_id, str):
         return "state_catalog custom state ids must be strings"
     if not CUSTOM_VISUAL_STATE_ID_PATTERN.fullmatch(state_id):
-        return (
-            "state_catalog custom state ids must match "
-            f"{CUSTOM_VISUAL_STATE_ID_PATTERN.pattern}"
-        )
+        return "state_catalog custom state ids must match " f"{CUSTOM_VISUAL_STATE_ID_PATTERN.pattern}"
     lowered = state_id.lower()
     if lowered.startswith(UNSAFE_CUSTOM_STATE_PREFIXES):
         return "state_catalog custom state ids must not use unsafe prefixes"
@@ -482,9 +430,7 @@ def _validate_state_references(
         if not isinstance(animation_id, str) or not animation_id:
             raise PersonaVisualManifestError(f"State {state} animation_id is required")
         if animation_id not in animations:
-            raise PersonaVisualManifestError(
-                f"State {state} references unknown animation_id {animation_id}"
-            )
+            raise PersonaVisualManifestError(f"State {state} references unknown animation_id {animation_id}")
 
 
 def _validate_fallbacks(
@@ -499,9 +445,7 @@ def _validate_fallbacks(
             raise PersonaVisualManifestError(f"Fallback {state} must be a list")
         for fallback_state in fallback_chain:
             if fallback_state not in allowed_states:
-                raise PersonaVisualManifestError(
-                    f"Fallback {state} references unknown state {fallback_state}"
-                )
+                raise PersonaVisualManifestError(f"Fallback {state} references unknown state {fallback_state}")
 
     visiting: set[str] = set()
     visited: set[str] = set()
@@ -509,13 +453,10 @@ def _validate_fallbacks(
     def visit(state: str, path: tuple[str, ...]) -> None:
         if len(path) >= MAX_FALLBACK_DEPTH:
             raise PersonaVisualManifestError(
-                f"Fallback chain depth exceeds {MAX_FALLBACK_DEPTH}: "
-                + " -> ".join((*path, state))
+                f"Fallback chain depth exceeds {MAX_FALLBACK_DEPTH}: " + " -> ".join((*path, state))
             )
         if state in visiting:
-            raise PersonaVisualManifestError(
-                "Fallback cycle detected: " + " -> ".join((*path, state))
-            )
+            raise PersonaVisualManifestError("Fallback cycle detected: " + " -> ".join((*path, state)))
         if state in visited:
             return
         visiting.add(state)
@@ -534,9 +475,7 @@ def _validate_authored_triggers(
     allowed_states: set[str],
 ) -> None:
     if len(triggers) > MAX_AUTHORED_TRIGGERS:
-        raise PersonaVisualManifestError(
-            f"authored_triggers may define at most {MAX_AUTHORED_TRIGGERS} triggers"
-        )
+        raise PersonaVisualManifestError(f"authored_triggers may define at most {MAX_AUTHORED_TRIGGERS} triggers")
     for index, trigger in enumerate(triggers):
         if not isinstance(trigger, dict):
             raise PersonaVisualManifestError(f"authored_triggers[{index}] must be an object")
@@ -546,31 +485,23 @@ def _validate_authored_triggers(
         source = trigger.get("source")
         if source not in SUPPORTED_TRIGGER_SOURCES:
             raise PersonaVisualManifestError(
-                f"authored_triggers[{index}].source must be one of "
-                f"{sorted(SUPPORTED_TRIGGER_SOURCES)}"
+                f"authored_triggers[{index}].source must be one of " f"{sorted(SUPPORTED_TRIGGER_SOURCES)}"
             )
         match = trigger.get("match")
         if not isinstance(match, str) or not match:
             raise PersonaVisualManifestError(f"authored_triggers[{index}].match is required")
         state = trigger.get("state")
         if state not in allowed_states:
-            raise PersonaVisualManifestError(
-                f"authored_triggers[{index}].state must be a known visual state"
-            )
+            raise PersonaVisualManifestError(f"authored_triggers[{index}].state must be a known visual state")
         duration_ms = trigger.get("duration_ms")
-        if (
-            not isinstance(duration_ms, int)
-            or not MIN_TRIGGER_DURATION_MS <= duration_ms <= MAX_TRIGGER_DURATION_MS
-        ):
+        if not isinstance(duration_ms, int) or not MIN_TRIGGER_DURATION_MS <= duration_ms <= MAX_TRIGGER_DURATION_MS:
             raise PersonaVisualManifestError(
                 f"authored_triggers[{index}].duration_ms must be between "
                 f"{MIN_TRIGGER_DURATION_MS} and {MAX_TRIGGER_DURATION_MS}"
             )
         priority = trigger.get("priority")
         if not isinstance(priority, int) or not 0 <= priority <= 100:
-            raise PersonaVisualManifestError(
-                f"authored_triggers[{index}].priority must be between 0 and 100"
-            )
+            raise PersonaVisualManifestError(f"authored_triggers[{index}].priority must be between 0 and 100")
 
 
 def _resolve_state(

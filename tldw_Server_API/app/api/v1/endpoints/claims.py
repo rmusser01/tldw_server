@@ -2,8 +2,15 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import AdminPrincipal, get_auth_principal, get_request_user, RequirePermission, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    AdminPrincipal,
+    RequirePermission,
+    User,
+    check_rate_limit,
+    get_auth_principal,
+    get_request_user,
+)
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
     ClaimNotificationResponse,
@@ -40,6 +47,11 @@ from tldw_Server_API.app.core.Claims_Extraction import claims_service
 from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import get_claims_rebuild_service
 
 router = APIRouter(prefix="/claims", tags=["claims"])
+
+
+async def _enforce_claims_export_rate_limit(request: Request) -> None:
+    """Apply the shared ingress guard without exposing its legacy test hook."""
+    await check_rate_limit(request)
 
 
 @router.get("/status")
@@ -558,20 +570,28 @@ def claims_dashboard_analytics(
     )
 
 
-@router.post("/analytics/export", response_model=ClaimsAnalyticsExportResponse)
+@router.post(
+    "/analytics/export",
+    response_model=ClaimsAnalyticsExportResponse,
+    responses={202: {"model": ClaimsAnalyticsExportResponse}},
+    dependencies=[Depends(_enforce_claims_export_rate_limit)],
+)
 def export_claims_analytics(
     payload: ClaimsAnalyticsExportRequest,
+    response: Response,
     principal: AuthPrincipal = Depends(get_auth_principal),
     current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
-) -> Any:
+) -> dict[str, Any]:
     """Export claims analytics in JSON or CSV."""
-    return claims_service.export_claims_analytics(
+    body, response_status = claims_service.export_claims_analytics(
         payload=payload.model_dump(exclude_unset=True),
         principal=principal,
         current_user=current_user,
         db=db,
     )
+    response.status_code = response_status
+    return body
 
 
 @router.get("/analytics/exports", response_model=ClaimsAnalyticsExportListResponse)
@@ -608,24 +628,42 @@ def list_claims_analytics_exports(
                 "text/csv": {},
             },
         },
+        409: {
+            "description": "The export artifact is not ready for download.",
+        },
     },
 )
 def download_claims_analytics_export(
     export_id: str,
+    workspace_id: Optional[str] = None,
     principal: AuthPrincipal = Depends(get_auth_principal),
     current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
-) -> Any:
+) -> Response:
     """Download a prepared claims analytics export."""
     result = claims_service.get_claims_analytics_export(
         export_id=export_id,
+        workspace_id=workspace_id,
         principal=principal,
         current_user=current_user,
         db=db,
     )
-    if result.get("format") == "csv":
-        return Response(content=str(result.get("payload") or ""), media_type="text/csv")
-    return result.get("payload") or {}
+    if result["format"] == "csv":
+        return Response(
+            content=result["payload_csv"],
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="claims-analytics-{result["export_id"]}.csv"'
+                ),
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+    return Response(
+        content=result["payload_json"],
+        media_type="application/json",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/clusters")

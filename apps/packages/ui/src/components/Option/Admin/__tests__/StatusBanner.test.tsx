@@ -26,7 +26,9 @@ describe("StatusBanner", () => {
 
     expect(screen.getByText("Status Error")).toBeTruthy()
     const fullText = document.body.textContent || ""
-    expect(fullText).toContain("[admin-endpoint]")
+    // The endpoint parenthetical is dropped entirely once redacted, so no
+    // "[admin-endpoint]" placeholder noise remains — only the path redaction.
+    expect(fullText).not.toContain("[admin-endpoint]")
     expect(fullText).toContain("[redacted-path]")
     expect(fullText).not.toContain("/api/v1/admin/mlx/status")
     expect(fullText).not.toContain("/Users/dev/.config/tldw/config.txt")

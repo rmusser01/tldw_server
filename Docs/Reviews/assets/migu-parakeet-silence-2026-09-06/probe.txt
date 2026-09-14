@@ -1,0 +1,49 @@
+"""Exercise normal Parakeet ONNX selection with local synthetic speech only."""
+import asyncio
+import json
+import hashlib
+import subprocess
+import time
+from pathlib import Path
+
+import httpx
+import numpy as np
+from dotenv import dotenv_values
+from tldw_Server_API.app.core.Persona.live_stt import create_persona_live_stt_transcriber, persona_live_transcript_snapshot
+
+async def main():
+    env=dotenv_values('/private/tmp/migu-server-uat/runtime.env')
+    async with httpx.AsyncClient(timeout=60) as client:
+        response=await client.post('http://127.0.0.1:9101/api/v1/audio/speech',headers={'X-API-KEY':env['SINGLE_USER_API_KEY']},
+          json={'model':'kokoro','input':'Reply with the blue notebook is ready.','voice':'af_heart','response_format':'mp3'})
+        response.raise_for_status()
+    pcm=subprocess.run(['ffmpeg','-v','error','-i','pipe:0','-f','f32le','-ar','16000','-ac','1','pipe:1'],input=response.content,capture_output=True,check=True).stdout
+    audio=np.concatenate([np.frombuffer(pcm,dtype=np.float32),np.zeros(16000,dtype=np.float32)])
+    transcriber=create_persona_live_stt_transcriber(voice_runtime={'stt_model':'parakeet-onnx','stt_language':'en'})
+    await asyncio.to_thread(transcriber.initialize)
+    silent_frames=[]
+    for _ in range(24):
+        result=await transcriber.process_audio_chunk(np.zeros(4096,dtype=np.float32).tobytes())
+        if result is not None: silent_frames.append(result['text'])
+        await asyncio.sleep(0.256)
+    silent_history=transcriber.get_full_transcript()
+    transcriber.reset()
+    snapshots,latencies=[],[]
+    try:
+        for offset in range(0,len(audio),4096):
+            started=time.monotonic()
+            result=await transcriber.process_audio_chunk(audio[offset:offset+4096].tobytes())
+            latencies.append(round((time.monotonic()-started)*1000,3))
+            if result is not None:
+                snapshots.append(persona_live_transcript_snapshot(transcriber=transcriber,result=result))
+            await asyncio.sleep(0.256)
+        report={'microphone_used':False,'external_provider_used':False,'selection':'parakeet-onnx','device':'cpu',
+                'model':'istupakov/parakeet-tdt-0.6b-v3-onnx','snapshots':snapshots,'callback_duration_ms':latencies,'silence_frame_count':len(silent_frames),'silence_history':silent_history,'source_sha256':hashlib.sha256(Path('tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Parakeet_Core_Streaming/transcriber.py').read_bytes()).hexdigest()}
+        Path('/private/tmp/migu-parakeet-silence-20260906/result.json').write_text(json.dumps(report,indent=2)+'\n')
+        print(json.dumps(report),flush=True)
+        assert silent_frames == [] and silent_history == ''
+        assert any('blue notebook is ready' in text.lower() for text in snapshots)
+    finally:
+        transcriber.cleanup()
+
+asyncio.run(main())

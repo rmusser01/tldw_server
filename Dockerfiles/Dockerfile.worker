@@ -18,16 +18,19 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Copy pyproject and minimal files for install
-COPY pyproject.toml /app/pyproject.toml
-COPY README.md /app/README.md
+# Copy all local package inputs and the legal corpus required for installation.
+COPY pyproject.toml README.md LICENSE /app/
+COPY LICENSES /app/LICENSES
 COPY tldw_Server_API /app/tldw_Server_API
+COPY apps/mcp-unified/src /app/apps/mcp-unified/src
+COPY packages/tldw_profile_core /app/packages/tldw_profile_core
 
 # Install package with extras (multiplayer for PG support)
 RUN pip install --no-cache-dir -e ".[multiplayer]"
+RUN python -c "import mcp_unified; import tldw_profile_core"
 
 # Copy application code
-COPY Config_Files /app/Config_Files
+COPY tldw_Server_API/Config_Files /app/Config_Files
 
 # Create necessary directories
 RUN mkdir -p /app/Databases /app/Models /app/logs

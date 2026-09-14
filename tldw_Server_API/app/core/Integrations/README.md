@@ -16,7 +16,7 @@ Integrations currently contains the weather provider used by chat slash commands
 - Read OpenWeather settings from `OPENWEATHER_API_KEY`, `WEATHER_UNITS`, `WEATHER_LANG`, and `WEATHER_TIMEOUT_MS`.
 - Return a safe unavailable response when no weather API key is configured.
 - Call the OpenWeather current-weather API and normalize the response into `WeatherResult`.
-- Provide an injectable HTTP client factory for tests.
+- Route OpenWeather requests through the central HTTP client and egress policy with redirects disabled.
 
 ## Module Map
 
@@ -46,8 +46,8 @@ Integrations currently contains the weather provider used by chat slash commands
 ### Security And Operations
 
 - The no-key client must not make outbound network requests.
-- OpenWeather failures should return normalized unavailable/error metadata without leaking API keys.
-- The injectable HTTP client factory is the test boundary for timeout, status-code, and response-shape behavior.
+- OpenWeather requires `api.openweathermap.org` in `EGRESS_ALLOWLIST`; policy denials and provider failures return normalized unavailable/error metadata without leaking API keys.
+- Redirects are disabled, and the central HTTP client is the test boundary for timeout, status-code, and response-shape behavior.
 
 ### Extension Checklist
 

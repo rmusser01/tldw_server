@@ -3,24 +3,27 @@ id: TASK-12964
 title: Complete research discovery Phase 2B HTML Media handoff design
 status: To Do
 assignee: []
-created_date: '2026-07-14 03:11'
+created_date: 2026-07-14 03:11
 labels:
-  - research
-  - media
-  - design
-  - jobs
-  - security
-  - web
+- research
+- media
+- design
+- jobs
+- security
+- web
 dependencies: []
 references:
-  - TASK-12954
-  - 'https://github.com/rmusser01/tldw_server/pull/2716'
-  - 'https://www.sourclip.com/resources/research-sources'
+- TASK-12954
+- https://github.com/rmusser01/tldw_server/pull/2716
+- https://www.sourclip.com/resources/research-sources
+- TASK-13139
+- TASK-13139.6
+- TASK-13139.8
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-06-20-research-source-discovery-chokepoint-design.md
-  - >-
-    Docs/superpowers/plans/2026-07-12-research-discovery-phase2a-pdf-media-handoff.md
+- Docs/superpowers/specs/2026-06-20-research-source-discovery-chokepoint-design.md
+- Docs/superpowers/plans/2026-07-12-research-discovery-phase2a-pdf-media-handoff.md
+- Docs/superpowers/specs/2026-08-27-agent-native-web-research-quality-provenance-roadmap.md
+updated_date: 2026-08-28 01:00
 ---
 
 ## Description
@@ -48,7 +51,7 @@ Handoff task only. Resume the superpowers brainstorming workflow, reconcile the 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Handoff state as of 2026-07-13. No Phase 2B implementation plan or code work is approved. Resume from current dev with the superpowers brainstorming and spec-review workflow.
 
 Approved boundaries
@@ -80,8 +83,8 @@ Verification expectations
 Cover deterministic candidate derivation; route isolation/defaults; owner-scoped idempotency and credential commitments; every terminal scrub path; SSRF, rebinding, redirects, downgrade, cross-origin stripping, MIME and decompression limits; deterministic crawl budgets and job-local state; no-touch duplicates; transactional creation ownership and analysis compare-and-set; crash/cancellation checkpoints; retry/partial classification; secret-free logs/results; property tests for URL normalization and budget invariants; targeted pytest, compile/diff/lint checks, and Bandit. Revise the existing discovery spec only after the cancellation decision is approved, run the spec reviewer loop, obtain user approval, and then create a separate implementation plan and implementation tasks.
 
 Tracker note: the older Phase 2A planning record uses duplicate ID TASK-12108, which also belongs to unrelated active tasks. It remains marked Done in backlog/tasks because ID-only completion is ambiguous. TASK-12954 is the authoritative completed Phase 2A implementation record.
-<!-- SECTION:NOTES:END -->
-
+2026-08-27 program reconciliation (TASK-13139): this task remains the sole owner of Phase 2B HTML-to-Media handoff, its existing Media Jobs crawl, credential envelope, and cooperative cancellation decision. The agent-native program will not create a duplicate crawl job or ingestion path. TASK-13139.6 is a post-Phase-2B checkpoint/stop-reason follow-up and must wait for this design, the Jobs cancellation contract, and the concrete implementation task produced here; TASK-13139.8 likewise adds that future implementation task as a dependency before execution.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed

@@ -48,6 +48,7 @@ async def run_rerank_adapter(config: dict[str, Any], context: dict[str, Any]) ->
       - api_name: Optional[str] - for LLM-based strategies
     Output:
       - {"documents": [{content, score, metadata, original_index}], "count": int, "strategy": str}
+      - degraded calls add {"reranking": {degraded, failure_code, verification_available}}
     """
     # Cancellation check
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
@@ -186,13 +187,21 @@ async def run_rerank_adapter(config: dict[str, Any], context: dict[str, Any]) ->
                 "relevance_score": sd.relevance_score,
             })
 
-        return {
+        result = {
             "documents": output_docs,
             "count": len(output_docs),
             "strategy": strategy,
             "query": query,
         }
+        reranking_metadata = getattr(reranker, "last_metadata", None)
+        if isinstance(reranking_metadata, dict) and reranking_metadata.get("degraded") is True:
+            result["reranking"] = {
+                "degraded": True,
+                "failure_code": "provider_unavailable",
+                "verification_available": False,
+            }
+        return result
 
-    except _RERANK_NONCRITICAL_EXCEPTIONS:
-        logger.exception("Rerank adapter error")
+    except _RERANK_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error("Rerank adapter error (error_type={})", type(exc).__name__)
         return {"error": "rerank_error"}

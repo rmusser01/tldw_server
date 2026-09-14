@@ -1,0 +1,562 @@
+{
+  "environment": {
+    "postgres": "18.6",
+    "python": "3.11.13",
+    "node_admin": "20.19.5",
+    "next_admin": "16.2.2 (production webpack build)",
+    "next_webui": "16.1.4 (development webpack)",
+    "api_test_mode": false,
+    "csrf_enabled": false,
+    "provider": "repository mock OpenAI server; actual local HTTP requests",
+    "node_admin_build": "20.19.5",
+    "node_admin_runtime_checks": [
+      "20.19.5",
+      "20.20.2"
+    ]
+  },
+  "jwt_http": [
+    {
+      "scenario": "valid",
+      "status": 200,
+      "redirect": null
+    },
+    {
+      "scenario": "missing",
+      "status": 307,
+      "redirect": "/login?redirectTo=%2F"
+    },
+    {
+      "scenario": "malformed",
+      "status": 307,
+      "redirect": "/login?redirectTo=%2F"
+    },
+    {
+      "scenario": "invalid-signature",
+      "status": 307,
+      "redirect": "/login?redirectTo=%2F"
+    },
+    {
+      "scenario": "invalid-base64-signature",
+      "status": 307,
+      "redirect": "/login?redirectTo=%2F"
+    },
+    {
+      "scenario": "non-string-alg",
+      "status": 307,
+      "redirect": "/login?redirectTo=%2F"
+    }
+  ],
+  "chat": [
+    {
+      "configuration": "env",
+      "scenario": "omitted",
+      "stream": false,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-configured-default",
+          "stream": false
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "env",
+      "scenario": "blank",
+      "stream": false,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-configured-default",
+          "stream": false
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "env",
+      "scenario": "explicit",
+      "stream": false,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-explicit-model",
+          "stream": false
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "env",
+      "scenario": "omitted",
+      "stream": true,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-configured-default",
+          "stream": true
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "env",
+      "scenario": "blank",
+      "stream": true,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-configured-default",
+          "stream": true
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "env",
+      "scenario": "explicit",
+      "stream": true,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-explicit-model",
+          "stream": true
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "config",
+      "scenario": "omitted",
+      "stream": false,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-config-file-default",
+          "stream": false
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "config",
+      "scenario": "blank",
+      "stream": false,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-config-file-default",
+          "stream": false
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "config",
+      "scenario": "explicit",
+      "stream": false,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-explicit-model",
+          "stream": false
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "config",
+      "scenario": "omitted",
+      "stream": true,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-config-file-default",
+          "stream": true
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "config",
+      "scenario": "blank",
+      "stream": true,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-config-file-default",
+          "stream": true
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "config",
+      "scenario": "explicit",
+      "stream": true,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-explicit-model",
+          "stream": true
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "missing",
+      "scenario": "omitted",
+      "stream": false,
+      "status": 400,
+      "provider_requests": [],
+      "error": "{\"detail\":\"Model is required for provider 'local-llm'. Please select a model in the WebUI or configure a default via environment variable 'DEFAULT_MODEL_LOCAL_LLM'\"}"
+    },
+    {
+      "configuration": "missing",
+      "scenario": "blank",
+      "stream": false,
+      "status": 400,
+      "provider_requests": [],
+      "error": "{\"detail\":\"Model is required for provider 'local-llm'. Please select a model in the WebUI or configure a default via environment variable 'DEFAULT_MODEL_LOCAL_LLM'\"}"
+    },
+    {
+      "configuration": "missing",
+      "scenario": "explicit",
+      "stream": false,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-explicit-model",
+          "stream": false
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "missing",
+      "scenario": "omitted",
+      "stream": true,
+      "status": 400,
+      "provider_requests": [],
+      "error": "{\"detail\":\"Model is required for provider 'local-llm'. Please select a model in the WebUI or configure a default via environment variable 'DEFAULT_MODEL_LOCAL_LLM'\"}"
+    },
+    {
+      "configuration": "missing",
+      "scenario": "blank",
+      "stream": true,
+      "status": 400,
+      "provider_requests": [],
+      "error": "{\"detail\":\"Model is required for provider 'local-llm'. Please select a model in the WebUI or configure a default via environment variable 'DEFAULT_MODEL_LOCAL_LLM'\"}"
+    },
+    {
+      "configuration": "missing",
+      "scenario": "explicit",
+      "stream": true,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-explicit-model",
+          "stream": true
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "ollama",
+      "scenario": "omitted",
+      "stream": false,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-config-file-default",
+          "stream": false
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "ollama",
+      "scenario": "blank",
+      "stream": false,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-config-file-default",
+          "stream": false
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "ollama",
+      "scenario": "explicit",
+      "stream": false,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-config-file-default",
+          "stream": false
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "ollama",
+      "scenario": "omitted",
+      "stream": true,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-config-file-default",
+          "stream": true
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "ollama",
+      "scenario": "blank",
+      "stream": true,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-config-file-default",
+          "stream": true
+        }
+      ],
+      "completed": true
+    },
+    {
+      "configuration": "ollama",
+      "scenario": "explicit",
+      "stream": true,
+      "status": 200,
+      "provider_requests": [
+        {
+          "model": "uat-config-file-default",
+          "stream": true
+        }
+      ],
+      "completed": true
+    }
+  ],
+  "profiles": [
+    {
+      "scenario": "profile",
+      "memberships": 0,
+      "auth": "bearer",
+      "status": 200,
+      "orgs": 0,
+      "teams": 0,
+      "active_sessions": 1,
+      "audio": {
+        "daily_minutes_limit": 30.0,
+        "daily_minutes_used": 0.0,
+        "daily_minutes_remaining": 30.0,
+        "concurrent_streams_limit": 1,
+        "concurrent_streams_active": 0,
+        "concurrent_jobs_limit": 1,
+        "max_file_size_mb": 25
+      }
+    },
+    {
+      "scenario": "profile",
+      "memberships": 0,
+      "auth": "api-key",
+      "status": 200,
+      "orgs": 0,
+      "teams": 0,
+      "active_sessions": 1,
+      "audio": {
+        "daily_minutes_limit": 30.0,
+        "daily_minutes_used": 0.0,
+        "daily_minutes_remaining": 30.0,
+        "concurrent_streams_limit": 1,
+        "concurrent_streams_active": 0,
+        "concurrent_jobs_limit": 1,
+        "max_file_size_mb": 25
+      }
+    },
+    {
+      "scenario": "profile",
+      "memberships": 1,
+      "auth": "bearer",
+      "status": 200,
+      "orgs": 1,
+      "teams": 1,
+      "active_sessions": 1,
+      "audio": {
+        "daily_minutes_limit": 30.0,
+        "daily_minutes_used": 0.0,
+        "daily_minutes_remaining": 30.0,
+        "concurrent_streams_limit": 1,
+        "concurrent_streams_active": 0,
+        "concurrent_jobs_limit": 1,
+        "max_file_size_mb": 25
+      },
+      "theme": {
+        "value": "light",
+        "source": "team"
+      }
+    },
+    {
+      "scenario": "profile",
+      "memberships": 1,
+      "auth": "api-key",
+      "status": 200,
+      "orgs": 1,
+      "teams": 1,
+      "active_sessions": 1,
+      "audio": {
+        "daily_minutes_limit": 30.0,
+        "daily_minutes_used": 0.0,
+        "daily_minutes_remaining": 30.0,
+        "concurrent_streams_limit": 1,
+        "concurrent_streams_active": 0,
+        "concurrent_jobs_limit": 1,
+        "max_file_size_mb": 25
+      },
+      "theme": {
+        "value": "light",
+        "source": "team"
+      }
+    },
+    {
+      "scenario": "profile",
+      "memberships": 2,
+      "auth": "bearer",
+      "status": 200,
+      "orgs": 2,
+      "teams": 2,
+      "active_sessions": 1,
+      "audio": {
+        "daily_minutes_limit": 30.0,
+        "daily_minutes_used": 0.0,
+        "daily_minutes_remaining": 30.0,
+        "concurrent_streams_limit": 1,
+        "concurrent_streams_active": 0,
+        "concurrent_jobs_limit": 1,
+        "max_file_size_mb": 25
+      },
+      "theme": {
+        "value": "light",
+        "source": "team"
+      }
+    },
+    {
+      "scenario": "profile",
+      "memberships": 2,
+      "auth": "api-key",
+      "status": 200,
+      "orgs": 2,
+      "teams": 2,
+      "active_sessions": 1,
+      "audio": {
+        "daily_minutes_limit": 30.0,
+        "daily_minutes_used": 0.0,
+        "daily_minutes_remaining": 30.0,
+        "concurrent_streams_limit": 1,
+        "concurrent_streams_active": 0,
+        "concurrent_jobs_limit": 1,
+        "max_file_size_mb": 25
+      },
+      "theme": {
+        "value": "light",
+        "source": "team"
+      }
+    },
+    {
+      "scenario": "refresh-and-profile",
+      "refresh_status": 200,
+      "profile_status": 200
+    },
+    {
+      "scenario": "new-signup-profile",
+      "signup_status": 200,
+      "profile_status": 200,
+      "orgs": 1,
+      "teams": 1
+    }
+  ],
+  "sessions": {
+    "last_activity_columns": [
+      {
+        "column_name": "last_activity",
+        "data_type": "timestamp without time zone"
+      }
+    ],
+    "last_activity_advanced": true
+  },
+  "rbac_live_lock": {
+    "scenario": "live-RBAC-lock-concurrency",
+    "database_wait_observed": true,
+    "health_status": 200,
+    "health_seconds": 0.007,
+    "authenticated_request_still_waiting": true,
+    "authenticated_status_after_unlock": 200
+  },
+  "webui": [
+    {
+      "scenario": "WebUI API-key Save",
+      "profileStatus": 200,
+      "successMessage": true
+    },
+    {
+      "scenario": "WebUI saved configuration after reload",
+      "serverUrl": "http://127.0.0.1:8940",
+      "apiKeyPresent": true
+    }
+  ],
+  "jwt_http_node_20_20_2": {
+    "node_runtime": "20.20.2",
+    "build_node": "20.19.5",
+    "login_status": 200,
+    "cases": [
+      {
+        "scenario": "valid",
+        "status": 200,
+        "redirect_to_login": false
+      },
+      {
+        "scenario": "missing",
+        "status": 307,
+        "redirect_to_login": true
+      },
+      {
+        "scenario": "malformed",
+        "status": 307,
+        "redirect_to_login": true
+      },
+      {
+        "scenario": "invalid-signature",
+        "status": 307,
+        "redirect_to_login": true
+      },
+      {
+        "scenario": "invalid-base64-signature",
+        "status": 307,
+        "redirect_to_login": true
+      },
+      {
+        "scenario": "non-string-algorithm",
+        "status": 307,
+        "redirect_to_login": true
+      }
+    ]
+  },
+  "rbac_cold_auth": {
+    "scenario": "cold-concurrent-authentication",
+    "concurrent_requests": 4,
+    "statuses": [
+      200,
+      200,
+      200,
+      200
+    ],
+    "profile_status": 200,
+    "health_status": 200,
+    "cache_initializations_before": 0,
+    "cache_initializations_after": 1,
+    "seconds": 1.184
+  }
+}

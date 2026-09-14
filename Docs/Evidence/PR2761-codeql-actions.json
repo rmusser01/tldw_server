@@ -1,0 +1,3023 @@
+{
+  "analyzed_source": "28797892b1e021dad55cbc736532e702f0963ae8",
+  "codeql_library_source": "eb3ddb87306141a681e11b3cca65b653231bb3f2",
+  "file_sha256": {
+    ".github/actions/detect-required-gate-changes/action.yml": "7684e59e152f24a276a332ce21a4cc3e2a64872d0e8dc1f601b9d0795fb25927",
+    ".github/actions/setup-python-deps/action.yml": "86051df9a6a1d049caf3292d1158edda5c5da56bfe7a73d842e5d2cf2150be8f",
+    ".github/workflows/backend-required.yml": "60f8434ded5986fda65fbd5148ee8121e5ba6144fe9f5599c2bae3260275a266",
+    ".github/workflows/ci.yml": "80f9c6b2801e52373ef641496e66f846a2c98e72652fb546c0481e13471d2dad",
+    ".github/workflows/coverage-required.yml": "d3c44f8116ec5a60957f96d4d2314f0368e0e0e374c6fe556e4354ce341c66ac",
+    ".github/workflows/e2e-required.yml": "37ac09c47cd762449485df0a42a92c986398290a1344c4308e6b844daf3f6b3d",
+    ".github/workflows/e2e-smoke.yml": "77efd7dd5a0216bd6426878e534f597409fb6728f52d64b7f9ca309d7b61adb5",
+    ".github/workflows/frontend-e2e-tiers.yml": "5441bfd8737cb134fa3119d5a00c26b511c58ec4fa795b72a18df3ca0f5a82e3",
+    ".github/workflows/frontend-license-gate.yml": "b78b4c2ec5d5cf4060e54d17c62e766ff699925e93f20f190e21fa648526fe19",
+    ".github/workflows/frontend-required.yml": "53c9355b7ab6620d0d16e0af468e45ed80228ff4c42cfc293ac607223372a477",
+    ".github/workflows/frontend-ux-gates.yml": "2a0a239a0e586a70c2442b12b78d9d66d190f36495d173962dde9594e886be1a",
+    ".github/workflows/jobs-suite.yml": "24740e197d9febaf456fca5eb31e6817d91b6b0e7fa19c655f308bac3066fc20",
+    ".github/workflows/mcp-unified-rc.yml": "a193608854fe2163147c299129069b528d1affca76f5626fa67c6ea050a956d4",
+    ".github/workflows/notes-remediation-targeted.yml": "f0ed0492a8295ddc578e624ed5ef240cb3e31e07b01986bd167987e772fc4076",
+    ".github/workflows/onboarding-docs-gate.yml": "2d8ba4f1afc6954e3b549d81fdc1688a7734c556880f794274b9483c0d872e6a",
+    ".github/workflows/pypi-package.yml": "ff481397c1db413cadbadd58813515c9e7a505502f23d97bb70b9c1c08dbe41f",
+    ".github/workflows/sbom.yml": "b91f30c8400070c2f8204162fcb74bc9a61f86b23b0c8268bd1339da862e06ae",
+    ".github/workflows/security-required.yml": "d42556a34c9c1212e64fc227972751e79ba877489f751aba72dabdb6200d05ca",
+    ".github/workflows/ui-characters-harness-tests.yml": "2f7614477fe0be11afb0b52928ddcae458a97a037a4359a1793073139a5017f8",
+    ".github/workflows/ui-dictionaries-tests.yml": "91f6e3aa042c64c58b1123d9497a62ef9d620b8cefad17993d100e83888601e6",
+    ".github/workflows/ui-playground-quality-gates.yml": "6c537a7a868f4f755629bb383567d4a611679c743adc108c824b54a73276bbe0",
+    ".github/workflows/ui-research-workspace-parity.yml": "25f4160382717922e63cc5a1c4cceb9e4238f59640f2b53b6731e4e1709ebe1e",
+    ".github/workflows/ui-watchlists-a11y-gates.yml": "7fe50c96cc71936b133026c76e8921bd3c9a1c31014c5951a30fa5a3efd476a3",
+    ".github/workflows/ui-watchlists-extension-e2e.yml": "bec2d1307f76f139c7d23aa3fa829e8946557b2baaf3c980413cbf7991ffdb00",
+    ".github/workflows/ui-watchlists-help-tests.yml": "7110c0e8d3218362464812b0aa719617e3aa045876d9afbaedad0d8b0a054d5c",
+    ".github/workflows/ui-watchlists-scale-gates.yml": "f6fd34a19cc3f750dbf5b267f3662596632a256a6a6a605428d073c88ca43ab0",
+    ".github/workflows/ui-worldbooks-tests.yml": "3f3522102595201d5b9975b853ff27724405bf7cb262508b39d2eb17fd8038ca"
+  },
+  "checkout_event_proofs": {
+    ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch": {
+      "workflow": ".github/workflows/frontend-required.yml",
+      "job": "frontend-required",
+      "checkout_line": 591,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/backend-required.yml:changes:56:workflow_dispatch": {
+      "workflow": ".github/workflows/backend-required.yml",
+      "job": "changes",
+      "checkout_line": 56,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/coverage-required.yml:changes:56:workflow_dispatch": {
+      "workflow": ".github/workflows/coverage-required.yml",
+      "job": "changes",
+      "checkout_line": 56,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/e2e-required.yml:changes:56:workflow_dispatch": {
+      "workflow": ".github/workflows/e2e-required.yml",
+      "job": "changes",
+      "checkout_line": 56,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ci.yml:changes:424:workflow_dispatch": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "changes",
+      "checkout_line": 424,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/frontend-required.yml:changes:68:workflow_dispatch": {
+      "workflow": ".github/workflows/frontend-required.yml",
+      "job": "changes",
+      "checkout_line": 68,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/security-required.yml:changes:57:workflow_dispatch": {
+      "workflow": ".github/workflows/security-required.yml",
+      "job": "changes",
+      "checkout_line": 57,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/frontend-required.yml:frontend-unit-tests:128:workflow_dispatch": {
+      "workflow": ".github/workflows/frontend-required.yml",
+      "job": "frontend-unit-tests",
+      "checkout_line": 128,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ci.yml:character-chat-rate-limits:7483:workflow_dispatch": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "character-chat-rate-limits",
+      "checkout_line": 7483,
+      "event": "workflow_dispatch",
+      "checkout_ref": "github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": null,
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ci.yml:full-suite-os-313-release-shards:7328:workflow_dispatch": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "full-suite-os-313-release-shards",
+      "checkout_line": 7328,
+      "event": "workflow_dispatch",
+      "checkout_ref": "github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": null,
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ci.yml:full-suite-windows-312-shards:6031:workflow_dispatch": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "full-suite-windows-312-shards",
+      "checkout_line": 6031,
+      "event": "workflow_dispatch",
+      "checkout_ref": "github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": null,
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ci.yml:full-suite-macos-312-shards:4740:workflow_dispatch": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "full-suite-macos-312-shards",
+      "checkout_line": 4740,
+      "event": "workflow_dispatch",
+      "checkout_ref": "github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": null,
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ci.yml:full-suite-linux-313-shards:3396:workflow_dispatch": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "full-suite-linux-313-shards",
+      "checkout_line": 3396,
+      "event": "workflow_dispatch",
+      "checkout_ref": "github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": null,
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ui-worldbooks-tests.yml:worldbooks-vitest:68:workflow_dispatch": {
+      "workflow": ".github/workflows/ui-worldbooks-tests.yml",
+      "job": "worldbooks-vitest",
+      "checkout_line": 68,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ui-watchlists-scale-gates.yml:watchlists-scale-gate:70:workflow_dispatch": {
+      "workflow": ".github/workflows/ui-watchlists-scale-gates.yml",
+      "job": "watchlists-scale-gate",
+      "checkout_line": 70,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ui-watchlists-extension-e2e.yml:watchlists-extension-e2e:127:workflow_dispatch": {
+      "workflow": ".github/workflows/ui-watchlists-extension-e2e.yml",
+      "job": "watchlists-extension-e2e",
+      "checkout_line": 127,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ui-watchlists-help-tests.yml:watchlists-help-vitest:76:workflow_dispatch": {
+      "workflow": ".github/workflows/ui-watchlists-help-tests.yml",
+      "job": "watchlists-help-vitest",
+      "checkout_line": 76,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ui-research-workspace-parity.yml:extension-research-workspace-parity:181:workflow_dispatch": {
+      "workflow": ".github/workflows/ui-research-workspace-parity.yml",
+      "job": "extension-research-workspace-parity",
+      "checkout_line": 181,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ui-watchlists-a11y-gates.yml:watchlists-a11y-gate:70:workflow_dispatch": {
+      "workflow": ".github/workflows/ui-watchlists-a11y-gates.yml",
+      "job": "watchlists-a11y-gate",
+      "checkout_line": 70,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ui-research-workspace-parity.yml:webui-research-workspace-parity:121:workflow_dispatch": {
+      "workflow": ".github/workflows/ui-research-workspace-parity.yml",
+      "job": "webui-research-workspace-parity",
+      "checkout_line": 121,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "full-suite-linux-312-shards",
+      "checkout_line": 1899,
+      "event": "workflow_dispatch",
+      "checkout_ref": "github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": null,
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ui-playground-quality-gates.yml:playground-quality:74:workflow_dispatch": {
+      "workflow": ".github/workflows/ui-playground-quality-gates.yml",
+      "job": "playground-quality",
+      "checkout_line": 74,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ui-dictionaries-tests.yml:dictionaries-vitest:68:workflow_dispatch": {
+      "workflow": ".github/workflows/ui-dictionaries-tests.yml",
+      "job": "dictionaries-vitest",
+      "checkout_line": 68,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ui-characters-harness-tests.yml:characters-harness:89:workflow_dispatch": {
+      "workflow": ".github/workflows/ui-characters-harness-tests.yml",
+      "job": "characters-harness",
+      "checkout_line": 89,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/security-required.yml:security-required:108:workflow_dispatch": {
+      "workflow": ".github/workflows/security-required.yml",
+      "job": "security-required",
+      "checkout_line": 108,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/sbom.yml:build-sbom:54:workflow_dispatch": {
+      "workflow": ".github/workflows/sbom.yml",
+      "job": "build-sbom",
+      "checkout_line": 54,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/pypi-package.yml:build-and-check:70:workflow_dispatch": {
+      "workflow": ".github/workflows/pypi-package.yml",
+      "job": "build-and-check",
+      "checkout_line": 70,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/onboarding-docs-gate.yml:onboarding-docs-gate:73:workflow_dispatch": {
+      "workflow": ".github/workflows/onboarding-docs-gate.yml",
+      "job": "onboarding-docs-gate",
+      "checkout_line": 73,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/notes-remediation-targeted.yml:notes-backend-remediation:132:workflow_dispatch": {
+      "workflow": ".github/workflows/notes-remediation-targeted.yml",
+      "job": "notes-backend-remediation",
+      "checkout_line": 132,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/notes-remediation-targeted.yml:notes-ui-remediation:78:workflow_dispatch": {
+      "workflow": ".github/workflows/notes-remediation-targeted.yml",
+      "job": "notes-ui-remediation",
+      "checkout_line": 78,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/mcp-unified-rc.yml:portable-stdio:133:workflow_dispatch": {
+      "workflow": ".github/workflows/mcp-unified-rc.yml",
+      "job": "portable-stdio",
+      "checkout_line": 133,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/mcp-unified-rc.yml:internal-rc:73:workflow_dispatch": {
+      "workflow": ".github/workflows/mcp-unified-rc.yml",
+      "job": "internal-rc",
+      "checkout_line": 73,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/jobs-suite.yml:jobs-postgres:161:schedule": {
+      "workflow": ".github/workflows/jobs-suite.yml",
+      "job": "jobs-postgres",
+      "checkout_line": 161,
+      "event": "schedule",
+      "checkout_ref": "github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": null,
+      "resolved_ref": "github.sha",
+      "reason": "schedule has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/jobs-suite.yml:jobs-postgres:161:workflow_dispatch": {
+      "workflow": ".github/workflows/jobs-suite.yml",
+      "job": "jobs-postgres",
+      "checkout_line": 161,
+      "event": "workflow_dispatch",
+      "checkout_ref": "github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": null,
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch": {
+      "workflow": ".github/workflows/frontend-ux-gates.yml",
+      "job": "smoke-gate",
+      "checkout_line": 228,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/jobs-suite.yml:jobs-sqlite:62:schedule": {
+      "workflow": ".github/workflows/jobs-suite.yml",
+      "job": "jobs-sqlite",
+      "checkout_line": 62,
+      "event": "schedule",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "schedule has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/jobs-suite.yml:jobs-sqlite:62:workflow_dispatch": {
+      "workflow": ".github/workflows/jobs-suite.yml",
+      "job": "jobs-sqlite",
+      "checkout_line": 62,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/frontend-e2e-tiers.yml:admin:306:workflow_dispatch": {
+      "workflow": ".github/workflows/frontend-e2e-tiers.yml",
+      "job": "admin",
+      "checkout_line": 306,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/frontend-ux-gates.yml:onboarding-gate:72:workflow_dispatch": {
+      "workflow": ".github/workflows/frontend-ux-gates.yml",
+      "job": "onboarding-gate",
+      "checkout_line": 72,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ci.yml:full-suite-linux-311-smoke:546:workflow_dispatch": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "full-suite-linux-311-smoke",
+      "checkout_line": 546,
+      "event": "workflow_dispatch",
+      "checkout_ref": "github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": null,
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/frontend-e2e-tiers.yml:features:205:workflow_dispatch": {
+      "workflow": ".github/workflows/frontend-e2e-tiers.yml",
+      "job": "features",
+      "checkout_line": 205,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/frontend-e2e-tiers.yml:critical:96:workflow_dispatch": {
+      "workflow": ".github/workflows/frontend-e2e-tiers.yml",
+      "job": "critical",
+      "checkout_line": 96,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/e2e-smoke.yml:e2e-smoke:72:workflow_dispatch": {
+      "workflow": ".github/workflows/e2e-smoke.yml",
+      "job": "e2e-smoke",
+      "checkout_line": 72,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ci.yml:wizard-tests:337:workflow_dispatch": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "wizard-tests",
+      "checkout_line": 337,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/e2e-required.yml:e2e-required:123:workflow_dispatch": {
+      "workflow": ".github/workflows/e2e-required.yml",
+      "job": "e2e-required",
+      "checkout_line": 123,
+      "event": "workflow_dispatch",
+      "checkout_ref": "github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": null,
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ci.yml:frontend-lint:259:workflow_dispatch": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "frontend-lint",
+      "checkout_line": 259,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/coverage-required.yml:coverage-required:101:workflow_dispatch": {
+      "workflow": ".github/workflows/coverage-required.yml",
+      "job": "coverage-required",
+      "checkout_line": 101,
+      "event": "workflow_dispatch",
+      "checkout_ref": "github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": null,
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ci.yml:lint:213:workflow_dispatch": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "lint",
+      "checkout_line": 213,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ci.yml:quickstart-dry-run:185:workflow_dispatch": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "quickstart-dry-run",
+      "checkout_line": 185,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ci.yml:shard-coverage:153:workflow_dispatch": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "shard-coverage",
+      "checkout_line": 153,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/backend-required.yml:backend-required:111:workflow_dispatch": {
+      "workflow": ".github/workflows/backend-required.yml",
+      "job": "backend-required",
+      "checkout_line": 111,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    },
+    ".github/workflows/ci.yml:http-client-patch-guard:62:workflow_dispatch": {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "http-client-patch-guard",
+      "checkout_line": 62,
+      "event": "workflow_dispatch",
+      "checkout_ref": "needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
+      "admission_guard": "vars.LICENSE_FIRST_CI_ENABLED == 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'",
+      "resolved_ref": "github.sha",
+      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
+    }
+  },
+  "alerts": [
+    {
+      "alert": 2359,
+      "rule": "actions/untrusted-checkout/high",
+      "path": ".github/workflows/frontend-license-gate.yml",
+      "line": 48,
+      "disposition": "false positive",
+      "proof": "trusted-fetch-isolation"
+    },
+    {
+      "alert": 2360,
+      "rule": "actions/cache-poisoning/direct-cache",
+      "path": ".github/workflows/ci.yml",
+      "line": 2093,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2361,
+      "rule": "actions/cache-poisoning/direct-cache",
+      "path": ".github/workflows/ci.yml",
+      "line": 3534,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-313-shards:3396:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2362,
+      "rule": "actions/cache-poisoning/direct-cache",
+      "path": ".github/workflows/ci.yml",
+      "line": 4826,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-macos-312-shards:4740:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2363,
+      "rule": "actions/cache-poisoning/direct-cache",
+      "path": ".github/workflows/ci.yml",
+      "line": 6117,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-windows-312-shards:6031:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2364,
+      "rule": "actions/cache-poisoning/direct-cache",
+      "path": ".github/workflows/ci.yml",
+      "line": 7414,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-os-313-release-shards:7328:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2366,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/actions/setup-python-deps/action.yml",
+      "line": 82,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/backend-required.yml:backend-required:111:workflow_dispatch",
+        ".github/workflows/coverage-required.yml:coverage-required:101:workflow_dispatch",
+        ".github/workflows/e2e-required.yml:e2e-required:123:workflow_dispatch",
+        ".github/workflows/ci.yml:wizard-tests:337:workflow_dispatch",
+        ".github/workflows/frontend-e2e-tiers.yml:critical:96:workflow_dispatch",
+        ".github/workflows/ci.yml:full-suite-linux-311-smoke:546:workflow_dispatch",
+        ".github/workflows/frontend-ux-gates.yml:onboarding-gate:72:workflow_dispatch",
+        ".github/workflows/frontend-e2e-tiers.yml:features:205:workflow_dispatch",
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch",
+        ".github/workflows/frontend-e2e-tiers.yml:admin:306:workflow_dispatch",
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch",
+        ".github/workflows/jobs-suite.yml:jobs-sqlite:62:schedule",
+        ".github/workflows/jobs-suite.yml:jobs-sqlite:62:workflow_dispatch",
+        ".github/workflows/jobs-suite.yml:jobs-postgres:161:schedule",
+        ".github/workflows/jobs-suite.yml:jobs-postgres:161:workflow_dispatch",
+        ".github/workflows/onboarding-docs-gate.yml:onboarding-docs-gate:73:workflow_dispatch",
+        ".github/workflows/notes-remediation-targeted.yml:notes-backend-remediation:132:workflow_dispatch",
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch",
+        ".github/workflows/ui-watchlists-extension-e2e.yml:watchlists-extension-e2e:127:workflow_dispatch",
+        ".github/workflows/ci.yml:full-suite-linux-313-shards:3396:workflow_dispatch",
+        ".github/workflows/ci.yml:full-suite-macos-312-shards:4740:workflow_dispatch",
+        ".github/workflows/ci.yml:full-suite-windows-312-shards:6031:workflow_dispatch",
+        ".github/workflows/ci.yml:full-suite-os-313-release-shards:7328:workflow_dispatch",
+        ".github/workflows/ci.yml:character-chat-rate-limits:7483:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2367,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/backend-required.yml",
+      "line": 62,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/backend-required.yml:changes:56:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2368,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/backend-required.yml",
+      "line": 66,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/backend-required.yml:changes:56:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2369,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/actions/setup-python-deps/action.yml",
+      "line": 112,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/backend-required.yml:backend-required:111:workflow_dispatch",
+        ".github/workflows/coverage-required.yml:coverage-required:101:workflow_dispatch",
+        ".github/workflows/e2e-required.yml:e2e-required:123:workflow_dispatch",
+        ".github/workflows/ci.yml:wizard-tests:337:workflow_dispatch",
+        ".github/workflows/frontend-e2e-tiers.yml:critical:96:workflow_dispatch",
+        ".github/workflows/ci.yml:full-suite-linux-311-smoke:546:workflow_dispatch",
+        ".github/workflows/frontend-ux-gates.yml:onboarding-gate:72:workflow_dispatch",
+        ".github/workflows/frontend-e2e-tiers.yml:features:205:workflow_dispatch",
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch",
+        ".github/workflows/frontend-e2e-tiers.yml:admin:306:workflow_dispatch",
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch",
+        ".github/workflows/jobs-suite.yml:jobs-sqlite:62:schedule",
+        ".github/workflows/jobs-suite.yml:jobs-sqlite:62:workflow_dispatch",
+        ".github/workflows/jobs-suite.yml:jobs-postgres:161:schedule",
+        ".github/workflows/jobs-suite.yml:jobs-postgres:161:workflow_dispatch",
+        ".github/workflows/onboarding-docs-gate.yml:onboarding-docs-gate:73:workflow_dispatch",
+        ".github/workflows/notes-remediation-targeted.yml:notes-backend-remediation:132:workflow_dispatch",
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch",
+        ".github/workflows/ui-watchlists-extension-e2e.yml:watchlists-extension-e2e:127:workflow_dispatch",
+        ".github/workflows/ci.yml:full-suite-linux-313-shards:3396:workflow_dispatch",
+        ".github/workflows/ci.yml:full-suite-macos-312-shards:4740:workflow_dispatch",
+        ".github/workflows/ci.yml:full-suite-windows-312-shards:6031:workflow_dispatch",
+        ".github/workflows/ci.yml:full-suite-os-313-release-shards:7328:workflow_dispatch",
+        ".github/workflows/ci.yml:character-chat-rate-limits:7483:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2370,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 71,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:http-client-patch-guard:62:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2371,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/backend-required.yml",
+      "line": 119,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/backend-required.yml:backend-required:111:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2372,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/backend-required.yml",
+      "line": 126,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/backend-required.yml:backend-required:111:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2373,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/backend-required.yml",
+      "line": 148,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/backend-required.yml:backend-required:111:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2374,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/backend-required.yml",
+      "line": 185,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/backend-required.yml:backend-required:111:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2375,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/backend-required.yml",
+      "line": 202,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/backend-required.yml:backend-required:111:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2376,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/backend-required.yml",
+      "line": 213,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/backend-required.yml:backend-required:111:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2377,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 164,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:shard-coverage:153:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2378,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 194,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:quickstart-dry-run:185:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2379,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/coverage-required.yml",
+      "line": 62,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/coverage-required.yml:changes:56:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2380,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/coverage-required.yml",
+      "line": 66,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/coverage-required.yml:changes:56:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2381,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/coverage-required.yml",
+      "line": 108,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/coverage-required.yml:coverage-required:101:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2382,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 228,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:lint:213:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2383,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 237,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:lint:213:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2384,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/e2e-required.yml",
+      "line": 62,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/e2e-required.yml:changes:56:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2385,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/e2e-required.yml",
+      "line": 66,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/e2e-required.yml:changes:56:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2386,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/coverage-required.yml",
+      "line": 115,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/coverage-required.yml:coverage-required:101:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2387,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/coverage-required.yml",
+      "line": 146,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/coverage-required.yml:coverage-required:101:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2388,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/coverage-required.yml",
+      "line": 159,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/coverage-required.yml:coverage-required:101:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2389,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 275,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:frontend-lint:259:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2390,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 279,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:frontend-lint:259:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2391,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/e2e-required.yml",
+      "line": 130,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/e2e-required.yml:e2e-required:123:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2392,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/e2e-required.yml",
+      "line": 137,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/e2e-required.yml:e2e-required:123:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2393,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/e2e-required.yml",
+      "line": 149,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/e2e-required.yml:e2e-required:123:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2394,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/e2e-required.yml",
+      "line": 165,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/e2e-required.yml:e2e-required:123:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2395,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/e2e-smoke.yml",
+      "line": 110,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/e2e-smoke.yml:e2e-smoke:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2396,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 343,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:wizard-tests:337:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2397,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 349,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:wizard-tests:337:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2398,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/e2e-smoke.yml",
+      "line": 116,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/e2e-smoke.yml:e2e-smoke:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2399,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 360,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:wizard-tests:337:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2400,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 396,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:wizard-tests:337:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2401,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/e2e-smoke.yml",
+      "line": 124,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/e2e-smoke.yml:e2e-smoke:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2402,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/e2e-smoke.yml",
+      "line": 158,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/e2e-smoke.yml:e2e-smoke:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2403,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/e2e-smoke.yml",
+      "line": 175,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/e2e-smoke.yml:e2e-smoke:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2404,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 430,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:changes:424:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2405,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 434,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:changes:424:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2406,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 101,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:critical:96:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2407,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 107,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:critical:96:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2408,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 118,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:critical:96:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2409,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 136,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:critical:96:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2410,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 140,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:critical:96:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2411,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 144,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:critical:96:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2412,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 150,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:critical:96:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2413,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 74,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:changes:68:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2414,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 78,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:changes:68:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2415,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 210,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:features:205:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2416,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 216,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:features:205:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2417,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 552,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-311-smoke:546:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2418,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 558,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-311-smoke:546:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2419,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 611,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2420,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 616,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2421,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 623,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2422,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 635,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2424,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 88,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:onboarding-gate:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2425,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 92,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:onboarding-gate:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2426,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 227,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:features:205:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2427,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 666,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2428,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 96,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:onboarding-gate:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2429,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 671,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2430,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 569,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-311-smoke:546:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2431,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 244,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:features:205:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2432,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 676,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2433,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 248,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:features:205:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2434,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 681,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2435,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 252,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:features:205:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2436,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 604,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-311-smoke:546:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2437,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 686,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2438,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 609,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-311-smoke:546:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2439,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 691,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2440,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 696,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2441,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 703,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2442,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 708,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2443,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 713,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2444,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 629,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-311-smoke:546:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2445,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 720,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2446,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 102,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:onboarding-gate:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2447,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 732,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2448,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 737,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2449,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 113,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:onboarding-gate:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2451,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 118,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:onboarding-gate:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2452,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 908,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2453,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 124,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:onboarding-gate:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2454,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 128,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:onboarding-gate:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2455,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 915,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2456,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 654,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-311-smoke:546:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2457,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 662,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-311-smoke:546:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2458,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 141,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:onboarding-gate:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2459,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 180,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:onboarding-gate:72:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2460,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 311,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:admin:306:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2461,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 317,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:admin:306:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2462,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 328,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:admin:306:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2463,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 345,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:admin:306:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2464,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 349,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:admin:306:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2465,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-e2e-tiers.yml",
+      "line": 353,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-e2e-tiers.yml:admin:306:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2466,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 244,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2467,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 248,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2468,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 259,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2469,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 263,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2470,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 269,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2471,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 298,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2472,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 303,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2473,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 309,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2474,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/jobs-suite.yml",
+      "line": 73,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/jobs-suite.yml:jobs-sqlite:62:schedule",
+        ".github/workflows/jobs-suite.yml:jobs-sqlite:62:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2475,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 313,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2476,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 317,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2477,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/jobs-suite.yml",
+      "line": 84,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/jobs-suite.yml:jobs-sqlite:62:schedule",
+        ".github/workflows/jobs-suite.yml:jobs-sqlite:62:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2478,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 321,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2479,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 325,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2480,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 329,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2481,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/jobs-suite.yml",
+      "line": 105,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/jobs-suite.yml:jobs-sqlite:62:schedule",
+        ".github/workflows/jobs-suite.yml:jobs-sqlite:62:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2482,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-ux-gates.yml",
+      "line": 357,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-ux-gates.yml:smoke-gate:228:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2483,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/jobs-suite.yml",
+      "line": 172,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/jobs-suite.yml:jobs-postgres:161:schedule",
+        ".github/workflows/jobs-suite.yml:jobs-postgres:161:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2484,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/jobs-suite.yml",
+      "line": 183,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/jobs-suite.yml:jobs-postgres:161:schedule",
+        ".github/workflows/jobs-suite.yml:jobs-postgres:161:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2485,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/jobs-suite.yml",
+      "line": 207,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/jobs-suite.yml:jobs-postgres:161:schedule",
+        ".github/workflows/jobs-suite.yml:jobs-postgres:161:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2486,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/jobs-suite.yml",
+      "line": 228,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/jobs-suite.yml:jobs-postgres:161:schedule",
+        ".github/workflows/jobs-suite.yml:jobs-postgres:161:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2487,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/mcp-unified-rc.yml",
+      "line": 84,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/mcp-unified-rc.yml:internal-rc:73:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2488,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/mcp-unified-rc.yml",
+      "line": 90,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/mcp-unified-rc.yml:internal-rc:73:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2489,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/mcp-unified-rc.yml",
+      "line": 144,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/mcp-unified-rc.yml:portable-stdio:133:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2490,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/mcp-unified-rc.yml",
+      "line": 150,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/mcp-unified-rc.yml:portable-stdio:133:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2491,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/notes-remediation-targeted.yml",
+      "line": 89,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/notes-remediation-targeted.yml:notes-ui-remediation:78:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2492,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/notes-remediation-targeted.yml",
+      "line": 93,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/notes-remediation-targeted.yml:notes-ui-remediation:78:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2493,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/notes-remediation-targeted.yml",
+      "line": 144,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/notes-remediation-targeted.yml:notes-backend-remediation:132:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2494,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/onboarding-docs-gate.yml",
+      "line": 80,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/onboarding-docs-gate.yml:onboarding-docs-gate:73:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2495,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/onboarding-docs-gate.yml",
+      "line": 86,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/onboarding-docs-gate.yml:onboarding-docs-gate:73:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2496,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/notes-remediation-targeted.yml",
+      "line": 155,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/notes-remediation-targeted.yml:notes-backend-remediation:132:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2497,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/onboarding-docs-gate.yml",
+      "line": 97,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/onboarding-docs-gate.yml:onboarding-docs-gate:73:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2498,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/onboarding-docs-gate.yml",
+      "line": 102,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/onboarding-docs-gate.yml:onboarding-docs-gate:73:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2499,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/onboarding-docs-gate.yml",
+      "line": 107,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/onboarding-docs-gate.yml:onboarding-docs-gate:73:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2500,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/onboarding-docs-gate.yml",
+      "line": 111,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/onboarding-docs-gate.yml:onboarding-docs-gate:73:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2501,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/onboarding-docs-gate.yml",
+      "line": 115,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/onboarding-docs-gate.yml:onboarding-docs-gate:73:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2502,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/onboarding-docs-gate.yml",
+      "line": 119,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/onboarding-docs-gate.yml:onboarding-docs-gate:73:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2503,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/onboarding-docs-gate.yml",
+      "line": 125,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/onboarding-docs-gate.yml:onboarding-docs-gate:73:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2504,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/pypi-package.yml",
+      "line": 81,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/pypi-package.yml:build-and-check:70:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2505,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/pypi-package.yml",
+      "line": 86,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/pypi-package.yml:build-and-check:70:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2506,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/sbom.yml",
+      "line": 65,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/sbom.yml:build-sbom:54:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2507,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/security-required.yml",
+      "line": 63,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/security-required.yml:changes:57:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2508,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/security-required.yml",
+      "line": 67,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/security-required.yml:changes:57:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2509,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/security-required.yml",
+      "line": 119,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/security-required.yml:security-required:108:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2510,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/security-required.yml",
+      "line": 136,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/security-required.yml:security-required:108:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2511,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 1905,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2512,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-characters-harness-tests.yml",
+      "line": 100,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-characters-harness-tests.yml:characters-harness:89:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2513,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 1911,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2514,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-characters-harness-tests.yml",
+      "line": 104,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-characters-harness-tests.yml:characters-harness:89:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2515,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 1922,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2516,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-dictionaries-tests.yml",
+      "line": 79,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-dictionaries-tests.yml:dictionaries-vitest:68:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2517,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-dictionaries-tests.yml",
+      "line": 83,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-dictionaries-tests.yml:dictionaries-vitest:68:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2518,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 1937,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2519,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 1972,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2520,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 1989,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2521,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 2009,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2522,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 2034,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2523,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 2042,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2524,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-playground-quality-gates.yml",
+      "line": 85,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-playground-quality-gates.yml:playground-quality:74:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2525,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-playground-quality-gates.yml",
+      "line": 89,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-playground-quality-gates.yml:playground-quality:74:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2526,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 2064,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2527,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-playground-quality-gates.yml",
+      "line": 95,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-playground-quality-gates.yml:playground-quality:74:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2528,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-playground-quality-gates.yml",
+      "line": 101,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-playground-quality-gates.yml:playground-quality:74:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2529,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 2075,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2530,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 2103,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2531,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 2113,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-312-shards:1899:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2532,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-research-workspace-parity.yml",
+      "line": 137,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-research-workspace-parity.yml:webui-research-workspace-parity:121:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2533,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-research-workspace-parity.yml",
+      "line": 141,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-research-workspace-parity.yml:webui-research-workspace-parity:121:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2534,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-research-workspace-parity.yml",
+      "line": 145,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-research-workspace-parity.yml:webui-research-workspace-parity:121:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2535,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-watchlists-a11y-gates.yml",
+      "line": 81,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-watchlists-a11y-gates.yml:watchlists-a11y-gate:70:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2536,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-watchlists-a11y-gates.yml",
+      "line": 85,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-watchlists-a11y-gates.yml:watchlists-a11y-gate:70:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2537,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-research-workspace-parity.yml",
+      "line": 197,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-research-workspace-parity.yml:extension-research-workspace-parity:181:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2538,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-research-workspace-parity.yml",
+      "line": 201,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-research-workspace-parity.yml:extension-research-workspace-parity:181:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2539,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-research-workspace-parity.yml",
+      "line": 205,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-research-workspace-parity.yml:extension-research-workspace-parity:181:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2540,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-watchlists-help-tests.yml",
+      "line": 87,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-watchlists-help-tests.yml:watchlists-help-vitest:76:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2541,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-watchlists-help-tests.yml",
+      "line": 91,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-watchlists-help-tests.yml:watchlists-help-vitest:76:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2542,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-watchlists-extension-e2e.yml",
+      "line": 143,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-watchlists-extension-e2e.yml:watchlists-extension-e2e:127:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2543,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-watchlists-extension-e2e.yml",
+      "line": 147,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-watchlists-extension-e2e.yml:watchlists-extension-e2e:127:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2544,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-watchlists-extension-e2e.yml",
+      "line": 156,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-watchlists-extension-e2e.yml:watchlists-extension-e2e:127:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2545,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-watchlists-extension-e2e.yml",
+      "line": 161,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-watchlists-extension-e2e.yml:watchlists-extension-e2e:127:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2546,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-watchlists-extension-e2e.yml",
+      "line": 172,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-watchlists-extension-e2e.yml:watchlists-extension-e2e:127:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2547,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-watchlists-extension-e2e.yml",
+      "line": 177,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-watchlists-extension-e2e.yml:watchlists-extension-e2e:127:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2548,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-watchlists-extension-e2e.yml",
+      "line": 225,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-watchlists-extension-e2e.yml:watchlists-extension-e2e:127:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2549,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-watchlists-scale-gates.yml",
+      "line": 81,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-watchlists-scale-gates.yml:watchlists-scale-gate:70:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2550,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-watchlists-scale-gates.yml",
+      "line": 85,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-watchlists-scale-gates.yml:watchlists-scale-gate:70:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2551,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-watchlists-scale-gates.yml",
+      "line": 91,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-watchlists-scale-gates.yml:watchlists-scale-gate:70:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2552,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-worldbooks-tests.yml",
+      "line": 79,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-worldbooks-tests.yml:worldbooks-vitest:68:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2553,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ui-worldbooks-tests.yml",
+      "line": 83,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ui-worldbooks-tests.yml:worldbooks-vitest:68:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2554,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 3402,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-313-shards:3396:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2555,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 3408,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-313-shards:3396:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2556,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 3419,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-313-shards:3396:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2557,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 3434,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-313-shards:3396:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2558,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 3469,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-313-shards:3396:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2559,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 3486,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-313-shards:3396:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2560,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 3506,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-313-shards:3396:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2561,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 3516,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-313-shards:3396:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2562,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 3544,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-313-shards:3396:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2563,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 3554,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-linux-313-shards:3396:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2564,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 4746,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-macos-312-shards:4740:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2565,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 4752,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-macos-312-shards:4740:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2566,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 4763,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-macos-312-shards:4740:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2567,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 4769,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-macos-312-shards:4740:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2568,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 4788,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-macos-312-shards:4740:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2569,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 4798,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-macos-312-shards:4740:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2570,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 4808,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-macos-312-shards:4740:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2571,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 4836,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-macos-312-shards:4740:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2572,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 4846,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-macos-312-shards:4740:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2573,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 6037,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-windows-312-shards:6031:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2574,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 6043,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-windows-312-shards:6031:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2575,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 6054,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-windows-312-shards:6031:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2576,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 6060,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-windows-312-shards:6031:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2577,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 6079,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-windows-312-shards:6031:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2578,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 6089,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-windows-312-shards:6031:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2579,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 6099,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-windows-312-shards:6031:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2580,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 6127,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-windows-312-shards:6031:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2581,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 6137,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-windows-312-shards:6031:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2582,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 7334,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-os-313-release-shards:7328:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2583,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 7340,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-os-313-release-shards:7328:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2584,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 7351,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-os-313-release-shards:7328:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2585,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 7357,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-os-313-release-shards:7328:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2586,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 7376,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-os-313-release-shards:7328:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2587,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 7386,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-os-313-release-shards:7328:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2588,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 7396,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-os-313-release-shards:7328:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2589,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 7424,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-os-313-release-shards:7328:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2590,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 7434,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:full-suite-os-313-release-shards:7328:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2591,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 7489,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:character-chat-rate-limits:7483:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2592,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 7495,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:character-chat-rate-limits:7483:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2593,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 7506,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:character-chat-rate-limits:7483:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2594,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 7511,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:character-chat-rate-limits:7483:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2595,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/ci.yml",
+      "line": 7520,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/ci.yml:character-chat-rate-limits:7483:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2639,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 145,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-unit-tests:128:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2640,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 149,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-unit-tests:128:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2641,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 742,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2667,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 640,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2669,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 650,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2670,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/actions/detect-required-gate-changes/action.yml",
+      "line": 33,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/backend-required.yml:changes:56:workflow_dispatch",
+        ".github/workflows/coverage-required.yml:changes:56:workflow_dispatch",
+        ".github/workflows/e2e-required.yml:changes:56:workflow_dispatch",
+        ".github/workflows/ci.yml:changes:424:workflow_dispatch",
+        ".github/workflows/frontend-required.yml:changes:68:workflow_dispatch",
+        ".github/workflows/security-required.yml:changes:57:workflow_dispatch"
+      ]
+    },
+    {
+      "alert": 2671,
+      "rule": "actions/cache-poisoning/poisonable-step",
+      "path": ".github/workflows/frontend-required.yml",
+      "line": 645,
+      "disposition": "false positive",
+      "proofs": [
+        ".github/workflows/frontend-required.yml:frontend-required:591:workflow_dispatch"
+      ]
+    }
+  ]
+}

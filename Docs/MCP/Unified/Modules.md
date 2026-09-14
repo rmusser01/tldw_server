@@ -145,6 +145,29 @@ restart TLDW Server, then verify the module moved from
 - Tool responses include module metadata, e.g. `{ "content": [...], "module": "Media", "tool": "search_media" }`.
 - The HTTP endpoint `/api/v1/mcp/tools/execute` returns the module name in the response model.
 
+## Slides And Guarded WebSockets
+
+The Slides module remains available through supported non-WebSocket MCP
+transports, including HTTP, subject to its normal RBAC and module policy.
+Standalone-aware Slides operations expose source-free metadata only; V1 does
+not add source-bearing standalone MCP tools.
+
+WebSocket transport has an additional pre-materialization guard. An unguarded
+WebSocket connection omits Slides from `tools/list` and rejects Slides
+`tools/call` requests while leaving other permitted MCP modules available. The
+only supported guarded MCP server launcher that advertises Slides over
+WebSocket is:
+
+```bash
+python -m tldw_Server_API.scripts.run_server_guarded_mcp
+```
+
+That launcher uses the application-owned guarded protocol and disables
+WebSocket compression. A header, query parameter, or ordinary Uvicorn launch
+cannot manufacture the transport marker. Do not describe unguarded MCP in
+general as unavailable: the restriction is specific to Slides on unguarded
+WebSocket transport.
+
 ## Guidelines
 
 - Keep health checks non-blocking and degrade gracefully.

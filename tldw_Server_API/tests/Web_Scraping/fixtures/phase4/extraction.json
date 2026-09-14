@@ -1,0 +1,520 @@
+{
+  "cases": [
+    {
+      "expected": {
+        "cache_stats": {
+          "cluster_embedding_cache_size": 0,
+          "llm_provider_last_call_count": 0,
+          "llm_provider_limit_count": 0,
+          "schema_result_cache_size": 0,
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 0,
+          "strategy_limit_count": 0
+        },
+        "metrics": [],
+        "result": {
+          "author": "N/A",
+          "content": "Contacts Email demo@example.com or call +1 (415) 555-2671.",
+          "date": "N/A",
+          "extraction_successful": true,
+          "regex_matches": [
+            {
+              "label": "email",
+              "span": [
+                15,
+                31
+              ],
+              "url": "https://example.com/contacts",
+              "value": "demo@example.com"
+            },
+            {
+              "label": "phone",
+              "span": [
+                41,
+                57
+              ],
+              "url": "https://example.com/contacts",
+              "value": "1 (415) 555-2671"
+            }
+          ],
+          "title": "Contacts",
+          "url": "https://example.com/contacts"
+        }
+      },
+      "html": "<html><head><title>Contacts</title></head><body>Email demo@example.com or call +1 (415) 555-2671.</body></html>",
+      "mask_pii": false,
+      "name": "regex_catalog_matches",
+      "operation": "regex",
+      "url": "https://example.com/contacts"
+    },
+    {
+      "expected": {
+        "cache_stats": {
+          "cluster_embedding_cache_size": 0,
+          "llm_provider_last_call_count": 0,
+          "llm_provider_limit_count": 0,
+          "schema_result_cache_size": 0,
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 0,
+          "strategy_limit_count": 0
+        },
+        "metrics": [],
+        "result": {
+          "author": "Jane Doe",
+          "content": "JSON-LD body text.",
+          "date": "2024-05-01",
+          "extraction_successful": true,
+          "jsonld_types": [
+            "newsarticle"
+          ],
+          "title": "JSON-LD Title",
+          "url": "https://example.com/jsonld"
+        }
+      },
+      "html": "<html><head><script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"NewsArticle\",\"headline\":\"JSON-LD Title\",\"author\":{\"@type\":\"Person\",\"name\":\"Jane Doe\"},\"datePublished\":\"2024-05-01\",\"articleBody\":\"JSON-LD body text.\"}</script></head><body></body></html>",
+      "name": "jsonld_article",
+      "operation": "jsonld",
+      "url": "https://example.com/jsonld"
+    },
+    {
+      "cluster_settings": {
+        "cluster_threshold": 0.1,
+        "embed_dims": 32,
+        "max_blocks": 10,
+        "method": "greedy",
+        "min_block_chars": 20,
+        "min_word_count": 4,
+        "prefilter_threshold": 0.0,
+        "tag_keywords": {
+          "research": [
+            "research",
+            "dataset"
+          ],
+          "security": [
+            "security",
+            "encryption"
+          ]
+        },
+        "tag_top_k": 2
+      },
+      "expected": {
+        "cache_stats": {
+          "cluster_embedding_cache_size": 3,
+          "llm_provider_last_call_count": 0,
+          "llm_provider_limit_count": 0,
+          "schema_result_cache_size": 0,
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 0,
+          "strategy_limit_count": 0
+        },
+        "metrics": [
+          {
+            "emitter": "increment_counter",
+            "kind": "counter",
+            "labels": {
+              "status": "started"
+            },
+            "name": "extraction_cluster_total"
+          },
+          {
+            "emitter": "increment_counter",
+            "kind": "counter",
+            "labels": {
+              "cache": "embedding",
+              "result": "miss"
+            },
+            "name": "extraction_cluster_cache_total"
+          },
+          {
+            "emitter": "increment_counter",
+            "kind": "counter",
+            "labels": {
+              "cache": "embedding",
+              "result": "miss"
+            },
+            "name": "extraction_cluster_cache_total"
+          },
+          {
+            "emitter": "increment_counter",
+            "kind": "counter",
+            "labels": {
+              "cache": "embedding",
+              "result": "miss"
+            },
+            "name": "extraction_cluster_cache_total"
+          },
+          {
+            "emitter": "increment_counter",
+            "kind": "counter",
+            "labels": {
+              "status": "success"
+            },
+            "name": "extraction_cluster_total"
+          }
+        ],
+        "result": {
+          "author": "N/A",
+          "cluster_block_count": 2,
+          "cluster_blocks": [
+            "Security research explains encryption controls for a stable local fixture.",
+            "The research dataset contains deterministic examples for repeatable extraction."
+          ],
+          "cluster_cluster_count": 1,
+          "cluster_method": "greedy",
+          "cluster_prefiltered_count": 2,
+          "cluster_similarity_threshold": 0.1,
+          "cluster_tag_scores": {
+            "research": 3,
+            "security": 2
+          },
+          "cluster_tags": [
+            "research",
+            "security"
+          ],
+          "cluster_total_blocks": 2,
+          "cluster_word_threshold": 4,
+          "content": "Security research explains encryption controls for a stable local fixture.\n\nThe research dataset contains deterministic examples for repeatable extraction.",
+          "date": "N/A",
+          "extraction_successful": true,
+          "title": "Cluster Fixture",
+          "url": "https://example.com/cluster"
+        }
+      },
+      "html": "<html><head><title>Cluster Fixture</title></head><body><article><p>Security research explains encryption controls for a stable local fixture.</p><p>The research dataset contains deterministic examples for repeatable extraction.</p></article></body></html>",
+      "name": "cluster_extraction",
+      "operation": "cluster",
+      "url": "https://example.com/cluster"
+    },
+    {
+      "allow_llm_extraction": false,
+      "expected": {
+        "cache_stats": {
+          "cluster_embedding_cache_size": 0,
+          "llm_provider_last_call_count": 0,
+          "llm_provider_limit_count": 0,
+          "schema_result_cache_size": 0,
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 0,
+          "strategy_limit_count": 0
+        },
+        "metrics": [
+          {
+            "emitter": "log_counter",
+            "kind": "counter",
+            "labels": {
+              "status": "failed",
+              "strategy": "jsonld"
+            },
+            "name": "extraction_strategy_total"
+          },
+          {
+            "emitter": "observe_histogram",
+            "kind": "histogram",
+            "labels": {
+              "status": "failed",
+              "strategy": "jsonld"
+            },
+            "name": "extraction_strategy_duration_seconds",
+            "value": "<TIMING>"
+          },
+          {
+            "emitter": "log_counter",
+            "kind": "counter",
+            "labels": {
+              "status": "success",
+              "strategy": "trafilatura"
+            },
+            "name": "extraction_strategy_total"
+          },
+          {
+            "emitter": "observe_histogram",
+            "kind": "histogram",
+            "labels": {
+              "status": "success",
+              "strategy": "trafilatura"
+            },
+            "name": "extraction_strategy_duration_seconds",
+            "value": "<TIMING>"
+          },
+          {
+            "emitter": "observe_histogram",
+            "kind": "histogram",
+            "labels": {
+              "strategy": "trafilatura"
+            },
+            "name": "extraction_content_length_bytes",
+            "value": 13
+          }
+        ],
+        "result": {
+          "author": "Fixture Author",
+          "content": "Fallback body",
+          "date": "2026-07-27",
+          "extraction_strategy": "trafilatura",
+          "extraction_strategy_order": [
+            "jsonld",
+            "trafilatura"
+          ],
+          "extraction_successful": true,
+          "extraction_trace": [
+            {
+              "reason": "jsonld_no_content",
+              "status": "failed",
+              "strategy": "jsonld"
+            },
+            {
+              "reason": "extracted",
+              "status": "success",
+              "strategy": "trafilatura"
+            }
+          ],
+          "summary": "Structured summary",
+          "title": "Fallback title",
+          "url": "https://example.com/summary"
+        }
+      },
+      "fallback_result": {
+        "author": "Fixture Author",
+        "content": "Fallback body",
+        "date": "2026-07-27",
+        "extraction_successful": true,
+        "summary": "   ",
+        "title": "Fallback title"
+      },
+      "html": "<html><head><script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"Article\",\"headline\":\"Structured title\",\"description\":\"Structured summary\"}</script></head><body></body></html>",
+      "name": "jsonld_summary_carries_to_fallback",
+      "operation": "pipeline",
+      "strategy_order": [
+        "jsonld",
+        "trafilatura"
+      ],
+      "url": "https://example.com/summary"
+    },
+    {
+      "allow_llm_extraction": false,
+      "expected": {
+        "cache_stats": {
+          "cluster_embedding_cache_size": 0,
+          "llm_provider_last_call_count": 0,
+          "llm_provider_limit_count": 0,
+          "schema_result_cache_size": 0,
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 0,
+          "strategy_limit_count": 0
+        },
+        "metrics": [
+          {
+            "emitter": "log_counter",
+            "kind": "counter",
+            "labels": {
+              "status": "skipped",
+              "strategy": "mystery"
+            },
+            "name": "extraction_strategy_total"
+          },
+          {
+            "emitter": "log_counter",
+            "kind": "counter",
+            "labels": {
+              "status": "success",
+              "strategy": "trafilatura"
+            },
+            "name": "extraction_strategy_total"
+          },
+          {
+            "emitter": "observe_histogram",
+            "kind": "histogram",
+            "labels": {
+              "status": "success",
+              "strategy": "trafilatura"
+            },
+            "name": "extraction_strategy_duration_seconds",
+            "value": "<TIMING>"
+          },
+          {
+            "emitter": "observe_histogram",
+            "kind": "histogram",
+            "labels": {
+              "strategy": "trafilatura"
+            },
+            "name": "extraction_content_length_bytes",
+            "value": 13
+          }
+        ],
+        "result": {
+          "author": "Fixture Author",
+          "content": "Fallback body",
+          "date": "2026-07-27",
+          "extraction_strategy": "trafilatura",
+          "extraction_strategy_order": [
+            "trafilatura"
+          ],
+          "extraction_successful": true,
+          "extraction_trace": [
+            {
+              "reason": "unknown_strategy",
+              "status": "skipped",
+              "strategy": "mystery"
+            },
+            {
+              "reason": "extracted",
+              "status": "success",
+              "strategy": "trafilatura"
+            }
+          ],
+          "title": "Fallback title",
+          "url": "https://example.com/unknown"
+        }
+      },
+      "fallback_result": {
+        "author": "Fixture Author",
+        "content": "Fallback body",
+        "date": "2026-07-27",
+        "extraction_successful": true,
+        "title": "Fallback title"
+      },
+      "html": "<html><body><p>Fallback input.</p></body></html>",
+      "name": "unknown_strategy_is_traced",
+      "operation": "pipeline",
+      "strategy_order": [
+        "mystery",
+        "trafilatura"
+      ],
+      "url": "https://example.com/unknown"
+    },
+    {
+      "allow_llm_extraction": false,
+      "behavior_change": 1,
+      "difference_contract": "change_1_default_regex_non_terminal",
+      "expected": {
+        "cache_stats": {
+          "cluster_embedding_cache_size": 0,
+          "llm_provider_last_call_count": 0,
+          "llm_provider_limit_count": 0,
+          "schema_result_cache_size": 0,
+          "selector_css_cache_size": 0,
+          "selector_xpath_cache_size": 0,
+          "strategy_limit_count": 0
+        },
+        "metrics": [
+          {
+            "emitter": "log_counter",
+            "kind": "counter",
+            "labels": {
+              "status": "failed",
+              "strategy": "jsonld"
+            },
+            "name": "extraction_strategy_total"
+          },
+          {
+            "emitter": "observe_histogram",
+            "kind": "histogram",
+            "labels": {
+              "status": "failed",
+              "strategy": "jsonld"
+            },
+            "name": "extraction_strategy_duration_seconds",
+            "value": "<TIMING>"
+          },
+          {
+            "emitter": "log_counter",
+            "kind": "counter",
+            "labels": {
+              "status": "skipped",
+              "strategy": "schema"
+            },
+            "name": "extraction_strategy_total"
+          },
+          {
+            "emitter": "observe_histogram",
+            "kind": "histogram",
+            "labels": {
+              "status": "skipped",
+              "strategy": "schema"
+            },
+            "name": "extraction_strategy_duration_seconds",
+            "value": "<TIMING>"
+          },
+          {
+            "emitter": "log_counter",
+            "kind": "counter",
+            "labels": {
+              "status": "success",
+              "strategy": "regex"
+            },
+            "name": "extraction_strategy_total"
+          },
+          {
+            "emitter": "observe_histogram",
+            "kind": "histogram",
+            "labels": {
+              "status": "success",
+              "strategy": "regex"
+            },
+            "name": "extraction_strategy_duration_seconds",
+            "value": "<TIMING>"
+          },
+          {
+            "emitter": "observe_histogram",
+            "kind": "histogram",
+            "labels": {
+              "strategy": "regex"
+            },
+            "name": "extraction_content_length_bytes",
+            "value": 31
+          }
+        ],
+        "result": {
+          "author": "N/A",
+          "content": "Contact predecessor@example.com",
+          "date": "N/A",
+          "extraction_strategy": "regex",
+          "extraction_strategy_order": [
+            "jsonld",
+            "schema",
+            "regex",
+            "cluster",
+            "trafilatura"
+          ],
+          "extraction_successful": true,
+          "extraction_trace": [
+            {
+              "reason": "jsonld_no_content",
+              "status": "failed",
+              "strategy": "jsonld"
+            },
+            {
+              "reason": "no_schema_rules_or_handler",
+              "status": "skipped",
+              "strategy": "schema"
+            },
+            {
+              "reason": "regex_extracted",
+              "status": "success",
+              "strategy": "regex"
+            }
+          ],
+          "regex_matches": [
+            {
+              "label": "email",
+              "span": [
+                8,
+                31
+              ],
+              "url": "https://example.com/regex-default",
+              "value": "predecessor@example.com"
+            }
+          ],
+          "title": "N/A",
+          "url": "https://example.com/regex-default"
+        }
+      },
+      "html": "<html><body>Contact predecessor@example.com</body></html>",
+      "name": "default_regex_is_terminal_in_predecessor",
+      "operation": "pipeline",
+      "strategy_order": null,
+      "url": "https://example.com/regex-default"
+    }
+  ],
+  "category": "extraction"
+}

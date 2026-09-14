@@ -16,7 +16,7 @@ import threading
 import time
 import warnings
 import weakref
-from functools import wraps
+from functools import partial, wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 # Import them lazily inside functions/methods when needed to keep app import light.
 
 _EMBEDDINGS_IMPORT_EXCEPTIONS = (ImportError, OSError, RuntimeError)
+_EXPLICIT_OPENAI_API_BASE = "https://api.openai.com/v1"
 
 
 def _import_torch():
@@ -107,10 +108,22 @@ def _import_onnxruntime():
 # Local Imports
 import contextlib
 
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+)
 from tldw_Server_API.app.core.config import resolve_repo_relative_path, rg_policy_path
+from tldw_Server_API.app.core.Embeddings.async_embeddings import (
+    EmbeddingEndpointError,
+    EmbeddingProviderError,
+)
 from tldw_Server_API.app.core.Embeddings.audit_adapter import (
     log_memory_limit_exceeded,
     log_model_evicted,
+)
+from tldw_Server_API.app.core.Embeddings.vector_validation import (
+    validated_embedding_vectors,
+    validated_indexed_embedding_data,
 )
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, NetworkError, RetryExhaustedError
 from tldw_Server_API.app.core.LLM_Calls.chat_calls import get_openai_embeddings_batch
@@ -159,6 +172,12 @@ _EMBEDDINGS_STORAGE_ALLOWLIST_ROOT = Path(_allowlist_root_env or resolve_repo_re
 
 
 def _get_http_status_from_exception(exc: Exception) -> int | None:
+    direct_status = getattr(exc, "status_code", None)
+    try:
+        if direct_status is not None:
+            return int(direct_status)
+    except (TypeError, ValueError):
+        pass
     response = getattr(exc, "response", None)
     if response is None:
         return None
@@ -167,6 +186,118 @@ def _get_http_status_from_exception(exc: Exception) -> int | None:
         return int(status)
     except (TypeError, ValueError):
         return None
+
+
+def _get_explicit_openai_embeddings_batch(
+    texts: list[str],
+    *,
+    model: str,
+    api_key: str,
+    base_url: str,
+    dimensions: int | None,
+    app_config: dict[str, Any],
+) -> list[list[float]]:
+    """Call OpenAI embeddings without exposing explicit credentials to legacy config paths."""
+    from tldw_Server_API.app.core.http_client import RetryPolicy, fetch
+    from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+        openai_credential_headers,
+    )
+
+    endpoint = base_url if base_url.rstrip("/").endswith("/embeddings") else f"{base_url.rstrip('/')}/embeddings"
+    payload: dict[str, Any] = {"input": texts, "model": model}
+    if dimensions is not None:
+        payload["dimensions"] = dimensions
+    response = None
+    provider_error: EmbeddingProviderError | None = None
+    try:
+        response = fetch(
+            method="POST",
+            url=endpoint,
+            headers=openai_credential_headers(api_key, app_config),
+            json=payload,
+            timeout=60,
+            retry=RetryPolicy(attempts=1),
+            sensitive_observability=True,
+        )
+        status_code = int(getattr(response, "status_code", 0) or 0)
+        if status_code >= 400:
+            code = "authentication" if status_code in {401, 403} else "provider_failure"
+            raise EmbeddingProviderError("openai", code=code, status_code=status_code) from None
+        data = response.json()
+        rows = data.get("data") if isinstance(data, dict) else None
+        embeddings = validated_indexed_embedding_data(rows, expected=len(texts))
+        if embeddings is None:
+            raise EmbeddingProviderError("openai", code="malformed_response") from None
+        return embeddings
+    except EmbeddingProviderError:
+        raise
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+        status_code = _get_http_status_from_exception(exc)
+        code = "authentication" if status_code in {401, 403} else "provider_failure"
+        provider_error = EmbeddingProviderError(
+            "openai",
+            code=code,
+            status_code=status_code,
+        )
+    finally:
+        if response is not None:
+            with contextlib.suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
+                response.close()
+    if provider_error is not None:
+        raise provider_error
+
+
+def _get_explicit_local_api_embeddings_batch(
+    texts: list[str],
+    *,
+    model: str,
+    api_key: str | None,
+    endpoint: str,
+) -> list[list[float]]:
+    """Call a local embedding endpoint without exposing execution credentials."""
+    from tldw_Server_API.app.core.http_client import RetryPolicy, fetch
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    response = None
+    provider_error: EmbeddingProviderError | None = None
+    try:
+        response = fetch(
+            method="POST",
+            url=endpoint,
+            headers=headers,
+            json={"texts": texts, "model": model},
+            timeout=60,
+            retry=RetryPolicy(attempts=1),
+            sensitive_observability=True,
+        )
+        status_code = int(getattr(response, "status_code", 0) or 0)
+        if status_code >= 400:
+            code = "authentication" if status_code in {401, 403} else "provider_failure"
+            raise EmbeddingProviderError("local_api", code=code, status_code=status_code) from None
+        data = response.json()
+        raw_embeddings = data.get("embeddings") if isinstance(data, dict) else None
+        embeddings = validated_embedding_vectors(raw_embeddings, expected=len(texts))
+        if embeddings is None:
+            raise EmbeddingProviderError("local_api", code="malformed_response") from None
+        return embeddings
+    except EmbeddingProviderError:
+        raise
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+        status_code = _get_http_status_from_exception(exc)
+        code = "authentication" if status_code in {401, 403} else "provider_failure"
+        provider_error = EmbeddingProviderError(
+            "local_api",
+            code=code,
+            status_code=status_code,
+        )
+    finally:
+        if response is not None:
+            with contextlib.suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
+                response.close()
+    if provider_error is not None:
+        raise provider_error
 
 
 def _is_probable_network_error(exc: Exception) -> bool:
@@ -561,6 +692,59 @@ class EmbeddingConfigSchema(BaseModel):
     rate_limiter: RateLimiterCfg = RateLimiterCfg()
     retry_config: RetryCfg = RetryCfg()
     models: dict[str, ModelCfg]
+
+
+def _resolve_model_key(models_map: dict[str, Any], model_id: str) -> tuple[str, Any]:
+    """Resolve the configured model entry used for embedding dispatch."""
+
+    if model_id in models_map:
+        return model_id, models_map[model_id]
+    if ":" in model_id:
+        suffix = model_id.split(":", 1)[1]
+        if suffix in models_map:
+            return suffix, models_map[suffix]
+
+    bare_model = model_id.split(":", 1)[1] if ":" in model_id else model_id
+    guessed_providers: list[str] = []
+    if "/" in bare_model:
+        guessed_providers.append("huggingface")
+    guessed_providers.extend(["openai", "local_api"])
+    for provider in guessed_providers:
+        candidate = f"{provider}:{bare_model}"
+        if candidate in models_map:
+            return candidate, models_map[candidate]
+
+    suffix_matches = [
+        key for key in models_map if key.endswith(f":{bare_model}")
+    ]
+    if len(suffix_matches) == 1:
+        resolved_key = suffix_matches[0]
+        return resolved_key, models_map[resolved_key]
+
+    logger.error(
+        "Configuration for `model_id` '{}' not found in `embedding_config.models`.",
+        model_id,
+    )
+    raise ValueError(f"Invalid `model_id` or configuration missing: {model_id}")
+
+
+def _resolve_effective_embedding_provider(
+    user_app_config: dict[str, Any],
+    model_id_override: str | None,
+) -> str:
+    """Resolve the provider through the same validated model lookup as sync dispatch."""
+
+    embedding_config = EmbeddingConfigSchema(
+        **user_app_config["embedding_config"]
+    )
+    model_id = model_id_override or embedding_config.default_model_id
+    if not model_id:
+        raise ValueError("Embedding model ID not specified or configured as default.")
+    _resolved_key, model_spec = _resolve_model_key(
+        embedding_config.models,
+        model_id,
+    )
+    return str(model_spec.provider).strip().lower()
 
 
 def _ensure_hf_revision(model_name_or_path: str, expected_sha: str | None) -> None:
@@ -984,6 +1168,16 @@ def exponential_backoff(max_retries: int = 3, base_delay: int = 1):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
+            from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+                PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+            )
+
+            if (
+                kwargs.get("credentials_resolved") is True
+                or kwargs.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY) is not None
+                or kwargs.get("_require_provider_call_credentials") is True
+            ):
+                return fn(*args, **kwargs)
             for attempt in range(max_retries + 1):  # +1 to include the initial attempt
                 try:
                     return fn(*args, **kwargs)
@@ -1730,6 +1924,12 @@ def create_embeddings_batch(
     texts: list[str],
     user_app_config: dict[str, Any],  # Renamed for clarity: this is the top-level app config
     model_id_override: str | None = None,
+    *,
+    api_key_override: str | None = None,
+    base_url_override: str | None = None,
+    credentials_resolved: bool = False,
+    _provider_call_credentials: object | None = None,
+    _require_provider_call_credentials: bool = False,
 ) -> list[list[float]]:
     """
     Creates embeddings for a batch of texts.
@@ -1744,6 +1944,11 @@ def create_embeddings_batch(
     if not texts:
         logger.warning("create_embeddings_batch called with empty list of texts.")
         return []
+
+    runtime_boundary_requested = (
+        _require_provider_call_credentials is True
+        or _provider_call_credentials is not None
+    )
 
     try:
         loop = asyncio.get_running_loop()
@@ -1764,6 +1969,9 @@ def create_embeddings_batch(
         # Pydantic will parse and validate. If it fails, it raises a ValidationError.
         embedding_service_config = EmbeddingConfigSchema(**user_app_config["embedding_config"])
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:  # Catch Pydantic ValidationError or other parsing issues
+        if credentials_resolved is True or runtime_boundary_requested:
+            logger.error("Runtime-explicit embedding configuration is invalid")
+            raise ValueError("Invalid embedding_config structure.") from None
         logger.exception(f"Failed to parse embedding_config: {str(e)}")
         raise ValueError(f"Invalid embedding_config structure: {e}") from e
 
@@ -1772,45 +1980,35 @@ def create_embeddings_batch(
         logger.error("No `model_id` specified and no `default_model_id` found in embedding_config.")
         raise ValueError("Embedding model ID not specified or configured as default.")
 
-    def _resolve_model_key(models_map: dict[str, Any], mid: str) -> tuple[str, Any]:
-        """Resolve a model key from models_map supporting bare or provider-prefixed IDs.
-
-        Tries exact match first, then:
-        - If mid contains ':', try its suffix as a bare key
-        - If bare, try common provider prefixes (heuristic) and any unique key ending with ":mid"
-        Returns (resolved_key, model_spec) on success or raises ValueError.
-        """
-        # 1) Exact key
-        if mid in models_map:
-            return mid, models_map[mid]
-        # 2) If provider-prefixed, try bare suffix
-        if ":" in mid:
-            suffix = mid.split(":", 1)[1]
-            if suffix in models_map:
-                return suffix, models_map[suffix]
-        # 3) If bare, try prefixed candidates based on simple heuristics
-        bare = mid.split(":", 1)[1] if ":" in mid else mid
-        guessed_providers = []
-        if "/" in bare:
-            guessed_providers.append("huggingface")
-        # Always consider openai and local_api as common options
-        guessed_providers.extend(["openai", "local_api"])  # order matters for tie-breaks
-        for prov in guessed_providers:
-            candidate = f"{prov}:{bare}"
-            if candidate in models_map:
-                return candidate, models_map[candidate]
-        # 4) Unique suffix match (any key that ends with ":<bare>")
-        suffix_matches = [k for k in models_map if k.endswith(f":{bare}")]
-        if len(suffix_matches) == 1:
-            k = suffix_matches[0]
-            return k, models_map[k]
-        logger.error(f"Configuration for `model_id` '{mid}' not found in `embedding_config.models`.")
-        raise ValueError(f"Invalid `model_id` or configuration missing: {mid}")
-
     resolved_key, model_spec = _resolve_model_key(embedding_service_config.models, model_id_to_use)
     model_id_to_use = resolved_key
 
     provider = model_spec.provider
+    runtime_openai_config: dict[str, Any] = {}
+    if runtime_boundary_requested and provider.lower() != "openai":
+        from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+
+        raise ChatConfigurationError(
+            provider=provider,
+            message="Provider credentials do not match the embedding provider.",
+        )
+    runtime_bound_openai = provider.lower() == "openai" and runtime_boundary_requested
+    if runtime_bound_openai:
+        from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+            bind_openai_embedding_credentials,
+        )
+
+        (
+            api_key_override,
+            base_url_override,
+            runtime_openai_config,
+        ) = bind_openai_embedding_credentials(
+            provider_credentials=_provider_call_credentials,
+            credentials_resolved=credentials_resolved,
+            api_key_override=api_key_override,
+            base_url_override=base_url_override,
+        )
+        credentials_resolved = True
 
     # Phase 2: RG middleware handles ingress rate limiting
 
@@ -2006,52 +2204,72 @@ def create_embeddings_batch(
             logger.debug(
                 f"Creating embeddings for {len(texts)} texts via OpenAI API with model {model_spec.model_name_or_path}"
             )
-            if not callable(get_openai_embeddings_batch):  # Basic check
-                logger.error("`get_openai_embeddings_batch` is not available or not callable.")
-                raise NotImplementedError("OpenAI batch embedding function is not properly set up.")
+            if credentials_resolved is True:
+                if not (isinstance(api_key_override, str) and api_key_override.strip()):
+                    raise ValueError("Explicit embedding credential is required for openai.")
+                embeddings_list = _get_explicit_openai_embeddings_batch(
+                    texts,
+                    model=model_spec.model_name_or_path,
+                    api_key=api_key_override,
+                    base_url=base_url_override or _EXPLICIT_OPENAI_API_BASE,
+                    dimensions=model_spec.dimensions,
+                    app_config=runtime_openai_config,
+                )
+            else:
+                openai_app_config = user_app_config
+                if not callable(get_openai_embeddings_batch):  # Basic check
+                    logger.error("`get_openai_embeddings_batch` is not available or not callable.")
+                    raise NotImplementedError("OpenAI batch embedding function is not properly set up.")
+                if model_spec.api_key:
+                    openai_section = dict(user_app_config.get("openai_api", {}) or {})
+                    if not openai_section.get("api_key"):
+                        openai_section["api_key"] = model_spec.api_key
+                    if openai_section != user_app_config.get("openai_api", {}):
+                        openai_app_config = {**user_app_config, "openai_api": openai_section}
 
-            openai_app_config = user_app_config
-            if model_spec.api_key:
-                openai_section = dict(user_app_config.get("openai_api", {}) or {})
-                if not openai_section.get("api_key"):
-                    openai_section["api_key"] = model_spec.api_key
-                if openai_section != user_app_config.get("openai_api", {}):
-                    openai_app_config = {**user_app_config, "openai_api": openai_section}
-
-            # Pass the full user_app_config as it might contain API keys or other necessary settings
-            # for get_openai_embeddings_batch
-            embeddings_list = get_openai_embeddings_batch(
-                texts,
-                model=model_spec.model_name_or_path,
-                app_config=openai_app_config,  # Or pass only relevant parts if get_openai_embeddings_batch is refactored
-                dimensions=model_spec.dimensions,
-            )
+                # Legacy calls retain configuration-based credential resolution.
+                embeddings_list = get_openai_embeddings_batch(
+                    texts,
+                    model=model_spec.model_name_or_path,
+                    app_config=openai_app_config,
+                    dimensions=model_spec.dimensions,
+                )
 
         elif provider.lower() == "local_api":
             if not isinstance(model_spec, LocalAPICfg):
                 raise ValueError(f"Model spec for {model_id_to_use} is not LocalAPICfg.")
 
             # TODO: Implement chunking for texts if len(texts) is large, based on model_spec.chunk_size
-            logger.debug(
-                f"Creating {len(texts)} embeddings via local API ({model_spec.api_url}) with model {model_spec.model_name_or_path}"
-            )
-            headers = {"Content-Type": "application/json"}
-            if model_spec.api_key:
-                headers["Authorization"] = f"Bearer {model_spec.api_key}"
+            if credentials_resolved is True:
+                if not (isinstance(base_url_override, str) and base_url_override.strip()):
+                    raise EmbeddingEndpointError("local_api") from None
+                embeddings_list = _get_explicit_local_api_embeddings_batch(
+                    texts,
+                    model=model_spec.model_name_or_path,
+                    api_key=api_key_override,
+                    endpoint=base_url_override,
+                )
+            else:
+                logger.debug(
+                    f"Creating {len(texts)} embeddings via local API ({model_spec.api_url}) with model {model_spec.model_name_or_path}"
+                )
+                headers = {"Content-Type": "application/json"}
+                if model_spec.api_key:
+                    headers["Authorization"] = f"Bearer {model_spec.api_key}"
 
-            payload = {"texts": texts, "model": model_spec.model_name_or_path}
+                payload = {"texts": texts, "model": model_spec.model_name_or_path}
 
-            # The outbound call is already wrapped by exponential backoff and the per-config rate limiter
-            from tldw_Server_API.app.core.http_client import fetch as _fetch
+                # The outbound call is already wrapped by exponential backoff and the per-config rate limiter
+                from tldw_Server_API.app.core.http_client import fetch as _fetch
 
-            resp = _fetch(method="POST", url=model_spec.api_url, headers=headers, json=payload, timeout=60)
-            if resp.status_code >= 400:
-                resp.raise_for_status()
-            response_data = resp.json()
-            if "embeddings" not in response_data or not isinstance(response_data["embeddings"], list):
-                logger.error(f"Local API at {model_spec.api_url} returned unexpected data format: {response_data}")
-                raise ValueError("Local API embedding response format error.")
-            embeddings_list = response_data["embeddings"]
+                resp = _fetch(method="POST", url=model_spec.api_url, headers=headers, json=payload, timeout=60)
+                if resp.status_code >= 400:
+                    resp.raise_for_status()
+                response_data = resp.json()
+                if "embeddings" not in response_data or not isinstance(response_data["embeddings"], list):
+                    logger.error(f"Local API at {model_spec.api_url} returned unexpected data format: {response_data}")
+                    raise ValueError("Local API embedding response format error.")
+                embeddings_list = response_data["embeddings"]
 
         else:
             logger.error(f"Unsupported embedding provider: {provider} for model_id '{model_id_to_use}'")
@@ -2073,7 +2291,10 @@ def create_embeddings_batch(
                 "error_type": type(ve).__name__,
             },
         )
-        logger.exception(f"Configuration or Value error in create_embeddings_batch: {ve}")
+        if credentials_resolved is True:
+            logger.error("Runtime-explicit embedding configuration or validation failed")
+        else:
+            logger.exception(f"Configuration or Value error in create_embeddings_batch: {ve}")
         raise
     except RuntimeError as rte:  # Model loading, conversion, or runtime issues
         log_counter(
@@ -2084,7 +2305,10 @@ def create_embeddings_batch(
                 "error_type": type(rte).__name__,
             },
         )
-        logger.exception(f"Runtime error in create_embeddings_batch: {rte}")
+        if credentials_resolved is True:
+            logger.error("Runtime-explicit embedding provider call failed")
+        else:
+            logger.exception(f"Runtime error in create_embeddings_batch: {rte}")
         raise
     except (NetworkError, RetryExhaustedError) as req_e:
         log_counter(
@@ -2095,7 +2319,10 @@ def create_embeddings_batch(
                 "error_type": type(req_e).__name__,
             },
         )
-        logger.exception(f"Network error after retries in create_embeddings_batch: {req_e}")
+        if credentials_resolved is True:
+            logger.error("Runtime-explicit embedding network call failed")
+        else:
+            logger.exception(f"Network error after retries in create_embeddings_batch: {req_e}")
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:  # Catch-all for unexpected errors
         log_counter(
@@ -2106,10 +2333,13 @@ def create_embeddings_batch(
                 "error_type": type(e).__name__,
             },
         )
-        logger.exception(
-            f"Unexpected error in create_embeddings_batch for model_id '{model_id_to_use if 'model_id_to_use' in locals() else 'unknown'}' "
-            f"(Provider: {provider if 'provider' in locals() else 'unknown'}): {e}"
-        )
+        if credentials_resolved is True:
+            logger.error("Runtime-explicit embedding call failed")
+        else:
+            logger.exception(
+                f"Unexpected error in create_embeddings_batch for model_id '{model_id_to_use if 'model_id_to_use' in locals() else 'unknown'}' "
+                f"(Provider: {provider if 'provider' in locals() else 'unknown'}): {e}"
+            )
         raise
 
 
@@ -2117,6 +2347,12 @@ async def create_embeddings_batch_async(
     texts: list[str],
     user_app_config: dict[str, Any],
     model_id_override: str | None = None,
+    *,
+    api_key_override: str | None = None,
+    base_url_override: str | None = None,
+    credentials_resolved: bool = False,
+    _provider_call_credentials: object | None = None,
+    _require_provider_call_credentials: bool = False,
 ) -> list[list[float]]:
     """
     Async wrapper for create_embeddings_batch.
@@ -2130,19 +2366,54 @@ async def create_embeddings_batch_async(
     Returns:
         List of embedding vectors (list of floats for each text)
     """
-    import asyncio
-
-    # Run the synchronous function in a thread pool to avoid blocking
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None, create_embeddings_batch, texts, user_app_config, model_id_override  # Use default executor
+    call = partial(
+        create_embeddings_batch,
+        texts,
+        user_app_config,
+        model_id_override,
+        api_key_override=api_key_override,
+        base_url_override=base_url_override,
+        credentials_resolved=credentials_resolved,
+        _provider_call_credentials=_provider_call_credentials,
+        _require_provider_call_credentials=_require_provider_call_credentials,
     )
+    effective_provider: str | None = None
+    if (
+        credentials_resolved is True
+        or _provider_call_credentials is not None
+        or _require_provider_call_credentials is True
+    ):
+        try:
+            effective_provider = _resolve_effective_embedding_provider(
+                user_app_config,
+                model_id_override,
+            )
+        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+            # Preserve the synchronous function's established validation and
+            # sanitization behavior; invalid configuration cannot dispatch.
+            effective_provider = None
+
+    if effective_provider in {"openai", "local_api"}:
+        return await await_bounded_sync_call(
+            call,
+            pool=SYNC_ADAPTER_CALL_POOL,
+            exhaustion_message="Embeddings provider capacity is exhausted",
+        )
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, call)
 
 
 def create_embedding(
     text: str,
     user_app_config: dict[str, Any],
     model_id_override: str | None = None,
+    *,
+    api_key_override: str | None = None,
+    base_url_override: str | None = None,
+    credentials_resolved: bool = False,
+    _provider_call_credentials: object | None = None,
+    _require_provider_call_credentials: bool = False,
 ) -> list[float]:
     """
     Creates an embedding for a single text using the batch function.
@@ -2171,7 +2442,14 @@ def create_embedding(
 
     # The create_embeddings_batch function is already decorated with rate limiter and backoff
     embeddings_list = create_embeddings_batch(
-        texts=[text], user_app_config=user_app_config, model_id_override=model_id_override  # Pass override if provided
+        texts=[text],
+        user_app_config=user_app_config,
+        model_id_override=model_id_override,
+        api_key_override=api_key_override,
+        base_url_override=base_url_override,
+        credentials_resolved=credentials_resolved,
+        _provider_call_credentials=_provider_call_credentials,
+        _require_provider_call_credentials=_require_provider_call_credentials,
     )
 
     if not embeddings_list or not embeddings_list[0]:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
 import sqlite3
 from typing import Any
 
@@ -32,7 +31,8 @@ def soft_delete_media(self: Any, media_id: int, cascade: bool = True) -> bool:
         with self.transaction() as conn:
             media_info = self._fetchone_with_connection(
                 conn,
-                "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0",
+                "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0 "
+                "AND system_operation_id IS NULL",
                 (media_id,),
             )
             if not media_info:
@@ -46,7 +46,8 @@ def soft_delete_media(self: Any, media_id: int, cascade: bool = True) -> bool:
 
             update_cursor = self._execute_with_connection(
                 conn,
-                "UPDATE Media SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ?",
+                "UPDATE Media SET deleted = 1, last_modified = ?, version = ?, client_id = ? "
+                "WHERE id = ? AND version = ? AND system_operation_id IS NULL",
                 (current_time, new_media_version, client_id, media_id, current_media_version),
             )
             if update_cursor.rowcount == 0:
@@ -208,7 +209,8 @@ def share_media(
         with self.transaction() as conn:
             row = self._fetchone_with_connection(
                 conn,
-                "SELECT id, uuid, version, visibility, org_id, team_id FROM Media WHERE id = ? AND deleted = 0",
+                "SELECT id, uuid, version, visibility, org_id, team_id FROM Media "
+                "WHERE id = ? AND deleted = 0 AND system_operation_id IS NULL",
                 (media_id,),
             )
             if not row:
@@ -224,7 +226,7 @@ def share_media(
             update_sql = """
                 UPDATE Media
                 SET visibility = ?, org_id = ?, team_id = ?, version = ?, last_modified = ?, client_id = ?
-                WHERE id = ? AND version = ?
+                WHERE id = ? AND version = ? AND system_operation_id IS NULL
             """
             cursor = self._execute_with_connection(
                 conn,
@@ -266,7 +268,7 @@ def get_media_visibility(self: Any, media_id: int) -> dict[str, Any] | None:
     """Return the current visibility state for a media row."""
     cursor = self.execute_query(
         "SELECT visibility, org_id, team_id, owner_user_id, client_id "
-        "FROM Media WHERE id = ? AND deleted = 0",
+        "FROM Media WHERE id = ? AND deleted = 0 AND system_operation_id IS NULL",
         (media_id,),
     )
     row = cursor.fetchone() if cursor else None
@@ -291,7 +293,8 @@ def mark_as_trash(self: Any, media_id: int) -> bool:
         with self.transaction() as conn:
             media_info = self._fetchone_with_connection(
                 conn,
-                "SELECT uuid, version, is_trash FROM Media WHERE id = ? AND deleted = 0",
+                "SELECT uuid, version, is_trash FROM Media WHERE id = ? AND deleted = 0 "
+                "AND system_operation_id IS NULL",
                 (media_id,),
             )
             if not media_info:
@@ -305,7 +308,8 @@ def mark_as_trash(self: Any, media_id: int) -> bool:
             new_version = current_version + 1
             update_cursor = self._execute_with_connection(
                 conn,
-                "UPDATE Media SET is_trash=1, trash_date=?, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
+                "UPDATE Media SET is_trash=1, trash_date=?, last_modified=?, version=?, "
+                "client_id=? WHERE id=? AND version=? AND system_operation_id IS NULL",
                 (current_time, current_time, new_version, client_id, media_id, current_version),
             )
             if update_cursor.rowcount == 0:
@@ -313,7 +317,7 @@ def mark_as_trash(self: Any, media_id: int) -> bool:
 
             sync_payload = self._fetchone_with_connection(
                 conn,
-                "SELECT * FROM Media WHERE id = ?",
+                "SELECT * FROM Media WHERE id = ? AND system_operation_id IS NULL",
                 (media_id,),
             ) or {}
             self._log_sync_event(conn, "Media", media_uuid, "update", new_version, sync_payload)
@@ -338,7 +342,8 @@ def restore_from_trash(self: Any, media_id: int) -> bool:
         with self.transaction() as conn:
             media_info = self._fetchone_with_connection(
                 conn,
-                "SELECT uuid, version, is_trash FROM Media WHERE id = ? AND deleted = 0",
+                "SELECT uuid, version, is_trash FROM Media WHERE id = ? AND deleted = 0 "
+                "AND system_operation_id IS NULL",
                 (media_id,),
             )
             if not media_info:
@@ -352,7 +357,8 @@ def restore_from_trash(self: Any, media_id: int) -> bool:
             new_version = current_version + 1
             update_cursor = self._execute_with_connection(
                 conn,
-                "UPDATE Media SET is_trash=0, trash_date=NULL, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
+                "UPDATE Media SET is_trash=0, trash_date=NULL, last_modified=?, version=?, "
+                "client_id=? WHERE id=? AND version=? AND system_operation_id IS NULL",
                 (current_time, new_version, client_id, media_id, current_version),
             )
             if update_cursor.rowcount == 0:
@@ -360,7 +366,7 @@ def restore_from_trash(self: Any, media_id: int) -> bool:
 
             sync_payload = self._fetchone_with_connection(
                 conn,
-                "SELECT * FROM Media WHERE id = ?",
+                "SELECT * FROM Media WHERE id = ? AND system_operation_id IS NULL",
                 (media_id,),
             ) or {}
             self._log_sync_event(conn, "Media", media_uuid, "update", new_version, sync_payload)

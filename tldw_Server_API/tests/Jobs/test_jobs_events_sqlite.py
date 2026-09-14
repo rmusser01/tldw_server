@@ -15,6 +15,7 @@ def events(monkeypatch):
     monkeypatch.setenv("JOBS_EVENTS_ENABLED", "true")
     from tldw_Server_API.app.core.Jobs import manager as mgr
     monkeypatch.setattr(mgr, "emit_job_event", _emit, raising=True)
+    monkeypatch.setattr(mgr, "observe_job_event", _emit, raising=True)
     return calls
 
 
@@ -26,7 +27,7 @@ def test_events_emitted_for_core_paths_sqlite(tmp_path, monkeypatch, events):
     jm = JobManager(db_path)
 
     # Create (emits job.created)
-    j = jm.create_job(domain="d", queue="default", job_type="t", payload={}, owner_user_id="u1")
+    jm.create_job(domain="d", queue="default", job_type="t", payload={}, owner_user_id="u1")
     assert any(n == "job.created" for (n, _j, _a) in events)
 
     # Acquire (emits job.acquired)

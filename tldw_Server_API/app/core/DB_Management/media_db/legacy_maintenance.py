@@ -8,20 +8,17 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import yaml
-
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.db_migration import MigrationError
-from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, DatabaseError
-from tldw_Server_API.app.core.DB_Management.media_db.errors import InputError
+from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, DatabaseError, InputError
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
     MediaDbLike,
     require_media_database_like,
 )
-
 
 _MAINTENANCE_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
@@ -60,7 +57,8 @@ def empty_trash(db_instance: MediaDbLike, days_threshold: int) -> tuple[int, int
     )
     try:
         cursor_find = db_instance.execute_query(
-            "SELECT id, title FROM Media WHERE is_trash = 1 AND deleted = 0 AND trash_date <= ?",
+            "SELECT id, title FROM Media WHERE is_trash = 1 AND deleted = 0 "
+            "AND system_operation_id IS NULL AND trash_date <= ?",
             (threshold_date_str,),
         )
         items_to_process = cursor_find.fetchall()
@@ -98,7 +96,8 @@ def empty_trash(db_instance: MediaDbLike, days_threshold: int) -> tuple[int, int
                     )
 
         cursor_remain = db_instance.execute_query(
-            "SELECT COUNT(*) AS trash_remaining FROM Media WHERE is_trash = 1 AND deleted = 0"
+            "SELECT COUNT(*) AS trash_remaining FROM Media WHERE is_trash = 1 "
+            "AND deleted = 0 AND system_operation_id IS NULL"
         )
         remain_row = cursor_remain.fetchone()
         remaining_count = remain_row["trash_remaining"] if remain_row else 0
@@ -139,7 +138,8 @@ def permanently_delete_item(db_instance: MediaDbLike, media_id: int) -> bool:
     try:
         with db_instance.transaction() as conn:
             sel_cur = db_instance.execute_query(
-                "SELECT 1 AS one FROM Media WHERE id = ?",
+                "SELECT 1 AS one FROM Media WHERE id = ? "
+                "AND system_operation_id IS NULL",
                 (media_id,),
                 connection=conn,
             )
@@ -149,7 +149,7 @@ def permanently_delete_item(db_instance: MediaDbLike, media_id: int) -> bool:
                 return False
 
             del_cur = db_instance.execute_query(
-                "DELETE FROM Media WHERE id = ?",
+                "DELETE FROM Media WHERE id = ? AND system_operation_id IS NULL",
                 (media_id,),
                 commit=False,
                 connection=conn,

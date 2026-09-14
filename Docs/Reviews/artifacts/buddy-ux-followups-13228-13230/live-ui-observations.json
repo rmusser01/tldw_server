@@ -1,0 +1,41 @@
+{
+  "runtime_profile": "/private/tmp/buddy-ux-followups-20260909",
+  "scope": "Observed DOM/pointer checks before final nullable-timestamp and pinned-transport corrections; those corrections are covered by final focused tests. No compact live viewport or real audio pass claimed.",
+  "viewport": {
+    "width": 1090,
+    "height": 991
+  },
+  "buddy_after_Home": {
+    "x": 942,
+    "y": 96,
+    "width": 128,
+    "height": 172
+  },
+  "composer_input": {
+    "x": 388,
+    "y": 885.71875,
+    "width": 288,
+    "height": 32,
+    "center_unobstructed": true
+  },
+  "composer_send": {
+    "x": 682,
+    "y": 881.71875,
+    "width": 36,
+    "height": 36,
+    "center_unobstructed": true
+  },
+  "recovery": {
+    "missing_settings_visible": true,
+    "draft_retained": "MODEL RECOVERY CHECK: keep this draft while selecting my provider.",
+    "send_enabled_after_both_fields": true,
+    "provider": "custom-openai-api",
+    "model": "buddy-qualification",
+    "completed_turn": "156c528764bb46ffaa23d5a7f4e7c1cf",
+    "conversation_id": "c71cc7fc-7cd6-4463-b801-7acc6391f4a0"
+  },
+  "duplicate_labels": [
+    "c71cc7fc \u2014 Workspace qualification: use the saved Research Assistant default for this new c",
+    "5c26dc31 \u2014 Workspace qualification: use the saved Research Assistant default for this new c"
+  ]
+}

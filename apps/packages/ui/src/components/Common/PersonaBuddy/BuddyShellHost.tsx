@@ -1,4 +1,5 @@
 import React from "react"
+import { useBuddyManagementStore } from "@/store/buddy-management"
 import { createPortal } from "react-dom"
 
 import { useSetting } from "@/hooks/useSetting"
@@ -76,7 +77,9 @@ const hasVisualMovementState = (
   state: BuddyMovementState
 ): boolean => {
   const stateId = asPersonaVisualCustomStateId(state)
-  return Boolean(manifest?.states?.[stateId] || manifest?.state_catalog?.[stateId])
+  return Boolean(
+    manifest?.states?.[stateId] || manifest?.state_catalog?.[stateId]
+  )
 }
 
 const clearBuddyDragOverride = (context: BuddyMovementContext) => {
@@ -94,7 +97,10 @@ const setBuddyDragMovementOverride = (
   context: BuddyMovementContext,
   state: BuddyMovementState
 ) => {
-  if (!context.activePersonaId || !hasVisualMovementState(context.manifest, state)) {
+  if (
+    !context.activePersonaId ||
+    !hasVisualMovementState(context.manifest, state)
+  ) {
     return
   }
 
@@ -141,17 +147,14 @@ const hasExplicitBuddySummary = (
 ) =>
   Boolean(
     renderContext &&
-      Object.prototype.hasOwnProperty.call(renderContext, "buddy_summary")
+    Object.prototype.hasOwnProperty.call(renderContext, "buddy_summary")
   )
 
 const resolveActivePersonaSelection = ({
   renderContext,
   selectedAssistant
 }: {
-  renderContext:
-    | PersonaBuddyRenderContext
-    | null
-    | undefined
+  renderContext: PersonaBuddyRenderContext | null | undefined
   selectedAssistant: unknown
 }): ResolvedPersonaShellState => {
   if (!renderContext?.surface_active) {
@@ -180,7 +183,8 @@ const resolveActivePersonaSelection = ({
     if (renderContext.buddy_summary) {
       return {
         hasTargetPersona: true,
-        activePersonaId: renderContext.active_persona_id || selectedPersona?.id || null,
+        activePersonaId:
+          renderContext.active_persona_id || selectedPersona?.id || null,
         fallbackName: renderContext.buddy_summary.persona_name,
         buddySummary: renderContext.buddy_summary
       }
@@ -188,7 +192,8 @@ const resolveActivePersonaSelection = ({
 
     return {
       hasTargetPersona: hasExplicitTargetPersona,
-      activePersonaId: renderContext.active_persona_id || selectedPersona?.id || null,
+      activePersonaId:
+        renderContext.active_persona_id || selectedPersona?.id || null,
       fallbackName: selectionMatches ? selectedPersona.name : null,
       buddySummary: null
     }
@@ -318,7 +323,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     }
   }, [positionBucket, setPosition])
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     const clampPersistedPosition = () => {
       if (!dockRef.current) {
         return
@@ -346,11 +351,19 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     }
 
     clampPersistedPosition()
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(clampPersistedPosition)
+    if (dockRef.current) {
+      resizeObserver?.observe(dockRef.current)
+    }
     window.addEventListener("resize", clampPersistedPosition)
     return () => {
+      resizeObserver?.disconnect()
       window.removeEventListener("resize", clampPersistedPosition)
     }
-  }, [position, positionBucket, setPosition])
+  }, [isOpen, position, positionBucket, renderContext, setPosition])
 
   const handleDragHandlePointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -386,7 +399,9 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     defaultPersonaId: resolvedPersona.activePersonaId,
     surface: renderContext.surface_id
   })
-  const [visualPack, setVisualPack] = React.useState<PersonaVisualPack | null>(null)
+  const [visualPack, setVisualPack] = React.useState<PersonaVisualPack | null>(
+    null
+  )
   const [visualPackLoadStatus, setVisualPackLoadStatus] =
     React.useState<PersonaVisualPackLoadStatus>("idle")
   const [visualPackLoadError, setVisualPackLoadError] =
@@ -394,7 +409,9 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   const [visualPackRefreshNonce, setVisualPackRefreshNonce] = React.useState(0)
   const [visualRenderError, setVisualRenderError] =
     React.useState<PersonaVisualRenderErrorState | null>(null)
-  const runtimeOverride = usePersonaVisualRuntimeStore((state) => state.override)
+  const runtimeOverride = usePersonaVisualRuntimeStore(
+    (state) => state.override
+  )
   const setVisualRuntimeDiagnostics = usePersonaVisualRuntimeStore(
     (state) => state.setRuntimeDiagnostics
   )
@@ -420,12 +437,17 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     const handlePackActivated = (event: Event) => {
       const detail = (event as CustomEvent<{ personaId?: unknown }>).detail
       const eventPersonaId = String(detail?.personaId ?? "").trim()
-      const activePersonaId = String(resolvedPersona.activePersonaId ?? "").trim()
+      const activePersonaId = String(
+        resolvedPersona.activePersonaId ?? ""
+      ).trim()
       if (eventPersonaId && eventPersonaId === activePersonaId) {
         setVisualPackRefreshNonce((current) => current + 1)
       }
     }
-    window.addEventListener(PERSONA_VISUAL_PACK_ACTIVATED_EVENT, handlePackActivated)
+    window.addEventListener(
+      PERSONA_VISUAL_PACK_ACTIVATED_EVENT,
+      handlePackActivated
+    )
     return () => {
       window.removeEventListener(
         PERSONA_VISUAL_PACK_ACTIVATED_EVENT,
@@ -455,7 +477,10 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
           response.packs.find((pack) => pack.status === "active") ??
           null
         if (activePack && !hasVisualPackAssetMap(activePack)) {
-          activePack = await getPersonaVisualPack(activePersonaId, activePack.id)
+          activePack = await getPersonaVisualPack(
+            activePersonaId,
+            activePack.id
+          )
         }
         if (!cancelled) {
           setVisualPack(activePack)
@@ -505,7 +530,10 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     const states = visualPack?.manifest?.states
     const stateCatalog = visualPack?.manifest?.state_catalog
     return Array.from(
-      new Set([...Object.keys(states || {}), ...Object.keys(stateCatalog || {})])
+      new Set([
+        ...Object.keys(states || {}),
+        ...Object.keys(stateCatalog || {})
+      ])
     ).filter(isPersonaVisualCustomStateIdText)
   }, [visualPack])
   const visualState =
@@ -558,14 +586,13 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       visualState
     ]
   )
-  const liveControlView: PersonaBuddyLiveControlView | null =
-    liveControlEnabled
-      ? {
-          ...liveControl,
-          voiceIsListening: renderContext.live_voice_is_listening ?? undefined,
-          voiceState: renderContext.live_voice_state ?? null
-        }
-      : null
+  const liveControlView: PersonaBuddyLiveControlView | null = liveControlEnabled
+    ? {
+        ...liveControl,
+        voiceIsListening: renderContext.live_voice_is_listening ?? undefined,
+        voiceState: renderContext.live_voice_state ?? null
+      }
+    : null
 
   React.useEffect(() => {
     const activePersonaId = String(resolvedPersona.activePersonaId || "").trim()
@@ -611,15 +638,14 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     return null
   }
 
-  const dockSummary: PersonaBuddySummary =
-    buddySummary
-      ? buddySummary
-      : {
-          has_buddy: false,
-          persona_name: resolvedPersona.fallbackName || "Persona Buddy",
-          role_summary: null,
-          visual: null
-        }
+  const dockSummary: PersonaBuddySummary = buddySummary
+    ? buddySummary
+    : {
+        has_buddy: false,
+        persona_name: resolvedPersona.fallbackName || "Persona Buddy",
+        role_summary: null,
+        visual: null
+      }
 
   return createPortal(
     <BuddyShellDock
@@ -635,6 +661,37 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       position={position}
       onToggle={() => setOpen(!isOpen)}
       onDragHandlePointerDown={handleDragHandlePointerDown}
+      onDragHandleKeyDown={(event) => {
+        if (event.key === "Home") {
+          event.preventDefault()
+          usePersonaBuddyShellStore.getState().resetPosition(positionBucket)
+          return
+        }
+        const step = event.shiftKey ? 40 : 10
+        const delta: Record<string, [number, number]> = {
+          ArrowLeft: [-step, 0],
+          ArrowRight: [step, 0],
+          ArrowUp: [0, -step],
+          ArrowDown: [0, step]
+        }
+        const change = delta[event.key]
+        if (!change) return
+        event.preventDefault()
+        const rect = dockRef.current?.getBoundingClientRect()
+        setPosition(
+          positionBucket,
+          clampPersonaBuddyShellPosition(
+            { x: position.x + change[0], y: position.y + change[1] },
+            positionBucket,
+            {
+              viewportWidth: window.innerWidth,
+              viewportHeight: window.innerHeight,
+              shellWidth: rect?.width ?? 160,
+              shellHeight: rect?.height ?? 90
+            }
+          )
+        )
+      }}
       dockRef={dockRef}
     />,
     portalRoot
@@ -642,12 +699,13 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
 }
 
 export const BuddyShellHost: React.FC<BuddyShellHostProps> = ({ root }) => {
+  const independentAttached = useBuddyManagementStore((s) => s.attached)
   const renderContext = useBuddyShellRenderContext()
   const [selectedAssistant] = useSelectedAssistant()
   const [buddyShellEnabled] = useSetting(PERSONA_BUDDY_SHELL_ENABLED_SETTING)
   const isDesktop = useDesktop()
 
-  if (!buddyShellEnabled) {
+  if (!buddyShellEnabled || independentAttached) {
     return null
   }
 

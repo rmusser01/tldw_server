@@ -70,6 +70,13 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
 )
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
+try:
+    import psycopg as _psycopg
+except ImportError:
+    _CLAIMS_PG_EXCEPTIONS: tuple[type[BaseException], ...] = ()
+else:
+    _CLAIMS_PG_EXCEPTIONS = (_psycopg.Error,)
+
 _CLAIMS_COERCE_EXCEPTIONS = (TypeError, ValueError, OverflowError)
 
 _CLAIMS_TEMPLATE_FORMAT_EXCEPTIONS = (
@@ -99,7 +106,7 @@ _CLAIMS_RESPONSE_PARSE_EXCEPTIONS = (
     AttributeError,
 )
 
-_CLAIMS_STORE_EXCEPTIONS = _CLAIMS_NONCRITICAL_EXCEPTIONS + (sqlite3.Error,)
+_CLAIMS_STORE_EXCEPTIONS = _CLAIMS_NONCRITICAL_EXCEPTIONS + (sqlite3.Error,) + _CLAIMS_PG_EXCEPTIONS
 
 _INGESTION_CLAIMS_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -409,13 +416,16 @@ def extract_claims_for_chunks(
             import concurrent.futures as _futures
 
             start_time = time.time()
-            with _futures.ThreadPoolExecutor(max_workers=1) as _exec:
+            _exec = _futures.ThreadPoolExecutor(max_workers=1)
+            try:
                 fut = _exec.submit(_call_provider)
                 try:
                     resp = fut.result(timeout=timeout_sec)
                 except _futures.TimeoutError:
                     with contextlib.suppress(_CLAIMS_NONCRITICAL_EXCEPTIONS):
                         fut.cancel()
+                    _exec.shutdown(wait=False, cancel_futures=True)
+                    _exec = None
                     record_claims_provider_request(
                         provider=provider,
                         model=model_override or "",
@@ -431,6 +441,9 @@ def extract_claims_for_chunks(
                         reason="timeout",
                     )
                     return []
+            finally:
+                if _exec is not None:
+                    _exec.shutdown(wait=True)
             record_claims_provider_request(
                 provider=provider,
                 model=model_override or "",
@@ -672,14 +685,31 @@ def store_claims(
                 assignments=assignments,
             )
             if notification_ids:
+                from tldw_Server_API.app.core.Claims_Extraction import claims_jobs
                 from tldw_Server_API.app.core.Claims_Extraction.claims_notifications import (
                     dispatch_claim_review_notifications,
                 )
-                dispatch_claim_review_notifications(
-                    db_path=str(db.db_path_str),
-                    owner_user_id=str(owner_user_id),
-                    notification_ids=notification_ids,
-                )
+
+                dispatched_via_jobs = False
+                if claims_jobs.claims_jobs_enabled():
+                    try:
+                        claims_jobs.enqueue_claims_review_notification(
+                            owner_user_id=str(owner_user_id),
+                            notification_ids=notification_ids,
+                        )
+                        dispatched_via_jobs = True
+                    except _CLAIMS_STORE_EXCEPTIONS as exc:
+                        logger.debug(
+                            "Failed to enqueue claims review assignment notification job; "
+                            "falling back to legacy dispatch: {}",
+                            exc,
+                        )
+                if not dispatched_via_jobs:
+                    dispatch_claim_review_notifications(
+                        db_path=str(db.db_path_str),
+                        owner_user_id=str(owner_user_id),
+                        notification_ids=notification_ids,
+                    )
         return inserted
     except _CLAIMS_STORE_EXCEPTIONS as e:  # pragma: no cover
         logger.error(f"Failed to store claims for media_id={media_id}: {e}")

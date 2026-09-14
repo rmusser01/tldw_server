@@ -1,0 +1,5 @@
+tldw_Server_API/tests/LLM_Adapters/unit/test_llm_providers_optional_metadata.py: module and 5 functions documented; all parameters/returns annotated
+tldw_Server_API/tests/Persona/test_buddy_reply_settings.py: module and 4 functions documented; all parameters/returns annotated
+tldw_Server_API/tests/Persona/test_buddy_workspace_model_handoff.py: module and 3 functions documented; all parameters/returns annotated
+Bandit production: findings {}; errors []
+Bandit tests: findings {'B101': 40}; errors []

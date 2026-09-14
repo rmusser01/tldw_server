@@ -239,7 +239,10 @@ export async function duplicateAudiobookProject(
       id: crypto.randomUUID(),
       status: "pending" as const,
       audioDuration: undefined,
-      errorMessage: undefined
+      errorMessage: undefined,
+      requestedBackend: undefined,
+      actualBackend: undefined,
+      fallbackUsed: undefined
     })),
     chapterAudioAssetIds: {},
     status: "draft",
@@ -400,6 +403,9 @@ export function serializeChapters(
     audioDuration?: number
     errorMessage?: string
     audioBlob?: Blob
+    requestedBackend?: string
+    actualBackend?: string
+    fallbackUsed?: boolean
   }>
 ): SerializedAudioChapter[] {
   return chapters.map((ch) => ({
@@ -410,6 +416,9 @@ export function serializeChapters(
     voiceConfig: ch.voiceConfig,
     status: ch.status as SerializedAudioChapter["status"],
     audioDuration: ch.audioDuration,
-    errorMessage: ch.errorMessage
+    errorMessage: ch.errorMessage,
+    requestedBackend: ch.requestedBackend,
+    actualBackend: ch.actualBackend,
+    fallbackUsed: ch.fallbackUsed
   }))
 }

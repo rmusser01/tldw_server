@@ -4,10 +4,11 @@
 # Imports
 import asyncio
 import contextlib
-import json
+import inspect
+import threading
 import time
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import TimeoutError
 from dataclasses import dataclass, field
 from enum import IntEnum
 from functools import partial
@@ -15,6 +16,101 @@ from heapq import heappop, heappush
 from typing import Any, Callable, Optional
 
 from loguru import logger
+
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+    start_bounded_stream_daemon,
+)
+from tldw_Server_API.app.core.Chat.streaming_utils import (
+    cancel_stream_tasks_bounded,
+    create_bounded_stream_task,
+    invoke_stream_close_bounded,
+    provider_stream_error_payload,
+    sanitized_provider_stream_exception,
+)
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+
+REQUEST_QUEUE_STREAM_CANCEL_DRAIN_SECONDS = 0.05
+REQUEST_QUEUE_STREAM_CLEANUP_TIMEOUT_SECONDS = 0.05
+REQUEST_QUEUE_STREAM_DAEMON_POLL_SECONDS = 0.05
+REQUEST_QUEUE_STREAM_HANDOFF_CLEANUP_SECONDS = 0.1
+REQUEST_QUEUE_STREAM_TERMINAL_PUT_SECONDS = 0.1
+_QUEUE_STREAM_ABANDONED = object()
+_QUEUE_STREAM_TERMINAL_ABSENT = object()
+
+
+@dataclass(frozen=True, slots=True)
+class QueueStreamTerminalError:
+    """One atomic terminal signal for a queued provider failure."""
+
+    code: str
+
+
+class QueueStreamChannel(asyncio.Queue[Any]):
+    """Bound data chunks while reserving one out-of-band terminal slot."""
+
+    def __init__(self, maxsize: int = 0) -> None:
+        super().__init__(maxsize=maxsize)
+        self._terminal_item: Any = _QUEUE_STREAM_TERMINAL_ABSENT
+        self._terminal_ready = asyncio.Event()
+
+    def put_terminal_nowait(self, item: QueueStreamTerminalError | None) -> bool:
+        """Append exactly one terminal item outside bounded data capacity."""
+
+        if self._terminal_item is not _QUEUE_STREAM_TERMINAL_ABSENT:
+            return False
+        self._terminal_item = item
+        self._terminal_ready.set()
+        return True
+
+    def get_nowait(self) -> Any:
+        """Return buffered data before the reserved terminal error."""
+
+        if not super().empty():
+            return super().get_nowait()
+        if self._terminal_item is _QUEUE_STREAM_TERMINAL_ABSENT:
+            raise asyncio.QueueEmpty
+        terminal = self._terminal_item
+        self._terminal_item = _QUEUE_STREAM_TERMINAL_ABSENT
+        self._terminal_ready.clear()
+        return terminal
+
+    async def get(self) -> Any:
+        """Wait for either buffered data or the reserved terminal error."""
+
+        try:
+            return self.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+
+        data_task = asyncio.create_task(super().get())
+        terminal_task = asyncio.create_task(self._terminal_ready.wait())
+        try:
+            await asyncio.wait(
+                {data_task, terminal_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if data_task.done() and not data_task.cancelled():
+                return data_task.result()
+            data_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                return await data_task
+            return self.get_nowait()
+        finally:
+            for task in (data_task, terminal_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(data_task, terminal_task, return_exceptions=True)
+
+    def empty(self) -> bool:
+        """Return whether neither data nor a terminal error is buffered."""
+
+        return (
+            super().empty()
+            and self._terminal_item is _QUEUE_STREAM_TERMINAL_ABSENT
+        )
+
 
 _REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -26,6 +122,235 @@ _REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
+
+
+async def _await_queue_stream_operation(awaitable: Any, timeout: float) -> Any:
+    """Await queue stream work with a hard bound and detached cancellation."""
+
+    if timeout <= 0:
+        if inspect.iscoroutine(awaitable):
+            awaitable.close()
+        elif isinstance(awaitable, asyncio.Future):
+            awaitable.cancel()
+        raise asyncio.TimeoutError
+    task = create_bounded_stream_task(awaitable)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=max(0.0, timeout))
+    except asyncio.CancelledError:
+        await cancel_stream_tasks_bounded(
+            [task],
+            REQUEST_QUEUE_STREAM_CANCEL_DRAIN_SECONDS,
+        )
+        raise
+    if task not in done:
+        await cancel_stream_tasks_bounded(
+            [task],
+            REQUEST_QUEUE_STREAM_CANCEL_DRAIN_SECONDS,
+        )
+        raise asyncio.TimeoutError
+    return task.result()
+
+
+def _close_late_queue_stream(stream: Any) -> None:
+    """Best-effort close a stream returned after its queued request was abandoned."""
+
+    close = getattr(stream, "aclose", None)
+    if not callable(close):
+        close = getattr(stream, "close", None)
+    if not callable(close):
+        return
+    try:
+        result = close()
+        if inspect.isawaitable(result):
+            asyncio.run(result)
+    except BaseException as close_error:
+        if isinstance(close_error, (KeyboardInterrupt, SystemExit)):
+            raise
+        logger.debug(
+            "Late queued stream close failed error_type={}",
+            type(close_error).__name__,
+        )
+
+
+def _observe_queue_cleanup_task(task: asyncio.Task[Any]) -> None:
+    """Consume completion from a detached queue-result cleanup task."""
+
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        task.result()
+
+
+async def _close_accepted_queue_result_after_release(
+    stream: Any,
+    worker_released: threading.Event,
+) -> None:
+    """Close a caller-owned factory result after its daemon lease is released."""
+
+    deadline = time.monotonic() + REQUEST_QUEUE_STREAM_HANDOFF_CLEANUP_SECONDS
+    while not worker_released.is_set():
+        if time.monotonic() >= deadline:
+            logger.warning("Queued stream cleanup missed worker handoff deadline")
+            return
+        await asyncio.sleep(0)
+    close = getattr(stream, "aclose", None)
+    if not callable(close):
+        close = getattr(stream, "close", None)
+    if not callable(close):
+        return
+    try:
+        await invoke_stream_close_bounded(
+            close,
+            max(0.0, deadline - time.monotonic()),
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Queued stream handoff cleanup exceeded bounded timeout")
+    except _REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS as close_error:
+        logger.debug(
+            "Queued stream handoff cleanup failed error_type={}",
+            type(close_error).__name__,
+        )
+
+
+async def _run_queue_stream_sync_daemon(
+    fn: Callable[..., Any],
+    *args: Any,
+    should_abandon: Callable[[], bool],
+    close_late_result: bool = False,
+    cleanup_after_delivery: Callable[[], Any] | None = None,
+    wait_for_worker_release: bool = False,
+) -> Any:
+    """Run sync streaming work in a disposable daemon, polling request liveness."""
+
+    if should_abandon():
+        return _QUEUE_STREAM_ABANDONED
+
+    loop = asyncio.get_running_loop()
+    result_future: asyncio.Future[Any] = loop.create_future()
+    abandoned = threading.Event()
+    accepted = threading.Event()
+    decision_made = threading.Event()
+    delivery_observed = threading.Event()
+    close_late = threading.Event()
+    worker_released = threading.Event()
+
+    def deliver(value: Any = None, error: BaseException | None = None) -> None:
+        try:
+            if abandoned.is_set() or result_future.done():
+                if close_late_result and error is None and value is not None:
+                    close_late.set()
+                return
+            if error is not None:
+                if isinstance(error, asyncio.CancelledError):
+                    error = sanitized_provider_stream_exception(error)
+                result_future.set_exception(error)
+            else:
+                result_future.set_result(value)
+        finally:
+            delivery_observed.set()
+
+    def finish_delivery(value: Any = None) -> None:
+        while not delivery_observed.wait(REQUEST_QUEUE_STREAM_DAEMON_POLL_SECONDS):
+            if loop.is_closed():
+                if close_late_result and value is not None:
+                    _close_late_queue_stream(value)
+                if cleanup_after_delivery is not None:
+                    cleanup_after_delivery()
+                return
+        if wait_for_worker_release:
+            while not decision_made.wait(REQUEST_QUEUE_STREAM_DAEMON_POLL_SECONDS):
+                if loop.is_closed():
+                    abandoned.set()
+                    decision_made.set()
+                    break
+        if (close_late.is_set() or (abandoned.is_set() and not accepted.is_set())) and value is not None:
+            _close_late_queue_stream(value)
+        if cleanup_after_delivery is not None:
+            cleanup_after_delivery()
+
+    def worker() -> None:
+        try:
+            value = fn(*args)
+        except BaseException as error:
+            if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                raise
+            try:
+                loop.call_soon_threadsafe(deliver, None, error)
+            except RuntimeError:
+                if cleanup_after_delivery is not None:
+                    cleanup_after_delivery()
+                return
+            finish_delivery()
+        else:
+            try:
+                loop.call_soon_threadsafe(deliver, value, None)
+            except RuntimeError:
+                if close_late_result:
+                    _close_late_queue_stream(value)
+                if cleanup_after_delivery is not None:
+                    cleanup_after_delivery()
+                return
+            finish_delivery(value)
+
+    start_bounded_stream_daemon(
+        worker,
+        name="queued-stream-sync-work",
+        released_event=worker_released,
+    )
+    try:
+        while True:
+            done, _ = await asyncio.wait(
+                {result_future},
+                timeout=REQUEST_QUEUE_STREAM_DAEMON_POLL_SECONDS,
+            )
+            if result_future in done:
+                result = result_future.result()
+                if wait_for_worker_release:
+                    if should_abandon():
+                        abandoned.set()
+                        decision_made.set()
+                        return _QUEUE_STREAM_ABANDONED
+                    accepted.set()
+                    decision_made.set()
+                    while not worker_released.is_set():
+                        if should_abandon():
+                            cleanup_task = asyncio.create_task(
+                                _close_accepted_queue_result_after_release(
+                                    result,
+                                    worker_released,
+                                )
+                            )
+                            cleanup_task.add_done_callback(_observe_queue_cleanup_task)
+                            return _QUEUE_STREAM_ABANDONED
+                        await asyncio.sleep(0)
+                return result
+            if should_abandon():
+                abandoned.set()
+                decision_made.set()
+                return _QUEUE_STREAM_ABANDONED
+    except asyncio.CancelledError:
+        if accepted.is_set() and "result" in locals():
+            cleanup_task = asyncio.create_task(
+                _close_accepted_queue_result_after_release(result, worker_released)
+            )
+            cleanup_task.add_done_callback(_observe_queue_cleanup_task)
+        else:
+            abandoned.set()
+            decision_made.set()
+        raise
+    except BaseException:
+        abandoned.set()
+        decision_made.set()
+        if wait_for_worker_release:
+            release_deadline = (
+                time.monotonic() + REQUEST_QUEUE_STREAM_HANDOFF_CLEANUP_SECONDS
+            )
+            while not worker_released.is_set():
+                if should_abandon() or time.monotonic() >= release_deadline:
+                    logger.warning(
+                        "Queued stream worker release exceeded bounded error handoff"
+                    )
+                    break
+                await asyncio.sleep(0)
+        raise
 
 #######################################################################################################################
 #
@@ -55,6 +380,58 @@ class QueuedRequest:
     streaming: bool = field(compare=False, default=False)
     # For streaming jobs, a channel to emit provider chunks (bytes or str). Sentinel None indicates end.
     stream_channel: Optional[asyncio.Queue] = field(compare=False, default=None)
+    stream_factory_timeout: float | None = field(compare=False, default=None)
+    stream_terminal_error_emitted: bool = field(compare=False, default=False)
+
+
+async def _emit_stream_terminal_error(
+    request: QueuedRequest,
+    value: Any = "provider_unavailable",
+    *,
+    preserve_buffered: bool = False,
+) -> None:
+    """Emit one fail-closed terminal signal, optionally after buffered output."""
+
+    channel = request.stream_channel
+    if (
+        not request.streaming
+        or channel is None
+        or request.stream_terminal_error_emitted
+    ):
+        return
+    payload = provider_stream_error_payload(value)
+    code = payload["error"]["code"]
+    terminal = QueueStreamTerminalError(code=code)
+    request.stream_terminal_error_emitted = True
+    if not preserve_buffered:
+        while True:
+            try:
+                channel.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+    put_terminal_nowait = getattr(channel, "put_terminal_nowait", None)
+    if callable(put_terminal_nowait):
+        put_terminal_nowait(terminal)
+        return
+    if preserve_buffered:
+        try:
+            await asyncio.wait_for(
+                channel.put(terminal),
+                timeout=REQUEST_QUEUE_STREAM_TERMINAL_PUT_SECONDS,
+            )
+        except (asyncio.TimeoutError, RuntimeError):
+            logger.warning("Queued terminal error append exceeded bounded timeout")
+        return
+    with contextlib.suppress(asyncio.QueueFull, RuntimeError):
+        channel.put_nowait(terminal)
+
+
+async def _terminalize_cancelled_request(request: QueuedRequest) -> None:
+    """Cancel a queued future and fail closed for any streaming consumer."""
+
+    if not request.future.done():
+        request.future.cancel()
+    await _emit_stream_terminal_error(request)
 
 #######################################################################################################################
 #
@@ -101,10 +478,6 @@ class RequestQueue:
         self._recent_activity = deque(maxlen=200)
         # Event to wake workers when new items arrive (avoids polling delay)
         self._has_items = asyncio.Event()
-        # Dedicated thread pool for processor execution to reduce scheduling variance
-        # and guarantee at-most max_concurrent worker threads.
-        self._executor = ThreadPoolExecutor(max_workers=max(1, int(max_concurrent)))
-
     async def start(self, num_workers: int = 4):
         """
         Start the queue workers.
@@ -127,17 +500,6 @@ class RequestQueue:
             worker = asyncio.create_task(self._worker(f"worker-{i}"))
             self._workers.append(worker)
 
-        # Pre-warm the dedicated executor to reduce first-run latency for processors
-        try:
-            warm_n = max(1, min(self.max_concurrent, num_workers))
-            loop = asyncio.get_running_loop()
-            await asyncio.gather(*[
-                loop.run_in_executor(self._executor, lambda: None)
-                for _ in range(warm_n)
-            ])
-        except _REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS:
-            pass
-
         logger.info("Started {} queue workers", num_workers)
 
     async def stop(self):
@@ -146,6 +508,15 @@ class RequestQueue:
             return
         self._running = False
 
+        async with self._lock:
+            pending_requests = list(self.queue)
+            self.queue.clear()
+            self._has_items.clear()
+            for request in pending_requests:
+                self._active_request_ids.discard(request.request_id)
+        for request in pending_requests:
+            await _terminalize_cancelled_request(request)
+
         # Cancel all workers
         for worker in self._workers:
             worker.cancel()
@@ -153,8 +524,6 @@ class RequestQueue:
         # Wait for workers to finish
         await asyncio.gather(*self._workers, return_exceptions=True)
         self._workers.clear()
-        with contextlib.suppress(_REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS):
-            self._executor.shutdown(wait=True)
         self._stopped = True
 
         logger.info("Stopped queue workers")
@@ -189,6 +558,7 @@ class RequestQueue:
         wait_timeout = 60.0
 
         while self._running:
+            request: QueuedRequest | None = None
             try:
                 # Get next request from queue
                 request = await self._get_next_request()
@@ -211,6 +581,7 @@ class RequestQueue:
                         )
                     except asyncio.InvalidStateError:
                         logger.debug(f"Future already resolved for timed-out request {request.request_id}")
+                    await _emit_stream_terminal_error(request)
                     # Clean up request ID for timed-out requests
                     async with self._lock:
                         self._active_request_ids.discard(request.request_id)
@@ -251,7 +622,11 @@ class RequestQueue:
                     except BaseException as e:
                         if isinstance(e, (KeyboardInterrupt, SystemExit)):
                             raise
-                        logger.error(f"Error processing request {request.request_id}: {e}")
+                        logger.error(
+                            "Error processing request {} error_type={}",
+                            request.request_id,
+                            type(e).__name__,
+                        )
                         try:
                             if not request.future.cancelled():
                                 request.future.set_exception(e)
@@ -267,11 +642,18 @@ class RequestQueue:
                             self._active_request_ids.discard(request.request_id)
 
             except asyncio.CancelledError:
+                if request is not None:
+                    await _terminalize_cancelled_request(request)
+                    self._active_request_ids.discard(request.request_id)
                 break
             except BaseException as e:
                 if isinstance(e, (KeyboardInterrupt, SystemExit)):
                     raise
-                logger.error(f"Worker {worker_id} error: {e}")
+                logger.error(
+                    "Worker {} error_type={}",
+                    worker_id,
+                    type(e).__name__,
+                )
                 await asyncio.sleep(1)
 
         logger.debug("Worker {} stopped", worker_id)
@@ -324,7 +706,7 @@ class RequestQueue:
         )
         loop = asyncio.get_running_loop()
 
-        # Non-streaming: run processor in dedicated thread executor to avoid blocking loop
+        # Non-streaming provider work shares the process-wide adapter capacity cap.
         if not request.streaming:
             try:
                 fn = partial(
@@ -332,7 +714,20 @@ class RequestQueue:
                     *request.processor_args,
                     **request.processor_kwargs,
                 )
-                result = await loop.run_in_executor(self._executor, fn)
+
+                def _invoke_sync_processor() -> Any:
+                    try:
+                        return fn()
+                    except asyncio.CancelledError as provider_cancel:
+                        raise_detached_error(
+                            sanitized_provider_stream_exception(provider_cancel)
+                        )
+
+                result = await await_bounded_sync_call(
+                    _invoke_sync_processor,
+                    pool=SYNC_ADAPTER_CALL_POOL,
+                    exhaustion_message="Provider adapter capacity is exhausted",
+                )
                 duration = time.time() - start_ts
                 self._recent_activity.append({
                     "request_id": request.request_id,
@@ -345,7 +740,11 @@ class RequestQueue:
                 })
                 return result
             except Exception as e:
-                logger.error(f"Processor error for request {request.request_id}: {e}")
+                logger.error(
+                    "Processor error for request {} error_type={}",
+                    request.request_id,
+                    type(e).__name__,
+                )
                 self._recent_activity.append({
                     "request_id": request.request_id,
                     "client_id": request.client_id,
@@ -353,7 +752,7 @@ class RequestQueue:
                     "streaming": False,
                     "duration": time.time() - start_ts,
                     "result": "error",
-                    "error": str(e),
+                    "error_type": type(e).__name__,
                     "ts": time.time(),
                 })
                 raise
@@ -366,10 +765,17 @@ class RequestQueue:
         async def _put_async_with_backpressure(item: Any, *, terminal: bool = False) -> bool:
             """Put an item onto the stream channel with cancellation-aware backpressure.
 
-            For terminal frames (DONE/sentinel), perform bounded retries so the
-            consumer can finish cleanly without risking indefinite hangs.
+            QueueStreamChannel reserves one terminal slot, so completion never
+            waits behind accepted data or loses its sole terminal sentinel.
             """
-            terminal_attempts = 0
+            if terminal:
+                put_terminal_nowait = getattr(
+                    request.stream_channel,
+                    "put_terminal_nowait",
+                    None,
+                )
+                if callable(put_terminal_nowait):
+                    return bool(put_terminal_nowait(item))
             while True:
                 if not terminal and (request.future.cancelled() or loop.is_closed() or not self._running):
                     return False
@@ -381,24 +787,58 @@ class RequestQueue:
                     return True
                 except asyncio.TimeoutError:
                     if terminal:
-                        terminal_attempts += 1
-                        if terminal_attempts >= 3:
-                            return False
-                        continue
+                        return False
                     # Keep waiting while consumer is alive; cancellation checks at loop top.
                     continue
                 except _REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS as ch_e:
-                    logger.warning(f"Failed to enqueue stream chunk for {request.request_id}: {ch_e}")
+                    logger.warning(
+                        "Failed to enqueue stream chunk for {} error_type={}",
+                        request.request_id,
+                        type(ch_e).__name__,
+                    )
                     return False
 
         async def _pump_async_iterator(async_iter):
             aiter = async_iter.__aiter__() if hasattr(async_iter, "__aiter__") else async_iter
+            next_task: asyncio.Future[Any] | None = None
             try:
                 while True:
                     if request.future.cancelled() or loop.is_closed() or not self._running:
                         break
                     try:
-                        chunk = await aiter.__anext__()
+                        next_task = create_bounded_stream_task(aiter.__anext__())
+                        while True:
+                            done, _ = await asyncio.wait(
+                                {next_task},
+                                timeout=REQUEST_QUEUE_STREAM_CANCEL_DRAIN_SECONDS,
+                            )
+                            if next_task in done:
+                                try:
+                                    chunk = next_task.result()
+                                except asyncio.CancelledError as provider_cancel:
+                                    worker_task = asyncio.current_task()
+                                    if (
+                                        worker_task is not None
+                                        and worker_task.cancelling()
+                                    ):
+                                        raise
+                                    raise_detached_error(
+                                        sanitized_provider_stream_exception(
+                                            provider_cancel
+                                        )
+                                    )
+                                break
+                            if (
+                                request.future.cancelled()
+                                or loop.is_closed()
+                                or not self._running
+                            ):
+                                await cancel_stream_tasks_bounded(
+                                    [next_task],
+                                    REQUEST_QUEUE_STREAM_CANCEL_DRAIN_SECONDS,
+                                )
+                                next_task = None
+                                return
                     except StopAsyncIteration:
                         break
                     if request.future.cancelled() or loop.is_closed() or not self._running:
@@ -407,22 +847,40 @@ class RequestQueue:
                         break
             finally:
                 # Ensure async iterators are closed on cancellation or early exit
+                if next_task is not None and not next_task.done():
+                    await cancel_stream_tasks_bounded(
+                        [next_task],
+                        REQUEST_QUEUE_STREAM_CANCEL_DRAIN_SECONDS,
+                    )
                 try:
                     aclose = getattr(aiter, "aclose", None)
                     if callable(aclose):
-                        await aclose()
-                except _REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS:
-                    pass
-                # Signal completion
-                with contextlib.suppress(_REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS):
-                    await _put_async_with_backpressure(None, terminal=True)
+                        await invoke_stream_close_bounded(
+                            aclose,
+                            REQUEST_QUEUE_STREAM_CLEANUP_TIMEOUT_SECONDS,
+                        )
+                except asyncio.TimeoutError:
+                    logger.debug(
+                        "Queued async stream close exceeded bounded timeout request={}",
+                        request.request_id,
+                    )
+                except _REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS as close_error:
+                    logger.debug(
+                        "Queued async stream close failed request={} error_type={}",
+                        request.request_id,
+                        type(close_error).__name__,
+                    )
 
         def _pump_sync_iterator(sync_iter):
             def _put_with_backpressure(item: Any) -> bool:
                 try:
                     fut = asyncio.run_coroutine_threadsafe(request.stream_channel.put(item), loop)
                 except _REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS as ch_e:
-                    logger.warning(f"Failed to enqueue stream chunk (sync) for {request.request_id}: {ch_e}")
+                    logger.warning(
+                        "Failed to enqueue stream chunk (sync) for {} error_type={}",
+                        request.request_id,
+                        type(ch_e).__name__,
+                    )
                     return False
                 while True:
                     try:
@@ -434,20 +892,17 @@ class RequestQueue:
                                 fut.cancel()
                             return False
                     except _REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS as ch_e:
-                        logger.warning(f"Failed to enqueue stream chunk (sync) for {request.request_id}: {ch_e}")
+                        logger.warning(
+                            "Failed to enqueue stream chunk (sync) for {} error_type={}",
+                            request.request_id,
+                            type(ch_e).__name__,
+                        )
                         return False
 
-            try:
-                for chunk in sync_iter:
-                    try:
-                        if not _put_with_backpressure(chunk):
-                            break
-                    except _REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS as ch_e:
-                        logger.warning(f"Failed to enqueue stream chunk (sync) for {request.request_id}: {ch_e}")
-                        break
-            finally:
-                with contextlib.suppress(_REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS):
-                    _put_with_backpressure(None)
+            for chunk in sync_iter:
+                if not _put_with_backpressure(chunk):
+                    return None
+            return None
 
         # Run the processor to obtain the stream (potentially blocking)
         try:
@@ -456,19 +911,52 @@ class RequestQueue:
                 *request.processor_args,
                 **request.processor_kwargs,
             )
-            stream = await loop.run_in_executor(self._executor, fn)
+            stream_factory_deadline: float | None = None
+
+            def dispatch_stream_factory() -> Any:
+                nonlocal stream_factory_deadline
+                if request.stream_factory_timeout is not None:
+                    stream_factory_deadline = time.monotonic() + max(
+                        0.0,
+                        request.stream_factory_timeout,
+                    )
+                return fn()
+
+            stream = await _run_queue_stream_sync_daemon(
+                dispatch_stream_factory,
+                should_abandon=lambda: (
+                    request.future.cancelled()
+                    or loop.is_closed()
+                    or not self._running
+                    or (
+                        stream_factory_deadline is not None
+                        and time.monotonic() >= stream_factory_deadline
+                    )
+                ),
+                close_late_result=True,
+                wait_for_worker_release=True,
+            )
+            if stream is _QUEUE_STREAM_ABANDONED:
+                if (
+                    stream_factory_deadline is not None
+                    and time.monotonic() >= stream_factory_deadline
+                    and not request.future.cancelled()
+                    and self._running
+                ):
+                    raise TimeoutError("Provider stream factory timed out")
+                with contextlib.suppress(_REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS):
+                    await _put_async_with_backpressure(None, terminal=True)
+                return {
+                    "status": "stream_cancelled",
+                    "request_id": request.request_id,
+                }
         except Exception as e:
-            # Emit SSE-style error payload to channel to gracefully end downstream streaming
-            # Use json.dumps to properly escape the error message and prevent JSON injection
-            error_payload = json.dumps({"error": {"message": str(e)[:500]}})
-            err_msg = f'data: {error_payload}\n\n'
-            try:
-                await _put_async_with_backpressure(err_msg, terminal=True)
-                await _put_async_with_backpressure("data: [DONE]\n\n", terminal=True)
-                await _put_async_with_backpressure(None, terminal=True)
-            except _REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS:
-                pass
-            logger.error(f"Processor error starting stream for {request.request_id}: {e}")
+            await _emit_stream_terminal_error(request, e)
+            logger.error(
+                "Processor error starting stream for {} error_type={}",
+                request.request_id,
+                type(e).__name__,
+            )
             self._recent_activity.append({
                 "request_id": request.request_id,
                 "client_id": request.client_id,
@@ -476,7 +964,7 @@ class RequestQueue:
                 "streaming": True,
                 "duration": time.time() - start_ts,
                 "result": "error",
-                "error": str(e),
+                "error_type": type(e).__name__,
                 "ts": time.time(),
             })
             raise
@@ -487,7 +975,25 @@ class RequestQueue:
                 await _pump_async_iterator(stream)
             else:
                 # Sync iterator; run pumping in thread
-                await loop.run_in_executor(self._executor, _pump_sync_iterator, stream)
+                pump_result = await _run_queue_stream_sync_daemon(
+                    _pump_sync_iterator,
+                    stream,
+                    should_abandon=lambda: (
+                        request.future.cancelled()
+                        or loop.is_closed()
+                        or not self._running
+                    ),
+                    cleanup_after_delivery=lambda: _close_late_queue_stream(stream),
+                )
+                if pump_result is _QUEUE_STREAM_ABANDONED:
+                    with contextlib.suppress(_REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS):
+                        await _put_async_with_backpressure(None, terminal=True)
+                    return {
+                        "status": "stream_cancelled",
+                        "request_id": request.request_id,
+                    }
+            with contextlib.suppress(_REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS):
+                await _put_async_with_backpressure(None, terminal=True)
             # For streaming jobs, return a simple status when pumping completes
             duration = time.time() - start_ts
             self._recent_activity.append({
@@ -501,16 +1007,12 @@ class RequestQueue:
             })
             return {"status": "stream_completed", "request_id": request.request_id}
         except Exception as e:
-            # Best-effort to signal error and completion downstream
-            # Use json.dumps to properly escape the error message and prevent JSON injection
-            error_payload = json.dumps({"error": {"message": f"Stream error: {str(e)[:500]}"}})
-            try:
-                await _put_async_with_backpressure(f'data: {error_payload}\n\n', terminal=True)
-                await _put_async_with_backpressure("data: [DONE]\n\n", terminal=True)
-                await _put_async_with_backpressure(None, terminal=True)
-            except _REQUEST_QUEUE_NONCRITICAL_EXCEPTIONS:
-                pass
-            logger.error(f"Streaming processor error for {request.request_id}: {e}")
+            await _emit_stream_terminal_error(request, e, preserve_buffered=True)
+            logger.error(
+                "Streaming processor error for {} error_type={}",
+                request.request_id,
+                type(e).__name__,
+            )
             self._recent_activity.append({
                 "request_id": request.request_id,
                 "client_id": request.client_id,
@@ -518,7 +1020,7 @@ class RequestQueue:
                 "streaming": True,
                 "duration": time.time() - start_ts,
                 "result": "error",
-                "error": str(e),
+                "error_type": type(e).__name__,
                 "ts": time.time(),
             })
             raise
@@ -536,6 +1038,7 @@ class RequestQueue:
         processor_kwargs: Optional[dict[str, Any]] = None,
         streaming: bool = False,
         stream_channel: Optional[asyncio.Queue] = None,
+        stream_factory_timeout: float | None = None,
     ) -> asyncio.Future:
         """
         Add a request to the queue.
@@ -583,6 +1086,11 @@ class RequestQueue:
                 processor_kwargs=processor_kwargs,
                 streaming=streaming,
                 stream_channel=stream_channel,
+                stream_factory_timeout=(
+                    max(0.0, float(stream_factory_timeout))
+                    if streaming and stream_factory_timeout is not None
+                    else None
+                ),
             )
 
             # Add to priority queue
@@ -626,12 +1134,14 @@ class RequestQueue:
         """Clear all pending requests."""
         async with self._lock:
             # Cancel all pending requests
-            for request in self.queue:
-                request.future.cancel()
+            pending = list(self.queue)
+            for request in pending:
                 self._active_request_ids.discard(request.request_id)
             self.queue.clear()
             self._has_items.clear()
             logger.info("Cleared request queue")
+        for request in pending:
+            await _terminalize_cancelled_request(request)
 
 
 class RateLimitedQueue(RequestQueue):
@@ -739,6 +1249,7 @@ class RateLimitedQueue(RequestQueue):
         processor_kwargs: Optional[dict[str, Any]] = None,
         streaming: bool = False,
         stream_channel: Optional[asyncio.Queue] = None,
+        stream_factory_timeout: float | None = None,
     ) -> asyncio.Future:
         """
         Add a request to the queue with rate limiting.
@@ -782,6 +1293,7 @@ class RateLimitedQueue(RequestQueue):
                 processor_kwargs=processor_kwargs,
                 streaming=streaming,
                 stream_channel=stream_channel,
+                stream_factory_timeout=stream_factory_timeout,
             )
         except Exception:
             await self._rollback_rate_limit(client_id, reservation)

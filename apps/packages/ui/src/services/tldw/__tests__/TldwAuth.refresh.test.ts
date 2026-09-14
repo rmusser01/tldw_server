@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
+  initialize: vi.fn(),
   bgRequest: vi.fn(),
   emitSplashAfterLoginSuccess: vi.fn(),
   getConfig: vi.fn(),
   updateConfig: vi.fn(),
+  commitTokenRefresh: vi.fn(),
   getCurrentUserProfile: vi.fn()
 }))
 
@@ -19,8 +21,11 @@ vi.mock("@/services/splash-events", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    initialize: (...args: unknown[]) => mocks.initialize(...args),
     getConfig: (...args: unknown[]) => mocks.getConfig(...args),
     updateConfig: (...args: unknown[]) => mocks.updateConfig(...args),
+    commitTokenRefresh: (...args: unknown[]) =>
+      mocks.commitTokenRefresh(...args),
     getCurrentUserProfile: (...args: unknown[]) =>
       mocks.getCurrentUserProfile(...args)
   }
@@ -33,9 +38,13 @@ describe("TldwAuthService token refresh single-flight", () => {
     vi.resetModules()
     delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
     mocks.bgRequest.mockReset()
+    mocks.initialize.mockReset()
     mocks.getConfig.mockReset()
     mocks.updateConfig.mockReset()
+    mocks.commitTokenRefresh.mockReset()
     mocks.updateConfig.mockResolvedValue(undefined)
+    mocks.commitTokenRefresh.mockResolvedValue(true)
+    mocks.initialize.mockResolvedValue(undefined)
     mocks.getConfig.mockResolvedValue({
       authMode: "multi-user",
       refreshToken: "refresh-token"

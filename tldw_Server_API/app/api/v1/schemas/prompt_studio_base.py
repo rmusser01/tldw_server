@@ -7,6 +7,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
 from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
 
 ########################################################################################################################
@@ -116,10 +117,16 @@ class PageStandardResponse(StandardResponse):
 ########################################################################################################################
 # Security Shim
 
+DEFAULT_MAX_TEST_CASES = 1000
+
+
 class SecurityConfig(BaseModel):
     """Security configuration for prompt operations"""
     max_prompt_length: int = Field(default=50000, description="Maximum prompt length in characters")
-    max_test_cases: int = Field(default=1000, description="Maximum test cases per project")
+    max_test_cases: int = Field(
+        default=DEFAULT_MAX_TEST_CASES,
+        description="Maximum test cases per project",
+    )
     max_concurrent_jobs: int = Field(default=10, description="Maximum concurrent jobs per user")
     enable_prompt_validation: bool = Field(default=True, description="Enable prompt validation")
     enable_rate_limiting: bool = Field(default=True, description="Enable rate limiting")

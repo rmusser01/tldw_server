@@ -8,7 +8,6 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio.mcts_optimizer imp
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.optimization_engine import OptimizationEngine
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_runner import TestRunner
 
-
 pytestmark = pytest.mark.integration
 
 
@@ -90,6 +89,7 @@ def test_mcts_ws_schema_and_persistence_match_throttle_cadence(
     monkeypatch.setattr(TestRunner, "run_single_test", _fake_run_single_test, raising=True)
 
     lifecycle_events = []
+    completion_statuses = []
     iteration_payloads = []
 
     async def _capture_event(self, event_type, data, client_ids=None, project_id=None):
@@ -101,6 +101,9 @@ def test_mcts_ws_schema_and_persistence_match_throttle_cadence(
             EventType.OPTIMIZATION_COMPLETED.value,
         }:
             lifecycle_events.append(et)
+            if et == EventType.OPTIMIZATION_COMPLETED.value:
+                current = db.get_optimization(opt["id"]) or {}
+                completion_statuses.append(str(current.get("status") or "").lower())
         return None
 
     from tldw_Server_API.app.core.Prompt_Management.prompt_studio import event_broadcaster as eb_mod
@@ -112,6 +115,7 @@ def test_mcts_ws_schema_and_persistence_match_throttle_cadence(
 
     assert lifecycle_events.count(EventType.OPTIMIZATION_STARTED.value) == 1
     assert lifecycle_events.count(EventType.OPTIMIZATION_COMPLETED.value) == 1
+    assert completion_statuses == ["completed"]
 
     expected_iterations = _expected_throttled_iterations(n_sims, throttle_every)
     seen_iterations = [int(p["iteration"]) for p in iteration_payloads]

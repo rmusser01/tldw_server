@@ -21,7 +21,7 @@ Spec: `Docs/superpowers/specs/2026-07-01-openai-realtime-speech-endpoint-design.
 
 **Tests:** Protocol golden tests and capability unit tests run without importing heavy audio providers.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -162,7 +162,7 @@ class UpdateSessionCommand:
 - [ ] Implement `to_openai_server_event(event: RealtimeServerEvent) -> dict[str, Any]`.
 - [ ] Keep all base64 encoding and decoding in `protocol.py`.
 - [ ] Keep OpenAI field names out of session and pipeline modules except where converting through the adapter.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 source .venv/bin/activate
@@ -206,7 +206,7 @@ Expected result: all capability tests pass.
 
 **Tests:** Orchestrator tests use fake pipeline and fake persistence only.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -327,7 +327,7 @@ Expected result: all Stage 2 session and persistence tests pass.
 
 **Tests:** WebSocket auth and integration tests run against fake pipeline without live providers.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -493,7 +493,7 @@ Expected result: all Stage 3 tests pass.
 
 **Tests:** Unit tests monkeypatch service callables and do not call external providers by default.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -510,19 +510,19 @@ Modify if needed after inspecting signatures during execution:
 
 ### Task 4.1: Write Default Pipeline Tests First
 
-- [ ] Add `test_realtime_default_pipeline.py`.
-- [ ] Monkeypatch the STT callable to return `"hello world"`.
-- [ ] Monkeypatch `perform_chat_api_call_async` to return an async text iterator yielding `"hello "` and `"there"`.
-- [ ] Monkeypatch TTS service `open_realtime_session` to return a fake realtime TTS session yielding two PCM chunks.
-- [ ] Test the adapter sends `OpenAISpeechRequest(response_format="pcm", stream=True, target_sample_rate=24000)`.
-- [ ] Test text is passed into the TTS realtime session incrementally and committed at turn end.
-- [ ] Test `stream_turn` yields text deltas before done and yields audio chunks from the fake TTS session.
-- [ ] Test assistant transcript deltas mirror the spoken text emitted by the adapter.
-- [ ] Test non-streaming chat return values are normalized into one text delta when the provider does not stream.
-- [ ] Test STT exceptions become `RealtimePipelineError(stage="stt")`.
-- [ ] Test LLM exceptions become `RealtimePipelineError(stage="llm")`.
-- [ ] Test TTS exceptions become `RealtimePipelineError(stage="tts")`.
-- [ ] Run the red test:
+- [x] Add `test_realtime_default_pipeline.py`.
+- [x] Monkeypatch the STT callable to return `"hello world"`.
+- [x] Monkeypatch `perform_chat_api_call_async` to return an async text iterator yielding `"hello "` and `"there"`.
+- [x] Monkeypatch TTS service `open_realtime_session` to return a fake realtime TTS session yielding two PCM chunks.
+- [x] Test the adapter sends `OpenAISpeechRequest(response_format="pcm", stream=True, target_sample_rate=24000)`.
+- [x] Test text is passed into the TTS realtime session incrementally and committed at turn end.
+- [x] Test `stream_turn` yields text deltas before done and yields audio chunks from the fake TTS session.
+- [x] Test assistant transcript deltas mirror the spoken text emitted by the adapter.
+- [x] Test non-streaming chat return values are normalized into one text delta when the provider does not stream.
+- [x] Test STT exceptions become `RealtimePipelineError(stage="stt")`.
+- [x] Test LLM exceptions become `RealtimePipelineError(stage="llm")`.
+- [x] Test TTS exceptions become `RealtimePipelineError(stage="tts")`.
+- [x] Run the red test:
 
 ```bash
 source .venv/bin/activate
@@ -533,8 +533,8 @@ Expected red result: pytest imports the test module and fails because `default_p
 
 ### Task 4.2: Implement Default Pipeline Adapter
 
-- [ ] Add `DefaultRealtimePipeline` in `default_pipeline.py`.
-- [ ] Constructor arguments:
+- [x] Add `DefaultRealtimePipeline` in `default_pipeline.py`.
+- [x] Constructor arguments:
   - `stt_transcribe_pcm16: Callable[..., Awaitable[str]]`
   - `chat_call: Callable[..., Awaitable[Any]]`
   - `tts_service_factory: Callable[[], Any]`
@@ -542,24 +542,24 @@ Expected red result: pytest imports the test module and fails because `default_p
   - `default_voice: str`
   - `provider_hint: str | None`
   - `user_id: int | None`
-- [ ] Provide a module-level factory `build_default_realtime_pipeline(principal) -> DefaultRealtimePipeline`.
-- [ ] Reuse existing STT code by extracting or wrapping a lower-level batch transcription helper. The helper must accept raw PCM16 bytes plus sample rate and must not require an HTTP `UploadFile`.
-- [ ] Use `perform_chat_api_call_async` for LLM calls.
-- [ ] Normalize streaming chat chunks and non-streaming chat responses into an async iterator of text deltas.
-- [ ] Implement `stream_turn` as the only public streaming method on the default pipeline.
-- [ ] Within `stream_turn`, push each LLM text delta to the realtime TTS session and yield a typed text event for the same delta.
-- [ ] Within `stream_turn`, yield transcript events for the assistant text that will be spoken.
-- [ ] Within `stream_turn`, concurrently drain TTS audio chunks and yield typed audio events until the TTS session finishes.
-- [ ] Use `TTSServiceV2.open_realtime_session` when available.
-- [ ] Fall back to `generate_speech` through `BufferedRealtimeSession` when a provider lacks native realtime TTS.
-- [ ] Use `OpenAISpeechRequest` with:
+- [x] Provide a module-level factory `build_default_realtime_pipeline(principal) -> DefaultRealtimePipeline`.
+- [x] Reuse existing STT code by extracting or wrapping a lower-level batch transcription helper. The helper must accept raw PCM16 bytes plus sample rate and must not require an HTTP `UploadFile`.
+- [x] Use `perform_chat_api_call_async` for LLM calls.
+- [x] Normalize streaming chat chunks and non-streaming chat responses into an async iterator of text deltas.
+- [x] Implement `stream_turn` as the only public streaming method on the default pipeline.
+- [x] Within `stream_turn`, push each LLM text delta to the realtime TTS session and yield a typed text event for the same delta.
+- [x] Within `stream_turn`, yield transcript events for the assistant text that will be spoken.
+- [x] Within `stream_turn`, concurrently drain TTS audio chunks and yield typed audio events until the TTS session finishes.
+- [x] Use `TTSServiceV2.open_realtime_session` when available.
+- [x] Fall back to `generate_speech` through `BufferedRealtimeSession` when a provider lacks native realtime TTS.
+- [x] Use `OpenAISpeechRequest` with:
   - `response_format="pcm"`
   - `stream=True`
   - `target_sample_rate=24000`
   - `voice=<resolved voice>`
   - `model=<resolved TTS model>`
-- [ ] Do not import heavy STT or TTS model modules at import time; resolve them inside the factory or call path.
-- [ ] Run:
+- [x] Do not import heavy STT or TTS model modules at import time; resolve them inside the factory or call path.
+- [x] Run:
 
 ```bash
 source .venv/bin/activate
@@ -570,10 +570,10 @@ Expected result: all default pipeline tests pass.
 
 ### Task 4.3: Wire Default Factories Into Routers
 
-- [ ] In `audio_realtime.py`, set the production pipeline factory to `build_default_realtime_pipeline`.
-- [ ] In `realtime_compat.py`, set the production pipeline factory to the same factory.
-- [ ] Keep tests able to monkeypatch factories without importing heavy providers.
-- [ ] Run the Stage 3 WebSocket tests again with fake factories:
+- [x] In `audio_realtime.py`, set the production pipeline factory to `build_default_realtime_pipeline`.
+- [x] In `realtime_compat.py`, set the production pipeline factory to the same factory.
+- [x] Keep tests able to monkeypatch factories without importing heavy providers.
+- [x] Run the Stage 3 WebSocket tests again with fake factories:
 
 ```bash
 source .venv/bin/activate
@@ -581,6 +581,26 @@ python -m pytest tldw_Server_API/tests/Audio/test_realtime_websocket.py -v
 ```
 
 Expected result: all WebSocket tests still pass.
+
+### Stage 4 Review Notes
+
+- [x] Spec review passed with no Critical or Important findings.
+- [x] Initial code-quality review found task/session cleanup leaks on abnormal `stream_turn` exits and fragile realtime TTS opener kwargs.
+- [x] Added cleanup regressions for LLM-stream failure, close-preferred cleanup, buffered fallback abort without partial synthesis, and request-only/config-only realtime opener signatures.
+- [x] Fixed abnormal-exit cleanup to close/abort/cancel TTS sessions where available, fall back to finish, and cancel/await the audio drain task.
+- [x] Added `BufferedRealtimeSession.close()` to abort without synthesizing uncommitted text.
+- [x] Filtered `open_realtime_session` kwargs by callable signature unless it accepts `**kwargs`.
+- [x] Code-quality re-review passed with no Critical or Important findings.
+- [x] Verification after fixes:
+
+```bash
+source .venv/bin/activate
+python -m pytest tldw_Server_API/tests/Audio/test_realtime_default_pipeline.py tldw_Server_API/tests/Audio/test_realtime_websocket.py tldw_Server_API/tests/TTS_NEW/unit/test_realtime_session_sanitization.py -q
+python -m bandit -r tldw_Server_API/app/core/Audio/Realtime tldw_Server_API/app/api/v1/endpoints/audio/audio_realtime.py tldw_Server_API/app/api/v1/endpoints/realtime_compat.py tldw_Server_API/app/core/TTS/realtime_session.py -f json -o /tmp/bandit_realtime_stage4_fix4.json
+git diff --check
+```
+
+Expected result: pytest reports `20 passed`; Bandit reports `errors=[]` and `results=0`; diff check is clean.
 
 ---
 
@@ -592,13 +612,14 @@ Expected result: all WebSocket tests still pass.
 
 **Tests:** Focused unit/integration tests and Bandit pass.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
 Create:
 
-- `tldw_Server_API/tests/Audio/test_realtime_live_smoke.py`
+- `Helper_Scripts/Testing-related/realtime_speech_smoke.py` (manual provider verification)
+- `tldw_Server_API/tests/Audio/test_realtime_smoke_cli.py` (fake-transport regression coverage)
 
 Modify:
 
@@ -609,29 +630,32 @@ Modify:
 
 ### Task 5.1: Update Docs
 
-- [ ] Add a `OpenAI-Compatible Realtime Speech` section to `Docs/Audio_Streaming_Protocol.md`.
-- [ ] Document both routes:
+- [x] Add a `OpenAI-Compatible Realtime Speech` section to `Docs/Audio_Streaming_Protocol.md`.
+- [x] Document both routes:
   - `WS /api/v1/audio/realtime`
   - `WS /v1/realtime`
   - `GET /api/v1/audio/realtime/capabilities`
-- [ ] Document required auth headers for Stage 1.
-- [ ] Document that `/v1/realtime` does not accept first-message auth.
-- [ ] Document the input/output audio formats, sample rates, and limits.
-- [ ] Document supported client events and server events.
-- [ ] Document `conversation.item.create` as explicitly unsupported in Stage 1.
-- [ ] Document `rate_limits.updated` as tldw quota compatibility semantics.
-- [ ] Update `Docs/Product/Realtime_Voice_Latency_PRD.md` with a note that the new endpoint carries `generation_id` from Stage 1 and that latency/interruption benchmarks remain Stage 2 work.
-- [ ] Update the design spec status from `Draft for user review` to `Accepted for implementation` after implementation begins.
+- [x] Document required auth headers for Stage 1.
+- [x] Document that `/v1/realtime` does not accept first-message auth.
+- [x] Document the input/output audio formats, sample rates, and limits.
+- [x] Document supported client events and server events.
+- [x] Document `conversation.item.create` as explicitly unsupported in Stage 1.
+- [x] Document `rate_limits.updated` as tldw quota compatibility semantics.
+- [x] Update `Docs/Product/Realtime_Voice_Latency_PRD.md` with a note that the new endpoint carries `generation_id` from Stage 1 and that latency/interruption benchmarks remain Stage 2 work.
+- [x] Update the design spec status from `Draft for user review` to `Accepted for implementation` after implementation begins.
 
-### Task 5.2: Add Live Smoke Test Marker
+### Task 5.2: Add Manual Provider Smoke
 
-- [ ] Add `test_realtime_live_smoke.py`.
-- [ ] Mark the module with `pytestmark = [pytest.mark.external_api, pytest.mark.local_llm_service]`.
-- [ ] Skip unless `TLDW_REALTIME_LIVE_SMOKE=1`.
-- [ ] Require explicit provider environment variables for STT, LLM, and TTS.
-- [ ] Send a short generated PCM16 silence-plus-tone fixture through `/v1/realtime`.
-- [ ] Assert a `response.done` event arrives.
-- [ ] Keep this test out of default verification commands.
+Amended during TASK-12089's September 2026 Qodo follow-up: provider verification
+is an explicitly invoked script rather than an environment-skipped pytest test.
+This preserves manual validation while making automated tests deterministic.
+
+- [x] Add `Helper_Scripts/Testing-related/realtime_speech_smoke.py`.
+- [x] Require an explicit spoken 16 kHz mono PCM16 WAV and authentication.
+- [x] Use the running server's normal STT, LLM, and TTS configuration.
+- [x] Check the manual turn lifecycle through a completed `response.done`.
+- [x] Cover the command with fake-transport unit tests using one `unit` marker.
+- [x] Keep real-provider calls outside pytest and normal CI.
 
 ### Task 5.3: Run Focused Verification
 
@@ -653,7 +677,7 @@ python -m pytest \
 
 Expected result: all focused tests pass.
 
-- [ ] Run route/config regression tests:
+- [x] Run route/config regression tests:
 
 ```bash
 source .venv/bin/activate
@@ -666,7 +690,7 @@ python -m pytest \
 
 Expected result: all selected route and policy tests pass.
 
-- [ ] Run Bandit on touched implementation paths:
+- [x] Run Bandit on touched implementation paths:
 
 ```bash
 source .venv/bin/activate
@@ -681,10 +705,13 @@ python -m bandit \
 
 Expected result: Bandit exits successfully, and `/tmp/bandit_audio_realtime.json` contains no new high or medium findings in touched code.
 
+Actual result: live smoke marker collection reported `1 skipped`; focused realtime suite reported `96 passed`;
+route/config regression slice reported `11 passed`; Bandit reported `errors=[]` and `results=0`.
+
 ### Task 5.4: Finalize Backlog And Commit
 
-- [ ] Update Backlog task metadata with implementation docs, touched files, verification commands, Bandit result path, known live smoke skip conditions, and final summary.
-- [ ] Run diff checks:
+- [x] Update Backlog task metadata with implementation docs, touched files, verification commands, Bandit result path, known live smoke skip conditions, and final summary.
+- [x] Run diff checks:
 
 ```bash
 git diff --check
@@ -693,8 +720,10 @@ git status --short
 
 Expected result: no whitespace errors. Git status shows only files intentionally changed for the realtime endpoint work plus unrelated pre-existing workspace changes.
 
-- [ ] Stage only files touched for this implementation.
-- [ ] Commit with a message that references the feature and includes the reason for the adapter-first design:
+Actual result: `git diff --check` passed; `git status --short` showed only Stage 5 documentation/task/test files before final Backlog updates.
+
+- [x] Stage only files touched for this implementation.
+- [x] Commit with a message that references the feature and includes the reason for the adapter-first design:
 
 ```bash
 git commit -m "feat: add OpenAI-compatible realtime speech endpoint"
@@ -705,6 +734,16 @@ Expected result: commit succeeds without bypassing hooks.
 ---
 
 ## Implementation Notes
+
+- Pre-PR review follow-up: rebased the branch onto current `origin/dev` to remove unrelated PR noise. Fixed review blockers by making WebSocket `response.cancel` reachable during active generation, rejecting unimplemented response/session overrides explicitly, adding capability metadata for persistence/deferred features, serializing capabilities with `asdict`, splitting chat/TTS provider hints, splitting oversized output audio chunks before protocol serialization, and correcting the opt-in live smoke session shape.
+- Review follow-up verification:
+  - `python -m pytest tldw_Server_API/tests/Audio/test_realtime_websocket.py -q` -> `9 passed`
+  - `python -m pytest tldw_Server_API/tests/Audio/test_realtime_default_pipeline.py -q` -> `12 passed`
+  - `python -m pytest tldw_Server_API/tests/Audio/test_realtime_protocol_adapter.py tldw_Server_API/tests/Audio/test_realtime_capabilities.py tldw_Server_API/tests/Audio/test_realtime_live_smoke.py -q` -> `65 passed, 1 skipped`
+  - focused realtime suite from Task 5.3 -> `110 passed`
+  - route/config regression slice -> `11 passed`
+  - Bandit `/tmp/bandit_audio_realtime_reviewfix_final.json` -> `errors=[]`, `results=0`
+  - `git diff --check` -> passed
 
 - Use a separate `audio_realtime` router spec instead of adding the realtime route to aggregate `audio.py`. This preserves independent `audio-realtime` route gating.
 - Keep all OpenAI compatibility field names in `protocol.py`, `handler.py`, and endpoint docs. Session, pipeline, and persistence modules should use internal names.

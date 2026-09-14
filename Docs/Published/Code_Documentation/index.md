@@ -34,6 +34,7 @@ Use the links below to jump to common areas, or the sidebar to browse all topics
 
 ## Chat & Knowledge
 - Chat Developer Guide: Chat_Developer_Guide.md
+- Personal Context Profile: Personal_Context_Developer_Guide.md
 - Chatbook Developer Guide: Chatbook_Developer_Guide.md
 - Meetings Developer Guide: Meetings_Developer_Guide.md
 
