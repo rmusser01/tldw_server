@@ -103,6 +103,19 @@ triage issue.
 
 ## Latest Evidence
 
+### 2026-09-13: PR #2960 review follow-up (portable verification)
+
+- Both drills now share the readiness drill's resilient ownership-scoped cleanup.
+  A mismatch session or VM deletion error no longer skips later cleanup attempts;
+  accumulated errors and remaining owned VMs are retained before failure.
+- Separate session-error and VM-error regressions failed against the old cleanup
+  and passed after the fix. The focused suite passed **71 tests**, with two
+  intentional host-gated skips; the two drill modules passed **18 unit cases**.
+  Unit markers and missing docstrings were added; Black and Bandit were clean.
+- No live VM was rerun for this review patch. The accepted runs and source hashes
+  below describe their retained historical test versions, not the modified test
+  files. No production runtime, helper, or guest-agent source changed.
+
 ### 2026-09-13: Real acknowledged-guest readiness timeout and recovery
 
 - TASK-13243.4, branch `codex/vz-readiness-timeout-host-validation`, stacked on

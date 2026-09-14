@@ -20,7 +20,7 @@ from tldw_Server_API.app.core.Sandbox.runners.vz_linux_runner import VZLinuxRunn
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 from tldw_Server_API.app.core.Sandbox.streams import get_hub
 from tldw_Server_API.app.core.testing import is_truthy
-from tldw_Server_API.tests.sandbox.test_vz_linux_guest_mismatch_host_gated import _owned_vm_ids
+from tldw_Server_API.tests.sandbox.test_vz_linux_guest_mismatch_host_gated import _cleanup_owned_resources
 from tldw_Server_API.tests.sandbox.test_vz_linux_real_host_e2e import _expect, _require_vz_linux_real_host_e2e
 
 
@@ -30,48 +30,22 @@ _CHALLENGE_NAME = ".tldw-readiness-challenge.json"
 _PROOF_NAME = ".tldw-readiness-proof.json"
 
 
-def _cleanup_owned_resources(service: Any, helper: Any, sessions: list[str], evidence: dict[str, Any]) -> None:
-    """Release only this test's resources, retaining failure evidence."""
-    errors = []
-    for session_id in sessions:
-        try:
-            service.destroy_session(session_id)
-        except Exception as exc:
-            errors.append(f"session {session_id}: {exc}")
-        try:
-            if service.get_session(session_id) is not None:
-                errors.append(f"session {session_id}: still exists after deletion")
-        except Exception as exc:
-            errors.append(f"session {session_id} verification: {exc}")
-    try:
-        for vm_id in _owned_vm_ids(helper.list_vms().vms, evidence):
-            try:
-                helper.terminate_vm(vm_id)
-            except Exception as exc:
-                errors.append(f"VM {vm_id}: {exc}")
-    except Exception as exc:
-        errors.append(f"VM enumeration: {exc}")
-    try:
-        evidence["remaining_owned_vms"] = _owned_vm_ids(helper.list_vms().vms, evidence)
-    except Exception as exc:
-        evidence["remaining_owned_vms"] = None
-        errors.append(f"VM verification: {exc}")
-    evidence["cleanup_errors"] = errors
-    _expect(not errors and evidence["remaining_owned_vms"] == [], f"Cleanup failed: {errors}")
-
-
+@pytest.mark.unit
 def test_readiness_cleanup_continues_after_session_and_vm_errors() -> None:
+    """Record both deletion failures while attempting every other owned resource."""
     calls = []
     evidence = {"created_vms": [{"vm_id": "owned-a"}, {"vm_id": "owned-b"}], "attempted_creates": []}
     metadata = SimpleNamespace(owner="", runtime="", run_id="", session_id="")
     vms = [SimpleNamespace(vm_id=value, metadata=metadata) for value in ("owned-a", "owned-b", "other")]
 
     def destroy(session_id: str) -> None:
+        """Fail the first session deletion without changing later attempts."""
         calls.append(session_id)
         if session_id == "session-a":
             raise RuntimeError("session cleanup failed")
 
     def terminate(vm_id: str) -> None:
+        """Leave the first owned VM running and remove the second."""
         calls.append(vm_id)
         if vm_id == "owned-a":
             raise RuntimeError("VM cleanup failed")
@@ -85,7 +59,9 @@ def test_readiness_cleanup_continues_after_session_and_vm_errors() -> None:
     _expect(evidence["remaining_owned_vms"] == ["owned-a"], "Failed cleanup not recorded")
 
 
+@pytest.mark.unit
 def test_readiness_cleanup_reports_session_that_survives_false_deletion() -> None:
+    """A false deletion result must not hide a surviving session row."""
     evidence = {"created_vms": [], "attempted_creates": []}
     service = SimpleNamespace(destroy_session=lambda _: False, get_session=lambda _: object())
     helper = SimpleNamespace(list_vms=lambda: SimpleNamespace(vms=[]))
@@ -131,6 +107,7 @@ def _read_handshake_proof(path: Path, nonce: str) -> dict[str, Any]:
     return proof
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "payload",
     [
@@ -140,21 +117,26 @@ def _read_handshake_proof(path: Path, nonce: str) -> dict[str, Any]:
     ],
 )
 def test_readiness_proof_rejects_stale_or_unacknowledged_guest(tmp_path: Path, payload: dict[str, Any]) -> None:
+    """Reject proof that does not identify this run's acknowledged guest."""
     path = tmp_path / "proof.json"
     path.write_text(json.dumps(payload))
     with pytest.raises(pytest.fail.Exception, match="Invalid handshake proof"):
         _read_handshake_proof(path, "fresh")
 
 
+@pytest.mark.unit
 def test_readiness_proof_accepts_matching_acknowledged_guest(tmp_path: Path) -> None:
+    """Accept intact proof for the expected nonce and acknowledged VM."""
     proof = {"nonce": "fresh", "vm_id": "vm-test", "handshake_acknowledged": True}
     path = tmp_path / "proof.json"
     path.write_text(json.dumps(proof))
     _expect(_read_handshake_proof(path, "fresh") == proof, "Proof changed")
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("raw", [None, "not json", "[]", " " * 4097])
 def test_readiness_proof_requires_bounded_json(tmp_path: Path, raw: str | None) -> None:
+    """Reject missing, malformed, non-object, and oversized proof files."""
     path = tmp_path / "proof.json"
     if raw is not None:
         path.write_text(raw)
@@ -162,23 +144,29 @@ def test_readiness_proof_requires_bounded_json(tmp_path: Path, raw: str | None) 
         _read_handshake_proof(path, "fresh")
 
 
+@pytest.mark.unit
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX proof files")
 @pytest.mark.timeout(2, method="signal")
 def test_readiness_proof_rejects_fifo_without_blocking(tmp_path: Path) -> None:
+    """Reject a FIFO proof without waiting for a writer to connect."""
     path = tmp_path / "proof.json"
     os.mkfifo(path)
     with pytest.raises(pytest.fail.Exception, match="Invalid handshake proof"):
         _read_handshake_proof(path, "fresh")
 
 
+@pytest.mark.unit
 def test_readiness_drill_requires_separate_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Normal E2E opt-in must not enable deliberate readiness withholding."""
     monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_E2E", "1")
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_READINESS_DRILL", raising=False)
     with pytest.raises(pytest.skip.Exception, match="READINESS_DRILL"):
         _require_readiness_bundle()
 
 
+@pytest.mark.unit
 def test_readiness_drill_requires_fault_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An enabled drill without a fault bundle is an error rather than a skip."""
     monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_READINESS_DRILL", "1")
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_READINESS_BASE_IMAGE", raising=False)
     with pytest.raises(pytest.fail.Exception, match="readiness-withholding"):
@@ -222,6 +210,7 @@ def test_vz_linux_readiness_timeout_then_healthy_session_reuse(monkeypatch: pyte
     original_exec = VZLinuxRunner.helper_client_cls.exec_guest
 
     def record_create(client: Any, request: dict[str, Any]) -> Any:
+        """Challenge the fault guest and retain its proof before workspace cleanup."""
         attempt = {field: request[field] for field in ("owner", "runtime", "run_id", "session_id")}
         evidence["attempted_creates"].append(attempt)
         is_fault = Path(request["template"]).resolve() == fault_bundle
@@ -247,6 +236,7 @@ def test_vz_linux_readiness_timeout_then_healthy_session_reuse(monkeypatch: pyte
                 evidence["handshake_proof"] = _read_handshake_proof(proof_path, nonce)
 
     def record_exec(client: Any, **kwargs: Any) -> Any:
+        """Record actual dispatches without replacing the guest execution path."""
         evidence["exec_vm_ids"].append(kwargs["vm_id"])
         return original_exec(client, **kwargs)
 
@@ -254,6 +244,7 @@ def test_vz_linux_readiness_timeout_then_healthy_session_reuse(monkeypatch: pyte
     monkeypatch.setattr(VZLinuxRunner.helper_client_cls, "exec_guest", record_exec)
 
     def run(session_id: str, bundle: str, token: str, startup_timeout: int) -> tuple[Any, str]:
+        """Execute through the service and retain the result and exact stdout."""
         command = ["/bin/echo", token]
         result = service.start_run_scaffold(
             user_id="e2e-user",
@@ -278,6 +269,7 @@ def test_vz_linux_readiness_timeout_then_healthy_session_reuse(monkeypatch: pyte
         return result, stdout
 
     def check_empty(label: str) -> None:
+        """Record reconciliation and reject any reusable controls or live VMs."""
         report = service.macos_diagnostics()["reconciliation"]
         evidence[label] = report
         _expect(

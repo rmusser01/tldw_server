@@ -7,6 +7,7 @@ import os
 import platform
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -50,6 +51,73 @@ def _owned_vm_ids(vms: list[HelperVMStatusReply], evidence: dict[str, Any]) -> l
     return [vm.vm_id for vm in vms if vm.vm_id in owned]
 
 
+def _cleanup_owned_resources(service: Any, helper: Any, sessions: list[str], evidence: dict[str, Any]) -> None:
+    """Release only this drill's resources, retaining every cleanup failure."""
+    errors = []
+    for session_id in sessions:
+        try:
+            service.destroy_session(session_id)
+        except Exception as exc:
+            errors.append(f"session {session_id}: {exc}")
+        try:
+            if service.get_session(session_id) is not None:
+                errors.append(f"session {session_id}: still exists after deletion")
+        except Exception as exc:
+            errors.append(f"session {session_id} verification: {exc}")
+    try:
+        for vm_id in _owned_vm_ids(helper.list_vms().vms, evidence):
+            try:
+                helper.terminate_vm(vm_id)
+            except Exception as exc:
+                errors.append(f"VM {vm_id}: {exc}")
+    except Exception as exc:
+        errors.append(f"VM enumeration: {exc}")
+    try:
+        evidence["remaining_owned_vms"] = _owned_vm_ids(helper.list_vms().vms, evidence)
+    except Exception as exc:
+        evidence["remaining_owned_vms"] = None
+        errors.append(f"VM verification: {exc}")
+    evidence["cleanup_errors"] = errors
+    _expect(
+        not errors and evidence["remaining_owned_vms"] == [],
+        f"Cleanup failed: errors={errors}; remaining_owned_vms={evidence['remaining_owned_vms']}",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure_stage", ["session", "vm"])
+def test_guest_mismatch_cleanup_continues_after_resource_failure(failure_stage: str) -> None:
+    """A failed deletion must not abandon later owned resources or leak evidence."""
+    calls = []
+    evidence = {"created_vms": [{"vm_id": "owned-a"}, {"vm_id": "owned-b"}], "attempted_creates": []}
+    metadata = SimpleNamespace(owner="", runtime="", run_id="", session_id="")
+    vms = [SimpleNamespace(vm_id=value, metadata=metadata) for value in ("owned-a", "owned-b", "other")]
+
+    def destroy(session_id: str) -> None:
+        """Simulate one operational session deletion failure."""
+        calls.append(session_id)
+        if failure_stage == "session" and session_id == "session-a":
+            raise RuntimeError("session deletion failed")
+
+    def terminate(vm_id: str) -> None:
+        """Remove an owned VM except for the deliberately failing first one."""
+        calls.append(vm_id)
+        if failure_stage == "vm" and vm_id == "owned-a":
+            raise RuntimeError("VM deletion failed")
+        vms[:] = [vm for vm in vms if vm.vm_id != vm_id]
+
+    service = SimpleNamespace(destroy_session=destroy, get_session=lambda _: None)
+    helper = SimpleNamespace(list_vms=lambda: SimpleNamespace(vms=vms), terminate_vm=terminate)
+    with pytest.raises((RuntimeError, pytest.fail.Exception)):
+        _cleanup_owned_resources(service, helper, ["session-a", "session-b"], evidence)
+    _expect(calls == ["session-a", "session-b", "owned-a", "owned-b"], "Cleanup abandoned owned resources")
+    expected_remaining = ["owned-a"] if failure_stage == "vm" else []
+    _expect(evidence["remaining_owned_vms"] == expected_remaining, "Remaining resources were not recorded")
+    _expect(len(evidence["cleanup_errors"]) == 1, "Cleanup failure was not retained")
+    _expect(any(vm.vm_id == "other" for vm in vms), "Cleanup removed an unrelated VM")
+
+
+@pytest.mark.unit
 def test_guest_mismatch_cleanup_covers_lost_create_reply() -> None:
     """A timed-out create can still leave a VM with this run's ownership metadata."""
     evidence = {
@@ -85,6 +153,7 @@ def test_guest_mismatch_cleanup_covers_lost_create_reply() -> None:
     _expect(_owned_vm_ids(vms, evidence) == ["lost-reply"], "Cleanup must select only the owned lost-reply VM")
 
 
+@pytest.mark.unit
 def test_guest_mismatch_drill_requires_separate_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
     """Normal E2E opt-in must not enable intentional guest fault injection."""
     monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_E2E", "1")
@@ -93,6 +162,7 @@ def test_guest_mismatch_drill_requires_separate_opt_in(monkeypatch: pytest.Monke
         _require_mismatch_bundle()
 
 
+@pytest.mark.unit
 def test_guest_mismatch_drill_requires_fault_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
     """Opting in without a fault bundle is a configuration error, not acceptance."""
     monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_GUEST_MISMATCH_DRILL", "1")
@@ -241,11 +311,6 @@ def test_vz_linux_rejects_real_guest_missing_exec_then_runs_healthy_session(
         )
     finally:
         try:
-            for session_id in sessions:
-                service.destroy_session(session_id)
-            for vm_id in _owned_vm_ids(helper.list_vms().vms, evidence):
-                helper.terminate_vm(vm_id)
-            evidence["remaining_owned_vms"] = _owned_vm_ids(helper.list_vms().vms, evidence)
-            _expect(not evidence["remaining_owned_vms"], "Owned VM cleanup failed")
+            _cleanup_owned_resources(service, helper, sessions, evidence)
         finally:
             (tmp_path / "guest-mismatch.json").write_text(json.dumps(evidence, indent=2) + "\n")
