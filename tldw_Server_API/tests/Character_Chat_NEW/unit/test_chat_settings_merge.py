@@ -1,18 +1,34 @@
+"""Settings merge and public response conversion preserve independent authorities."""
+
+from collections.abc import Iterator
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI, HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as sessions
-from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import GreetingSelectRequest
+from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import ConversationListItem, ConversationMetadata
+from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import ChatSessionListItem, GreetingSelectRequest
 from tldw_Server_API.app.core.Character_Chat import character_conversation_factory
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
     build_materialized_behavior_controls,
 )
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
     build_materialized_behavior_settings,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError, InputError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
+
+
+@pytest.fixture
+def conversion_db(tmp_path: Path) -> Iterator[CharactersRAGDB]:
+    """Use real scoped storage when checking response conversion."""
+    db = CharactersRAGDB(tmp_path / "conversion.db", client_id="owner")
+    try:
+        yield db
+    finally:
+        db.close_all_connections()
 
 
 @pytest.mark.unit
@@ -313,7 +329,8 @@ def test_persist_auto_summary_settings_upsert_does_not_touch_conversation_metada
 
 
 @pytest.mark.unit
-def test_convert_db_conversation_to_response_includes_settings_payload():
+def test_convert_db_conversation_to_response_includes_settings_payload(conversion_db: CharactersRAGDB) -> None:
+    """Projection retains the requested public settings payload."""
     conv = {
         "id": "chat-1",
         "character_id": 7,
@@ -324,14 +341,15 @@ def test_convert_db_conversation_to_response_includes_settings_payload():
     }
     settings = {"greetingEnabled": True, "authorNote": "test"}
 
-    response = sessions._convert_db_conversation_to_response(conv, settings=settings)
+    response = sessions._convert_db_conversation_to_response(conv, db=conversion_db, user_id="owner", settings=settings)
 
     assert response.id == "chat-1"
     assert response.settings == settings
 
 
 @pytest.mark.unit
-def test_convert_db_conversation_to_response_defaults_settings_none():
+def test_convert_db_conversation_to_response_defaults_settings_none(conversion_db: CharactersRAGDB) -> None:
+    """Omitted settings remain omitted rather than acquiring startup fields."""
     conv = {
         "id": "chat-2",
         "character_id": 9,
@@ -340,14 +358,15 @@ def test_convert_db_conversation_to_response_defaults_settings_none():
         "version": 1,
     }
 
-    response = sessions._convert_db_conversation_to_response(conv)
+    response = sessions._convert_db_conversation_to_response(conv, db=conversion_db, user_id="owner")
 
     assert response.id == "chat-2"
     assert response.settings is None
 
 
 @pytest.mark.unit
-def test_convert_db_conversation_to_response_does_not_infer_tracked_identity_from_character_id():
+def test_convert_db_conversation_to_response_does_not_infer_tracked_identity_from_character_id(conversion_db: CharactersRAGDB) -> None:
+    """Legacy identity normalization remains independent of startup projection."""
     conv = {
         "id": "chat-3",
         "character_id": 11,
@@ -358,11 +377,43 @@ def test_convert_db_conversation_to_response_does_not_infer_tracked_identity_fro
         "version": 1,
     }
 
-    response = sessions._convert_db_conversation_to_response(conv)
+    response = sessions._convert_db_conversation_to_response(conv, db=conversion_db, user_id="owner")
 
     assert response.character_id == 11
     assert response.assistant_kind is None
     assert response.assistant_id is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("hidden", [False, True])
+def test_startup_projection_does_not_change_settings_or_resume_authority(
+    conversion_db: CharactersRAGDB, hidden: bool,
+) -> None:
+    """Source visibility cannot invent snapshot validity, fences, or greeting settings."""
+    db = conversion_db
+    db.upsert_workspace("conversion-origin", "Origin")
+    cid = db.add_conversation({"title": "Converted"}, assistant_startup=AssistantStartup(
+        source="workspace_default", workspace_id="conversion-origin", workspace_version=1,
+    ))
+    if hidden:
+        db.delete_workspace("conversion-origin", expected_version=1)
+    row = db.get_conversation_by_id(cid)
+    settings = {"greetingEnabled": False, "authorNote": "Kept"}
+    state = {"behavior_snapshot": {"status": "missing"}, "resume_eligible": False,
+             "resume_ineligible_reason": "behavior_snapshot_missing", "settings_version": 4, "history_version": 7}
+    detail = sessions._convert_db_conversation_to_response(row, db=db, user_id="owner", settings=settings, resume_state=state)
+    listed = sessions._convert_db_conversation_to_list_item(row, db=db, user_id="owner", settings=settings)
+    expected = {"schema_version": 1, "source": "unknown" if hidden else "workspace_default",
+                "workspace_id": None if hidden else "conversion-origin", "workspace_version": None if hidden else 1}
+    assert detail.assistant_startup.model_dump() == expected
+    assert listed.assistant_startup.model_dump() == expected
+    assert detail.settings == listed.settings == {"greetingEnabled": False, "authorNote": "Kept"}
+    assert detail.behavior_snapshot.status == "missing"
+    assert detail.resume_eligible is False
+    assert detail.resume_ineligible_reason == "behavior_snapshot_missing"
+    assert (detail.settings_version, detail.history_version) == (4, 7)
+    assert {"behavior_snapshot", "resume_eligible", "settings_version", "history_version"}.isdisjoint(listed.model_dump())
+    assert db.get_conversation_by_id(cid)["assistant_startup_json"] == row["assistant_startup_json"]
 
 
 @pytest.mark.unit
@@ -378,6 +429,13 @@ def test_openapi_exposes_include_settings_query_params():
     list_params = schema["paths"]["/api/v1/chats/"]["get"]["parameters"]
     list_param_names = {param["name"] for param in list_params}
     assert "include_settings" in list_param_names
+
+
+@pytest.mark.unit
+def test_response_schemas_mark_startup_read_only() -> None:
+    """Generated contracts describe local history as output, never caller authority."""
+    for model in (ChatSessionListItem, ConversationListItem, ConversationMetadata):
+        assert model.model_json_schema()["properties"]["assistant_startup"]["readOnly"] is True
 
 
 @pytest.mark.unit

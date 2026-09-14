@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 from tldw_Server_API.app.core.Character_Chat.emote_directives import CharacterEmoteEvent
-from tldw_Server_API.app.core.Chat.assistant_startup import reject_assistant_startup_input
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, reject_assistant_startup_input
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 
 ALLOWED_CONVERSATION_STATES = ("in-progress", "resolved", "backlog", "non-viable")
@@ -281,6 +281,7 @@ class ChatSessionUpdate(BaseModel):
 
 class ChatSessionListItem(BaseModel):
     """Chat list item without authoritative resume-detail fields."""
+    assistant_startup: AssistantStartup = Field(default_factory=AssistantStartup, json_schema_extra={"readOnly": True})
     id: str = Field(..., description="UUID of the chat session")
     scope_type: Literal["global", "workspace"] = Field(
         "global",

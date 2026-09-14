@@ -243,6 +243,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Workspaces.assistant_defaults import project_assistant_startup
 from tldw_Server_API.app.core.DB_Management.transaction_utils import (
     db_transaction,
 )
@@ -6282,8 +6283,16 @@ def _scoped_conversation_fields(conversation: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _conversation_assistant_identity_fields(conversation: dict[str, Any]) -> dict[str, Any]:
+def _conversation_assistant_identity_fields(
+    conversation: dict[str, Any], *, db: CharactersRAGDB, user_id: str,
+    workspace_visibility_cache: dict[str, bool] | None = None,
+) -> dict[str, Any]:
+    """Project identity and independently authorized local startup history."""
     return {
+        "assistant_startup": project_assistant_startup(
+            db, raw=conversation.get("assistant_startup_json"), user_id=user_id,
+            workspace_visibility_cache=workspace_visibility_cache,
+        ),
         "character_id": conversation.get("character_id"),
         "assistant_kind": conversation.get("assistant_kind"),
         "assistant_id": conversation.get("assistant_id"),
@@ -6933,6 +6942,7 @@ async def list_chat_conversations(
             else {}
         )
         items: list[ConversationListItem] = []
+        workspace_visibility_cache: dict[str, bool] = {}
         for row in page_rows:
             conv_id = row.get("id") or ""
             keyword_rows = keyword_map.get(conv_id, [])
@@ -6944,7 +6954,10 @@ async def list_chat_conversations(
                 ConversationListItem(
                     id=conv_id,
                     **_scoped_conversation_fields(row),
-                    **_conversation_assistant_identity_fields(row),
+                    **_conversation_assistant_identity_fields(
+                        row, db=db, user_id=str(current_user.id),
+                        workspace_visibility_cache=workspace_visibility_cache,
+                    ),
                     title=row.get("title"),
                     state=row.get("state") or "in-progress",
                     topic_label=row.get("topic_label"),
@@ -7055,7 +7068,7 @@ async def get_chat_conversation(
         return ConversationListItem(
             id=conversation.get("id") or conversation_id,
             **_scoped_conversation_fields(conversation),
-            **_conversation_assistant_identity_fields(conversation),
+            **_conversation_assistant_identity_fields(conversation, db=db, user_id=str(current_user.id)),
             title=conversation.get("title"),
             state=conversation.get("state") or "in-progress",
             topic_label=conversation.get("topic_label"),
@@ -7183,7 +7196,7 @@ async def update_chat_conversation(
         return ConversationListItem(
             id=updated.get("id") or conversation_id,
             **_scoped_conversation_fields(updated),
-            **_conversation_assistant_identity_fields(updated),
+            **_conversation_assistant_identity_fields(updated, db=db, user_id=str(current_user.id)),
             title=updated.get("title"),
             state=updated.get("state") or "in-progress",
             topic_label=updated.get("topic_label"),
@@ -7380,7 +7393,7 @@ async def get_conversation_tree(
         metadata = ConversationMetadata(
             id=conversation.get("id") or conversation_id,
             **_scoped_conversation_fields(conversation),
-            **_conversation_assistant_identity_fields(conversation),
+            **_conversation_assistant_identity_fields(conversation, db=db, user_id=str(current_user.id)),
             title=conversation.get("title"),
             state=conversation.get("state") or "in-progress",
             topic_label=conversation.get("topic_label"),
