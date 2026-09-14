@@ -103,6 +103,12 @@ def test_effective_default_redacts_permission_denied(workspace_app, db):
 
 **2A baseline refresh:** Server dev `beac8e9449b0e2fa90bdab89cf8cbf7905d2b915` and Chatbook dev `fbf374c9d32144d5dd23fd44c9adc0e77f00d58f` verified on 2026-09-13; scoped diffs from the assessment baselines show no changes to the relevant Workspace defaults implementation, tests, or Chatbook migration. This slice adds durable choice only, not full parity.
 
+### Slice 2B Execution Plan
+
+TASK-13245.3 prepares the [focused local startup provenance implementation plan](2026-09-13-persona-startup-provenance-implementation-plan.md), stacked on 2A. It inventories shared resolution, transactional creation, ordinary/Sync/initializer identity mutation, privacy-safe read projection and transport authority. Runtime implementation has not started. All lifecycle/transport protections must ship with provenance in one activation unit; strict startup receipts and send-time admission remain 2C. The fresh planning baseline passed 71 existing tests. Server dev `ebdeeac384c58559fa90fd3a5f79f5262ae190d5` and Chatbook dev `4631b60f8dd9623fc55bf16f4a37e29fcb1240c7` show no relevant changes from the preceding baselines.
+
+### Remaining Stage 2 Scope
+
 **Files:**
 - Modify `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py` and `tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py`.
 - Modify `tldw_Server_API/app/api/v1/schemas/workspace_schemas.py`, `chat_session_schemas.py`, and `chat_conversation_schemas.py` in the same schemas directory.
