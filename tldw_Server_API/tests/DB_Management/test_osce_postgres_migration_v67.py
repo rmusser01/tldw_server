@@ -205,7 +205,7 @@ def test_postgres_v67_fresh_schema_matches_osce_contract(
             "SELECT version FROM db_schema_version WHERE schema_name = %s",
             (CharactersRAGDB._SCHEMA_NAME,),
         ).scalar
-        assert int(version) == 67
+        assert int(version) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
         _assert_live_postgres_osce_schema(backend)
     finally:
         db.close_all_connections()
