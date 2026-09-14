@@ -95,17 +95,17 @@ Local provenance coverage additionally lives in `test_conversation_assistant_sta
 
 ### Local 2B Execution Evidence (2026-09-14)
 
-The parent ran the final gates on implementation commit `6a8da29037107da8f901c7095841b9a70712a8ec`; the documentation stage does not rerun those suites or scans.
+The final gates cover runtime commit `4f1af5122470011f2a943a2c19e2f5380c61d52c` and the shared Character fixture's explicit authenticated-owner alignment. The owner fix preserves writer attribution while binding canonical ownership at trusted DB construction; no production code changed during fixture alignment.
 
 | Gate | Recorded result |
 | --- | --- |
-| Core, API, SQLite and required live PostgreSQL matrix (17 files) | 678 passed, 26 warnings, zero failures/skips, 237.84s; `/tmp/persona-stage5-core-final.log`. PostgreSQL 18.6, official fixture with `TLDW_TEST_POSTGRES_REQUIRED=1`. |
-| Full six-file Character/library/import/export regression | 394 passed, three pre-existing skips, 23 warnings, zero failures, 403.29s, exit 0; `/tmp/persona-stage5-character-transport-final.log`. Skips: Resource Governor limits, V3 format fixture, removed streaming route. |
-| Exact 29 changed Python files | Compilation and whitespace checks passed. Ruff: 42 findings versus 48 at execution base `8876d2d187`, none new by file/code/message comparison. |
+| Core, API, SQLite and required live PostgreSQL matrix (18 files) | 697 passed, 26 warnings, zero failures/skips, 203.96s; `/tmp/persona-stage5-core-postfix.log`. PostgreSQL 18.6, official fixture with `TLDW_TEST_POSTGRES_REQUIRED=1`. |
+| Full six-file Character/library/import/export regression | 394 passed, three pre-existing skips, 25 warnings, zero failures, 463.54s, exit 0; `/tmp/persona-stage5-character-transport-owner-final.log`. Skips: Resource Governor limits, V3 format fixture, removed streaming route. |
+| Exact 34 changed Python files | Compilation and whitespace checks passed. Ruff: 60 findings versus 66 at execution base `8876d2d187`, none new by file/code/message comparison. |
 | Bandit | Production: zero findings/errors. Tests, excluding only B101 assertions: eight findings, all reproduced at base (nine there); no new suppressions. |
-| Independent review and publication | Stages 1-4 individually approved; final whole-branch review and one draft implementation PR remain parent-owned pending gates. The human-written Change summary remains required. |
+| Independent review and publication | Stages 1-5 reviewed. Whole-branch review's cached-client ownership finding was fixed and independently re-reviewed; fixture alignment was also reviewed. Draft publication remains pending. The human-written Change summary remains required. |
 
-The two disjoint final test gates total 1,072 passed, three pre-existing skips and zero failures. These results do not certify repository-wide tests, live providers, Chatbook runtime, browser UAT, or PostgreSQL Character startup. Warnings and base-matched static findings are retained, not described as a clean lint run. Commands, artifacts and remaining gates are recorded in the focused plan and TASK-13245.4. Both parent test processes have exited; the parent retains the task-created PostgreSQL container for potential independent-review probes and owns its later cleanup.
+The two disjoint final test gates total 1,091 passed, three pre-existing skips and zero failures. An additional focused owner/cache/dependency gate passed 68 tests; its 19 owner cases overlap the final core gate and are not added to that total. These results do not certify repository-wide tests, live providers, Chatbook runtime, browser UAT, or PostgreSQL Character startup. Warnings and base-matched static findings are retained, not described as a clean lint run. Commands, artifacts and remaining gates are recorded in the focused plan and TASK-13245.4. All test processes exited, and only the task-created PostgreSQL container and temporary volume were removed.
 
 ### Historical 2A Evidence
 
@@ -117,4 +117,4 @@ Stage 2B verification reproduced a pre-existing PostgreSQL Character factory fai
 
 Chatbook source comparison informs the design, not full runtime parity. The approved server behavior intentionally fails closed for unavailable configured defaults; Chatbook's console resolver can degrade to an untracked assistant with a notice and treats supplied custom prompts differently. Local IDs and prompt snapshots are not copied between systems. Cross-client strict startup and other parity work remain separate future gates.
 
-Parent-fetched dev refs checked on 2026-09-14: server `1e0bb6feddab5a9e4be794ea44ea21b9ea29bf30`, Chatbook `2a10cc3a307c368d14bc73be9a8b1cd9109dfeb4`. Since the planning refs (`ebdeeac384c58559fa90fd3a5f79f5262ae190d5` / `4631b60f8dd9623fc55bf16f4a37e29fcb1240c7`), server changes are VZ drill tooling/docs and Chatbook changes are Notes/import UI/release files; neither changes the compared Persona/Workspace contract paths. Server dev remains schema v67; this stack advances 2A v68 to 2B v69. Source comparison does not replace runtime validation or authorize a rebase/deployment. TASK-13245, #2950, 2C/2D and later parity work remain open.
+Final dev refs checked on 2026-09-14: server `1e0bb6feddab5a9e4be794ea44ea21b9ea29bf30`, Chatbook `87a3de4493d7c78d0263c184ccaf2f590c9c277e`. Since the planning refs (`ebdeeac384c58559fa90fd3a5f79f5262ae190d5` / `4631b60f8dd9623fc55bf16f4a37e29fcb1240c7`), server changes are VZ drill tooling/docs. Chatbook adds Notes/import/sync, Library/console-access UI, first-run and release work; the compared Chat/Workspace/Persona contract paths are unchanged. Server dev remains schema v67; this stack advances 2A v68 to 2B v69. Source comparison does not replace runtime validation or authorize a rebase/deployment. TASK-13245, #2950, 2C/2D and later parity work remain open.
