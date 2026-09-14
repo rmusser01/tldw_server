@@ -12,7 +12,7 @@
 
 **Tracking:** [#2950](https://github.com/rmusser01/tldw_server/issues/2950), TASK-13245; this planning unit is TASK-13245.3. Based on [2A PR #2959](https://github.com/rmusser01/tldw_server/pull/2959), commit `8d5e6a5be37653134f7249a9699070940a61cbe3`. Create a separate execution child task before runtime edits; search first to avoid duplicates.
 
-**Delivery status:** Reviewed plan published in [draft PR #2961](https://github.com/rmusser01/tldw_server/pull/2961). Execution started on 2026-09-14 under TASK-13245.4, branch `codex/persona-startup-provenance`. All five stages remain one activation unit; no partial runtime rollout.
+**Delivery status:** Reviewed plan published in [draft PR #2961](https://github.com/rmusser01/tldw_server/pull/2961). Execution started on 2026-09-14 under TASK-13245.4, branch `codex/persona-startup-provenance`. Stages 1-4 are complete and independently approved at `6a8da29037107da8f901c7095841b9a70712a8ec`; Stage 5 is in progress with individually recorded gates below. All five stages remain one activation unit; no partial runtime rollout. Final whole-branch review, publication and human-owned Change summary are not implied by stage completion.
 
 ## Global Constraints
 
@@ -35,6 +35,8 @@ On 2026-09-13, fetched server dev is `ebdeeac384c58559fa90fd3a5f79f5262ae190d5`;
 Server dev remains schema 67; the stacked 2A branch is 68. At this baseline 2B uses registered v68-to-v69 migrations on both backends. Recheck dev and the migration registry before implementation/rebase: if 69 has been allocated, use the next version and adjust tests, never reuse another feature's version.
 
 Fresh planning baseline: **71 passed, six warnings** across `tests/Workspaces/test_workspace_assistant_creation.py`, `test_workspace_assistant_defaults_api.py`, and `tests/Chat/unit/test_chat_conversations_api.py`. Log: `/tmp/persona-provenance-plan-baseline.log`. 2A separately passed 114 SQLite/live-PostgreSQL tests without skips. Neither run tests new provenance behavior.
+
+**Execution refresh (2026-09-14, parent-fetched refs):** Server dev `1e0bb6feddab5a9e4be794ea44ea21b9ea29bf30` adds only VZ drill tooling/docs since `ebdeeac384c58559fa90fd3a5f79f5262ae190d5`; Chatbook dev `2a10cc3a307c368d14bc73be9a8b1cd9109dfeb4` changes Notes/import UI/release files since `4631b60f8dd9623fc55bf16f4a37e29fcb1240c7`. The compared Persona/Workspace contract and migration paths are unchanged. Server dev still uses v67; the stack has registered v68-to-v69 migrations for 2B. No Chatbook checkout changes or rebase were made. Planning PR #2961 remains open/draft on `codex/persona-startup-provenance-plan`, based on `codex/persona-workspace-explicit-none`; the parent must recheck this before publication.
 
 Chatbook's `resolve_new_console_assistant` still bypasses defaults for supplied custom prompts and degrades unavailable defaults to an untracked assistant with a notice. Preserve the approved server difference: invalid/disabled configured defaults fail closed. No copying local IDs or prompt snapshots. Source comparison is not a Chatbook runtime test or full parity certification.
 
@@ -236,7 +238,7 @@ if scope.scope_type == "workspace":
 **Goal:** Expose identical bounded provenance across owned read surfaces without leaking inaccessible origin references or allowing imported authority.
 **Success Criteria:** Detail/list/tree/update/restore metadata agrees; origin access loss yields whole-object unknown while retaining storage; every import starts unknown; outgoing unsupported formats omit provenance.
 **Tests:** Existing chat/conversation tests plus Character facade/export and Chatbook import/export tests listed below.
-**Status:** In Progress.
+**Status:** Complete.
 
 **Interfaces:** Add `assistant_startup: AssistantStartup = Field(default_factory=AssistantStartup, json_schema_extra={"readOnly": True})` to `ChatSessionListItem`, `ConversationListItem`, and `ConversationMetadata` (detail/tree models inherit them where applicable). Create `project_assistant_startup(db, *, raw: object, user_id: str, workspace_visibility_cache: dict[str, bool] | None = None) -> AssistantStartup` in `Workspaces/assistant_defaults.py`. It decodes before looking up anything, returns non-reference values directly, and resolves origin visibility through the authenticated DB's existing `get_workspace` boundary. Missing/deleted/hidden staged origin returns `AssistantStartup()`; visible archived origin remains history, not a new creation decision. DB errors propagate, not converted into successful unknown. The cache is request-local, bounded by returned distinct origins, and never shared between users or calls. Do not authorize an origin merely because the current conversation is readable.
 
@@ -252,7 +254,7 @@ if scope.scope_type == "workspace":
 | `Character_Chat/modules/character_io.py:1276` | Legacy import calls the existing creator with explicit arguments. Forged fields are ignored/stripped before the trusted creator; no origin keyword. |
 | `Sharing/clone_models.py:126` | Shared Workspace snapshots contain no conversations. No new copying behavior or shared-recipient adoption. |
 
-- [ ] Add a projection matrix extending `tests/Chat/unit/test_chat_conversations_api.py` and the new `tests/Workspaces/test_workspace_assistant_provenance.py`: visible origin, moved conversation, old origin deleted/hidden, archived origin, legacy/corrupt JSON, and DB failure. Cover chat detail/list/restore and conversation detail/list/update/tree. Observe missing/unsafe projection RED before wiring builders.
+- [x] Add a projection matrix extending `tests/Chat/unit/test_chat_conversations_api.py` and the new `tests/Workspaces/test_workspace_assistant_provenance.py`: visible origin, moved conversation, old origin deleted/hidden, archived origin, legacy/corrupt JSON, and DB failure. Cover chat detail/list/restore and conversation detail/list/update/tree. Observe missing/unsafe projection RED before wiring builders.
 
 ```python
 def test_projection_redacts_hidden_origin_without_mutating_storage(db, monkeypatch):
@@ -271,20 +273,22 @@ def test_projection_redacts_hidden_origin_without_mutating_storage(db, monkeypat
 
 The HTTP version must seed a real conversation then assert its stored origin is byte-for-byte unchanged after all read calls. Include `system_fallback` with inaccessible origin; do not leave the source set while redacting required references. Repeated list origins should use at most one visibility lookup per origin per request. A subsequent request must observe access loss even after a cached earlier response.
 
-- [ ] Thread the authenticated DB/user and request-local visibility cache through existing response construction or a shared pre-projection helper. Never let the default unknown value mask a builder accidentally forgetting the actual stored provenance. Assert an available non-unknown fixture across every builder, not just schema defaults.
-- [ ] Extend `tests/Character_Chat_NEW/unit/test_chat_settings_merge.py` conversion tests and `tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py` list-versus-resume/restore tests. Startup source must not change snapshot status, resume eligibility, settings/history versions, or greeting behavior. Extend `tests/Characters/test_character_chat_lib.py` for raw-column removal and unchanged preexisting metadata.
-- [ ] Extend `tests/Chatbooks/test_chatbook_service.py` collector/import tests, `tests/Chatbooks/test_openwebui_import_service.py` JSON and DB fixtures, and `tests/Character_Chat_NEW/integration/test_character_api.py` export tests. Seed a unique private-origin marker and both forged keys. Assert outgoing bytes lack the internal/public keys and reference marker, and imported DB rows decode to unknown. Metadata-only fake dictionaries are insufficient for final acceptance: exercise actual collector/import pipelines and existing factory calls.
-- [ ] Check legacy history import/export and Sync outgoing payloads with real stored origin fixtures. If their existing allowlists already pass, change tests only. Incoming provenance nested in source settings may remain uninterpreted source metadata; it must not affect selection, authoritative output, or stored origin. Cross-server verified transport remains deferred.
-- [ ] Run focused API, facade, Character and transport suites; commit: `feat(persona): expose privacy-safe local startup metadata`.
+- [x] Thread the authenticated DB/user and request-local visibility cache through existing response construction or a shared pre-projection helper. Never let the default unknown value mask a builder accidentally forgetting the actual stored provenance. Assert an available non-unknown fixture across every builder, not just schema defaults.
+- [x] Extend `tests/Character_Chat_NEW/unit/test_chat_settings_merge.py` conversion tests and `tests/Character_Chat_NEW/integration/test_character_behavior_snapshot_api.py` list-versus-resume/restore tests. Startup source must not change snapshot status, resume eligibility, settings/history versions, or greeting behavior. Extend `tests/Characters/test_character_chat_lib.py` for raw-column removal and unchanged preexisting metadata.
+- [x] Extend `tests/Chatbooks/test_chatbook_service.py` collector/import tests, `tests/Chatbooks/test_openwebui_import_service.py` JSON and DB fixtures, and `tests/Character_Chat_NEW/integration/test_character_api.py` export tests. Seed a unique private-origin marker and both forged keys. Assert outgoing bytes lack the internal/public keys and reference marker, and imported DB rows decode to unknown. Metadata-only fake dictionaries are insufficient for final acceptance: exercise actual collector/import pipelines and existing factory calls.
+- [x] Check legacy history import/export and Sync outgoing payloads with real stored origin fixtures. If their existing allowlists already pass, change tests only. Incoming provenance nested in source settings may remain uninterpreted source metadata; it must not affect selection, authoritative output, or stored origin. Cross-server verified transport remains deferred.
+- [x] Run focused API, facade, Character and transport suites; commit: `feat(persona): expose privacy-safe local startup metadata`.
+
+**Execution evidence (2026-09-14):** `6a8da29037107da8f901c7095841b9a70712a8ec`; final core/facade/schema gate 479 passed, 25 warnings, zero failures/skips (`/tmp/persona-stage4-final-core-facade.log`); focused facade/transport gate 123 passed, 20 warnings (`/tmp/persona-stage4-facade-transport.log`). These selections overlap and are not additive. Stage 4 spec and quality independently approved. The parent closed the remaining no-change snapshot-shape audit: `Sharing/clone_models.py:126` contains Workspace metadata/memberships/sources/notes/artifacts, no conversations; `clone_models.py` and `clone_service.py` are unchanged from execution base. Exact RED/GREEN, seven real transport boundaries, security comparisons and warning limits are in the Stage 4 report; Stage 5 below owns the broader final gates.
 
 ## Stage 5: Activation Review And Operational Verification
 
 **Goal:** Prove the complete local provenance slice is safe before opening it for runtime review/merge.
 **Success Criteria:** Every mutation/projection/transport inventory row has a test or a verified no-change disposition; live migrations/concurrency pass; maintenance instructions and parent tracker reflect only 2B completion.
 **Tests:** Full focused matrix below, migration and real-connection concurrency; no live providers or browser work.
-**Status:** Not Started.
+**Status:** In Progress. Operational documentation and final test/security gates complete; whole-branch review, publication and container cleanup remain with the parent. Documentation changes add no production/test changes and do not rerun the parent-owned broad gates. TASK-13245.4 AC5 remains unchecked until all of its gates are complete.
 
-- [ ] Run the following from the isolated worktree, after activating `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate`. New test paths are created by their owning stages; do not run an empty selection or count collection errors as verification.
+- [x] Run the following from the isolated worktree, after activating `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate`. The parent final run includes all 12 original paths plus the five newly relevant paths shown below; no empty selections or collection errors count as verification.
 
 ```bash
 python -m pytest \
@@ -300,10 +304,18 @@ python -m pytest \
   tldw_Server_API/tests/Sync/test_sync_v2_chat_materializer.py \
   tldw_Server_API/tests/Sync/test_sync_v2_replay_repair.py \
   tldw_Server_API/tests/Chat/unit/test_chat_conversations_api.py \
+  tldw_Server_API/tests/DB_Management/test_osce_migration_v67.py \
+  tldw_Server_API/tests/DB_Management/test_workspace_assistant_creation_atomic.py \
+  tldw_Server_API/tests/Workspaces/test_assistant_startup_projection.py \
+  tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_session_error_mapping.py \
+  tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_session_create_schema.py \
+  -n 4 --benchmark-disable --basetemp="${TMPDIR%/}/persona-stage5-core-final" \
   -q -rs --tb=short
 ```
 
-- [ ] Run the Character/library/import/export suite separately so failures are attributable. Preserve existing fixtures and mock providers; do not fabricate successful runtime tests with snapshot-loader patches applied only in memory.
+**Final core result:** 678 passed, 26 warnings, zero failures/skips in 237.84s on `6a8da29037`; `/tmp/persona-stage5-core-final.log`. Parent used `env -u JOBS_DB_URL`, the task's `POSTGRES_TEST_DSN` on `127.0.0.1:55461/postgres`, `TLDW_TEST_PG_CONTAINER_NAME=tldw_persona_13245_4_postgres`, `TLDW_TEST_NO_DOCKER=1`, and `TLDW_TEST_POSTGRES_REQUIRED=1`. The official fixture creates/drops per-test databases; server version is PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2). `--benchmark-disable` disables unused benchmark instrumentation, not ordinary tests. Basetemp uses actual macOS TMPDIR; application path policy is unchanged. Stage 5 documentation work does not repeat this parent gate.
+
+- [x] Run the Character/library/import/export suite separately so failures are attributable. Preserve existing fixtures and mock providers; do not fabricate successful runtime tests with snapshot-loader patches applied only in memory.
 
 ```bash
 python -m pytest \
@@ -313,18 +325,33 @@ python -m pytest \
   tldw_Server_API/tests/Characters/test_character_chat_lib.py \
   tldw_Server_API/tests/Chatbooks/test_chatbook_service.py \
   tldw_Server_API/tests/Chatbooks/test_openwebui_import_service.py \
+  -n 4 --benchmark-disable --basetemp="${TMPDIR%/}/persona-stage5-character-transport-final" \
   -q -rs --tb=short
 ```
 
-- [ ] Run migration/concurrency tests using the official live PostgreSQL fixture with `TLDW_TEST_POSTGRES_REQUIRED=1`. Supply fixture configuration through its documented environment variables; `JOBS_DB_URL` takes precedence over `POSTGRES_TEST_DSN`, so unset it for a dedicated Persona test DSN. Use a task-specific container name/available port if fixture-managed Docker is needed; never remove another agent's/shared container. Clean up only the task-created container/temporary volume after test processes exit. Record server version, exact command, failures/skips and counts.
-- [ ] Cover both PostgreSQL blocking orders for create/default changes and local/Sync writes, genuine v68-to-current upgrade, failed migration rollback, reopen/repair, cached old-writer hazard, and ordinary global/Character regression. Schema changes may require updating existing v67 latest-version assertions; keep historical migration assertions exact to their stage.
-- [ ] Audit every current named writer again with `rg -n '\b(add_conversation|update_conversation|upsert_conversation_from_sync)\(' tldw_Server_API/app`. Also inspect `UPDATE conversations`/`INSERT INTO conversations` bypasses and response row spreads. Compare against this inventory and document each new caller. Do not edit unrelated Buddy/animation code; metadata locks and message updates must preserve origin through central invariants.
-- [ ] Run Ruff on the exact changed Python files, compile them, run `git diff --check`, and run Bandit on all changed production files plus a separate test scan excluding only B101 assertions. Record existing findings reproduced at the base separately; fix new findings in this slice. No new security suppression merely to make the scan green.
-- [ ] Update `Docs/Code_Documentation/Workspace_Persona_Defaults.md` and the parent plan with the real schema version, creation/read contract, unsupported transports, mutation semantics and the continued offline-upgrade requirement. Refresh server and Chatbook dev SHAs and scoped differences. Keep 2C/2D, send-time admission, profile/provisioning, Research RAG and full parity open.
-- [ ] Obtain independent spec-compliance and code-quality review of the complete implementation, particularly import authority, PostgreSQL absent-row races, initializer repair and hidden-origin reads. Reproduce valid findings, fix minimally and rerun affected suites. Commit documentation and execution-task final evidence: `docs(persona): document local startup provenance guarantees`.
+**Final Character result (parent-owned):** 394 passed, three pre-existing skips, 23 warnings, zero failures in 403.29s, exit 0; `/tmp/persona-stage5-character-transport-final.log`. The same three baseline skips are `test_character_api.py:854` (Resource Governor limits), `:761` (V3 format fixture), and `:637` (removed streaming route). The two disjoint final gates total **1,072 passed, three skips, zero failures**; do not add overlapping intermediate-stage runs. Both parent test processes have exited. The task-specific PostgreSQL container is retained for possible independent-review probes; cleanup is still parent-owned and pending.
+
+- [x] Run migration/concurrency tests using the official live PostgreSQL fixture with `TLDW_TEST_POSTGRES_REQUIRED=1`. Supply fixture configuration through its documented environment variables; `JOBS_DB_URL` takes precedence over `POSTGRES_TEST_DSN`, so unset it for a dedicated Persona test DSN. Use a task-specific container name/available port if fixture-managed Docker is needed; never remove another agent's/shared container. Record server version, exact command, failures/skips and counts (final core gate above).
+- [ ] Parent: clean up only the task-created container/temporary volume after all test processes exit; shared containers and unrelated temporary folders are excluded.
+- [x] Cover both PostgreSQL blocking orders for create/default changes and local/Sync writes, genuine v68-to-v69 upgrade, failed migration rollback, reopen/repair, cached old-writer hazard and ordinary global regression. Final core gate includes the seven storage races and six creation races. Historical migration assertions retain their exact stage; the full ordinary Character regression passed separately above, not a PostgreSQL Character startup certification.
+- [x] Audit every current named writer again with `rg -n '\b(add_conversation|update_conversation|upsert_conversation_from_sync)\(' tldw_Server_API/app`. Also inspect `UPDATE conversations`/`INSERT INTO conversations` bypasses and response row spreads. Parent's final audit found only the planned Workspace helper added; prior dispositions stand. Historical pre-v69 repair stays unchanged, modern repair uses protected comparisons, message/settings/Buddy lock-only writes preserve binding, fixture INSERTs default NULL, and erasure deletes the row. No unrelated Buddy/animation edits.
+- [x] Run Ruff on the exact changed Python files, compile them, run `git diff --check`, and run Bandit on all changed production files plus a separate test scan excluding only B101 assertions. Parent completed the 29-file scope and base comparison below; no new security suppression.
+- [x] Update `Docs/Code_Documentation/Workspace_Persona_Defaults.md` and the parent plan with the real schema version, creation/read contract, unsupported transports, mutation semantics and the continued offline-upgrade requirement. Record refreshed parent-fetched server/Chatbook dev SHAs and scoped differences. Keep 2C/2D, send-time admission, profile/provisioning, Research RAG and full parity open.
+- [ ] Parent: obtain independent spec-compliance and code-quality review of the complete implementation, particularly import authority, PostgreSQL absent-row races, initializer repair and hidden-origin reads. Reproduce valid findings, fix minimally and rerun affected suites. Stage-specific approvals are not this whole-branch gate.
+- [x] Prepare and verify documentation and execution-task evidence after the final Character result, included in this scoped commit: `docs(persona): document local startup provenance guarantees`. Still-pending parent gates are explicit; publication is not part of this documentation commit.
 - [ ] Open one draft implementation PR on the correct current parent (stacked if 2A is still unmerged). Link TASK-13245 and #2950 without closing the parent. Keep the human-written Change summary pending until the requester provides it. Do not claim the optional strict route or legacy replay safety.
 
-## Plan Validation Record
+### Final Static And Security Evidence
+
+Parent scanned exactly the 29 changed Python paths from `git diff --name-only 8876d2d187..6a8da29037`, separated into 12 production and 17 test files. `python -m py_compile` and `git diff --check` passed. Ruff found 42 issues versus 48 at execution base, with no new `(file, code, message)` multiset entries. Artifacts: `/tmp/persona-stage5-ruff.json`, `/tmp/persona-stage5-base-ruff.json`.
+
+Production Bandit: zero findings/errors. Test Bandit, excluding only B101 assertions: eight findings, zero scan errors, all findings reproduced at base (nine findings there). Seven are existing B105 fixture literals; one is the existing B311 library test random-data generator. Artifacts: `/tmp/persona-stage5-bandit-production.json`, `/tmp/persona-stage5-bandit-tests.json`, `/tmp/persona-stage5-base-bandit-production.json`, `/tmp/persona-stage5-base-bandit-tests.json`. Base comparison used `git archive` of existing changed files and `pyproject.toml` in `${TMPDIR}/persona-stage5-base.77Hs3m`; no checkout/rebase or new suppressions. This documentation-only stage does not rerun completed Python scans; its own whitespace/scope checks are recorded with the documentation commit.
+
+**Limits:** The unchanged PostgreSQL Character WorldBook preflight failure was reproduced at the Stage 3 base before the factory transaction/INSERT; it is disclosed in the runbook, not fixed or counted as PostgreSQL Character startup coverage. No live-provider, Chatbook-runtime, browser, repository-wide or full-parity certification. TASK-13245/#2950 stay open, and the strict 2C route/receipts/replay/send-time contract, 2D and later stages remain deferred.
+
+## Historical Plan Validation Record
+
+The following is the original 2026-09-13 TASK-13245.3 planning record, not the current TASK-13245.4 execution status. Its documentation-only/Bandit-not-applicable language and unperformed gates refer only to that planning commit. Current execution evidence and pending gates are above; the 71-pass baseline must not be substituted for them.
 
 This task changes documentation and Backlog only. Fresh baseline: 71 tests passed, six warnings, zero failures. Two read-only inventories checked DB mutation/Sync paths and read/transport paths. The plan incorporates their findings: independent Sync replacement and absent-row races, initialization repair bypasses, shared detail/list builders, raw library row exposure, unsupported import/export transport and existing Character factory preflight.
 
