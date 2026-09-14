@@ -34,7 +34,7 @@ def project_assistant_startup(
     startup = decode_assistant_startup(raw)
     if startup.workspace_id is None:
         return startup
-    if user_id != str(db.client_id):
+    if user_id != db.owner_user_id:
         raise InputError("Startup projection owner must match the scoped database owner")
     origin = startup.workspace_id
     if workspace_visibility_cache is not None and origin in workspace_visibility_cache:
@@ -225,7 +225,7 @@ def create_workspace_persona_conversation(
     """
     if request.scope_type != "workspace" or request.assistant_kind == "character":
         raise InputError("Workspace Persona creation requires a non-Character Workspace request")
-    if user_id != str(db.client_id) or conversation_data.get("client_id") != user_id:
+    if user_id != db.owner_user_id or conversation_data.get("client_id") != user_id:
         raise InputError("Conversation owner must match the scoped database owner")
     for field in ("scope_type", "workspace_id", "parent_conversation_id", "forked_from_message_id"):
         if conversation_data.get(field) != (getattr(request, field) or None):

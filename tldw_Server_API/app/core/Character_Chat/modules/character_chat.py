@@ -935,7 +935,7 @@ def _public_conversation_metadata(
     result = dict(row)
     raw = result.pop("assistant_startup_json", None)
     result["assistant_startup"] = project_assistant_startup(
-        db, raw=raw, user_id=str(db.client_id),
+        db, raw=raw, user_id=db.owner_user_id,
         workspace_visibility_cache=workspace_visibility_cache,
     ).model_dump()
     return result
