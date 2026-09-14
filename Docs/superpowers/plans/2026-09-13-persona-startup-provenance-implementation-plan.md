@@ -81,7 +81,7 @@ The SQLite conversation sync triggers at `ChaChaNotes_DB.py:1472-1522` enumerate
 **Goal:** Define a single validated local origin value and make management/startup consult identical effective-default rules.
 **Success Criteria:** All source/reference relations and byte bounds are enforced; management wire behavior is unchanged; implicit startup cannot treat corrupt storage as unset.
 **Tests:** New `tests/Chat/test_assistant_startup.py`; extend existing Workspace default API and creation tests.
-**Status:** In Progress.
+**Status:** Complete.
 
 **Interfaces:** Create `AssistantStartup` in the new core value module (Pydantic, frozen, `extra="forbid"`). Add `encode_assistant_startup(value: AssistantStartup) -> str` and `decode_assistant_startup(raw: object) -> AssistantStartup`. Encoding rejects non-model inputs, invalid Unicode and >1024-byte canonical JSON. Decoding NULL/invalid/oversized persisted data returns a fresh unknown value; catch only validation/decoding errors, not arbitrary DB exceptions. Do not log the raw object or validation error text containing input.
 
@@ -99,7 +99,7 @@ class AssistantStartup(BaseModel):
 
 Add before/after validators: schema version must have `type(value) is int` and value 1 (reject true); ID must be a nonempty string when present; pair/source rules match Global Constraints. Validate serialized byte size on model construction as well as encoding so response-only construction cannot bypass the cap. Use `json.dumps(model.model_dump(), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")`; convert Unicode errors to bounded validation messages. There is no existing global 128-character Workspace-ID contract: do not invent one or truncate IDs. A legacy ID whose complete origin exceeds the byte cap fails before new-chat insertion with a bounded input error; existing Workspace/chat access stays unchanged.
 
-- [ ] Add model/parser tests and observe RED. Include exact keys, each valid source, missing/partial/forbidden references, true/string/zero versions, non-string/empty IDs, escaped/control text, invalid Unicode, extra snapshot fields, arrays and >1024-byte JSON. Hypothesis round trips must retain values and prove the encoded cap.
+- [x] Add model/parser tests and observe RED. Include exact keys, each valid source, missing/partial/forbidden references, true/string/zero versions, non-string/empty IDs, escaped/control text, invalid Unicode, extra snapshot fields, arrays and >1024-byte JSON. Hypothesis round trips must retain values and prove the encoded cap.
 
 ```python
 def test_origin_is_reference_only_and_round_trips():
@@ -118,18 +118,20 @@ def test_legacy_or_invalid_storage_has_unknown_origin(raw):
     assert decode_assistant_startup(raw) == AssistantStartup()
 ```
 
-- [ ] Move parsing/profile-cache/effective-state logic from `workspaces.py:174-305` into existing `Workspaces/assistant_defaults.py`, keeping thin adapters where existing callers/tests need them. Expose `resolve_effective_workspace_assistant_default(db, *, workspace: Mapping[str, Any], user_id: str, persona_profile_cache=None, conn=None) -> WorkspaceEffectiveAssistantDefault`. Preserve management-authorized stored references and permission-safe effective output, include-deleted behavior, per-request profile caching, and bounded logging.
-- [ ] Use `_assistant_defaults_invalid` as well as schema validation. A non-null default plus opt-out true stays unavailable. Consult `core.feature_flags.is_persona_enabled` before profile lookup. Let DB errors propagate to existing HTTP mappers at endpoint boundaries; no generic successful fallback.
-- [ ] Retain `resolve_new_conversation_assistant(db, *, user_id, request) -> ChatSessionCreate` as a compatibility wrapper for direct callers. Introduce `ResolvedConversationAssistant(request: ChatSessionCreate, startup: AssistantStartup, display_name: str)` and `resolve_workspace_assistant_startup(db, *, user_id: str, request: ChatSessionCreate, conn=None) -> ResolvedConversationAssistant` in that same module. Its selection matrix is Stage 3; the wrapper returns `.request`. Do not persist the display name in provenance.
-- [ ] Extend resolver tests: malformed raw JSON hidden by DB normalization, inconsistent opt-out pair, inactive/deleted/hidden Persona, disabled configured Persona, unavailable Workspace and DB failure. Startup maps configured disabled to 503 and other unavailable defaults to 409 without identity/name; explicit None bypasses Persona lookup. Management status semantics stay unchanged. Capture logs and assert private markers are absent.
-- [ ] Run RED then GREEN for the new value tests and both existing Workspace suites. Add docstrings and commit only this stage's files/tests plus the execution task and updated plan: `refactor(persona): share workspace default resolution`.
+- [x] Move parsing/profile-cache/effective-state logic from `workspaces.py:174-305` into existing `Workspaces/assistant_defaults.py`, keeping thin adapters where existing callers/tests need them. Expose `resolve_effective_workspace_assistant_default(db, *, workspace: Mapping[str, Any], user_id: str, persona_profile_cache=None, conn=None) -> WorkspaceEffectiveAssistantDefault`. Preserve management-authorized stored references and permission-safe effective output, include-deleted behavior, per-request profile caching, and bounded logging.
+- [x] Use `_assistant_defaults_invalid` as well as schema validation. A non-null default plus opt-out true stays unavailable. Consult `core.feature_flags.is_persona_enabled` before profile lookup. Let DB errors propagate to existing HTTP mappers at endpoint boundaries; no generic successful fallback.
+- [x] Retain `resolve_new_conversation_assistant(db, *, user_id, request) -> ChatSessionCreate` as a compatibility wrapper for direct callers. Introduce `ResolvedConversationAssistant(request: ChatSessionCreate, startup: AssistantStartup, display_name: str)` and `resolve_workspace_assistant_startup(db, *, user_id: str, request: ChatSessionCreate, conn=None) -> ResolvedConversationAssistant` in that same module. Its selection matrix is Stage 3; the wrapper returns `.request`. Do not persist the display name in provenance.
+- [x] Extend resolver tests: malformed raw JSON hidden by DB normalization, inconsistent opt-out pair, inactive/deleted/hidden Persona, disabled configured Persona, unavailable Workspace and DB failure. Startup maps configured disabled to 503 and other unavailable defaults to 409 without identity/name; explicit None bypasses Persona lookup. Management status semantics stay unchanged. Capture logs and assert private markers are absent.
+- [x] Run RED then GREEN for the new value tests and both existing Workspace suites. Add docstrings and commit only this stage's files/tests plus the execution task and updated plan: `refactor(persona): share workspace default resolution`.
+
+**Execution evidence (2026-09-14):** `e709ade99d`; 158 passed, five warnings, no skips; 98% core coverage. Production/test Bandit clean, no new Ruff findings. Independent stage review approved spec and quality with no actionable findings. Storage/public activation remains contingent on Stages 2-5.
 
 ## Stage 2: Storage And Mutation Protections
 
 **Goal:** Store local provenance without permitting arbitrary DB dictionaries, Sync envelopes or initializer repairs to forge or stale it.
 **Success Criteria:** Fresh/upgrade/rollback pass on both backends; every existing identity writer invalidates atomically; no-op/metadata/scope-only writes preserve it.
 **Tests:** New `tests/DB_Management/test_conversation_assistant_startup.py`; extend `tests/ChaChaNotesDB/test_chacha_conversation_store.py`, `test_conversation_assistant_identity_db.py`, `test_conversation_scope_db.py`, and `tests/Sync/test_sync_v2_chat_materializer.py`, `test_sync_v2_replay_repair.py`.
-**Status:** Not Started.
+**Status:** In Progress.
 
 **Interfaces:** Add nullable `conversations.assistant_startup_json TEXT` through the next registered migration. SQLite CHECK uses byte length via `length(CAST(assistant_startup_json AS BLOB))`; PostgreSQL uses `octet_length`, both allow NULL and cap 1024. No default backfill, foreign key, snapshot table, lookup index or source inferred from legacy identity. Update historical/latest schema assertions precisely, never lower a modern DB marker to simulate an old schema.
 
