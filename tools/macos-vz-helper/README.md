@@ -162,6 +162,93 @@ run's evidence directory after review when it is no longer needed. Hard host
 termination can bypass Python cleanup; inspect the receipt's unique label and
 plist before any manual cleanup. Do not add this opt-in to scheduled CI.
 
+### Guest Capability Mismatch Drill
+
+This manual test exercises the existing runner's required-capability gate. It
+requires an isolated, operator-owned helper and **two separate disposable
+bundles**: a healthy bundle and a test-only guest advertising
+`["output_cap_v1"]` without `exec`. Removing the capability from the host-side
+manifest is not fault injection: the metadata must arrive from the running
+guest's VSock handshake. Keep the test guest's exec handler intact so an
+accidental dispatch is observable.
+
+Never install a test agent in the canonical bundle. Build a purpose-specific
+test guest, install it into an offline image-store clone, then create another
+disposable run clone for each attempt. Keep source and installed-agent hashes,
+filesystem checks, and helper lifecycle receipts. Ensure adequate host free
+space before preparing or booting images.
+
+With that private helper already running:
+
+```bash
+TLDW_SANDBOX_VZ_LINUX_E2E=1 \
+TLDW_SANDBOX_VZ_LINUX_GUEST_MISMATCH_DRILL=1 \
+TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=/path/to/healthy/run/bundle \
+TLDW_SANDBOX_VZ_LINUX_MISMATCH_BASE_IMAGE=/path/to/missing-exec/run/bundle \
+TLDW_SANDBOX_MACOS_HELPER_SOCKET=/path/to/private/helper.sock \
+python -m pytest -q \
+  tldw_Server_API/tests/sandbox/test_vz_linux_guest_mismatch_host_gated.py::test_vz_linux_rejects_real_guest_missing_exec_then_runs_healthy_session
+```
+
+The test removes its own sessions/VMs and writes `guest-mismatch.json` under
+pytest's artifact directory. The caller remains responsible for stopping its
+helper and retaining the receipt. A passing run proves capability rejection,
+no dispatch or reusable state for that guest, followed by healthy execution and
+session reuse on the same helper. It does not prove protocol-version rejection
+or host reboot recovery. Missing prerequisites/skips are not acceptance.
+
+Local live acceptance was recorded on 2026-09-13, including a negative control
+that caught actual guest execution when the runner gate was bypassed. See
+`Docs/Sandbox/vz-linux-prepared-host-evidence.md` and TASK-13243.3. A low `df`
+free-space value alone is not a definitive capacity check on macOS: account for
+reclaimable capacity and verify the actual write path before declaring a blocker.
+
+### Guest Readiness Timeout Drill
+
+This separate manual drill verifies a guest that has booted and completed its
+VSock handshake but never sends `ready`. It is not a missing-agent or kernel
+boot-failure test. Use an isolated operator-owned helper and separate disposable
+healthy/fault bundles, prepared through the same offline image-store cloning
+procedure as the capability-mismatch drill. Never alter a canonical image.
+
+The purpose-built test guest must implement this **test-only** contract after
+`sendHandshake` has validated the real helper acknowledgement:
+
+- Read `/workspace/.tldw-readiness-challenge.json`, containing a fresh `nonce`
+  and boolean `withhold_ready` written by the test before VM creation.
+- Write `/workspace/.tldw-readiness-proof.json` as a regular file with the same
+  nonce, its actual `vm_id`, and `handshake_acknowledged: true`.
+- When `withhold_ready` is true, keep the connection alive without sending
+  readiness, with a two-minute guest-side watchdog. Do not block solely on
+  `context.Background().Done()`: its nil channel can trigger Go deadlock exit.
+- Otherwise continue the unchanged readiness/exec path. The negative control
+  sets the test module's `_WITHHOLD_READY` to false and must fail specifically
+  because the guest actually executes, not because the image fails to boot.
+
+Keep this behavior in a purpose-built Go build overlay, not production source
+or runtime flags. Retain the overlay, binary, offline-install comparison, source
+hashes, and per-attempt lifecycle receipt. With the private helper running:
+
+```bash
+TLDW_SANDBOX_VZ_LINUX_E2E=1 \
+TLDW_SANDBOX_VZ_LINUX_READINESS_DRILL=1 \
+TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=/path/to/healthy/run/bundle \
+TLDW_SANDBOX_VZ_LINUX_READINESS_BASE_IMAGE=/path/to/withheld-ready/run/bundle \
+TLDW_SANDBOX_MACOS_HELPER_SOCKET=/path/to/private/helper.sock \
+python -m pytest -q --timeout=90 --timeout-method=signal \
+  tldw_Server_API/tests/sandbox/test_vz_linux_readiness_host_gated.py::test_vz_linux_readiness_timeout_then_healthy_session_reuse
+```
+
+The test requires a fresh acknowledged-handshake proof, a bounded
+`guest_transport_timeout`, no execution or reusable control state after failure,
+then two healthy commands in one new session VM on the same helper. It retains
+`guest-readiness.json` in pytest's artifact directory and attempts all owned
+cleanup even after a deletion error. A skip is not acceptance. The caller must
+stop its helper and retain its logs/receipt; also check disposable disk handles
+before helper shutdown, since registry emptiness alone is not shutdown proof.
+Local acceptance and the failed initial test-image attempt are recorded in
+`Docs/Sandbox/vz-linux-prepared-host-evidence.md` under TASK-13243.4.
+
 ### Host Reboot Validation Drill
 
 `host-reboot-drill` records bounded helper evidence before a manual host reboot
