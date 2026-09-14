@@ -253,10 +253,12 @@ def test_workspace_explicit_none_validation_preserves_unrelated_extra_compatibil
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("diagnostic", [False, True])
 def test_workspace_inconsistent_explicit_none_is_unavailable_on_reads(
     workspace_app: FastAPI,
     db: CharactersRAGDB,
     monkeypatch: pytest.MonkeyPatch,
+    diagnostic: bool,
 ) -> None:
     """A normalized non-null default plus opt-out fails closed on detail/list."""
     workspace = db.upsert_workspace("ws-inconsistent", "Inconsistent choice")
@@ -264,7 +266,7 @@ def test_workspace_inconsistent_explicit_none_is_unavailable_on_reads(
     workspace.update(
         assistant_defaults_json=_assistant_defaults_payload(persona_id),
         assistant_defaults_explicit_none=True,
-        _assistant_defaults_invalid=True,
+        _assistant_defaults_invalid=diagnostic,
     )
     monkeypatch.setattr(db, "get_workspace", Mock(return_value=workspace))
     monkeypatch.setattr(db, "list_workspaces", Mock(return_value=[workspace]))
@@ -396,6 +398,8 @@ def test_list_workspaces_caches_repeated_persona_default_lookups(
     try:
         with TestClient(workspace_app, raise_server_exceptions=False) as client:
             response = client.get("/api/v1/workspaces/")
+            db.update_persona_profile(persona_id=persona_id, user_id="1", update_data={"is_active": False})
+            next_response = client.get("/api/v1/workspaces/")
     finally:
         _clear_workspace_overrides(workspace_app)
 
@@ -405,7 +409,10 @@ def test_list_workspaces_caches_repeated_persona_default_lookups(
         "ws-assistant-a",
         "ws-assistant-b",
     }
-    assert profile_lookup_count == 1
+    assert profile_lookup_count == 2
+    assert next_response.status_code == 200
+    assert all(item["effective_assistant_default"]["degraded_reason"] == "persona_unavailable"
+               for item in next_response.json()["items"])
 
 
 @pytest.mark.integration
