@@ -211,6 +211,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
+from tldw_Server_API.app.core.Workspaces.assistant_defaults import project_assistant_startup
 from tldw_Server_API.app.core.LLM_Calls.routing import (
     InMemoryRoutingDecisionStore,
     RouterRequest,
@@ -1770,6 +1771,9 @@ def reset_complete_windows() -> None:
 def _conversation_list_item_fields(
     conv_data: dict[str, Any],
     *,
+    db: CharactersRAGDB,
+    user_id: str,
+    workspace_visibility_cache: dict[str, bool] | None = None,
     settings: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Build fields shared by list and detail conversation responses."""
@@ -1780,6 +1784,10 @@ def _conversation_list_item_fields(
         assistant_id = str(character_id)
     return {
         "id": conv_data.get('id', ''),
+        "assistant_startup": project_assistant_startup(
+            db, raw=conv_data.get("assistant_startup_json"), user_id=user_id,
+            workspace_visibility_cache=workspace_visibility_cache,
+        ),
         "scope_type": conv_data.get("scope_type") or "global",
         "workspace_id": conv_data.get("workspace_id"),
         "character_id": character_id,
@@ -1809,6 +1817,8 @@ def _conversation_list_item_fields(
 def _convert_db_conversation_to_response(
     conv_data: dict[str, Any],
     *,
+    db: CharactersRAGDB,
+    user_id: str,
     settings: Optional[dict[str, Any]] = None,
     resume_state: Optional[dict[str, Any]] = None,
 ) -> ChatSessionResponse:
@@ -1816,7 +1826,7 @@ def _convert_db_conversation_to_response(
     state = resume_state or {}
     snapshot = state.get("behavior_snapshot") or {"status": "missing"}
     tail = state.get("tail") or {"message_id": None, "message_version": None}
-    detail_fields = _conversation_list_item_fields(conv_data, settings=settings)
+    detail_fields = _conversation_list_item_fields(conv_data, db=db, user_id=user_id, settings=settings)
     detail_fields["message_count"] = state.get(
         "message_count",
         conv_data.get('message_count', 0),
@@ -1841,10 +1851,16 @@ def _convert_db_conversation_to_response(
 def _convert_db_conversation_to_list_item(
     conv_data: dict[str, Any],
     *,
+    db: CharactersRAGDB,
+    user_id: str,
+    workspace_visibility_cache: dict[str, bool] | None = None,
     settings: Optional[dict[str, Any]] = None,
 ) -> ChatSessionListItem:
     """Convert a conversation without materializing detail-only resume authority."""
-    return ChatSessionListItem(**_conversation_list_item_fields(conv_data, settings=settings))
+    return ChatSessionListItem(**_conversation_list_item_fields(
+        conv_data, db=db, user_id=user_id, settings=settings,
+        workspace_visibility_cache=workspace_visibility_cache,
+    ))
 
 
 def _assistant_display_name(record: Mapping[str, Any] | None) -> str | None:
@@ -4830,6 +4846,7 @@ async def create_chat_session(
                 str(current_user.id),
             ),
             resume_state=db.get_roleplay_resume_state(created_id),
+            db=db, user_id=str(current_user.id),
         )
 
     except HTTPException:
@@ -5115,6 +5132,7 @@ async def get_chat_session(
             ),
             settings=settings_payload,
             resume_state=resume_state,
+            db=db, user_id=str(current_user.id),
         )
 
     except HTTPException:
@@ -7330,6 +7348,7 @@ async def list_chat_sessions(
             user_id_str,
         )
         chats: list[ChatSessionListItem] = []
+        workspace_visibility_cache: dict[str, bool] = {}
         for conv in user_conversations:
             settings_payload: Optional[dict[str, Any]] = None
             if include_settings:
@@ -7344,6 +7363,8 @@ async def list_chat_sessions(
                         persona_names=persona_names,
                     ),
                     settings=settings_payload,
+                    db=db, user_id=user_id_str,
+                    workspace_visibility_cache=workspace_visibility_cache,
                 )
             )
 
@@ -7451,6 +7472,7 @@ async def update_chat_session(
                 str(current_user.id),
             ),
             resume_state=db.get_roleplay_resume_state(chat_id),
+            db=db, user_id=str(current_user.id),
         )
 
     except ConflictError as e:
@@ -7925,6 +7947,7 @@ async def restore_chat_session(
                     str(current_user.id),
                 ),
                 resume_state=db.get_roleplay_resume_state(chat_id),
+                db=db, user_id=str(current_user.id),
             )
 
         if _active_chat_sync_service(current_user, scope) is not None:
@@ -7946,6 +7969,7 @@ async def restore_chat_session(
                 str(current_user.id),
             ),
             resume_state=db.get_roleplay_resume_state(chat_id),
+            db=db, user_id=str(current_user.id),
         )
 
     except ConflictError as e:
