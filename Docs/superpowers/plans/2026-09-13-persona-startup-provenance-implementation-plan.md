@@ -12,7 +12,7 @@
 
 **Tracking:** [#2950](https://github.com/rmusser01/tldw_server/issues/2950), TASK-13245; this planning unit is TASK-13245.3. Based on [2A PR #2959](https://github.com/rmusser01/tldw_server/pull/2959), commit `8d5e6a5be37653134f7249a9699070940a61cbe3`. Create a separate execution child task before runtime edits; search first to avoid duplicates.
 
-**Delivery status:** Planning and review only, published in [draft PR #2961](https://github.com/rmusser01/tldw_server/pull/2961). All runtime execution stages below are Not Started.
+**Delivery status:** Reviewed plan published in [draft PR #2961](https://github.com/rmusser01/tldw_server/pull/2961). Execution started on 2026-09-14 under TASK-13245.4, branch `codex/persona-startup-provenance`. All five stages remain one activation unit; no partial runtime rollout.
 
 ## Global Constraints
 
@@ -81,7 +81,7 @@ The SQLite conversation sync triggers at `ChaChaNotes_DB.py:1472-1522` enumerate
 **Goal:** Define a single validated local origin value and make management/startup consult identical effective-default rules.
 **Success Criteria:** All source/reference relations and byte bounds are enforced; management wire behavior is unchanged; implicit startup cannot treat corrupt storage as unset.
 **Tests:** New `tests/Chat/test_assistant_startup.py`; extend existing Workspace default API and creation tests.
-**Status:** Not Started.
+**Status:** In Progress.
 
 **Interfaces:** Create `AssistantStartup` in the new core value module (Pydantic, frozen, `extra="forbid"`). Add `encode_assistant_startup(value: AssistantStartup) -> str` and `decode_assistant_startup(raw: object) -> AssistantStartup`. Encoding rejects non-model inputs, invalid Unicode and >1024-byte canonical JSON. Decoding NULL/invalid/oversized persisted data returns a fresh unknown value; catch only validation/decoding errors, not arbitrary DB exceptions. Do not log the raw object or validation error text containing input.
 
