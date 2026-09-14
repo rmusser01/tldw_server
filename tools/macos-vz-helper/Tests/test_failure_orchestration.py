@@ -285,6 +285,26 @@ def test_install_agent_verifies_offline_copy_and_terminates_preparer(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("termination_raises", [False, True])
+def test_install_agent_preserves_primary_error_when_cleanup_also_fails(
+    drill: ModuleType, tmp_path: Path, termination_raises: bool
+) -> None:
+    """Keep the exec error primary and retain termination diagnostics in its traceback."""
+    binary = tmp_path / "agent"
+    binary.write_bytes(b"fault-agent")
+    helper = Mock()
+    helper.create_vm.return_value = SimpleNamespace(vm_id="preparer-vm")
+    helper.exec_guest.side_effect = OSError("original execution failure")
+    helper.terminate_vm.return_value = False
+    if termination_raises:
+        helper.terminate_vm.side_effect = OSError("termination RPC failed")
+    with pytest.raises(OSError, match="original execution failure") as caught:
+        drill.install_agent(helper, tmp_path / "boot", tmp_path, binary, tmp_path)
+    helper.terminate_vm.assert_called_once_with("preparer-vm")
+    assert any("preparer cleanup failed" in note for note in caught.value.__notes__)
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "profile,negative,blocked_by",
     [

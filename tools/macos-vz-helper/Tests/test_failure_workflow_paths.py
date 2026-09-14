@@ -114,10 +114,11 @@ def test_logged_preserves_output_and_exit_code(drill: ModuleType, tmp_path: Path
 
 @pytest.mark.integration
 @pytest.mark.skipif(os.name != "posix", reason="POSIX process ownership contract")
+@pytest.mark.parametrize("signal_count", [1, 2])
 def test_logged_handles_signal_before_spawn_returns(
-    drill: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    drill: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, signal_count: int
 ) -> None:
-    """Cancellation inside spawn must wait until the child has an assigned owner."""
+    """One or several startup signals become one cancellation after ownership assignment."""
     popen = subprocess.Popen
     children: list[subprocess.Popen] = []
 
@@ -125,7 +126,8 @@ def test_logged_handles_signal_before_spawn_returns(
         """Deliver SIGINT after OS creation but before returning the process handle."""
         child = popen(*args, **kwargs)
         children.append(child)
-        signal.raise_signal(signal.SIGINT)
+        for _ in range(signal_count):
+            signal.raise_signal(signal.SIGINT)
         return child
 
     original_handler = signal.getsignal(signal.SIGINT)

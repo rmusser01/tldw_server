@@ -335,6 +335,9 @@ def _defer_spawn_signals() -> Iterator[None]:
     Do not block the OS signal mask: a child would inherit that mask and could
     then ignore TERM. Caught Python handlers reset on exec instead. The CLI
     calls this on the main thread; worker threads cannot receive Python signals.
+    A burst during this short window is intentionally coalesced into its first
+    signal, requesting one orderly cancellation rather than repeated unwinding.
+    Once handlers are restored, subsequent signals retain their normal behavior.
     """
     if threading.current_thread() is not threading.main_thread():
         yield
@@ -562,9 +565,12 @@ def install_agent(helper: Any, boot: Path, target: Path, binary: Path, packet: P
 
     Always attempts termination of a known preparer VM; outer helper cleanup
     covers lost create replies. Never pass the canonical bundle as target.
+    A simultaneous cleanup failure is attached as a note to the primary error
+    so the retained traceback records both without replacing the original cause.
     """
     shutil.copy2(binary, target / "fault-agent")
     vm_id = None
+    primary_error: BaseException | None = None
     try:
         vm = helper.create_vm(
             {
@@ -592,9 +598,17 @@ def install_agent(helper: Any, boot: Path, target: Path, binary: Path, packet: P
         (packet / "install.stderr.log").write_bytes(reply.stderr)
         if reply.exit_code != 0 or digest(binary) != digest(target / "installed-agent"):
             raise RuntimeError(f"offline installation failed: {packet}")
+    except BaseException as exc:
+        primary_error = exc
+        raise
     finally:
-        if vm_id is not None and not helper.terminate_vm(vm_id):
-            raise RuntimeError("preparer termination not confirmed")
+        try:
+            if vm_id is not None and not helper.terminate_vm(vm_id):
+                raise RuntimeError("preparer termination not confirmed")
+        except Exception as cleanup_error:  # noqa: BLE001 - retain both failures at the CLI boundary
+            if primary_error is None:
+                raise
+            primary_error.add_note(f"preparer cleanup failed: {type(cleanup_error).__name__}: {cleanup_error}")
         # A lost create reply is handled by the exclusive helper's outer cleanup.
 
 

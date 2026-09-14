@@ -200,7 +200,9 @@ attaches to an existing helper, installs launchd services, or reboots the host.
 Exit zero requires two passing live tests, two negative controls failing at
 their specific execution assertions, no skipped tests, no cleanup errors, empty
 VM inventory, closed disposable disks, helper shutdown, and unchanged source
-hashes. An unrelated boot failure is not a successful negative control.
+boot-artifact/manifest/build-provenance hashes. This is not a full directory
+inventory: unrelated files such as operator notes are outside the fingerprint.
+An unrelated boot failure is not a successful negative control.
 
 Retained artifacts include `receipt.json` (including hashes of helperctl and
 the image-store materializer), per-case `result.json`, JUnit and
@@ -211,8 +213,12 @@ remove only that run's evidence directory when its cleanup receipt confirms the
 helper and VMs are gone. A failure retains logs and returns nonzero; unavailable
 cleanup checks are not reported as empty. Ctrl-C/SIGTERM and command timeouts
 terminate the active build/test process group and reap its direct child before
-helper cleanup (three-second TERM grace, then KILL). They attempt cleanup, but
-SIGKILL, a host crash, or power loss can bypass it. In that case inspect the
+helper cleanup (three-second TERM grace, then KILL). Signals arriving during
+process creation coalesce into one cancellation after
+child ownership is registered; later signals retain their normal behavior.
+An installation error stays primary if preparer cleanup also fails, with the
+cleanup diagnostic attached to the retained traceback.
+SIGKILL, a host crash, or power loss can bypass cleanup. In that case inspect the
 receipt's unique runtime/socket/PID paths before manual recovery. Never enable
 these fault fixtures on a production guest or run this in scheduled CI.
 

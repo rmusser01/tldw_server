@@ -135,6 +135,14 @@ triage issue.
   diff checks, and scoped Bandit scans passed (test assertions excluded).
   Independent re-review found no remaining issues. Full server/Swift suites
   and additional failure classes remain outside this Python/test-only change.
+- Subsequent reviewer-guide follow-up: **298 passed, 2 expected host-gated
+  skips**, four existing warnings. Added combined installation/termination
+  failure regressions and a startup signal-burst test; documented first-signal
+  coalescing and the boot-artifact/metadata fingerprint boundary. This later
+  change preserves the primary exception with a cleanup note; it does not
+  alter Go overlays or normal VM behavior. No additional real VM run was
+  performed for this exception-reporting/test/documentation-only follow-up;
+  the packet above records the exact earlier workflow bytes it exercised.
 
 ### 2026-09-13: Checked-in real guest-failure workflow (TASK-13243.5)
 
