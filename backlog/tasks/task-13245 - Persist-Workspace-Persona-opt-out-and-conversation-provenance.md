@@ -4,7 +4,7 @@ title: Persist Workspace Persona opt-out and conversation provenance
 status: In Progress
 assignee: []
 created_date: '2026-09-13 18:15'
-updated_date: '2026-09-13 23:52'
+updated_date: '2026-09-14 00:09'
 labels:
   - persona
   - workspaces
@@ -40,6 +40,8 @@ Stage 2 contract design underway in child TASK-13245.1; runtime not started. Cor
 Stage 2 prompt/memory baseline: 13 passed, 9 failed with HTTP 503 missing_provider_credentials before mocked dispatch. Persona fixture patches chat.API_KEYS but runtime now uses provider_credential_runtime.load_server_config_snapshot. Diagnostic-only in-memory fixture supplying the same dummy credential via that loader yielded 22 passed. No runtime/test edits made. Repair the existing fixture and rerun ordinary suites during implementation; tracked in the staged plan and design validation record.
 
 Design prerequisite TASK-13245.1 completed and published as draft PR #2958 (stacked on #2957). Independent review findings resolved at contract level. Parent remains In Progress: all runtime acceptance criteria are unchecked; requester approval is needed before slice 2A implementation.
+
+Requester-requested second design review completed in TASK-13245.1/PR #2958. Verified/amended silent strict-selector downgrade on older servers (dedicated route), mixed-version cached-writer hazard (offline migration), lifecycle activation ordering, and unbounded permanent receipts (finite owner-scoped budget including tombstones). Independent re-review found no remaining material contract issues. Runtime untouched; revised contract and implementation verification gates still apply.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
