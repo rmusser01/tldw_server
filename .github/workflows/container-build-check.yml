@@ -134,13 +134,11 @@ jobs:
               variant: (.Variant // ""), source_sha: $source_sha}' > "$EVIDENCE_DIR/image.json"
           docker pull "$TRIVY_IMAGE"
           # Network acquisition has no access to the Docker daemon or repository.
-          for database in --download-db-only --download-java-db-only; do
-            docker run --rm --read-only --cap-drop ALL \
-              --user "$(id -u):$(id -g)" \
-              --security-opt no-new-privileges:true --tmpfs /tmp:rw,nosuid,nodev,size=256m \
-              --volume "$SCANNER_CACHE:/cache:rw" \
-              "$TRIVY_IMAGE" image --cache-dir /cache --timeout 5m "$database"
-          done
+          docker run --rm --read-only --cap-drop ALL \
+            --user "$(id -u):$(id -g)" \
+            --security-opt no-new-privileges:true --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+            --volume "$SCANNER_CACHE:/cache:rw" \
+            "$TRIVY_IMAGE" image --cache-dir /cache --timeout 5m --download-db-only
           python - <<'PY'
           import hashlib
           import json
@@ -151,7 +149,7 @@ jobs:
           cache = Path(os.environ["SCANNER_CACHE"])
           now = datetime.now(timezone.utc)
           databases = {}
-          for name, filename in (("db", "trivy.db"), ("java-db", "trivy-java.db")):
+          for name, filename in (("db", "trivy.db"),):
               metadata = json.loads((cache / name / "metadata.json").read_text())
               updated = datetime.fromisoformat(metadata["UpdatedAt"].replace("Z", "+00:00"))
               if updated.tzinfo is None or not -timedelta(minutes=5) <= now - updated <= timedelta(hours=24):
@@ -233,7 +231,7 @@ jobs:
           now = datetime.now(timezone.utc)
           if scanner["image"] != os.environ["TRIVY_IMAGE"]:
               raise SystemExit("Scanner identity does not match the pinned tool")
-          for name in ("db", "java-db"):
+          for name in ("db",):
               database = scanner["databases"][name]
               updated = datetime.fromisoformat(database["UpdatedAt"].replace("Z", "+00:00"))
               if updated.tzinfo is None or not -timedelta(minutes=5) <= now - updated <= timedelta(hours=24):

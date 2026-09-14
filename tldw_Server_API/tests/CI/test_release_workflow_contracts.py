@@ -197,6 +197,8 @@ def test_backend_scan_is_pinned_offline_and_does_not_publish_or_filter_findings(
     assert prepare["if"] == scan["if"] == "matrix.backend"
     assert "docker.sock" not in prepare["run"]
     assert "--download-db-only" in prepare["run"]
+    assert "java-db" not in prepare["run"]
+    assert "java-db" not in finalize["run"]
     for required in (
         "--network none",
         "--read-only",
@@ -204,6 +206,7 @@ def test_backend_scan_is_pinned_offline_and_does_not_publish_or_filter_findings(
         "no-new-privileges",
         "--image-src docker",
         "--skip-db-update",
+        "--skip-java-db-update",
         "--scanners vuln",
         "--list-all-pkgs",
         "--ignore-unfixed=false",
@@ -258,7 +261,7 @@ def test_backend_scanner_uses_mount_owner_and_only_scan_gets_socket_group(tmp_pa
     )
     assert result.returncode == 0, result.stderr
     runs = [args for line in command_log.read_text().splitlines() if (args := shlex.split(line))[0] == "run"]
-    assert len(runs) == 2
+    assert len(runs) == (1 if phase.startswith("Prepare") else 2)
     for args in runs:
         assert "--user" in args, "Scanner must use the owner of its runner-created mounts"
         assert args[args.index("--user") + 1] == "1001:123"
@@ -308,7 +311,7 @@ def test_backend_evidence_verifier_rejects_invalid_artifacts(tmp_path: Path, def
     timestamp = (now - age).replace(tzinfo=None) if defect == "naive_time" else now - age
     scanner = {
         "image": "wrong" if defect == "wrong_scanner" else scanner_pin,
-        "databases": {name: {"UpdatedAt": timestamp.isoformat(), "sha256": "d" * 64} for name in ("db", "java-db")},
+        "databases": {"db": {"UpdatedAt": timestamp.isoformat(), "sha256": "d" * 64}},
     }
     report = {
         "Metadata": {"ImageID": "wrong" if defect == "wrong_image" else image_id},
