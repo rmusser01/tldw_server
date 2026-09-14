@@ -700,8 +700,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 68  # Schema v68 persists Workspace Persona opt-out
-    _POSTGRES_SCHEMA_VERSION = 68
+    _CURRENT_SCHEMA_VERSION = 69  # Schema v69 persists local conversation startup provenance
+    _POSTGRES_SCHEMA_VERSION = 69
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -7437,6 +7437,18 @@ UPDATE workspaces SET assistant_defaults_explicit_none = TRUE WHERE assistant_de
 UPDATE db_schema_version SET version = 68 WHERE schema_name = 'rag_char_chat_schema' AND version = 67;
 """
 
+    _MIGRATION_SQL_V68_TO_V69 = """
+ALTER TABLE conversations ADD COLUMN assistant_startup_json TEXT
+    CHECK (assistant_startup_json IS NULL OR length(CAST(assistant_startup_json AS BLOB)) <= 1024);
+UPDATE db_schema_version SET version = 69 WHERE schema_name = 'rag_char_chat_schema' AND version = 68;
+"""
+
+    _MIGRATION_SQL_V68_TO_V69_POSTGRES = """
+ALTER TABLE conversations ADD COLUMN assistant_startup_json TEXT
+    CHECK (assistant_startup_json IS NULL OR octet_length(assistant_startup_json) <= 1024);
+UPDATE db_schema_version SET version = 69 WHERE schema_name = 'rag_char_chat_schema' AND version = 68;
+"""
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -7504,6 +7516,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         *,
         backend: DatabaseBackend | None = None,
         config: ConfigParser | None = None,
+        owner_user_id: str | None = None,
     ):
         """
         Initializes the CharactersRAGDB instance.
@@ -7516,6 +7529,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                      or ":memory:" for an in-memory database.
             client_id: A unique identifier for this client instance. Used for
                        tracking changes in the sync log and records. Must not be empty.
+            owner_user_id: Canonical owner supplied by trusted dependency construction,
+                           never request metadata. Defaults to the initial client_id
+                           for standalone callers that already use it as their owner.
 
         Raises:
             ValueError: If `client_id` is empty or None.
@@ -7533,6 +7549,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not client_id:
             raise ValueError("Client ID cannot be empty or None.")  # noqa: TRY003
         self.client_id = client_id
+        self._owner_user_id = str(client_id if owner_user_id is None else owner_user_id)
         self._local = threading.local()
         self._schema_lock = threading.RLock()
         self._bootstrapped_backend_targets: set[str] = set()
@@ -7632,6 +7649,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             exc_info=True)
             self.close_connection()
             raise CharactersRAGDBError(f"Unexpected database initialization error: {e}") from e  # noqa: TRY003
+
+    @property
+    def owner_user_id(self) -> str:
+        """Return construction-time ownership, independent of writer attribution."""
+        return self._owner_user_id
 
     # --- Backend Resolution Helpers ---
     def _resolve_backend(
@@ -8523,6 +8545,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (65, "_migrate_from_v65_to_v66"),
             (66, "_migrate_from_v66_to_v67"),
             (67, "_migrate_from_v67_to_v68"),
+            (68, "_migrate_from_v68_to_v69"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17632,6 +17655,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 68:
             raise SchemaError("Workspace Persona PostgreSQL migration V67->V68 failed version verification.")  # noqa: TRY003
 
+    def _migrate_from_v68_to_v69(self, conn: sqlite3.Connection) -> None:
+        """Add bounded local startup storage without inferring historical provenance."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V68_TO_V69):
+            conn.execute(statement)
+        if self._get_db_version(conn) != 69:
+            raise SchemaError("Conversation startup migration V68->V69 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v68_to_v69_postgres(self, conn: Any) -> None:
+        """Add PostgreSQL startup storage in the caller's offline upgrade transaction."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V68_TO_V69_POSTGRES):
+            self.backend.execute(statement, connection=conn)
+        if self._get_schema_version_postgres(conn) != 69:
+            raise SchemaError("Conversation startup PostgreSQL migration V68->V69 failed version verification.")  # noqa: TRY003
+
     def _migrate_from_v64_to_v65(self, conn: sqlite3.Connection) -> None:
         """Migrate schema from V64 to V65 (character resume snapshot state)."""
         logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V64 to V65 for DB: {self.db_path_str}...")
@@ -17731,7 +17768,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise SchemaError(f"Failed ensuring SQLite persona persistence schema: {exc}") from exc  # noqa: TRY003
 
     def _ensure_recent_persona_schema_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Backfill recent persona schema columns after version-number collisions."""
+        """Backfill Persona columns and guard local origin during historical identity repairs."""
         self._ensure_persona_persistence_schema_sqlite(conn)
         profile_cols = self._sqlite_column_names(conn, "persona_profiles")
         if "voice_defaults_json" not in profile_cols:
@@ -17758,22 +17795,26 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         self._ensure_conversations_fts_triggers_sqlite(conn)
         self._rebuild_conversations_fts_sqlite(conn)
-        conn.execute(
-            """
-            UPDATE conversations
-               SET assistant_kind = 'character'
-             WHERE character_id IS NOT NULL
-               AND COALESCE(TRIM(assistant_kind), '') = ''
-            """
-        )
-        conn.execute(
-            """
-            UPDATE conversations
-               SET assistant_id = CAST(character_id AS TEXT)
-             WHERE character_id IS NOT NULL
-               AND COALESCE(TRIM(assistant_id), '') = ''
-            """
-        )
+        if "assistant_startup_json" in conversation_cols:
+            with TransactionContextManager(self):
+                self._repair_conversation_assistant_identity(conn)
+        else:
+            conn.execute(
+                """
+                UPDATE conversations
+                   SET assistant_kind = 'character'
+                 WHERE character_id IS NOT NULL
+                   AND COALESCE(TRIM(assistant_kind), '') = ''
+                """
+            )
+            conn.execute(
+                """
+                UPDATE conversations
+                   SET assistant_id = CAST(character_id AS TEXT)
+                 WHERE character_id IS NOT NULL
+                   AND COALESCE(TRIM(assistant_id), '') = ''
+                """
+            )
 
         session_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_sessions')").fetchall()}
         if "activity_surface" not in session_cols:
@@ -17783,6 +17824,40 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if "preferences_json" not in session_cols:
             conn.execute(
                 "ALTER TABLE persona_sessions ADD COLUMN preferences_json TEXT NOT NULL DEFAULT '{}'"
+            )
+
+    def _repair_conversation_assistant_identity(self, conn: Any) -> None:
+        """Repair only historical missing Character fields, comparing locked normalized bindings."""
+        query = """
+            SELECT id, character_id, assistant_kind, assistant_id, persona_memory_mode,
+                   assistant_startup_json
+              FROM conversations
+             WHERE character_id IS NOT NULL
+               AND (COALESCE(TRIM(assistant_kind), '') = ''
+                    OR COALESCE(TRIM(assistant_id), '') = '')
+        """
+        if self.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE"
+        rows = conn.execute(query).fetchall()
+        for row in rows:
+            kind = row["assistant_kind"]
+            assistant_id = row["assistant_id"]
+            if kind is None or not kind.strip(" "):
+                kind = "character"
+            if assistant_id is None or not assistant_id.strip(" "):
+                assistant_id = str(row["character_id"])
+            try:
+                binding = self.conversation_store._normalize_conversation_assistant_identity(
+                    character_id=row["character_id"], assistant_kind=kind,
+                    assistant_id=assistant_id, persona_memory_mode=row["persona_memory_mode"],
+                )
+            except InputError:
+                preserve_origin = False
+            else:
+                preserve_origin = self.conversation_store._assistant_identity_matches(row, binding)
+            conn.execute(
+                "UPDATE conversations SET assistant_kind = ?, assistant_id = ?, assistant_startup_json = ? WHERE id = ?",
+                (kind, assistant_id, row["assistant_startup_json"] if preserve_origin else None, row["id"]),
             )
 
     def _ensure_recent_voice_command_schema_sqlite(self, conn: sqlite3.Connection) -> None:
@@ -17918,7 +17993,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
 
     def _ensure_recent_persona_schema_postgres(self, conn: Any) -> None:
-        """Backfill recent persona schema columns for PostgreSQL deployments."""
+        """Backfill Persona columns, protecting local origin when modern storage exists."""
         if not hasattr(self.backend, "execute"):
             return
         statements = [
@@ -17930,6 +18005,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assistant_kind TEXT CHECK (assistant_kind IN ('character', 'persona'))",
             "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assistant_id TEXT",
             "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS persona_memory_mode TEXT CHECK (persona_memory_mode IN ('read_only', 'read_write'))",
+            "ALTER TABLE persona_sessions ADD COLUMN IF NOT EXISTS activity_surface TEXT NOT NULL DEFAULT 'api.persona'",
+            "ALTER TABLE persona_sessions ADD COLUMN IF NOT EXISTS preferences_json TEXT NOT NULL DEFAULT '{}'",
+        ]
+        for statement in statements:
+            self.backend.execute(statement, connection=conn)
+        if self._get_schema_version_postgres(conn) >= 69:
+            self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, self.backend))
+            return
+        for statement in (
             """
             UPDATE conversations
                SET assistant_kind = 'character'
@@ -17942,10 +18026,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              WHERE character_id IS NOT NULL
                AND COALESCE(TRIM(assistant_id), '') = ''
             """,
-            "ALTER TABLE persona_sessions ADD COLUMN IF NOT EXISTS activity_surface TEXT NOT NULL DEFAULT 'api.persona'",
-            "ALTER TABLE persona_sessions ADD COLUMN IF NOT EXISTS preferences_json TEXT NOT NULL DEFAULT '{}'",
-        ]
-        for statement in statements:
+        ):
             self.backend.execute(statement, connection=conn)
 
     def _ensure_recent_voice_command_schema_postgres(self, conn: Any) -> None:
@@ -24956,6 +25037,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if target_version >= 68 and current_version < 68:
                 self._migrate_from_v67_to_v68_postgres(conn)
                 current_version = 68
+            if target_version >= 69 and current_version < 69:
+                self._migrate_from_v68_to_v69_postgres(conn)
+                current_version = 69
             self._runtime_schema_version = current_version
 
             if current_version > target_version:
@@ -27347,19 +27431,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         workspace_id: str,
         *,
         include_deleted: bool = False,
+        conn: Any = None,
+        for_update: bool = False,
     ) -> dict[str, Any] | None:
-        """Retrieve a workspace by id, optionally including soft-deleted rows."""
-        if include_deleted:
-            cursor = self.execute_query(
-                "SELECT * FROM workspaces WHERE id = ? AND system_operation_state IS NULL",
-                (workspace_id,),
-            )
-        else:
-            cursor = self.execute_query(
-                "SELECT * FROM workspaces "
-                "WHERE id = ? AND deleted = 0 AND system_operation_state IS NULL",
-                (workspace_id,),
-            )
+        """Read a visible Workspace, optionally locking it in an existing transaction."""
+        if for_update and (
+            conn is None or not getattr(conn, "in_transaction", False)
+            or (self.backend_type == BackendType.POSTGRESQL and not getattr(self._local, "tx_depth", 0))
+        ):
+            raise InputError("Workspace locking reads require a transaction connection.")
+        query = "SELECT * FROM workspaces WHERE id = ? AND system_operation_state IS NULL"
+        if not include_deleted:
+            query += " AND deleted = 0"
+        if for_update and self.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE"
+        cursor = conn.execute(query, (workspace_id,)) if conn is not None else self.execute_query(query, (workspace_id,))
         row = cursor.fetchone()
         return self._workspace_row_to_dict(row) if row else None
 
