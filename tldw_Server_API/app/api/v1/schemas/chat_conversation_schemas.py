@@ -1,9 +1,13 @@
+"""Owned conversation metadata, pagination, and mutation request schemas."""
+
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from tldw_Server_API.app.core.Chat.assistant_startup import reject_assistant_startup_input
 
 ALLOWED_CONVERSATION_STATES = ("in-progress", "resolved", "backlog", "non-viable")
 
@@ -70,6 +74,8 @@ class ConversationListResponse(BaseModel):
 
 
 class ConversationUpdateRequest(BaseModel):
+    """Version-checked metadata update, excluding server-owned startup provenance."""
+
     version: int = Field(..., description="Expected version for optimistic locking")
     state: str | None = Field(None, description="Lifecycle state for the conversation")
     topic_label: str | None = Field(None, description="Primary topic label for the conversation")
@@ -77,6 +83,12 @@ class ConversationUpdateRequest(BaseModel):
     cluster_id: str | None = Field(None, description="Cluster/group identifier")
     source: str | None = Field(None, description="Source of the conversation")
     external_ref: str | None = Field(None, description="External reference/link")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_startup_input(cls, value: Any) -> Any:
+        """Reject reserved origin fields, including explicitly supplied nulls."""
+        return reject_assistant_startup_input(value)
 
     @field_validator("state")
     @classmethod
