@@ -197,8 +197,11 @@ no dispatch or reusable state for that guest, followed by healthy execution and
 session reuse on the same helper. It does not prove protocol-version rejection
 or host reboot recovery. Missing prerequisites/skips are not acceptance.
 
-Initial live acceptance is pending host storage recovery; see
-`Docs/Sandbox/vz-linux-prepared-host-evidence.md` and TASK-13243.3.
+Local live acceptance was recorded on 2026-09-13, including a negative control
+that caught actual guest execution when the runner gate was bypassed. See
+`Docs/Sandbox/vz-linux-prepared-host-evidence.md` and TASK-13243.3. A low `df`
+free-space value alone is not a definitive capacity check on macOS: account for
+reclaimable capacity and verify the actual write path before declaring a blocker.
 
 ### Host Reboot Validation Drill
 

@@ -102,6 +102,65 @@ triage issue.
 
 ## Latest Evidence
 
+### 2026-09-13: Real missing-exec guest rejection and healthy recovery
+
+- TASK-13243.3, branch `codex/vz-guest-mismatch-host-validation` at `dae1f00974`,
+  based on merged PR #2955 (`beac8e9449`). No production runtime or policy code
+  changed. The test observes the real helper's VSock-derived metadata and
+  delegates create/exec calls unchanged.
+- Corrected the earlier storage interpretation: Apple's volume-capacity API
+  reported 114,785,116,224 bytes available for important usage while the plain
+  available-capacity value was 467,423,232 bytes. A bounded write succeeded.
+  `df` alone was not sufficient to declare the test blocked or request manual
+  deletion. The earlier `ENOSPC` attempt remains recorded below; the following
+  retries succeeded without further storage deletion.
+- Evidence root:
+  `$HOME/Library/Logs/tldw/vz-guest-mismatch/20260913`.
+  `green`, `red`, and `review` each contain `host.xml`, `host.log`,
+  `receipt.json`, the generated LaunchAgent plist, helper/serial logs, and
+  `pytest/test_vz_linux_rejects_real_gue0/guest-mismatch.json`.
+- Normal guard: **1 passed, 0 skipped, 0 errors**, 8.942 seconds. A separate
+  fresh-clone repeat after the negative control also passed with **0 skips and
+  errors**, 11.232 seconds. The operator-owned LaunchAgent wrapper bootstrapped,
+  checked, and stopped a unique helper for each attempt. No default helper or
+  host reboot was involved.
+- Final-repeat helper generation:
+  `235162A9-B6E7-4409-9B23-70D5A80E6B66`. Fault VM
+  `9b764241-d778-4e3a-9b2f-47021a13b27e` reported known capabilities containing
+  only `output_cap_v1`. Its run failed with
+  `vz_linux_guest_agent_required_capability_missing`, no stdout, and no exec
+  dispatch. Public reconciliation then reported zero persisted controls and
+  zero live VMs.
+- A new healthy session on the same helper ran both exact-output commands in VM
+  `e8a0f98c-f716-425b-885d-5872a54b785d`, proving same-session reuse after the
+  failed session. This is not an in-place repair of the incompatible guest or
+  reuse of the failed session.
+- Negative control: a test-process-only fixture bypassed the runner's
+  create-time compatibility classification. The independent test observer
+  still saw the missing `exec` capability. VM
+  `1eba8794-237d-45a3-80dd-49175e7e70bf` actually executed the command and
+  returned `mismatch-drill-first\n`, exit 0. The test failed specifically at
+  "Mismatched guest was not rejected" (5.140 seconds), not on a boot error.
+  No production file was edited for the negative control.
+- All three attempts finished with empty helper registries, absent LaunchAgents,
+  unavailable sockets, and removed private runtime directories. Both accepted
+  runs also verified session removal and zero persisted controls. The negative
+  control's failure cleanup reported no remaining owned VMs.
+- Canonical rootfs stayed
+  `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`;
+  kernel, initrd, manifest, and build-info hashes matched before/after every
+  attempt. The unbooted fault-source rootfs also stayed
+  `3406ae92718845dfbf52f8c89628ae237f853d3dd527536dfdc2c9611ab5405c`.
+  Source provenance and retained helper signature/hash are recorded below.
+- Final focused portable checks: **35 passed, 1 intentional host skip**, 2.06
+  seconds. Black and diff checks passed; Bandit reported zero findings.
+  Independent review of the green/red evidence found no material issues.
+  The repository-wide test suite was not run for this test-only slice.
+- Scope: this proves rejection of a known missing required capability and
+  subsequent healthy execution/reuse. It does not prove protocol-version
+  mismatch, a missing agent, stuck boot/readiness, host reboot, or containment
+  of escaped guest descendants. Those remain distinct evidence items.
+
 ### 2026-09-13: Post-merge cleanup and guest-mismatch preparation (not acceptance)
 
 - PR #2955 merged as `beac8e9449`. Its clean worktree and local/remote branch
@@ -129,10 +188,11 @@ triage issue.
 - Canonical `source-bundle-final` rootfs stayed
   `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`;
   kernel, initrd, manifest, and build-info hashes also stayed unchanged.
-- **Live mismatch acceptance and its negative control have NOT run.** The host
-  reported `ENOSPC` while creating the next evidence directory, before starting
-  a test helper. Free sufficient host storage before resuming; never count the
-  successful offline installation as a successful rejection test.
+- At this preparation checkpoint, live mismatch acceptance and its negative
+  control had not run. The host reported `ENOSPC` while creating the next
+  evidence directory, before starting a test helper. Subsequent capacity checks
+  and successful retries are recorded above; the offline installation alone
+  was not counted as a rejection test.
 - Space cleanup removed only the inactive `preparer-boot` clone and PR #2955's
   `public-diagnostics` / `linux-regressions` disposable run disks. Their source
   bundles, logs, test binaries, and acceptance receipts remain. The PR #2955
@@ -990,7 +1050,7 @@ triage issue.
 | Launchd-drill evidence | Recorded real VM smoke on 2026-09-13 (3 tests, no skips), plus a separate live-session restart test (1 passed, no skips/errors) proving changed helper generation, stale-VM replacement, replacement reuse, and cleanup. The latter exposed and fixed guest capped-output loss before acceptance. Durable artifacts and failed attempts are recorded above. | Repeat both bounded drills when helper lifecycle, signing, guest transport, or image preparation changes. Keep launchd validation explicitly operator-requested; host reboot remains separate. |
 | Host reboot recovery | Manual `host-reboot-drill pre/post` procedure only and out of scheduled CI. | Record results when a maintainer explicitly runs the reboot drill on a prepared host that can tolerate disruptive reboot testing and preserve logs. |
 | Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver failure cleanup, guest-readiness failure cleanup, and no reusable session state after create failure. The default prepared-host smoke still does not inject real boot faults. | Record manual prepared-host evidence only after a separate reviewed fault-injection plan; diagnostics/evidence should report stable reason codes and artifact pointers, not raw serial log contents. |
-| Guest-agent mismatch | Not covered by the default smoke. | Use `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md` to guide narrow tests or diagnostics checks before considering automated coverage. |
+| Guest-agent mismatch | Manual real missing-`exec` capability rejection, cleanup, and subsequent healthy session reuse passed locally on 2026-09-13. A negative control proved the test detects execution when the runner gate is bypassed. Not part of default smoke. | Repeat this explicitly opted-in test when the guest handshake or runner admission changes. Protocol-version mismatch, missing-agent, and workspace-mismatch live injection remain separate evidence cases under the lifecycle-drill contract. |
 | Stale socket handling | Manual stale-socket prepared-host evidence was recorded locally on 2026-07-03 with controlled inactive socket recovery, helper start/status verification, and explicit stop cleanup passing. | Repeat when helper socket-safety behavior or the operator drill command changes; keep it manual-only and out of PR/push/scheduled destructive triggers. |
 | Direct-bundle smoke mutability | Closed for the default smoke path by the 2026-06-16 disposable-clone evidence and repeated on 2026-06-20 after host reboot: source bundle hashes stayed identical before/after while the disposable run bundle rootfs hash changed after execution. | Repeat periodically when the smoke wrapper, image-store materializer, or helper VM write path changes. |
 
