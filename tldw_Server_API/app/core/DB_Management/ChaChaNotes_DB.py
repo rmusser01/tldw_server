@@ -7516,6 +7516,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         *,
         backend: DatabaseBackend | None = None,
         config: ConfigParser | None = None,
+        owner_user_id: str | None = None,
     ):
         """
         Initializes the CharactersRAGDB instance.
@@ -7528,6 +7529,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                      or ":memory:" for an in-memory database.
             client_id: A unique identifier for this client instance. Used for
                        tracking changes in the sync log and records. Must not be empty.
+            owner_user_id: Canonical owner supplied by trusted dependency construction,
+                           never request metadata. Defaults to the initial client_id
+                           for standalone callers that already use it as their owner.
 
         Raises:
             ValueError: If `client_id` is empty or None.
@@ -7545,6 +7549,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not client_id:
             raise ValueError("Client ID cannot be empty or None.")  # noqa: TRY003
         self.client_id = client_id
+        self._owner_user_id = str(client_id if owner_user_id is None else owner_user_id)
         self._local = threading.local()
         self._schema_lock = threading.RLock()
         self._bootstrapped_backend_targets: set[str] = set()
@@ -7644,6 +7649,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             exc_info=True)
             self.close_connection()
             raise CharactersRAGDBError(f"Unexpected database initialization error: {e}") from e  # noqa: TRY003
+
+    @property
+    def owner_user_id(self) -> str:
+        """Return construction-time ownership, independent of writer attribution."""
+        return self._owner_user_id
 
     # --- Backend Resolution Helpers ---
     def _resolve_backend(

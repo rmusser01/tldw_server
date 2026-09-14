@@ -59,6 +59,8 @@ The object has exactly these four keys and a 1024-byte encoded UTF-8 JSON limit.
 
 NULL, corrupt or oversized storage projects to `unknown` with null references. A reference is disclosed only while its originating Workspace remains visible through the authenticated user's DB. Reading the conversation does not itself authorize its old origin. Deleted, missing or staged origins redact the whole value to `unknown`; archived but visible origins remain valid historical references. Redaction never changes stored history. Repeated origins may share a request-local visibility lookup, never a cross-request/user cache. Storage failures are errors, not successful `unknown` responses.
 
+Startup creation and reference projection check the DB handle's construction-time `owner_user_id`, supplied by the trusted per-user dependency. Cached handles retain their first caller's `client_id` for existing writer attribution, even when voice or a background worker initializes them before REST. That alias is not owner authority. Public Character library projection uses the same owner identity. Standalone `CharactersRAGDB` callers default ownership to their initial `client_id`; callers with separate attribution must supply the trusted owner explicitly, never from request metadata or inferred paths.
+
 Both `assistant_startup` and `assistant_startup_json` are rejected in create/update request bodies, including null. Ordinary DB insertion/update dictionaries reject the same keys. Only the internal typed insertion argument can create trusted provenance. The value describes local startup history, not current Persona eligibility, resume eligibility or Character behavior-snapshot authority.
 
 ## Lifecycle And Transport

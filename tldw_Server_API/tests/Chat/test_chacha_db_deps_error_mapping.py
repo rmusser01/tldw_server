@@ -332,10 +332,11 @@ def test_create_and_prepare_db_sanitizes_secondary_mkdir_failure_log(
             raise OSError("chacha backend exploded at /private/db/path SECRET_TOKEN")
         return original_mkdir(self, *args, **kwargs)
 
-    def make_db(*, db_path: str, client_id: str) -> _DBInstance:
+    def make_db(*, db_path: str, client_id: str, owner_user_id: str) -> _DBInstance:
         """Validate factory arguments and return an inert database double."""
         assert db_path == str(safe_db_path)
         assert client_id == "safe-client"
+        assert owner_user_id == "4242"
         return _DBInstance()
 
     monkeypatch.setattr(deps, "logger", logger_stub)
