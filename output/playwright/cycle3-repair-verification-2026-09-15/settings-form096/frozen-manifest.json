@@ -1,0 +1,30 @@
+{
+  "frozenAt": "2026-09-15T22:31:14.991Z",
+  "productionPaths": [
+    "apps/packages/ui/src/components/Option/Settings/tldw.tsx"
+  ],
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/tldw.tsx",
+      "sha256": "b509f7f1bcd86f5c36d55d2d53c1fc8fd09572c2d4bc3cdbb9b566f43e3a2d2e"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx",
+      "sha256": "2a2b8507849662a77f1b2b2b37eaf943d39d3ed168ab27e2e094ea5cd02d1ea9"
+    },
+    {
+      "path": "backlog/tasks/task-13260.37 - Remove-disconnected-Settings-form-access-during-logout.md",
+      "sha256": "3fe1002412a8a498b0d5f660f201e767af13c0fac24e55b4a5e5ff29ed80886b"
+    }
+  ],
+  "retainedOriginalProbes": [
+    {
+      "path": "/private/tmp/uat096-baseline.config.ts",
+      "sha256": "5e01d5eaae6cadde1d72c2a02abb17ed80c3d97b2a3a2a7792e8fc8222319a4d"
+    },
+    {
+      "path": "/private/tmp/uat096-settings-before.tsx",
+      "sha256": "eb3a2c3be44404ca0cc518307b10c075d022a55b99cdf5dce130a7c387395b9e"
+    }
+  ]
+}

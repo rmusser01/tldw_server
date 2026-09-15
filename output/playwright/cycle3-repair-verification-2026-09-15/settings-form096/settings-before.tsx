@@ -56,7 +56,6 @@ export const TldwSettings = () => {
   const [loading, setLoading] = useState(false)
   const [initializing, setInitializing] = useState(true)
   const [initializingError, setInitializingError] = useState<string | null>(null)
-  const [loadedFormValues, setLoadedFormValues] = useState<Record<string, unknown> | null>(null)
   const configLoadGeneration = useRef(0)
   const [testingConnection, setTestingConnection] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'success' | 'error' | null>(null)
@@ -128,11 +127,6 @@ export const TldwSettings = () => {
   // ── Config load ──────────────────────────────────────────────────
 
   useEffect(() => {
-    // The initial skeleton has no Form; apply values only after it is mounted.
-    if (!initializing && loadedFormValues) form.setFieldsValue(loadedFormValues)
-  }, [form, initializing, loadedFormValues])
-
-  useEffect(() => {
     void loadConfig()
     return () => { configLoadGeneration.current += 1 }
   }, [])
@@ -168,7 +162,7 @@ export const TldwSettings = () => {
         setMediaRequestTimeoutSec(nextTimeouts.media)
         setUploadRequestTimeoutSec(nextTimeouts.upload)
         setTimeoutPreset(determinePreset(nextTimeouts))
-        setLoadedFormValues({
+        form.setFieldsValue({
           serverUrl: config.serverUrl,
           apiKey: config.apiKey,
           authMode: config.authMode,
@@ -188,7 +182,7 @@ export const TldwSettings = () => {
         setCoreStatus("unknown")
         setRagStatus("unknown")
         setTimeoutPreset('balanced')
-        setLoadedFormValues({
+        form.setFieldsValue({
           serverUrl: '',
           apiKey: '',
           authMode: 'single-user',

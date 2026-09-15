@@ -1,0 +1,44 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:33628) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+ ✓ ../packages/ui/src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx (7 tests) 4165ms
+   ✓ loads the actual form before applying async configuration values  429ms
+   ✓ normal logout reaches the actual login form without a disconnected-form warning  673ms
+   ✓ clears the actual 'cookie session' form after a pending disconnect  979ms
+   ✓ clears the actual 'manual API key' form after a pending disconnect  1010ms
+   ✓ keeps the current form available when logout fails before credentials are cleared  635ms
+(node:33716) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx (5 tests) 1703ms
+     ✓ opens its real confirmation in the current application context without a static modal warning  506ms
+     ✓ revalidates a confirmed return to the saved multi-user mode  446ms
+(node:33740) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx (24 tests) 418ms
+(node:33743) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/Settings/__tests__/tldw-review-comments.test.tsx (16 tests) 202ms
+(node:33762) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/Settings/__tests__/tldw-settings-tabs.test.tsx (5 tests) 21ms
+
+ Test Files  5 passed (5)
+      Tests  57 passed (57)
+   Start at  15:33:23
+   Duration  10.43s (transform 577ms, setup 373ms, import 2.03s, tests 6.51s, environment 1.07s)

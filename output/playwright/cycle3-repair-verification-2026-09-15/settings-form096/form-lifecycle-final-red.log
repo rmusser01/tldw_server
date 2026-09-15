@@ -1,0 +1,56 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:26056) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+ ❯ ../packages/ui/src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx (7 tests | 1 failed) 4515ms
+   × loads the actual form before applying async configuration values 487ms
+   ✓ normal logout reaches the actual login form without a disconnected-form warning  806ms
+   ✓ clears the actual 'cookie session' form after a pending disconnect  1068ms
+   ✓ clears the actual 'manual API key' form after a pending disconnect  1078ms
+   ✓ preserves the mounted server draft across storage account transitions 230ms
+   ✓ rejects an old account's delayed initial load after the Settings owner is replaced 224ms
+   ✓ keeps the current form available when logout fails before credentials are cleared  620ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx > loads the actual form before applying async configuration values
+AssertionError: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "Warning: Instance created by `useForm` is not connected to any Form element. Forget to pass `form` prop?",
++ ]
+
+ ❯ ../packages/ui/src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx:62:30
+     60|   await screen.findByText("Logged In", { exact: true })
+     61|   expect(screen.getByRole("textbox", { name: "Server URL" })).toHaveVa…
+     62|   expect(formErrors(errors)).toEqual([])
+       |                              ^
+     63| })
+     64|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 passed (7)
+   Start at  15:25:24
+   Duration  6.08s (transform 320ms, setup 99ms, import 1.06s, tests 4.51s, environment 293ms)

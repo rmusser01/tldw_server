@@ -1,0 +1,16 @@
+### Result
+{"checkedAt":"2026-09-15T22:13:43.112Z","url":"http://127.0.0.1:18281/settings/tldw","body":"Skip to main content\nSwitch to Sidebar\nFilter settings\nSETUP & RECOVERY\nSetup & Recovery\ntldw Server\nProvider Keys\nManage Models\nHealth & Diagnostics\nPREFERENCES & WORKFLOW\nPreferences\nChat\nChat Macros\nUI customization\nSplash screens\nQuick Ingest\nSpeech\nImage Generation\nKnowledge QA\nRAG Settings\nWorkflow prompts\nPrompt Studio\nBeta\nChatbooks settings\nCharacters\nWorld Books\nChat Dictionaries\nDATA & ADMINISTRATION\nData Management\nManage Share\nEvaluations\nModeration Review\nContent Rules\nMCP Hub\nAbout\nHide beta badges\nClose\ntldw Server\n\nCurrent section:tldw Server\n\nAbout tldw server integration\n\nConnect to tldw server for chat, knowledge search, and media.\n\nWhat your tldw server provides\n\nPowers chat, multi-turn memory, and server-backed history.\nEnables Knowledge search & RAG so chats can reference your own documents.\nHandles media ingest, transcription, and metrics so you can review calls and videos.\nView server setup guide\nServer:http://127.0.0.1:18201\nHealth\nRecheck\nConnection\nTimeouts\ntldw Server Configuration\nServer URL\nThe URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000\nAuthentication Mode\nSingle User (API Key)\nMulti User (Login)\n\nLogin Required\n\nPlease login with your tldw_server credentials\nLogin Method\nMagic link\nPassword\nUsername\nPassword\nLogin\nSave\nTest Connection\nChecks\nCore: not checked yet\nRAG: not checked yet\nAdvanced Timeouts\nLogged out successfully\n\nServer Settings | tldw"}
+### Ran Playwright code
+```js
+await (async(page)=>{await page.getByRole("button",{name:"Logout",exact:true}).click({timeout:10000});await page.getByRole("button",{name:"Login",exact:true}).waitFor({timeout:15000});return {checkedAt:new Date().toISOString(),url:page.url(),body:await page.locator("body").innerText()};})(page);
+```
+### Open tabs
+- 0: (current) [Server Settings | tldw](http://127.0.0.1:18281/settings/tldw)
+- 1: [](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/settings/tldw
+- Page Title: Server Settings | tldw
+- Console: 3 errors, 4 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T22-05-15-136Z.log#L33-L35

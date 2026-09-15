@@ -1,0 +1,22 @@
+[
+  {
+    "path": "apps/packages/ui/src/components/Option/Settings/tldw.tsx",
+    "match": true
+  },
+  {
+    "path": "apps/packages/ui/src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx",
+    "match": true
+  },
+  {
+    "path": "backlog/tasks/task-13260.37 - Remove-disconnected-Settings-form-access-during-logout.md",
+    "match": true
+  },
+  {
+    "path": "/private/tmp/uat096-baseline.config.ts",
+    "match": true
+  },
+  {
+    "path": "/private/tmp/uat096-settings-before.tsx",
+    "match": true
+  }
+]
