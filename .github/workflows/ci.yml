@@ -1757,6 +1757,9 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context.py
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context_benchmark.py
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context_integration.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -3256,6 +3259,9 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context.py
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context_benchmark.py
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context_integration.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -4626,6 +4632,9 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context.py
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context_benchmark.py
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context_integration.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -5919,6 +5928,9 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context.py
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context_benchmark.py
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context_integration.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -7218,6 +7230,9 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context.py
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context_benchmark.py
+              tldw_Server_API/tests/Agent_Client_Protocol/test_mcp_result_context_integration.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
