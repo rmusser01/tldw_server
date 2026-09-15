@@ -316,3 +316,27 @@ Host reboot, kernel boot hangs, missing-agent, protocol-version mismatch,
 workspace mismatch, arbitrary crash classes, and scheduled fault injection
 remain outside this slice. See the helper README for the operator command and
 `Docs/Sandbox/vz-linux-prepared-host-evidence.md` for the actual host results.
+
+## 2026-09-14 Guest Protocol Mismatch Extension
+
+TASK-13243.6 adds the next bounded guest-compatibility drill to the existing
+workflow. A test-only Go overlay sends initial guest handshake version `999`;
+the normal helper rejects it with `guest_protocol_mismatch` rather than the
+generic `helper_internal_error`. Unrelated malformed messages retain their
+existing classification. This is the guest VSock protocol, not the separate
+host-helper protocol or the already tested missing-exec capability gate.
+
+The existing disposable image-store/offline-preparer/isolated-helper lifecycle
+remains authoritative. A fresh workspace nonce correlates a guest-written proof
+with the attempted VM and wire version. Proof alone cannot pass the test:
+acceptance requires the specific rejection, no exec dispatch, no surviving
+reusable VM state, then real healthy execution and same-session VM reuse.
+The negative control changes only the fixture's version to the supported value;
+helper validation stays enabled, and real successful execution plus the intended
+assertion failure are both required. The command now requires all six cases.
+
+Keep canonical/source hashes and cleanup verification, retain the evidence,
+and do not introduce production fault flags, automatic injection or reboot.
+Host reboot, missing-agent, early kernel boot hangs and other deferred fault
+classes remain separate. Record actual host results in the prepared-host evidence
+document; this design extension is not itself proof of real VM acceptance.

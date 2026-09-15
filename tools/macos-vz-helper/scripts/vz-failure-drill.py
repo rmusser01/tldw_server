@@ -54,6 +54,13 @@ TESTS = {
         "TLDW_SANDBOX_VZ_LINUX_READINESS_BASE_IMAGE",
         "TLDW_SANDBOX_VZ_LINUX_READINESS_DRILL",
     ),
+    "protocol": (
+        "test_vz_linux_protocol_host_gated.py",
+        "test_vz_linux_protocol_mismatch_then_healthy_session_reuse",
+        "Protocol mismatch was not rejected",
+        "TLDW_SANDBOX_VZ_LINUX_PROTOCOL_BASE_IMAGE",
+        "TLDW_SANDBOX_VZ_LINUX_PROTOCOL_DRILL",
+    ),
 }
 
 
@@ -201,11 +208,15 @@ def negative_execution(packet: Path, profile: str) -> dict[str, Any]:
 
     Args:
         packet: Case evidence directory containing private pytest output.
-        profile: ``mismatch`` or ``readiness``.
+        profile: A key in ``TESTS``.
     Returns:
         Validated execution proof, or an unsuccessful result on invalid evidence.
     """
-    filename = "guest-mismatch.json" if profile == "mismatch" else "guest-readiness.json"
+    filename = {
+        "mismatch": "guest-mismatch.json",
+        "readiness": "guest-readiness.json",
+        "protocol": "guest-protocol.json",
+    }[profile]
     paths = [p for p in (packet / "pytest").glob("*/" + filename) if not p.parent.is_symlink() and not p.is_symlink()]
     if len(paths) != 1:
         return {"ok": False, "error": "expected exactly one guest receipt"}
@@ -228,6 +239,9 @@ def negative_execution(packet: Path, profile: str) -> dict[str, Any]:
         if profile == "readiness":
             proof = data["handshake_proof"]
             ok = ok and proof["vm_id"] == vm_id and proof["handshake_acknowledged"] is True
+        elif profile == "protocol":
+            proof = data["protocol_proof"]
+            ok = ok and proof["vm_id"] == vm_id and proof["protocol_version"] == "1"
         return {"ok": ok, "receipt": str(paths[0]), "vm_id": vm_id, "run": run}
     except (OSError, ValueError, TypeError, KeyError) as exc:
         return {"ok": False, "error": str(exc)}
@@ -423,7 +437,7 @@ def build_agent(profile: str, packet: Path) -> Path:
     """Build an offline Linux arm64 Go overlay without editing production source.
 
     Args:
-        profile: ``mismatch`` or ``readiness`` fault profile.
+        profile: A key in ``TESTS``.
         packet: Existing private directory for overlay, binary, log, and hashes.
     Returns:
         Path to the built test-only guest executable.
@@ -437,9 +451,15 @@ def build_agent(profile: str, packet: Path) -> Path:
     source = original.read_text(encoding="utf-8")
     if profile == "mismatch":
         source = replace_once(source, 'return []string{"exec", "output_cap_v1"}', 'return []string{"output_cap_v1"}')
-    else:
+    elif profile == "readiness":
         anchor = "\tif err := c.sendReady(conn, reader, server); err != nil {"
         source = replace_once(source, anchor, (FIXTURES / "withhold-ready.go.txt").read_text() + anchor)
+    elif profile == "protocol":
+        anchor = "\tif err := writeJSONLine(conn, HandshakeRequest{\n\t\tProtocolVersion: ProtocolVersion,"
+        replacement = anchor.replace("ProtocolVersion: ProtocolVersion,", "ProtocolVersion: testProtocolVersion,")
+        source = replace_once(source, anchor, (FIXTURES / "protocol-mismatch.go.txt").read_text() + replacement)
+    else:
+        raise ValueError(f"unknown guest fault profile: {profile}")
     overlay_source = packet / "vsock_client.go"
     overlay_source.write_text(source, encoding="utf-8")
     overlay = packet / "overlay.json"
@@ -621,7 +641,7 @@ def run_case(
         helper: Exclusive helper used to verify empty inventory afterward.
         socket_path: That helper's socket, never an operator-shared socket.
         binary: Signed helper executable passed to the drill.
-        profile: ``mismatch`` or ``readiness``.
+        profile: A key in ``TESTS``.
         negative: Enable only the selected test-only negative-control plugin.
         healthy: Fresh healthy disposable bundle.
         fault: Fresh fault disposable bundle.
@@ -682,7 +702,7 @@ def exercise(
     receipt: dict[str, Any],
     client_factory: Any,
 ) -> None:
-    """Prepare both profiles and run positive/negative cases on independent clones.
+    """Prepare all profiles and run positive/negative cases on independent clones.
 
     Args:
         materializer: Repository image materialization module.
@@ -741,7 +761,7 @@ def main(argv: list[str] | None = None) -> int:
     Args:
         argv: CLI arguments, or None for the process command line.
     Returns:
-        Zero only when all four cases and cleanup/source verification pass;
+        Zero only when all cases and cleanup/source verification pass;
         one for failures after evidence allocation, including cancellation.
     Raises:
         SystemExit: Missing consent/arguments or unsupported host/input shape.
@@ -812,7 +832,11 @@ def main(argv: list[str] | None = None) -> int:
         (evidence / "error.log").write_text(traceback.format_exc(), encoding="utf-8")
     finally:
         verify_sources(materializer, source, evidence, receipt)
-        receipt["ok"] = not receipt["errors"] and len(receipt.get("cases", {})) == 4
+        expected_cases = {profile + suffix for profile in TESTS for suffix in ("-positive", "-negative")}
+        cases = receipt.get("cases", {})
+        receipt["ok"] = (
+            not receipt["errors"] and set(cases) == expected_cases and all(case["ok"] for case in cases.values())
+        )
         write_json(evidence / "receipt.json", receipt)
     print(f"{'PASS' if receipt['ok'] else 'FAIL'}: {evidence / 'receipt.json'}")
     return 0 if receipt["ok"] else 1

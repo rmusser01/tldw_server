@@ -62,6 +62,88 @@ import Testing
     #expect(guestBridge.lastExec?.timeout == 15.5)
 }
 
+@Test(arguments: [
+    (
+        #"{"protocol_version":"2","request_id":"handshake","type":"handshake","vm_id":"vm-diagnostic","connection_token":"token-diagnostic"}"#,
+        "guest_protocol_mismatch"
+    ),
+    (
+        #"{"request_id":"handshake","type":"handshake","vm_id":"vm-diagnostic","connection_token":"token-diagnostic"}"#,
+        "helper_internal_error"
+    ),
+    (
+        #"{"protocol_version":2,"request_id":"handshake","type":"handshake","vm_id":"vm-diagnostic","connection_token":"token-diagnostic"}"#,
+        "helper_internal_error"
+    ),
+    (
+        #"{"protocol_version":"","request_id":"handshake","type":"handshake","vm_id":"vm-diagnostic","connection_token":"token-diagnostic"}"#,
+        "helper_internal_error"
+    ),
+    (
+        #"{"protocol_version":"1","request_id":"unknown","type":"protocol_mismatch"}"#,
+        "helper_internal_error"
+    ),
+])
+func unixSocketServerClassifiesRejectedGuestMessagesBeforeReadinessAndExec(
+    guestMessage: String,
+    expectedCode: String
+) throws {
+    let registry = VMRegistry()
+    let sessions = VSockSessionManager()
+    let channel = InMemoryVSockChannel()
+    let bootDriver = RecordingBootDriver { vmID in
+        #expect(registry.status(vmID: vmID)?.state == "booting")
+        #expect(registry.status(vmID: vmID)?.healthy == false)
+        sessions.prepareSession(
+            vmID: vmID,
+            connectionToken: "token-diagnostic",
+            port: 1024,
+            workspaceRoot: "/workspace"
+        )
+        #expect(sessions.accept(channel: channel, for: vmID))
+        channel.push(json: guestMessage)
+    }
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: bootDriver,
+        guestBridge: VSockBridge(transport: sessions)
+    )
+    let server = UnixSocketServer(
+        socketPath: "/tmp/macos-vz-helper.sock",
+        service: HelperService(registry: registry, vmManager: manager)
+    )
+    defer { sessions.removeSession(vmID: "vm-diagnostic") }
+
+    let createRequest = Data(#"{"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-diagnostic","template":"/tmp/template.img","workspace_path":"/workspace","timeout_sec":0.1}}"#.utf8)
+    let createResponse = try server.handleRequestData(createRequest)
+    let createJSON = try #require(JSONSerialization.jsonObject(with: createResponse) as? [String: Any])
+
+    #expect(createJSON["protocol_version"] as? String == "1")
+    #expect(createJSON["error_code"] as? String == expectedCode)
+    #expect(createJSON["state"] == nil)
+    #expect(sessions.guestInfo(vmID: "vm-diagnostic") == nil)
+    #expect(bootDriver.stoppedVMIDs == ["vm-diagnostic"])
+    #expect(registry.status(vmID: "vm-diagnostic") == nil)
+
+    #expect(throws: VSockSessionError.self) {
+        try sessions.waitUntilGuestReady(vmID: "vm-diagnostic", timeoutSeconds: 0.1)
+    }
+    let guestExecRequest = Data(#"{"protocol_version":"1","request_id":"exec","type":"exec","argv":["/bin/echo","must-not-run"],"cwd":"/workspace","env":{},"timeout_sec":1}"#.utf8)
+    do {
+        _ = try sessions.sendExecRequest(vmID: "vm-diagnostic", requestData: guestExecRequest, timeoutSeconds: 0.1)
+        Issue.record("rejected guest must not accept exec")
+    } catch VSockSessionError.connectionNotReady(let vmID) {
+        #expect(vmID == "vm-diagnostic")
+    }
+
+    let execRequest = Data(#"{"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-diagnostic","argv":["/bin/echo","must-not-run"],"cwd":"/workspace","timeout_sec":1}}"#.utf8)
+    let execResponse = try server.handleRequestData(execRequest)
+    let execJSON = try #require(JSONSerialization.jsonObject(with: execResponse) as? [String: Any])
+    #expect(execJSON["error_code"] as? String == "guest_exec_not_implemented")
+    #expect(execJSON["exit_code"] == nil)
+    #expect(channel.writes.isEmpty)
+}
+
 @Test func unixSocketServerRejectsMalformedExecGuestRequestShape() throws {
     let registry = VMRegistry()
     let manager = VZLinuxVMManager(

@@ -146,8 +146,9 @@ def test_logged_handles_signal_before_spawn_returns(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("outcome", ["codesign", "incomplete", "rejected", "success"])
 def test_main_hashes_loaded_dependencies_even_on_failure(
-    drill: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    drill: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
 ) -> None:
     """A locally changed materializer or helperctl must change recorded provenance."""
     # main mutates these process settings; restore them after this test.
@@ -166,27 +167,36 @@ def test_main_hashes_loaded_dependencies_even_on_failure(
     monkeypatch.setattr(drill, "load_module", lambda name, path: materializer)
     monkeypatch.setattr(drill.sys, "platform", "darwin")
     monkeypatch.setattr(drill.platform, "machine", lambda: "arm64")
-    monkeypatch.setattr(drill, "logged", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(drill, "logged", lambda *args, **kwargs: int(outcome == "codesign"))
+
+    def exercise(*args: object) -> None:
+        """Supply the case boundary; main must require every accepted profile."""
+        receipt = args[5]
+        profiles = ("mismatch", "readiness") if outcome == "incomplete" else ("mismatch", "readiness", "protocol")
+        receipt["cases"] = {
+            profile + suffix: {"ok": True} for profile in profiles for suffix in ("-positive", "-negative")
+        }
+        if outcome == "rejected":
+            receipt["cases"]["protocol-positive"]["ok"] = False
+
+    monkeypatch.setattr(drill, "exercise", exercise)
     monkeypatch.setitem(
         sys.modules,
         "tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client",
         SimpleNamespace(MacOSVirtualizationHelperClient=object),
     )
     evidence = tmp_path / "evidence"
-    assert (
-        drill.main(
-            [
-                "--allow-fault-injection",
-                "--source-bundle",
-                str(source),
-                "--helper",
-                str(helper),
-                "--evidence-dir",
-                str(evidence),
-            ]
-        )
-        == 1
-    )
+    assert drill.main(
+        [
+            "--allow-fault-injection",
+            "--source-bundle",
+            str(source),
+            "--helper",
+            str(helper),
+            "--evidence-dir",
+            str(evidence),
+        ]
+    ) == int(outcome != "success")
     receipt = json.loads((evidence / "receipt.json").read_text())
     for relative in (
         "tools/vz-linux-image/scripts/prepare-smoke-bundle.py",
@@ -194,4 +204,5 @@ def test_main_hashes_loaded_dependencies_even_on_failure(
     ):
         assert receipt["input_sha256"].get(relative) == drill.digest(drill.REPO / relative)
     assert receipt["source_before"] == receipt["source_after"]
-    assert (evidence / "error.log").is_file()
+    assert (evidence / "error.log").is_file() is (outcome == "codesign")
+    assert receipt["ok"] is (outcome == "success")

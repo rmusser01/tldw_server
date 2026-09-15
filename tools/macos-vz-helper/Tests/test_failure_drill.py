@@ -250,9 +250,9 @@ def test_source_verification_continues_after_canonical_failure(drill: ModuleType
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("profile", ["mismatch", "readiness"])
+@pytest.mark.parametrize("profile", ["mismatch", "readiness", "protocol"])
 @pytest.mark.parametrize(
-    "fault", [None, "cancelled", "exit_code", "stdout", "dispatch", "handshake", "missing", "malformed"]
+    "fault", [None, "cancelled", "exit_code", "stdout", "dispatch", "handshake", "wire_version", "missing", "malformed"]
 )
 def test_negative_control_requires_actual_fault_execution(
     drill: ModuleType, tmp_path: Path, profile: str, fault: Optional[str]
@@ -266,6 +266,7 @@ def test_negative_control_requires_actual_fault_execution(
         "created_vms": [{"vm_id": "fault-vm"}],
         "exec_vm_ids": ["fault-vm"],
         "handshake_proof": {"vm_id": "fault-vm", "handshake_acknowledged": True},
+        "protocol_proof": {"vm_id": "fault-vm", "protocol_version": "1"},
         "cleanup_errors": [],
         "remaining_owned_vms": [],
     }
@@ -279,8 +280,17 @@ def test_negative_control_requires_actual_fault_execution(
         data["exec_vm_ids"] = ["healthy-vm"]
     elif fault == "handshake":
         data["handshake_proof"]["vm_id"] = "other-vm"
-    name = "guest-mismatch.json" if profile == "mismatch" else "guest-readiness.json"
+        data["protocol_proof"]["vm_id"] = "other-vm"
+    elif fault == "wire_version":
+        data["protocol_proof"]["protocol_version"] = "999"
+    name = {"mismatch": "guest-mismatch.json", "readiness": "guest-readiness.json", "protocol": "guest-protocol.json"}[
+        profile
+    ]
     if fault != "missing":
         (packet / name).write_text("null" if fault == "malformed" else json.dumps(data))
-    accepted = fault is None or (profile == "mismatch" and fault == "handshake")
+    accepted = (
+        fault is None
+        or (profile == "mismatch" and fault == "handshake")
+        or (profile != "protocol" and fault == "wire_version")
+    )
     assert drill.negative_execution(tmp_path, profile)["ok"] is accepted
