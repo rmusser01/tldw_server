@@ -1,0 +1,13 @@
+{
+  "scrape": {
+    "method": "POST", "path": "/api/v1/media/process-web-scraping", "status": 200,
+    "request": {"scrape_method":"Individual URLs","url_input":"https://en.wikipedia.org/wiki/Playwright_(software)","mode":"persist","summarize_checkbox":false,"perform_chunking":false},
+    "response": {"status":"persist-ok","media_ids":[2],"total_articles":1,"stored_articles":1,"skipped_articles":0,"duplicate_articles":0,"method":"Individual URLs","errors":null,"task_id":"scrape_b4b9b0aa"}
+  },
+  "mediaSearch": {
+    "method": "POST", "path": "/api/v1/media/search?page=1&results_per_page=20&include_keywords=true", "status":200,
+    "request":{"query":"Playwright","fields":["title","content"],"sort_by":"relevance"},
+    "response":{"items":[],"pagination":{"mode":"page","page":1,"per_page":20,"total":0,"total_pages":0,"has_more":false,"results_per_page":20,"total_items":0},"results":[]}
+  },
+  "knowledgeSearch": {"method":"POST","path":"/api/v1/rag/search/stream","status":200,"query":"Playwright","sources":["media_db","notes","characters","chats"],"generation_provider":"llama.cpp","generation_model":"../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf","contexts":[],"web_fallback":false,"upstream_dispatched":true}
+}

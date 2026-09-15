@@ -1,0 +1,124 @@
+### Open tabs
+- 0: (current) [](http://127.0.0.1:18181/knowledge)
+- 1: [Helpful AI Assistant Chat (20260915_042152)](http://127.0.0.1:18181/login)
+### Page
+- Page URL: http://127.0.0.1:18181/knowledge
+### Snapshot
+```yaml
+- generic [active] [ref=f15e20]:
+  - generic [ref=f15e23]:
+    - link "Skip to main content" [ref=f15e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f15e25]:
+      - button "Expand sidebar" [ref=f15e26] [cursor=pointer]
+      - button "New Chat" [ref=f15e30] [cursor=pointer]
+      - generic [ref=f15e33]:
+        - button "Quick Ingest" [ref=f15e34] [cursor=pointer]
+        - button "Chat" [ref=f15e38] [cursor=pointer]
+        - button "Prompts" [ref=f15e41] [cursor=pointer]
+        - button "Characters" [ref=f15e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f15e50] [cursor=pointer]
+        - button "World Books" [ref=f15e54] [cursor=pointer]
+        - button "Notes" [ref=f15e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f15e61] [cursor=pointer]
+        - button "Media" [ref=f15e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f15e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f15e78] [cursor=pointer]
+        - button "Kanban" [ref=f15e84] [cursor=pointer]
+        - button "Watchlists" [ref=f15e86] [cursor=pointer]
+      - generic [ref=f15e91]:
+        - button "Open Notes Dock" [ref=f15e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f15e97] [cursor=pointer]
+        - button "Settings" [ref=f15e100] [cursor=pointer]
+    - main [ref=f15e104]:
+      - generic [ref=f15e105]:
+        - generic [ref=f15e108]:
+          - generic [ref=f15e109]:
+            - button "Expand sidebar" [ref=f15e110] [cursor=pointer]
+            - generic [ref=f15e112]:
+              - img "tldw Assistant" [ref=f15e113]
+              - generic [ref=f15e114]: tldw Assistant
+              - button "Companion Home" [ref=f15e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f15e119] [cursor=pointer]
+          - generic [ref=f15e122]:
+            - button "Search - Open command palette" [ref=f15e123] [cursor=pointer]:
+              - generic [ref=f15e127]: Search
+              - generic [ref=f15e128]: ⌘K
+            - button "Open settings" [ref=f15e129] [cursor=pointer]
+            - generic [ref=f15e141]:
+              - button "Notifications, 0 unread" [ref=f15e142] [cursor=pointer]
+              - status [ref=f15e146]: Notifications are active
+            - button "Switch to light theme" [ref=f15e147] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f15e154] [cursor=pointer]:
+              - generic [ref=f15e155]: "?"
+        - generic [ref=f15e159]:
+          - link "Skip to search" [ref=f15e160] [cursor=pointer]:
+            - /url: "#knowledge-search-input"
+          - main [ref=f15e161]:
+            - generic [ref=f15e162]:
+              - generic [ref=f15e164]:
+                - generic [ref=f15e165]:
+                  - 'button "Open source scope and saved profiles. Sources: 4 selected" [ref=f15e166] [cursor=pointer]': "Sources: 4 selected"
+                  - button "Custom" [ref=f15e269] [cursor=pointer]
+                  - button "Web fallback is currently disabled. Click to toggle." [ref=f15e176] [cursor=pointer]: Web
+                  - button "Choose answer model" [ref=f15e181] [cursor=pointer]:
+                    - generic [ref=f15e185]: "AI: ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf"
+                  - button "Refresh source health" [ref=f15e188] [cursor=pointer]: "Sources ready: 8 of 8"
+                  - button "Open Knowledge QA settings" [ref=f15e189] [cursor=pointer]
+                - generic [ref=f15e247]:
+                  - paragraph [ref=f15e248]: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
+                  - generic [ref=f15e249]:
+                    - textbox "Search your knowledge base" [ref=f15e250]:
+                      - /placeholder: What are the pros and cons discussed?
+                      - text: Playwright
+                    - button "Clear search" [ref=f15e270] [cursor=pointer]
+                    - button "Ask" [ref=f15e314] [cursor=pointer]
+                  - generic [ref=f15e253]:
+                    - generic [ref=f15e254]: Press / to focus, Cmd+K for new search
+                    - button "New search" [ref=f15e315] [cursor=pointer]
+              - generic [ref=f15e282]:
+                - button "Export" [ref=f15e317] [cursor=pointer]
+                - generic [ref=f15e283]:
+                  - generic [ref=f15e284]: Search complete. 0 sources found.
+                  - generic [ref=f15e290]:
+                    - generic [ref=f15e291]:
+                      - generic [ref=f15e321]:
+                        - generic [ref=f15e325]: AI Answer
+                        - generic [ref=f15e326]: "Answer status: No results"
+                      - generic [ref=f15e294]:
+                        - generic [ref=f15e327]:
+                          - button "Summarize" [ref=f15e328] [cursor=pointer]
+                          - button "Show more" [ref=f15e329] [cursor=pointer]
+                        - generic [ref=f15e330]:
+                          - button "Copy answer" [ref=f15e331] [cursor=pointer]
+                          - button "Continue in editor" [ref=f15e332] [cursor=pointer]
+                      - note "Answer trust summary" [ref=f15e333]:
+                        - generic [ref=f15e334]: Searched Documents & Media, Notes, Characters, and Chats. 0 sources returned, 0 cited.
+                        - generic [ref=f15e335]: Web fallback disabled.
+                        - generic [ref=f15e336]: "AI model: llama / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf."
+                        - generic [ref=f15e337]: Selected sources look ready.
+                        - generic [ref=f15e338]: "Trust: No results."
+                        - generic [ref=f15e339]: No searchable evidence was returned.
+                    - paragraph [ref=f15e355]: The provided context does not contain relevant information about Playwright, so I can’t answer with sourced citations.
+                    - generic [ref=f15e345]:
+                      - generic [ref=f15e346]: Was this answer helpful?
+                      - button "Helpful" [ref=f15e347] [cursor=pointer]
+                      - button "Needs work" [ref=f15e350] [cursor=pointer]
+                  - generic [ref=f15e298]:
+                    - generic [ref=f15e299]:
+                      - generic [ref=f15e300]:
+                        - textbox "Ask a follow-up question" [ref=f15e301]:
+                          - /placeholder: Ask a follow-up question...
+                        - button "Submit follow-up question" [disabled] [ref=f15e302]
+                      - button "Start new topic" [ref=f15e305] [cursor=pointer]:
+                        - generic [ref=f15e307]: New Topic
+                    - paragraph [ref=f15e308]: Follow-up questions maintain context. Click "New Topic" to start fresh.
+            - complementary "Open evidence panel" [ref=f15e309]:
+              - button "Open evidence panel (0 sources)" [ref=f15e310] [cursor=pointer]
+          - generic [ref=f15e255]:
+            - button "Switch to detailed view" [ref=f15e256] [cursor=pointer]
+            - link "Help & Documentation" [ref=f15e260] [cursor=pointer]:
+              - /url: https://github.com/rmusser01/tldw_server2#readme
+  - button "Open Next.js Dev Tools" [ref=f15e15] [cursor=pointer]
+  - alert [ref=f15e19]: /knowledge
+```

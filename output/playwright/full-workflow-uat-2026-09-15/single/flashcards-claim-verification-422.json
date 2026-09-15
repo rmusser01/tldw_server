@@ -1,0 +1,155 @@
+{
+  "code": "claim_verification_failed",
+  "claimVerification": {
+    "verdict": "failed",
+    "report": {
+      "report_id": "698c92a4-32fd-4acd-942c-bbed40d8c6b1",
+      "generated_at": "2026-09-15T04:19:43.780696+00:00",
+      "query": "flashcards",
+      "answer_text": "The mitochondria is called the powerhouse of the cell because it produces most of the cell's energy, mainly in the form of ATP.\nDNA stands for deoxyribonucleic acid. It stores genetic information that controls the structure, function, and reproduction of living organisms.\nPhotosynthesis converts light energy into chemical energy, storing that energy in molecules such as glucose.",
+      "total_claims": 3,
+      "verified_count": 0,
+      "refuted_count": 0,
+      "unverified_count": 0,
+      "hallucination_count": 3,
+      "numerical_error_count": 0,
+      "misquoted_count": 0,
+      "citation_not_found_count": 0,
+      "contested_count": 0,
+      "verification_rate": 0,
+      "precision": 0,
+      "coverage": 0,
+      "claims": [
+        {
+          "claim_id": "flashcard:1:back:c1",
+          "claim_text": "The mitochondria is called the powerhouse of the cell because it produces most of the cell's energy, mainly in the form of ATP.",
+          "claim_type": "ranking",
+          "status": "hallucination",
+          "confidence": 0.7,
+          "match_level": "paraphrase",
+          "source_authority": "1",
+          "requires_external_knowledge": false,
+          "rationale": "No supporting evidence in provided documents",
+          "evidence": [
+            {
+              "doc_id": "flashcards-source",
+              "snippet": "The mitochondria is the powerhouse of the cell. DNA stands for deoxyribonucleic acid. Photosynthesis converts light energy into chemical energy. The human body has 206 bones. Water boils at 100 degrees Celsius at sea level.",
+              "score": 0,
+              "authority": "1",
+              "start_offset": null,
+              "end_offset": null
+            }
+          ],
+          "citations": []
+        },
+        {
+          "claim_id": "flashcard:2:back:c1",
+          "claim_text": "DNA stands for deoxyribonucleic acid. It stores genetic information that controls the structure, function, and reproduction of living organisms.",
+          "claim_type": "general",
+          "status": "hallucination",
+          "confidence": 0.7,
+          "match_level": "paraphrase",
+          "source_authority": "1",
+          "requires_external_knowledge": false,
+          "rationale": "No supporting evidence in provided documents",
+          "evidence": [
+            {
+              "doc_id": "flashcards-source",
+              "snippet": "The mitochondria is the powerhouse of the cell. DNA stands for deoxyribonucleic acid. Photosynthesis converts light energy into chemical energy. The human body has 206 bones. Water boils at 100 degrees Celsius at sea level.",
+              "score": 0,
+              "authority": "1",
+              "start_offset": null,
+              "end_offset": null
+            }
+          ],
+          "citations": []
+        },
+        {
+          "claim_id": "flashcard:3:back:c1",
+          "claim_text": "Photosynthesis converts light energy into chemical energy, storing that energy in molecules such as glucose.",
+          "claim_type": "general",
+          "status": "hallucination",
+          "confidence": 0.7,
+          "match_level": "paraphrase",
+          "source_authority": "1",
+          "requires_external_knowledge": false,
+          "rationale": "No supporting evidence in provided documents",
+          "evidence": [
+            {
+              "doc_id": "flashcards-source",
+              "snippet": "The mitochondria is the powerhouse of the cell. DNA stands for deoxyribonucleic acid. Photosynthesis converts light energy into chemical energy. The human body has 206 bones. Water boils at 100 degrees Celsius at sea level.",
+              "score": 0,
+              "authority": "1",
+              "start_offset": null,
+              "end_offset": null
+            }
+          ],
+          "citations": []
+        }
+      ],
+      "metadata": {
+        "artifact_type": "flashcards",
+        "generation_provider": "llama.cpp",
+        "generation_model": null,
+        "verification_provider": "llama.cpp",
+        "verification_model": null,
+        "verification_provider_configured": false,
+        "verification_model_configured": false,
+        "verification_llm_source": "generation",
+        "verification_llm_is_default": true,
+        "verification_llm_differs_from_generation": false,
+        "claims_max_per_unit": 6,
+        "max_text_chars_per_unit": 2000
+      }
+    },
+    "unitResults": [
+      {
+        "unit_id": "flashcard:1:back",
+        "verdict": "failed",
+        "claim_ids": [
+          "flashcard:1:back:c1"
+        ],
+        "statuses": [
+          "hallucination"
+        ],
+        "metadata": {}
+      },
+      {
+        "unit_id": "flashcard:2:back",
+        "verdict": "failed",
+        "claim_ids": [
+          "flashcard:2:back:c1"
+        ],
+        "statuses": [
+          "hallucination"
+        ],
+        "metadata": {}
+      },
+      {
+        "unit_id": "flashcard:3:back",
+        "verdict": "failed",
+        "claim_ids": [
+          "flashcard:3:back:c1"
+        ],
+        "statuses": [
+          "hallucination"
+        ],
+        "metadata": {}
+      }
+    ],
+    "metadata": {
+      "artifact_type": "flashcards",
+      "generation_provider": "llama.cpp",
+      "generation_model": null,
+      "verification_provider": "llama.cpp",
+      "verification_model": null,
+      "verification_provider_configured": false,
+      "verification_model_configured": false,
+      "verification_llm_source": "generation",
+      "verification_llm_is_default": true,
+      "verification_llm_differs_from_generation": false,
+      "claims_max_per_unit": 6,
+      "max_text_chars_per_unit": 2000
+    }
+  }
+}

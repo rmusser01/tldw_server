@@ -1,0 +1,169 @@
+[
+  {
+    "check": "Alice own note/media read",
+    "note": 200,
+    "noteId": "911dde71-c385-477f-98cf-2b97f57072aa",
+    "media": 200
+  },
+  {
+    "check": "Bob foreign note read",
+    "status": 404,
+    "body": {
+      "detail": "Note not found"
+    }
+  },
+  {
+    "check": "Bob foreign note update",
+    "status": 404,
+    "body": {
+      "detail": "Note not found."
+    }
+  },
+  {
+    "check": "Bob foreign media read",
+    "status": 404,
+    "body": {
+      "detail": "Media not found or is inactive/trashed"
+    }
+  },
+  {
+    "check": "Bob foreign media update",
+    "status": 404,
+    "body": {
+      "detail": "Media item not found or is inactive/trashed"
+    }
+  },
+  {
+    "check": "Bob notes list",
+    "status": 200,
+    "body": {
+      "notes": [
+        {
+          "title": "Bob Garden Note fullmulti20260915",
+          "content": "Bob planted marigolds in the east garden on 12 September 2026.",
+          "conversation_id": null,
+          "message_id": null,
+          "id": "b8774e6c-1366-4cf9-a7eb-b92024904cb2",
+          "created_at": "2026-09-15T04:33:18.689000Z",
+          "last_modified": "2026-09-15T04:33:18.689000Z",
+          "version": 1,
+          "client_id": "3",
+          "deleted": false,
+          "studio": null,
+          "keywords": null,
+          "folders": [],
+          "keyword_sync": null
+        }
+      ],
+      "items": [
+        {
+          "title": "Bob Garden Note fullmulti20260915",
+          "content": "Bob planted marigolds in the east garden on 12 September 2026.",
+          "conversation_id": null,
+          "message_id": null,
+          "id": "b8774e6c-1366-4cf9-a7eb-b92024904cb2",
+          "created_at": "2026-09-15T04:33:18.689000Z",
+          "last_modified": "2026-09-15T04:33:18.689000Z",
+          "version": 1,
+          "client_id": "3",
+          "deleted": false,
+          "studio": null,
+          "keywords": null,
+          "folders": [],
+          "keyword_sync": null
+        }
+      ],
+      "results": [
+        {
+          "title": "Bob Garden Note fullmulti20260915",
+          "content": "Bob planted marigolds in the east garden on 12 September 2026.",
+          "conversation_id": null,
+          "message_id": null,
+          "id": "b8774e6c-1366-4cf9-a7eb-b92024904cb2",
+          "created_at": "2026-09-15T04:33:18.689000Z",
+          "last_modified": "2026-09-15T04:33:18.689000Z",
+          "version": 1,
+          "client_id": "3",
+          "deleted": false,
+          "studio": null,
+          "keywords": null,
+          "folders": [],
+          "keyword_sync": null
+        }
+      ],
+      "count": 1,
+      "limit": 100,
+      "offset": 0,
+      "total": 1,
+      "has_more": false,
+      "next_offset": null,
+      "pagination": {
+        "mode": "offset",
+        "limit": 100,
+        "offset": 0,
+        "total": 1,
+        "has_more": false,
+        "next_offset": null
+      }
+    }
+  },
+  {
+    "check": "Bob media search",
+    "status": 200,
+    "body": {
+      "items": [],
+      "pagination": {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 0,
+        "total_pages": 0,
+        "has_more": false,
+        "results_per_page": 10,
+        "total_items": 0
+      },
+      "results": []
+    }
+  },
+  {
+    "check": "Alice media search",
+    "status": 200,
+    "body": {
+      "items": [],
+      "pagination": {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 0,
+        "total_pages": 0,
+        "has_more": false,
+        "results_per_page": 10,
+        "total_items": 0
+      },
+      "results": []
+    }
+  },
+  {
+    "check": "Alice originals after denied writes",
+    "noteTitle": "Alice Cell Study fullmulti20260915"
+  },
+  {
+    "check": "Alice foreign Bob note read",
+    "status": 404,
+    "body": {
+      "detail": "Note not found"
+    }
+  },
+  {
+    "check": "Alice foreign Bob note update",
+    "status": 404,
+    "body": {
+      "detail": "Note not found."
+    }
+  },
+  {
+    "check": "Bob original unchanged",
+    "status": 200,
+    "title": "Bob Garden Note fullmulti20260915"
+  }
+]

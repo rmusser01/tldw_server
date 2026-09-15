@@ -1,0 +1,252 @@
+{
+  "productRevision": "68863b90b7",
+  "checkedAt": "2026-09-15T05:06:35.374Z",
+  "findings": 26,
+  "priorities": {
+    "P1": 6,
+    "P2": 14,
+    "P3": 6
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 2602,
+      "sha256": "d2abd132b467a8e16dcbab3bb07bc0b22725cbc7d73fe4286220fc53553517e9"
+    },
+    {
+      "path": "multi/bob-recent-note-title-leak.png",
+      "bytes": 123709,
+      "sha256": "6224b2c89286d3ba8fe0443acc25bf8059108c0165682cf121728a76f5cb4630"
+    },
+    {
+      "path": "multi/cedar-multi-review-saved-analysis.png",
+      "bytes": 178146,
+      "sha256": "31d965a1798a6f44f9ae16dfadf08060abeca2666e0b16c4c83e06ee28781bfb"
+    },
+    {
+      "path": "multi/cedar-multi-review-saved-analysis.yml",
+      "bytes": 12655,
+      "sha256": "1bc05dec0c3b01e604bcc733a89cb74a0347d40a9dc081f85e6403261a994ba4"
+    },
+    {
+      "path": "multi/cedar-multi-review-source-response.json",
+      "bytes": 1120,
+      "sha256": "5100c2d3d7f5cbce81a0aebe3729ff3c540a475bcc66cd822910f7c8e768dc6a"
+    },
+    {
+      "path": "multi/flashcards-claim-verification-422.json",
+      "bytes": 3938,
+      "sha256": "5ec8152d1e0b647285170c2fd85e60b3dbb3b3b0c3021750ecc65d3917505445"
+    },
+    {
+      "path": "multi/flashcards-raw-verification-error.yml",
+      "bytes": 20080,
+      "sha256": "ca644c0baf071d59e5f3abd6b5ac2602775c945ea70c3a521821dabb43d5af61"
+    },
+    {
+      "path": "multi/ingest-analysis-error-saved.yml",
+      "bytes": 333,
+      "sha256": "6518809525ca717b96717d06c245995860889d4d4cebe62d0d52a9b9559eb996"
+    },
+    {
+      "path": "multi/isolation-api-results.json",
+      "bytes": 4081,
+      "sha256": "6f41805eff7d9080bf88234fd1e32fd82eee4db6e88007c12f191715554f0ba8"
+    },
+    {
+      "path": "multi/media-delete-confirmation.yml",
+      "bytes": 16474,
+      "sha256": "0fabd4ca2a23dc28d1ffcb598829f7d5f769beec0ded2ca800b811d6a79434c5"
+    },
+    {
+      "path": "multi/multi-uat-results.md",
+      "bytes": 18934,
+      "sha256": "493af521810c7a1bedb7f47c1267bb3ec08ca44cc5fab2c84498725f787655ed"
+    },
+    {
+      "path": "multi/open-media-stale-splash.yml",
+      "bytes": 3506,
+      "sha256": "41a38be19deda9e000b1c74d926f04833b97ee0a1784d8d1bc2dbf0985944fed"
+    },
+    {
+      "path": "multi/prompt-applied-chat-request.json",
+      "bytes": 405,
+      "sha256": "e13976bfc00919a32ee1e2a017fe9644450708f42106ab537035a5186ac62c74"
+    },
+    {
+      "path": "multi/prompt-save-editor-stays-open.yml",
+      "bytes": 17603,
+      "sha256": "b91386e88aa01b3ae508eccfb24fd8643c2c1972ba215fc649735ebac669648c"
+    },
+    {
+      "path": "multi/qa-no-results-selected-source.png",
+      "bytes": 106955,
+      "sha256": "86eed2c51dd85326843406eba30462fdbb4c05133541ecaf15ef0c0de15335f1"
+    },
+    {
+      "path": "multi/qa-no-results-selected-source.yml",
+      "bytes": 7746,
+      "sha256": "746406f9f6672c607c56c443cb156696633ab25c624fb023fe5f473069c4a8e6"
+    },
+    {
+      "path": "multi/qa-selected-source-stream.xndjson",
+      "bytes": 1363,
+      "sha256": "0d9a0815457136be406449d4b013fb6dc61c45a3724e3886c7b6b47d6368a69c"
+    },
+    {
+      "path": "multi/tracked-chat-provider-error.png",
+      "bytes": 147869,
+      "sha256": "8a0a97209717b8c5e37d3fdb18c579037183ddec0d5fc396e4f07581fe584b7e"
+    },
+    {
+      "path": "multi/wikipedia-knowledge-no-results.yml",
+      "bytes": 7633,
+      "sha256": "b7ca28d097f241ce8acb85afcc98ac69844ea34371c154cda22f494a0216be17"
+    },
+    {
+      "path": "multi/wikipedia-knowledge-stream.xndjson",
+      "bytes": 1188,
+      "sha256": "2bb7ab48e45a56d6b2056911cca1f2ccc1621c33fb3ec10a11b78bfad8ced1b8"
+    },
+    {
+      "path": "multi/wikipedia-media-search-empty.yml",
+      "bytes": 16035,
+      "sha256": "73d52d7781d62488cfa64b820a49ab241c4e71cd0ea455d5d695e53c0d0fcfd9"
+    },
+    {
+      "path": "multi/wikipedia-robot-policy-saved.png",
+      "bytes": 174343,
+      "sha256": "5a9817f3090551b420e75e640650d070b51172d30f102c9225c000c2ded879f9"
+    },
+    {
+      "path": "multi/wikipedia-url-content.yml",
+      "bytes": 16300,
+      "sha256": "96fcc3222adeed440b23308c0c77110ca642759237030b089f8d87a872b06eb6"
+    },
+    {
+      "path": "multi/wikipedia-url-http-summary.json",
+      "bytes": 1232,
+      "sha256": "1f6261a423f2e1f05b395806b12b2341682e36422ae5e0b07a59b852dd8eaeaf"
+    },
+    {
+      "path": "multi/wikipedia-url-success.yml",
+      "bytes": 11692,
+      "sha256": "27fa7241c491f5a7cf1d3631d00bbf0402f3de35e2819212eaf2917f861ef205"
+    },
+    {
+      "path": "single/aster-cited-answer.png",
+      "bytes": 248095,
+      "sha256": "383851bfac7c68870806339cd149bc5b90a07f690ac12aa617b66f2d8de42403"
+    },
+    {
+      "path": "single/character-route-stale-context-request.json",
+      "bytes": 559,
+      "sha256": "b350a61f4e00eaa1f51462c0117eb277bdd892cb8fbc0b219b1f8c0903d9361d"
+    },
+    {
+      "path": "single/chat-card-raw-reasoning-empty-back.png",
+      "bytes": 106210,
+      "sha256": "7375578548241ab101beab93f11f77adfa1d3775af695a1f2a9dba61f1801b9a"
+    },
+    {
+      "path": "single/chat-card-review-response.json",
+      "bytes": 435,
+      "sha256": "e10c9a2cf86bd5f246330a35c1f737d569b8ea6310b8167c35a26fecdbf5a20c"
+    },
+    {
+      "path": "single/chat-derived-card.json",
+      "bytes": 1200,
+      "sha256": "5045c3d9c2e89f0468587411174a39f8b80d17d3fc824da917b92ba5cf48ccfc"
+    },
+    {
+      "path": "single/chat-derived-note.yml",
+      "bytes": 14482,
+      "sha256": "4101d708ee9b1f068de7a6ba4286610dd24b875b98035f0bf27c79cbea8657fa"
+    },
+    {
+      "path": "single/flashcards-claim-verification-422.json",
+      "bytes": 5931,
+      "sha256": "f7e4687c36d658aa0f9676fe0a484bee5b4b1f3aa1ee01a0bf4f9614d81dbed7"
+    },
+    {
+      "path": "single/flashcards-generation-error.png",
+      "bytes": 193810,
+      "sha256": "2a9af92f842102d9926bd9793871899040b00b501cc5770f0af65c4572363a8a"
+    },
+    {
+      "path": "single/ingest-success.png",
+      "bytes": 133772,
+      "sha256": "557d2eb6d819ec65b15cab013366078a09973a30e0fded1f7bdeca2e0b1582fb"
+    },
+    {
+      "path": "single/linked-conversation-restored.png",
+      "bytes": 137571,
+      "sha256": "bb63cc8401cf6a5d3953791f80d097bab26384e9b7438fc3d86510a0f6cfe25e"
+    },
+    {
+      "path": "single/linked-conversation-restored.yml",
+      "bytes": 13057,
+      "sha256": "fa9b2ccd87d2fe266c9dbff1abdd76ea57c3af2922823eaf96224b5a6ba2dcf8"
+    },
+    {
+      "path": "single/media-chat-lands-home.yml",
+      "bytes": 11216,
+      "sha256": "3fd676a3f24eadd1babfaf99449124df04fc999a4ee7772f58167f42013bb19e"
+    },
+    {
+      "path": "single/media-handoff-chat-request.json",
+      "bytes": 524,
+      "sha256": "5d493a7b4dda80109683c60f6caf2fa3ec89d14b4832ed3b548e180f91966a76"
+    },
+    {
+      "path": "single/prompt-chat-request.json",
+      "bytes": 388,
+      "sha256": "a6dbc2dab5a2e3b6dfdcaa364e7b11a7e2dff50193f22cd1378bec15d0b34ffa"
+    },
+    {
+      "path": "single/restored-media-analysis.png",
+      "bytes": 163498,
+      "sha256": "e56832e698a70712b96f6120c90db54ad79d83c446b3360f20bd3eb7bc059f3e"
+    },
+    {
+      "path": "single/source-original-404.png",
+      "bytes": 45775,
+      "sha256": "271831328f4dba452ddc061d823a953889424078f3b9814c236d690e439246a5"
+    },
+    {
+      "path": "single/trash-missing-deletion-date.yml",
+      "bytes": 4183,
+      "sha256": "340e7df6a6a7cfed1e0112c4ad387cdf6a5043816d91c5f0df0d9f58dd220159"
+    },
+    {
+      "path": "single/wikipedia-ingest-response.json",
+      "bytes": 192,
+      "sha256": "8ed1803160932de0bf2bed8f4efcad95997ae67db34ee185fac58ad6a0998bc4"
+    },
+    {
+      "path": "single/wikipedia-ingest-success.yml",
+      "bytes": 11491,
+      "sha256": "743dcc34de8a6fce9b2e48eda8a8994571ad2e179771d6550d6c8764c9972b86"
+    },
+    {
+      "path": "single/wikipedia-robot-response.png",
+      "bytes": 174215,
+      "sha256": "437c0a2bbc7e56a9a2cbc4f21f054a920d772a3f12322baa9cec21dfe1f2a96c"
+    },
+    {
+      "path": "single/wikipedia-search-denial-page.yml",
+      "bytes": 16371,
+      "sha256": "91015cfcdbedc80b2c5f50891c08bf4d6f2f6641e632a186a4010099baa92e51"
+    },
+    {
+      "path": "single/wikipedia-search-response.json",
+      "bytes": 543,
+      "sha256": "c69639ac73c2b08a62e68283ea3076dfb5ca56095094670b98aac81a808945dd"
+    },
+    {
+      "path": "single/wikipedia-stored-media.json",
+      "bytes": 1491,
+      "sha256": "bef94a777c1f6ec9452671c6ed81bbb032dc08780e514cf4395b1fed239b386b"
+    }
+  ]
+}

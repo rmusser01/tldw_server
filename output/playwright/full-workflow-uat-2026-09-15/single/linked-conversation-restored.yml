@@ -1,0 +1,196 @@
+- generic [ref=f4e20]:
+  - generic [ref=f4e23]:
+    - link "Skip to main content" [ref=f4e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f4e25]:
+      - button "Expand sidebar" [ref=f4e26] [cursor=pointer]
+      - button "New Chat" [ref=f4e30] [cursor=pointer]
+      - generic [ref=f4e33]:
+        - button "Quick Ingest" [ref=f4e34] [cursor=pointer]
+        - button "Chat" [ref=f4e38] [cursor=pointer]
+        - button "Prompts" [ref=f4e41] [cursor=pointer]
+        - button "Characters" [ref=f4e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f4e50] [cursor=pointer]
+        - button "World Books" [ref=f4e54] [cursor=pointer]
+        - button "Notes" [ref=f4e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f4e61] [cursor=pointer]
+        - button "Media" [ref=f4e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f4e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f4e78] [cursor=pointer]
+        - button "Kanban" [ref=f4e84] [cursor=pointer]
+        - button "Watchlists" [ref=f4e86] [cursor=pointer]
+      - generic [ref=f4e91]:
+        - button "Open Notes Dock" [ref=f4e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f4e97] [cursor=pointer]
+        - button "Settings" [ref=f4e100] [cursor=pointer]
+    - main [ref=f4e104]:
+      - generic [ref=f4e105]:
+        - generic [ref=f4e108]:
+          - generic [ref=f4e109]:
+            - button "Expand sidebar" [ref=f4e110] [cursor=pointer]
+            - generic [ref=f4e112]:
+              - img "tldw Assistant" [ref=f4e113]
+              - generic [ref=f4e114]: tldw Assistant
+              - button "Companion Home" [ref=f4e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f4e119] [cursor=pointer]
+            - button "Untitled" [ref=f4e2899] [cursor=pointer]
+            - generic [ref=f4e2900]:
+              - generic "Saved chat. History is persisted." [ref=f4e2901]: Saved
+              - generic "Character mode is active." [ref=f4e2902]: "Character: Aster UAT Guide"
+          - generic [ref=f4e122]:
+            - button "Search - Open command palette" [ref=f4e123] [cursor=pointer]:
+              - generic [ref=f4e127]: Search
+              - generic [ref=f4e128]: ⌘K
+            - button "New saved chat" [ref=f4e2908] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f4e2912] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f4e2913] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f4e2914] [cursor=pointer]
+            - button "Open settings" [ref=f4e129] [cursor=pointer]
+            - generic [ref=f4e141]:
+              - button "Notifications, 0 unread" [ref=f4e142] [cursor=pointer]
+              - status [ref=f4e146]: Notifications are active
+            - button "Switch to light theme" [ref=f4e147] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f4e154] [cursor=pointer]:
+              - generic [ref=f4e155]: "?"
+        - generic [ref=f4e156]:
+          - heading "Chat" [level=1] [ref=f4e2921]
+          - generic [ref=f4e2924]:
+            - paragraph [ref=f4e2925]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f4e2926]:
+              - main [ref=f4e2927]:
+                - generic [ref=f4e2928]:
+                  - generic [ref=f4e2930]:
+                    - generic [ref=f4e2931]:
+                      - generic [ref=f4e2932]:
+                        - text: Character Chat
+                        - generic [ref=f4e2933]: Aster UAT Guide
+                      - generic [ref=f4e2934]: Conversation timeline
+                    - generic [ref=f4e2935]:
+                      - button "Switch to light theme" [ref=f4e2936] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f4e2943] [cursor=pointer]:
+                        - generic [ref=f4e2949]: Focus
+                      - button "Shortcuts" [ref=f4e2950] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f4e2954]
+                  - log "Chat messages" [ref=f4e2956]:
+                    - generic [ref=f4e2958]:
+                      - article "Assistant message 1 of 3" [ref=f4e2959]:
+                        - generic [ref=f4e2965]:
+                          - generic [ref=f4e2967]:
+                            - generic [ref=f4e2968]: Aster UAT Guide
+                            - generic [ref=f4e2969]: • 9:34 PM
+                            - generic [ref=f4e2970]: greeting
+                          - paragraph [ref=f4e2973]: Welcome to Aster study. The garden has seven raised beds.
+                          - generic [ref=f4e2974]:
+                            - generic [ref=f4e2975]:
+                              - generic [ref=f4e2976]: Was this helpful?
+                              - generic [ref=f4e2977]:
+                                - button "Helpful" [ref=f4e2978] [cursor=pointer]
+                                - button "Not helpful" [ref=f4e2981] [cursor=pointer]
+                                - button "More feedback" [ref=f4e2984] [cursor=pointer]
+                            - button "More actions" [ref=f4e2990] [cursor=pointer]: •••
+                      - article "User message 2 of 3" [ref=f4e2991]:
+                        - generic [ref=f4e2994]:
+                          - generic [ref=f4e2996]:
+                            - generic [ref=f4e2997]: You
+                            - generic [ref=f4e2998]: • 9:34 PM
+                          - paragraph [ref=f4e3000]: How many raised beds does the garden have?
+                          - button "More actions" [ref=f4e3003] [cursor=pointer]: •••
+                      - article "Assistant message 3 of 3" [ref=f4e3007]:
+                        - generic [ref=f4e3013]:
+                          - generic [ref=f4e3015]:
+                            - generic [ref=f4e3016]: Aster UAT Guide
+                            - generic [ref=f4e3017]: • 9:34 PM
+                          - generic [ref=f4e3018]:
+                            - button "collapsed Model’s reasoning (optional)" [ref=f4e3021] [cursor=pointer]:
+                              - img "collapsed" [ref=f4e3023]
+                              - generic [ref=f4e3026]: Model’s reasoning (optional)
+                            - paragraph [ref=f4e3030]: The garden has seven raised beds.
+                          - generic [ref=f4e3031]:
+                            - generic [ref=f4e3032]:
+                              - generic [ref=f4e3033]: Was this helpful?
+                              - generic [ref=f4e3034]:
+                                - button "Helpful" [ref=f4e3035] [cursor=pointer]
+                                - button "Not helpful" [ref=f4e3038] [cursor=pointer]
+                                - button "More feedback" [ref=f4e3041] [cursor=pointer]
+                            - generic [ref=f4e3048]:
+                              - button "Copy to clipboard" [ref=f4e3049] [cursor=pointer]
+                              - button "Edit" [ref=f4e3054] [cursor=pointer]
+                              - button "Regenerate" [ref=f4e3058] [cursor=pointer]
+                              - button "More actions" [ref=f4e3063] [cursor=pointer]
+                  - generic [ref=f4e3068]:
+                    - generic [ref=f4e3069]: Composer
+                    - generic [ref=f4e3077]:
+                      - button [aria-hidden] [ref=f4e3078]
+                      - button [aria-hidden] [ref=f4e3079]
+                      - generic [ref=f4e3080]:
+                        - generic [ref=f4e3082]:
+                          - button "Hide composer options" [expanded] [ref=f4e3083] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f4e3088]
+                          - generic [ref=f4e3089]:
+                            - button "Improve prompt" [ref=f4e3092] [cursor=pointer]
+                            - generic [ref=f4e3097]:
+                              - button "Send message" [ref=f4e3098] [cursor=pointer]:
+                                - generic [ref=f4e3099]: Send
+                              - button "Open message delivery options" [ref=f4e3104] [cursor=pointer]
+                        - generic [ref=f4e3109]:
+                          - generic [ref=f4e3111]:
+                            - group "Mode and context controls" [ref=f4e3112]:
+                              - button "Modes" [ref=f4e3113] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f4e3120] [cursor=pointer]':
+                                - generic [ref=f4e3121]:
+                                  - generic [ref=f4e3122]: MCP
+                                  - generic [ref=f4e3123]: None
+                              - button "Search & Context" [ref=f4e3126] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f4e3131] [cursor=pointer]:
+                                - generic [ref=f4e3134]: Single Pirate fulluat20260915
+                              - button "Aster UAT Guide" [ref=f4e3135] [cursor=pointer]
+                              - button "Role-play setup" [ref=f4e3140] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f4e3147] [cursor=pointer]
+                            - group "Run input controls" [ref=f4e3153]:
+                              - button "OpenUI" [ref=f4e3154] [cursor=pointer]
+                              - button "Start dictation" [ref=f4e3160] [cursor=pointer]
+                              - generic [ref=f4e3164]:
+                                - button "Attach image" [ref=f4e3166] [cursor=pointer]
+                                - button "More attachments" [ref=f4e3170] [cursor=pointer]
+                              - button "More tools" [ref=f4e3173] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f4e3176] [cursor=pointer]:
+                                - generic [ref=f4e3180]: Chat Settings
+                          - generic "Active context" [ref=f4e3181]:
+                            - button "LLaMa.cpp / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf" [ref=f4e3183] [cursor=pointer]:
+                              - generic "Provider status" [ref=f4e3187]: Healthy
+                            - button "Character Aster UAT Guide" [ref=f4e3188] [cursor=pointer]:
+                              - generic [ref=f4e3189]: Character
+                              - generic [ref=f4e3190]: Aster UAT Guide
+                            - 'generic "Character context: Included" [ref=f4e3191]':
+                              - generic [ref=f4e3192]: Character context
+                              - generic [ref=f4e3193]: Included
+                            - button "System prompt Custom" [ref=f4e3194] [cursor=pointer]:
+                              - generic [ref=f4e3195]: System prompt
+                              - generic [ref=f4e3196]: Custom
+                            - button "Chat 3 messages" [ref=f4e3197] [cursor=pointer]:
+                              - generic [ref=f4e3198]: Chat
+                              - generic [ref=f4e3199]: 3 messages
+                            - button "Configure context window size" [ref=f4e3201] [cursor=pointer]:
+                              - generic [ref=f4e3202]: 84 + ~0 = 84 tokens
+                            - button "Saved" [ref=f4e3204] [cursor=pointer]
+                            - button "Advanced controls" [ref=f4e3206] [cursor=pointer]
+                        - status [ref=f4e3210]:
+                          - generic [ref=f4e3211]: Add expression images for Aster UAT Guide.
+                          - generic [ref=f4e3212]:
+                            - link "Edit expressions" [ref=f4e3213] [cursor=pointer]:
+                              - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=4
+                            - button "Dismiss expression image setup" [ref=f4e3214] [cursor=pointer]: Dismiss
+                        - status [ref=f4e3215]:
+                          - generic [ref=f4e3216]:
+                            - generic [ref=f4e3217]: Character mode and custom prompt steering are both active. Verify intended behavior before sending.
+                            - button "Review modes" [ref=f4e3218] [cursor=pointer]
+              - generic [ref=f4e3219]:
+                - button "Restore context sidechannel" [ref=f4e3220] [cursor=pointer]:
+                  - generic [ref=f4e3224]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f4e3225]:
+                - button "Restore runtime sidechannel" [ref=f4e3226] [cursor=pointer]:
+                  - generic [ref=f4e3227]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f4e15] [cursor=pointer]
+  - alert [ref=f4e19]: Aster UAT Guide Chat (20260915_043437)

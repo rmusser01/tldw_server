@@ -1,0 +1,257 @@
+- generic [ref=f14e20]:
+  - generic [ref=f14e23]:
+    - link "Skip to main content" [ref=f14e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f14e25]:
+      - button "Expand sidebar" [ref=f14e26] [cursor=pointer]
+      - button "New Chat" [ref=f14e30] [cursor=pointer]
+      - generic [ref=f14e33]:
+        - button "Quick Ingest" [ref=f14e34] [cursor=pointer]
+        - button "Chat" [ref=f14e38] [cursor=pointer]
+        - button "Prompts" [ref=f14e41] [cursor=pointer]
+        - button "Characters" [ref=f14e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f14e50] [cursor=pointer]
+        - button "World Books" [ref=f14e54] [cursor=pointer]
+        - button "Notes" [ref=f14e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f14e61] [cursor=pointer]
+        - button "Media" [ref=f14e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f14e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f14e78] [cursor=pointer]
+        - button "Kanban" [ref=f14e84] [cursor=pointer]
+        - button "Watchlists" [ref=f14e86] [cursor=pointer]
+      - generic [ref=f14e91]:
+        - button "Open Notes Dock" [ref=f14e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f14e97] [cursor=pointer]
+        - button "Settings" [ref=f14e100] [cursor=pointer]
+    - main [ref=f14e104]:
+      - generic [ref=f14e105]:
+        - generic [ref=f14e108]:
+          - generic [ref=f14e109]:
+            - button "Expand sidebar" [ref=f14e110] [cursor=pointer]
+            - generic [ref=f14e112]:
+              - img "tldw Assistant" [ref=f14e113]
+              - generic [ref=f14e114]: tldw Assistant
+              - button "Companion Home" [ref=f14e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f14e119] [cursor=pointer]
+          - generic [ref=f14e122]:
+            - button "Search - Open command palette" [ref=f14e123] [cursor=pointer]:
+              - generic [ref=f14e127]: Search
+              - generic [ref=f14e128]: ⌘K
+            - button "Open settings" [ref=f14e129] [cursor=pointer]
+            - generic [ref=f14e141]:
+              - button "Notifications, 0 unread" [ref=f14e142] [cursor=pointer]
+              - status [ref=f14e146]: Notifications are active
+            - button "Switch to light theme" [ref=f14e147] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f14e154] [cursor=pointer]:
+              - generic [ref=f14e155]: "?"
+        - generic [ref=f14e157]:
+          - generic [ref=f14e159]:
+            - generic [ref=f14e160]:
+              - generic [ref=f14e161]:
+                - heading "Media Inspector" [level=1] [ref=f14e162]
+                - generic [ref=f14e163]:
+                  - generic [ref=f14e164]: 0 / 0
+                  - button "Trash" [ref=f14e165] [cursor=pointer]
+                  - button "Bulk" [ref=f14e169] [cursor=pointer]
+              - generic [ref=f14e172]:
+                - button "Show media only" [pressed] [ref=f14e173] [cursor=pointer]:
+                  - generic [ref=f14e174]: Media
+                  - generic [ref=f14e175]: "0"
+                - button "Show notes only" [ref=f14e176] [cursor=pointer]:
+                  - generic [ref=f14e177]: Notes
+                  - generic [ref=f14e178]: "0"
+            - generic [ref=f14e180]:
+              - generic [ref=f14e181]:
+                - generic [ref=f14e182]: Find media
+                - button "Collapse find media panel" [expanded] [ref=f14e184] [cursor=pointer]
+              - generic [ref=f14e187]:
+                - generic [ref=f14e188]:
+                  - generic [ref=f14e189]:
+                    - textbox "Search media (title/content)" [ref=f14e193]: Playwright
+                    - button "Clear search" [ref=f14e889] [cursor=pointer]
+                  - button "Search syntax help" [ref=f14e195] [cursor=pointer]: "?"
+                - button "Search" [active] [ref=f14e196] [cursor=pointer]
+                - generic [ref=f14e197]:
+                  - generic [ref=f14e198]:
+                    - generic [ref=f14e199]: Filters
+                    - button "Clear all" [ref=f14e203] [cursor=pointer]
+                  - generic [ref=f14e204]:
+                    - generic [ref=f14e205]: Search mode
+                    - generic [ref=f14e206]:
+                      - button "Full-text search" [pressed] [ref=f14e207] [cursor=pointer]: Full-text
+                      - button "Metadata search" [ref=f14e208] [cursor=pointer]: Metadata
+                  - generic [ref=f14e209]:
+                    - generic [ref=f14e210]: Sort by
+                    - generic [ref=f14e211] [cursor=pointer]:
+                      - generic [ref=f14e212]:
+                        - generic "Relevance" [ref=f14e213]
+                        - combobox [ref=f14e214]
+                      - img "down" [ref=f14e216]
+                  - generic [ref=f14e219]:
+                    - generic [ref=f14e220]: Date range
+                    - generic [ref=f14e221]:
+                      - generic [ref=f14e222]:
+                        - text: Start date
+                        - textbox "Start date" [ref=f14e223]
+                      - generic [ref=f14e224]:
+                        - text: End date
+                        - textbox "End date" [ref=f14e225]
+                  - button "Advanced search" [ref=f14e227] [cursor=pointer]
+                  - generic [ref=f14e231] [cursor=pointer]:
+                    - checkbox "Favorites only" [ref=f14e232]
+                    - generic [ref=f14e235]: Favorites only
+                  - generic [ref=f14e236]:
+                    - button "Media types" [ref=f14e237] [cursor=pointer]
+                    - generic [ref=f14e243] [cursor=pointer]:
+                      - checkbox "Filter by Document" [ref=f14e244]
+                      - generic [ref=f14e245]: Document
+                  - button "Keywords" [ref=f14e247] [cursor=pointer]
+                  - generic [ref=f14e252]:
+                    - generic [ref=f14e253]: Exclude keywords
+                    - generic [ref=f14e255]:
+                      - generic [ref=f14e256]:
+                        - generic: Exclude keyword
+                        - combobox "Exclude keyword" [ref=f14e258]
+                      - img "down" [ref=f14e260]
+                    - generic [ref=f14e263]: Use excluded keywords to remove items containing those terms.
+                    - generic [ref=f14e264]: 0 exclude keyword suggestions available
+                - generic [ref=f14e265]:
+                  - generic [ref=f14e266]:
+                    - generic [ref=f14e267]: Collection
+                    - combobox "Collection" [ref=f14e268]:
+                      - option "All items" [selected]
+                  - paragraph [ref=f14e269]: Create collections from bulk selection to organize related items.
+            - generic [ref=f14e270]:
+              - generic [ref=f14e272]:
+                - generic [ref=f14e273]:
+                  - generic [ref=f14e274]:
+                    - generic [ref=f14e275]: Results
+                    - generic [ref=f14e276]: 0 / 0
+                  - generic [ref=f14e277]:
+                    - button "Standard view" [pressed] [ref=f14e278] [cursor=pointer]
+                    - button "Compact view" [ref=f14e284] [cursor=pointer]
+                - generic [ref=f14e893]:
+                  - paragraph [ref=f14e894]: No media found. Use Quick ingest in the header to add media from your recordings and files.
+                  - paragraph [ref=f14e895]: Try broader terms, or ingest new content to search.
+                  - generic [ref=f14e896]:
+                    - button "Clear search" [ref=f14e897] [cursor=pointer]
+                    - button "Open Quick Ingest" [ref=f14e899] [cursor=pointer]
+              - generic [ref=f14e302]:
+                - generic [ref=f14e303]: 0 of 0 results
+                - button "? for shortcuts" [ref=f14e309] [cursor=pointer]:
+                  - generic [ref=f14e310]: "?"
+                  - generic [ref=f14e311]: for shortcuts
+            - button "Library tools" [ref=f14e313] [cursor=pointer]
+          - button "Collapse sidebar" [ref=f14e318] [cursor=pointer]
+          - generic [ref=f14e322]:
+            - generic [ref=f14e681]:
+              - generic [ref=f14e682] [cursor=pointer]:
+                - checkbox "Show chapters/sections panel" [checked] [ref=f14e683]
+                - generic [ref=f14e684]: Show chapters/sections panel
+              - generic [ref=f14e685] [cursor=pointer]:
+                - checkbox "Allow generated fallback structure" [checked] [ref=f14e686]
+                - generic [ref=f14e687]: Allow generated fallback structure
+              - generic [ref=f14e688]: "Generated sections: 2"
+            - generic [ref=f14e323]:
+              - complementary "Chapters and sections" [ref=f14e689]:
+                - generic [ref=f14e690]:
+                  - generic [ref=f14e691]: Chapters/Sections
+                  - textbox "Jump to 12.5 or title" [ref=f14e696]
+                  - generic [ref=f14e697]: "[METADATA] { \"url\": \"https://en.wikipedia.org/wiki/Playwright_(software)\", \"ingestion_date\": \"20..."
+                - tree [ref=f14e698]:
+                  - generic [ref=f14e699]:
+                    - 'button "1 [METADATA] { \"url\": \"https://en.wikipedia.org/wiki/Playwright_(software)\", \"ingestion_date\": \"20..." [ref=f14e702] [cursor=pointer]':
+                      - generic [ref=f14e703]: "1"
+                      - generic [ref=f14e704]: "[METADATA] { \"url\": \"https://en.wikipedia.org/wiki/Playwright_(software)\", \"ingestion_date\": \"20..."
+                    - button "2 Please respect our robot policy https://w.wiki/4wJS when crawling us. Contact bot-traffic@wikime..." [ref=f14e707] [cursor=pointer]:
+                      - generic [ref=f14e708]: "2"
+                      - generic [ref=f14e709]: Please respect our robot policy https://w.wiki/4wJS when crawling us. Contact bot-traffic@wikime...
+              - generic [ref=f14e324]:
+                - button "Create study pack" [ref=f14e326] [cursor=pointer]
+                - generic [ref=f14e327]:
+                  - generic [ref=f14e328]: Showing N/A
+                  - generic [ref=f14e711]:
+                    - generic [ref=f14e712]:
+                      - button "Previous" [disabled] [ref=f14e713]
+                      - generic [ref=f14e716]: 0/0
+                      - button "Next" [disabled] [ref=f14e717]
+                    - heading "N/A" [level=3] [ref=f14e720]
+                    - generic [ref=f14e721]:
+                      - button "Chat with this media" [ref=f14e722] [cursor=pointer]
+                      - button "Analyze" [ref=f14e725] [cursor=pointer]
+                      - button "Actions" [ref=f14e729] [cursor=pointer]
+                  - generic [ref=f14e735]:
+                    - generic [ref=f14e736]:
+                      - generic [ref=f14e737]: 40 Words
+                      - generic [ref=f14e741]: 1 min read
+                      - generic "Reading progress" [ref=f14e742]: 0% read
+                      - generic [ref=f14e743]: "Chunking: Completed"
+                      - generic [ref=f14e744]: "Vector: Pending"
+                    - button "Metadata details Show" [ref=f14e746] [cursor=pointer]:
+                      - generic [ref=f14e747]: Metadata details
+                      - generic [ref=f14e748]: Show
+                    - generic [ref=f14e750]:
+                      - generic [ref=f14e751]:
+                        - generic "default" [ref=f14e753]:
+                          - generic [aria-hidden] [ref=f14e755] [cursor=pointer]
+                        - generic "no_keyword_set" [ref=f14e760]:
+                          - generic [aria-hidden] [ref=f14e762] [cursor=pointer]
+                        - combobox [ref=f14e767]
+                      - img "down" [ref=f14e769]
+                      - img "close-circle" [ref=f14e773] [cursor=pointer]
+                    - generic [ref=f14e776]:
+                      - generic [ref=f14e777]:
+                        - button "Content" [ref=f14e778] [cursor=pointer]
+                        - generic [ref=f14e782]:
+                          - generic [ref=f14e783]: Chars 0-382
+                          - generic [ref=f14e784] [cursor=pointer]:
+                            - generic [ref=f14e785]:
+                              - generic "Auto" [ref=f14e786]
+                              - combobox "Display mode" [ref=f14e787]
+                            - img "down" [ref=f14e789]
+                          - group "Text size" [ref=f14e792]:
+                            - button "Text size S" [ref=f14e793] [cursor=pointer]: S
+                            - button "Text size M" [pressed] [ref=f14e794] [cursor=pointer]: M
+                            - button "Text size L" [ref=f14e795] [cursor=pointer]: L
+                          - button "Edit content" [ref=f14e796] [cursor=pointer]
+                          - button "Find in content" [ref=f14e799] [cursor=pointer]
+                      - region "Media content" [ref=f14e806]:
+                        - generic [ref=f14e807]:
+                          - paragraph [ref=f14e901]:
+                            - text: "[METADATA] { \"url\": \""
+                            - link "https://en.wikipedia.org/wiki/Playwright_(software)" [ref=f14e902] [cursor=pointer]:
+                              - /url: https://en.wikipedia.org/wiki/Playwright_(software)
+                            - text: "\", \"ingestion_date\": \"2026-09-14 21:49:46\", \"content_hash\": \"5acd94d243dd7f528c9d94bf959426aec35285cfc605553743cc3251acbc5212\", \"scraping_pipeline\": \"trafilatura\", \"date\": \"N/A\", \"author\": \"N/A\", \"crawl_depth\": null, \"crawl_parent_url\": null, \"crawl_score\": null } [/METADATA]"
+                          - generic [ref=f14e904]:
+                            - generic [ref=f14e905]:
+                              - generic [ref=f14e906]: plaintext
+                              - button "View code" [ref=f14e909] [cursor=pointer]
+                            - generic [ref=f14e914]:
+                              - button "Download Code" [ref=f14e915] [cursor=pointer]
+                              - button "Copy to clipboard" [ref=f14e919] [cursor=pointer]
+                            - generic [ref=f14e924]:
+                              - generic [ref=f14e925]: "1"
+                              - generic [ref=f14e926]: Please respect our robot policy https://w.wiki/4wJS when crawling us. Contact bot-traffic@wikimedia.org if you need higher volumes. (30224bb)
+                    - generic [ref=f14e834]:
+                      - generic [ref=f14e835]:
+                        - button "Analysis" [ref=f14e836] [cursor=pointer]
+                        - button "Generate" [ref=f14e841] [cursor=pointer]
+                      - generic [ref=f14e845]: No analysis yet
+                    - generic [ref=f14e847]:
+                      - button "Statistics" [ref=f14e848] [cursor=pointer]
+                      - generic [ref=f14e853]:
+                        - generic [ref=f14e854]:
+                          - generic [ref=f14e855]: Words
+                          - generic [ref=f14e856]: "40"
+                        - generic [ref=f14e857]:
+                          - generic [ref=f14e858]: Characters
+                          - generic [ref=f14e859]: "533"
+                        - generic [ref=f14e860]:
+                          - generic [ref=f14e861]: Paragraphs
+                          - generic [ref=f14e862]: "2"
+                    - button "Metadata" [ref=f14e864] [cursor=pointer]
+                    - button "Document Intelligence" [ref=f14e869] [cursor=pointer]
+                    - button "Version History" [ref=f14e875] [cursor=pointer]
+                    - button "Delete item" [ref=f14e885] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f14e15] [cursor=pointer]
+  - alert [ref=f14e19]: Media Inspector

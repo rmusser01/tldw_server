@@ -1,0 +1,126 @@
+### Open tabs
+- 0: (current) [](http://127.0.0.1:18181/knowledge)
+- 1: [Helpful AI Assistant Chat (20260915_042152)](http://127.0.0.1:18181/chat)
+### Page
+- Page URL: http://127.0.0.1:18181/knowledge
+### Snapshot
+```yaml
+- generic [active] [ref=f7e20]:
+  - generic [ref=f7e23]:
+    - link "Skip to main content" [ref=f7e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f7e25]:
+      - button "Expand sidebar" [ref=f7e26] [cursor=pointer]
+      - button "New Chat" [ref=f7e30] [cursor=pointer]
+      - generic [ref=f7e33]:
+        - button "Quick Ingest" [ref=f7e34] [cursor=pointer]
+        - button "Chat" [ref=f7e38] [cursor=pointer]
+        - button "Prompts" [ref=f7e41] [cursor=pointer]
+        - button "Characters" [ref=f7e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f7e50] [cursor=pointer]
+        - button "World Books" [ref=f7e54] [cursor=pointer]
+        - button "Notes" [ref=f7e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f7e61] [cursor=pointer]
+        - button "Media" [ref=f7e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f7e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f7e78] [cursor=pointer]
+        - button "Kanban" [ref=f7e84] [cursor=pointer]
+        - button "Watchlists" [ref=f7e86] [cursor=pointer]
+      - generic [ref=f7e91]:
+        - button "Open Notes Dock" [ref=f7e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f7e97] [cursor=pointer]
+        - button "Settings" [ref=f7e100] [cursor=pointer]
+    - main [ref=f7e104]:
+      - generic [ref=f7e105]:
+        - generic [ref=f7e108]:
+          - generic [ref=f7e109]:
+            - button "Expand sidebar" [ref=f7e110] [cursor=pointer]
+            - generic [ref=f7e112]:
+              - img "tldw Assistant" [ref=f7e113]
+              - generic [ref=f7e114]: tldw Assistant
+              - button "Companion Home" [ref=f7e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f7e119] [cursor=pointer]
+          - generic [ref=f7e122]:
+            - button "Search - Open command palette" [ref=f7e123] [cursor=pointer]:
+              - generic [ref=f7e127]: Search
+              - generic [ref=f7e128]: ⌘K
+            - button "Open settings" [ref=f7e129] [cursor=pointer]
+            - generic [ref=f7e141]:
+              - button "Notifications, 0 unread" [ref=f7e142] [cursor=pointer]
+              - status [ref=f7e146]: Notifications are active
+            - button "Switch to light theme" [ref=f7e147] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f7e154] [cursor=pointer]:
+              - generic [ref=f7e155]: "?"
+        - generic [ref=f7e747]:
+          - link "Skip to search" [ref=f7e748] [cursor=pointer]:
+            - /url: "#knowledge-search-input"
+          - main [ref=f7e749]:
+            - generic [ref=f7e750]:
+              - generic [ref=f7e752]:
+                - generic [ref=f7e753]:
+                  - 'button "Open source scope and saved profiles. Sources: 4 selected. Specific: 1 doc" [ref=f7e965] [cursor=pointer]':
+                    - text: "Sources: 4 selected"
+                    - generic [ref=f7e966]: "• Specific: 1 doc"
+                  - button "Custom" [ref=f7e967] [cursor=pointer]
+                  - button "Web fallback is currently disabled. Click to toggle." [ref=f7e764] [cursor=pointer]: Web
+                  - button "Choose answer model" [ref=f7e769] [cursor=pointer]:
+                    - generic [ref=f7e773]: "AI: ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf"
+                  - button "Refresh source health" [ref=f7e776] [cursor=pointer]: "Sources ready: 6 of 8"
+                  - button "Open Knowledge QA settings" [ref=f7e777] [cursor=pointer]
+                - generic [ref=f7e823]:
+                  - paragraph [ref=f7e824]: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
+                  - generic [ref=f7e825]:
+                    - textbox "Search your knowledge base" [ref=f7e826]:
+                      - /placeholder: What are the pros and cons discussed?
+                      - text: When does Project Cedar launch, and who leads it? Cite the source.
+                    - button "Clear search" [ref=f7e978] [cursor=pointer]
+                    - button "Ask" [ref=f7e1022] [cursor=pointer]
+                  - generic [ref=f7e829]:
+                    - generic [ref=f7e830]: Press / to focus, Cmd+K for new search
+                    - button "New search" [ref=f7e1023] [cursor=pointer]
+              - generic [ref=f7e990]:
+                - button "Export" [ref=f7e1025] [cursor=pointer]
+                - generic [ref=f7e991]:
+                  - generic [ref=f7e992]: Search complete. 0 sources found.
+                  - generic [ref=f7e998]:
+                    - generic [ref=f7e999]:
+                      - generic [ref=f7e1029]:
+                        - generic [ref=f7e1033]: AI Answer
+                        - generic [ref=f7e1034]: "Answer status: No results"
+                      - generic [ref=f7e1002]:
+                        - generic [ref=f7e1035]:
+                          - button "Summarize" [ref=f7e1036] [cursor=pointer]
+                          - button "Show more" [ref=f7e1037] [cursor=pointer]
+                        - generic [ref=f7e1038]:
+                          - button "Copy answer" [ref=f7e1039] [cursor=pointer]
+                          - button "Continue in editor" [ref=f7e1040] [cursor=pointer]
+                      - note "Answer trust summary" [ref=f7e1041]:
+                        - generic [ref=f7e1042]: Searched Documents & Media, Notes, Characters, and Chats. 0 sources returned, 0 cited.
+                        - generic [ref=f7e1043]: Web fallback disabled.
+                        - generic [ref=f7e1044]: "AI model: llama / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf."
+                        - generic [ref=f7e1045]: Selected sources look ready.
+                        - generic [ref=f7e1046]: "Trust: No results."
+                        - generic [ref=f7e1047]: No searchable evidence was returned.
+                    - paragraph [ref=f7e1063]: The provided context does not contain relevant information about Project Cedar’s launch date or leader, so I can’t answer with a citation.
+                    - generic [ref=f7e1053]:
+                      - generic [ref=f7e1054]: Was this answer helpful?
+                      - button "Helpful" [ref=f7e1055] [cursor=pointer]
+                      - button "Needs work" [ref=f7e1058] [cursor=pointer]
+                  - generic [ref=f7e1006]:
+                    - generic [ref=f7e1007]:
+                      - generic [ref=f7e1008]:
+                        - textbox "Ask a follow-up question" [ref=f7e1009]:
+                          - /placeholder: Ask a follow-up question...
+                        - button "Submit follow-up question" [disabled] [ref=f7e1010]
+                      - button "Start new topic" [ref=f7e1013] [cursor=pointer]:
+                        - generic [ref=f7e1015]: New Topic
+                    - paragraph [ref=f7e1016]: Follow-up questions maintain context. Click "New Topic" to start fresh.
+            - complementary "Open evidence panel" [ref=f7e1017]:
+              - button "Open evidence panel (0 sources)" [ref=f7e1018] [cursor=pointer]
+          - generic [ref=f7e831]:
+            - button "Switch to detailed view" [ref=f7e832] [cursor=pointer]
+            - link "Help & Documentation" [ref=f7e836] [cursor=pointer]:
+              - /url: https://github.com/rmusser01/tldw_server2#readme
+  - button "Open Next.js Dev Tools" [ref=f7e15] [cursor=pointer]
+  - alert [ref=f7e19]: /knowledge
+```

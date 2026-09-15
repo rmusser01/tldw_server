@@ -1,0 +1,272 @@
+- generic [ref=f8e11]:
+  - generic [ref=f8e12]:
+    - generic [ref=f8e14]:
+      - link "Skip to main content" [ref=f8e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f8e16]:
+        - button "Expand sidebar" [ref=f8e17] [cursor=pointer]
+        - button "New Chat" [ref=f8e21] [cursor=pointer]
+        - generic [ref=f8e24]:
+          - button "Quick Ingest" [ref=f8e25] [cursor=pointer]
+          - button "Chat" [ref=f8e29] [cursor=pointer]
+          - button "Prompts" [ref=f8e32] [cursor=pointer]
+          - button "Characters" [ref=f8e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f8e41] [cursor=pointer]
+          - button "World Books" [ref=f8e45] [cursor=pointer]
+          - button "Notes" [ref=f8e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=f8e52] [cursor=pointer]
+          - button "Media" [ref=f8e60] [cursor=pointer]
+          - button "Document Workspace" [ref=f8e63] [cursor=pointer]
+          - button "Research Workspace" [ref=f8e69] [cursor=pointer]
+          - button "Kanban" [ref=f8e75] [cursor=pointer]
+          - button "Watchlists" [ref=f8e77] [cursor=pointer]
+        - generic [ref=f8e82]:
+          - button "Open Notes Dock" [ref=f8e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f8e88] [cursor=pointer]
+          - button "Settings" [ref=f8e91] [cursor=pointer]
+      - main [ref=f8e95]:
+        - generic [ref=f8e96]:
+          - generic [ref=f8e99]:
+            - generic [ref=f8e100]:
+              - button "Expand sidebar" [ref=f8e101] [cursor=pointer]
+              - generic [ref=f8e103]:
+                - img "tldw Assistant" [ref=f8e104]
+                - generic [ref=f8e105]: tldw Assistant
+                - button "Companion Home" [ref=f8e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=f8e110] [cursor=pointer]
+            - generic [ref=f8e113]:
+              - button "Search - Open command palette" [ref=f8e114] [cursor=pointer]:
+                - generic [ref=f8e118]: Search
+                - generic [ref=f8e119]: ⌘K
+              - button "Open settings" [ref=f8e120] [cursor=pointer]
+              - generic [ref=f8e132]:
+                - button "Notifications, 0 unread" [ref=f8e133] [cursor=pointer]
+                - status [ref=f8e137]: Notifications are active
+              - button "Switch to light theme" [ref=f8e138] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f8e145] [cursor=pointer]:
+                - generic [ref=f8e146]: "?"
+          - generic [ref=f8e148]:
+            - generic [ref=f8e150]:
+              - generic [ref=f8e151]:
+                - generic [ref=f8e152]:
+                  - heading "Media Inspector" [level=1] [ref=f8e153]
+                  - generic [ref=f8e154]:
+                    - generic [ref=f8e155]: 1 / 1
+                    - button "Trash" [ref=f8e156] [cursor=pointer]
+                    - button "Bulk" [ref=f8e160] [cursor=pointer]
+                - generic [ref=f8e163]:
+                  - button "Show media only" [pressed] [ref=f8e164] [cursor=pointer]:
+                    - generic [ref=f8e165]: Media
+                    - generic [ref=f8e166]: "1"
+                  - button "Show notes only" [ref=f8e167] [cursor=pointer]:
+                    - generic [ref=f8e168]: Notes
+                    - generic [ref=f8e169]: "0"
+              - generic [ref=f8e171]:
+                - generic [ref=f8e172]:
+                  - generic [ref=f8e173]: Find media
+                  - button "Collapse find media panel" [expanded] [ref=f8e175] [cursor=pointer]
+                - generic [ref=f8e178]:
+                  - generic [ref=f8e179]:
+                    - textbox "Search media (title/content)" [ref=f8e184]
+                    - button "Search syntax help" [ref=f8e186] [cursor=pointer]: "?"
+                  - button "Search" [ref=f8e187] [cursor=pointer]
+                  - generic [ref=f8e188]:
+                    - generic [ref=f8e189]:
+                      - generic [ref=f8e190]: Filters
+                      - button "Clear all" [ref=f8e194] [cursor=pointer]
+                    - generic [ref=f8e195]:
+                      - generic [ref=f8e196]: Search mode
+                      - generic [ref=f8e197]:
+                        - button "Full-text search" [pressed] [ref=f8e198] [cursor=pointer]: Full-text
+                        - button "Metadata search" [ref=f8e199] [cursor=pointer]: Metadata
+                    - generic [ref=f8e200]:
+                      - generic [ref=f8e201]: Sort by
+                      - generic [ref=f8e202] [cursor=pointer]:
+                        - generic [ref=f8e203]:
+                          - generic "Relevance" [ref=f8e204]
+                          - combobox [ref=f8e205]
+                        - img "down" [ref=f8e207]
+                    - generic [ref=f8e210]:
+                      - generic [ref=f8e211]: Date range
+                      - generic [ref=f8e212]:
+                        - generic [ref=f8e213]:
+                          - text: Start date
+                          - textbox "Start date" [ref=f8e214]
+                        - generic [ref=f8e215]:
+                          - text: End date
+                          - textbox "End date" [ref=f8e216]
+                    - button "Advanced search" [ref=f8e218] [cursor=pointer]
+                    - generic [ref=f8e222] [cursor=pointer]:
+                      - checkbox "Favorites only" [ref=f8e223]
+                      - generic [ref=f8e226]: Favorites only
+                    - generic [ref=f8e227]:
+                      - button "Media types" [ref=f8e228] [cursor=pointer]
+                      - generic [ref=f8e234] [cursor=pointer]:
+                        - checkbox "Filter by Document" [ref=f8e235]
+                        - generic [ref=f8e236]: Document
+                    - button "Keywords" [ref=f8e238] [cursor=pointer]
+                    - generic [ref=f8e243]:
+                      - generic [ref=f8e244]: Exclude keywords
+                      - generic [ref=f8e246]:
+                        - generic [ref=f8e247]:
+                          - generic: Exclude keyword
+                          - combobox "Exclude keyword" [ref=f8e249]
+                        - img "down" [ref=f8e251]
+                      - generic [ref=f8e254]: Use excluded keywords to remove items containing those terms.
+                      - generic [ref=f8e255]: 0 exclude keyword suggestions available
+                  - generic [ref=f8e256]:
+                    - generic [ref=f8e257]:
+                      - generic [ref=f8e258]: Collection
+                      - combobox "Collection" [ref=f8e259]:
+                        - option "All items" [selected]
+                    - paragraph [ref=f8e260]: Create collections from bulk selection to organize related items.
+              - generic [ref=f8e261]:
+                - generic [ref=f8e263]:
+                  - generic [ref=f8e264]:
+                    - generic [ref=f8e265]:
+                      - generic [ref=f8e266]: Results
+                      - generic [ref=f8e267]: 1 / 1
+                    - generic [ref=f8e268]:
+                      - button "Standard view" [pressed] [ref=f8e269] [cursor=pointer]
+                      - button "Compact view" [ref=f8e275] [cursor=pointer]
+                  - 'button "Select media: alice-cedar-fullmulti20260915" [ref=f8e278] [cursor=pointer]':
+                    - generic [ref=f8e279]:
+                      - button "Add to favorites" [ref=f8e284]
+                      - generic [ref=f8e287]:
+                        - generic [ref=f8e288]:
+                          - generic [ref=f8e289]: MEDIA
+                          - generic [ref=f8e290]: document
+                          - generic [ref=f8e291]: 9m ago
+                        - generic [ref=f8e292]: alice-cedar-fullmulti20260915
+                - generic [ref=f8e293]:
+                  - generic [ref=f8e294]:
+                    - generic [ref=f8e295]: 1 of 1 results
+                    - generic [ref=f8e296]:
+                      - generic [ref=f8e297]: "Per page:"
+                      - combobox "Per page:" [ref=f8e298]:
+                        - option "20" [selected]
+                        - option "50"
+                        - option "100"
+                  - button "? for shortcuts" [ref=f8e300] [cursor=pointer]:
+                    - generic [ref=f8e301]: "?"
+                    - generic [ref=f8e302]: for shortcuts
+              - button "Library tools" [ref=f8e304] [cursor=pointer]
+            - button "Collapse sidebar" [ref=f8e309] [cursor=pointer]
+            - generic [ref=f8e313]:
+              - generic [ref=f8e315]:
+                - generic [ref=f8e316] [cursor=pointer]:
+                  - checkbox "Show chapters/sections panel" [checked] [ref=f8e317]
+                  - generic [ref=f8e318]: Show chapters/sections panel
+                - generic [ref=f8e319] [cursor=pointer]:
+                  - checkbox "Allow generated fallback structure" [checked] [ref=f8e320]
+                  - generic [ref=f8e321]: Allow generated fallback structure
+                - generic [ref=f8e322]: "Sections: 1"
+              - generic [ref=f8e323]:
+                - complementary "Chapters and sections" [ref=f8e324]:
+                  - generic [ref=f8e325]:
+                    - generic [ref=f8e326]: Chapters/Sections
+                    - textbox "Jump to 12.5 or title" [ref=f8e331]
+                    - generic [ref=f8e332]: Project Cedar launch brief fullmulti20260915
+                  - tree [ref=f8e333]:
+                    - button "1 Project Cedar launch brief fullmulti20260915" [ref=f8e337] [cursor=pointer]:
+                      - generic [ref=f8e338]: "1"
+                      - generic [ref=f8e339]: Project Cedar launch brief fullmulti20260915
+                - generic [ref=f8e340]:
+                  - button "Create study pack" [ref=f8e342] [cursor=pointer]
+                  - generic [ref=f8e343]:
+                    - generic [ref=f8e344]: Showing alice-cedar-fullmulti20260915
+                    - generic [ref=f8e346]:
+                      - generic [ref=f8e347]:
+                        - button "Previous" [disabled] [ref=f8e348]
+                        - generic [ref=f8e351]: 1/1
+                        - button "Next" [disabled] [ref=f8e352]
+                      - heading "alice-cedar-fullmulti20260915" [level=3] [ref=f8e355]
+                      - generic [ref=f8e356]:
+                        - button "Chat with this media" [ref=f8e357] [cursor=pointer]
+                        - button "Analyze" [ref=f8e360] [cursor=pointer]
+                        - button "Actions" [ref=f8e364] [cursor=pointer]
+                    - generic [ref=f8e370]:
+                      - generic [ref=f8e586]:
+                        - generic [ref=f8e587]: 85 Words
+                        - generic [ref=f8e591]: 1 min read
+                        - generic "Reading progress" [ref=f8e592]: 0% read
+                        - generic [ref=f8e593]: "Chunking: Completed"
+                        - generic [ref=f8e594]: "Vector: Pending"
+                      - button "Metadata details Show" [ref=f8e596] [cursor=pointer]:
+                        - generic [ref=f8e597]: Metadata details
+                        - generic [ref=f8e598]: Show
+                      - generic [ref=f8e600]:
+                        - generic [ref=f8e601]:
+                          - generic: Add keywords...
+                          - combobox [ref=f8e603]
+                        - img "down" [ref=f8e605]
+                      - generic [ref=f8e608]:
+                        - generic [ref=f8e609]:
+                          - button "Content" [ref=f8e610] [cursor=pointer]
+                          - generic [ref=f8e614]:
+                            - generic [ref=f8e615]: Chars 0-523
+                            - generic [ref=f8e616] [cursor=pointer]:
+                              - generic [ref=f8e617]:
+                                - generic "Auto" [ref=f8e618]
+                                - combobox "Display mode" [ref=f8e619]
+                              - img "down" [ref=f8e621]
+                            - group "Text size" [ref=f8e624]:
+                              - button "Text size S" [ref=f8e625] [cursor=pointer]: S
+                              - button "Text size M" [pressed] [ref=f8e626] [cursor=pointer]: M
+                              - button "Text size L" [ref=f8e627] [cursor=pointer]: L
+                            - button "Edit content" [ref=f8e628] [cursor=pointer]
+                            - button "Find in content" [ref=f8e631] [cursor=pointer]
+                        - region "Media content" [ref=f8e638]:
+                          - generic [ref=f8e639]:
+                            - heading "Project Cedar launch brief fullmulti20260915" [level=1] [ref=f8e727]
+                            - paragraph [ref=f8e728]: Project Cedar launches on 22 November 2026. Mira Chen leads the project. The public launch workshop takes place in the North Hall at 10 AM. The pilot group includes twelve community gardeners. Each gardener receives a printed schedule and a seed tray. Mira Chen will collect feedback at the workshop and publish a summary on 25 November 2026. The project studies which native plants thrive in shaded courtyards. The group will compare fern growth and soil moisture every week.
+                      - generic [ref=f8e642]:
+                        - generic [ref=f8e643]:
+                          - button "Analysis" [ref=f8e644] [cursor=pointer]
+                          - generic [ref=f8e648]:
+                            - button "Generate" [ref=f8e649] [cursor=pointer]
+                            - button "Send analysis to chat" [ref=f8e653] [cursor=pointer]
+                            - button "Copy analysis" [ref=f8e657] [cursor=pointer]
+                            - button "Edit analysis" [ref=f8e661] [cursor=pointer]
+                        - generic [ref=f8e665]:
+                          - generic [ref=f8e666]:
+                            - generic [ref=f8e667]: Analysis
+                            - generic [ref=f8e668] [cursor=pointer]:
+                              - generic [ref=f8e669]:
+                                - generic "Analysis" [ref=f8e670]
+                                - combobox "Analysis" [ref=f8e671]
+                              - img "down" [ref=f8e673]
+                          - generic [ref=f8e676]:
+                            - generic [ref=f8e677]:
+                              - generic [ref=f8e678]: Analysis
+                              - button "Copy analysis to clipboard" [ref=f8e680] [cursor=pointer]
+                            - generic [ref=f8e684]: Mira Chen leads Project Cedar, which launches on 22 November 2026.
+                      - generic [ref=f8e685]:
+                        - button "Statistics" [ref=f8e686] [cursor=pointer]
+                        - generic [ref=f8e691]:
+                          - generic [ref=f8e692]:
+                            - generic [ref=f8e693]: Words
+                            - generic [ref=f8e694]: "85"
+                          - generic [ref=f8e695]:
+                            - generic [ref=f8e696]: Characters
+                            - generic [ref=f8e697]: "523"
+                          - generic [ref=f8e698]:
+                            - generic [ref=f8e699]: Paragraphs
+                            - generic [ref=f8e700]: "1"
+                      - button "Metadata" [ref=f8e702] [cursor=pointer]
+                      - button "Document Intelligence" [ref=f8e707] [cursor=pointer]
+                      - button "Version History" [ref=f8e713] [cursor=pointer]
+                      - button "Delete item" [ref=f8e723] [cursor=pointer]
+    - generic [ref=f8e729]:
+      - dialog "Please confirm":
+        - generic [ref=f8e732]:
+          - generic [ref=f8e733]:
+            - img "exclamation-circle" [ref=f8e734]
+            - generic [ref=f8e737]:
+              - generic [ref=f8e738]: Please confirm
+              - generic [ref=f8e739]: Delete this item? This cannot be undone.
+          - generic [ref=f8e740]:
+            - button "Cancel" [active] [ref=f8e741] [cursor=pointer]
+            - button "Delete" [ref=f8e743] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f8e517] [cursor=pointer]
+  - alert [ref=f8e10]: Media Inspector
