@@ -623,26 +623,12 @@ def _generation_config(
         )
         cfg = {}
 
-    request_provider = _value(payload, request_defaults, "generation_provider")
-    env_provider = os.getenv("RAG_DEFAULT_LLM_PROVIDER")
-    provider_value = request_provider if isinstance(request_provider, str) else (
-        env_provider if env_provider is not None else cfg.get("RAG_DEFAULT_LLM_PROVIDER")
-    )
-    provider = (
-        provider_value.strip()
-        if isinstance(provider_value, str) and provider_value.strip()
-        else "openai"
-    )
+    from .generation_defaults import resolve_generation_defaults
 
-    request_model = _value(payload, request_defaults, "generation_model")
-    env_model = os.getenv("RAG_DEFAULT_LLM_MODEL")
-    model_value = request_model if isinstance(request_model, str) and request_model else (
-        env_model if env_model is not None else cfg.get("RAG_DEFAULT_LLM_MODEL")
-    )
-    model = (
-        model_value.strip()
-        if isinstance(model_value, str) and model_value.strip()
-        else "gpt-4o-mini"
+    provider, model = resolve_generation_defaults(
+        cfg,
+        _value(payload, request_defaults, "generation_provider"),
+        _value(payload, request_defaults, "generation_model"),
     )
 
     max_tokens = _to_int(_value(payload, request_defaults, "max_generation_tokens", 500), 500)

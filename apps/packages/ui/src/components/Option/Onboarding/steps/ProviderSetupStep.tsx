@@ -563,13 +563,13 @@ export function ProviderSetupStep({
       provider_key: provider.provider_key,
       api_key: apiKey,
       base_url: baseUrl,
-      model,
+      model: model || null,
       make_default: provider.provider_key === defaultProvider,
     };
   };
 
   const validateProvider = async (provider: SetupProviderCatalogEntry) => {
-    if (provider.provider_key === defaultProvider && !selectedDefaultModel) {
+    if (provider.provider_type !== "local_endpoint" && provider.provider_key === defaultProvider && !selectedDefaultModel) {
       setError("Default model is required before validation.");
       return;
     }

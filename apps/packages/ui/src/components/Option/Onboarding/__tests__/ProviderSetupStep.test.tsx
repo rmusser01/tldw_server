@@ -490,11 +490,12 @@ describe("ProviderSetupStep", () => {
     fireEvent.change(screen.getByLabelText(/ollama base url/i), {
       target: { value: "http://127.0.0.1:11434/v1" },
     });
-    fireEvent.change(screen.getByLabelText(/default model/i), {
-      target: { value: "temporary-discovery-model" },
-    });
+    expect(screen.getByLabelText(/default model/i)).toHaveValue("");
     fireEvent.click(screen.getByRole("button", { name: /validate ollama/i }));
     await screen.findByText("llama3.1");
+    expect(onValidateProvider).toHaveBeenCalledWith(expect.objectContaining({
+      provider_key: "ollama", model: null, base_url: "http://127.0.0.1:11434/v1"
+    }));
 
     fireEvent.click(screen.getByRole("button", { name: "qwen2.5" }));
     expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
@@ -567,7 +568,7 @@ describe("ProviderSetupStep", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /validate ollama/i }));
 
-    expect(onValidateProvider).not.toHaveBeenCalled();
+    expect(onValidateProvider).toHaveBeenCalledWith(expect.objectContaining({ model: null }));
     expect(onSaveProvider).not.toHaveBeenCalled();
     expect(
       screen.getByRole("button", { name: /save provider/i }),

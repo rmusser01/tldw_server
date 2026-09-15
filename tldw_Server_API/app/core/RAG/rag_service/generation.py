@@ -30,6 +30,7 @@ from .runtime_provider_call import (
     close_provider_stream,
 )
 from .types import Document
+from .generation_defaults import resolve_generation_defaults
 
 _STREAM_CONTROL_TOKENS = frozenset({"keepalive", "ping", "pong", "heartbeat"})
 
@@ -773,8 +774,7 @@ class AnswerGenerator:
             cfg = load_and_log_configs() or {}
         except Exception:  # noqa: BLE001 - config load best-effort
             cfg = {}
-        self.provider = (provider or cfg.get("RAG_DEFAULT_LLM_PROVIDER") or "openai").strip()
-        self.model = (model or cfg.get("RAG_DEFAULT_LLM_MODEL") or "gpt-4o-mini").strip()
+        self.provider, self.model = resolve_generation_defaults(cfg, provider, model)
         self.system_prompt = system_prompt or cfg.get("RAG_DEFAULT_SYSTEM_PROMPT")
         self.credential_runtime = credential_runtime
 
