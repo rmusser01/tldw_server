@@ -1,0 +1,190 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [Helpful AI Assistant (20260915_103320)](http://127.0.0.1:18281/chat)
+### Page
+- Page URL: http://127.0.0.1:18281/chat
+- Page Title: Helpful AI Assistant (20260915_103320)
+- Console: 2 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [ref=f1e11]:
+  - generic [ref=f1e14]:
+    - link "Skip to main content" [ref=f1e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f1e16]:
+      - button "Expand sidebar" [ref=f1e17] [cursor=pointer]
+      - button "New Chat" [ref=f1e21] [cursor=pointer]
+      - generic [ref=f1e24]:
+        - button "Quick Ingest" [ref=f1e25] [cursor=pointer]
+        - button "Chat" [ref=f1e29] [cursor=pointer]
+        - button "Prompts" [ref=f1e32] [cursor=pointer]
+        - button "Characters" [ref=f1e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f1e41] [cursor=pointer]
+        - button "World Books" [ref=f1e45] [cursor=pointer]
+        - button "Notes" [ref=f1e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f1e52] [cursor=pointer]
+        - button "Media" [ref=f1e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f1e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f1e69] [cursor=pointer]
+        - button "Kanban" [ref=f1e75] [cursor=pointer]
+        - button "Watchlists" [ref=f1e77] [cursor=pointer]
+      - generic [ref=f1e82]:
+        - button "Open Notes Dock" [ref=f1e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f1e88] [cursor=pointer]
+        - button "Settings" [ref=f1e91] [cursor=pointer]
+    - main [ref=f1e95]:
+      - generic [ref=f1e96]:
+        - generic [ref=f1e99]:
+          - generic [ref=f1e100]:
+            - button "Expand sidebar" [ref=f1e101] [cursor=pointer]
+            - generic [ref=f1e103]:
+              - img "tldw Assistant" [ref=f1e104]
+              - generic [ref=f1e105]: tldw Assistant
+              - button "Companion Home" [ref=f1e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f1e110] [cursor=pointer]
+            - button "Untitled" [ref=f1e1916] [cursor=pointer]
+            - generic [ref=f1e1384]:
+              - generic "Saved chat. History is persisted." [ref=f1e1385]: Saved
+              - generic "Character mode is active." [ref=f1e1917]: "Character: Helpful AI Assistant"
+          - generic [ref=f1e113]:
+            - button "Search - Open command palette" [ref=f1e114] [cursor=pointer]:
+              - generic [ref=f1e118]: Search
+              - generic [ref=f1e119]: ⌘K
+            - button "New saved chat" [ref=f1e1392] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f1e1396] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f1e1397] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f1e1398] [cursor=pointer]
+            - button "Open settings" [ref=f1e120] [cursor=pointer]
+            - generic [ref=f1e132]:
+              - button "Notifications, 0 unread" [ref=f1e505] [cursor=pointer]
+              - status [ref=f1e136]: Notifications are active
+            - button "Switch to light theme" [ref=f1e137] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f1e144] [cursor=pointer]:
+              - generic [ref=f1e145]: "?"
+        - generic [ref=f1e146]:
+          - heading "Chat" [level=1] [ref=f1e1405]
+          - generic [ref=f1e1408]:
+            - paragraph [ref=f1e1409]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f1e1410]:
+              - main [ref=f1e1411]:
+                - generic [ref=f1e1412]:
+                  - generic [ref=f1e1414]:
+                    - generic [ref=f1e1415]:
+                      - generic [ref=f1e1416]:
+                        - text: Character Chat
+                        - generic [ref=f1e1923]: Helpful AI Assistant
+                      - generic [ref=f1e1418]: Conversation timeline
+                    - generic [ref=f1e1419]:
+                      - button "Switch to light theme" [ref=f1e1420] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f1e1427] [cursor=pointer]:
+                        - generic [ref=f1e1433]: Focus
+                      - button "Shortcuts" [ref=f1e1434] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f1e1438]
+                  - log "Chat messages" [ref=f1e1451]:
+                    - generic [ref=f1e1453]:
+                      - article "User message 1 of 2" [ref=f1e1924]:
+                        - generic [ref=f1e1927]:
+                          - generic [ref=f1e1929]:
+                            - generic [ref=f1e1930]: You
+                            - generic [ref=f1e1931]: • 3:33 AM
+                          - paragraph [ref=f1e1933]: Greet a visitor to Project Cedar in one short sentence.
+                          - button "More actions" [ref=f1e1936] [cursor=pointer]: •••
+                      - article "Assistant message 2 of 2" [ref=f1e1940]:
+                        - generic [ref=f1e1946]:
+                          - generic [ref=f1e1948]:
+                            - generic [ref=f1e1949]: Helpful AI Assistant
+                            - generic [ref=f1e1950]: • 3:33 AM
+                          - paragraph [ref=f1e1953]: Ahoy, welcome aboard Project Cedar, ye landlubber—ARRR!
+                          - generic [ref=f1e1954]:
+                            - generic [ref=f1e1955]:
+                              - generic [ref=f1e1956]: Was this helpful?
+                              - generic [ref=f1e1957]:
+                                - button "Helpful" [ref=f1e1958] [cursor=pointer]
+                                - button "Not helpful" [ref=f1e1961] [cursor=pointer]
+                                - button "More feedback" [ref=f1e1964] [cursor=pointer]
+                            - button "More actions" [ref=f1e1970] [cursor=pointer]: •••
+                  - generic [ref=f1e1604]:
+                    - generic [ref=f1e1605]: Composer
+                    - generic [ref=f1e1616]:
+                      - button [aria-hidden] [ref=f1e1617]
+                      - button [aria-hidden] [ref=f1e1618]
+                      - generic [ref=f1e1619]:
+                        - generic [ref=f1e1621]:
+                          - button "Hide composer options" [expanded] [ref=f1e1622] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f1e1627]
+                          - generic [ref=f1e1628]:
+                            - button "Improve prompt" [ref=f1e1631] [cursor=pointer]
+                            - generic [ref=f1e1636]:
+                              - button "Send message" [ref=f1e1795] [cursor=pointer]:
+                                - generic [ref=f1e1638]: Send
+                              - button "Open message delivery options" [ref=f1e1640] [cursor=pointer]
+                        - generic [ref=f1e1645]:
+                          - generic [ref=f1e1647]:
+                            - group "Mode and context controls" [ref=f1e1648]:
+                              - button "Modes" [ref=f1e1649] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f1e1800] [cursor=pointer]':
+                                - generic [ref=f1e1801]:
+                                  - generic [ref=f1e1802]: MCP
+                                  - generic [ref=f1e1803]: None
+                              - button "Search & Context" [ref=f1e1662] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f1e1667] [cursor=pointer]:
+                                - generic [ref=f1e1670]: Cycle3 Alice Pirate
+                              - button "Helpful AI Assistant" [ref=f1e1974] [cursor=pointer]
+                              - button "Role-play setup" [ref=f1e1676] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f1e1683] [cursor=pointer]
+                            - group "Run input controls" [ref=f1e1689]:
+                              - button "OpenUI" [ref=f1e1690] [cursor=pointer]
+                              - button "Start dictation" [ref=f1e1806] [cursor=pointer]
+                              - generic [ref=f1e1700]:
+                                - button "Attach image" [ref=f1e1702] [cursor=pointer]
+                                - button "More attachments" [ref=f1e1706] [cursor=pointer]
+                              - button "More tools" [ref=f1e1709] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f1e1712] [cursor=pointer]:
+                                - generic [ref=f1e1716]: Chat Settings
+                          - generic "Active context" [ref=f1e1717]:
+                            - button "LLaMa.cpp / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf" [ref=f1e1807] [cursor=pointer]:
+                              - generic "Provider status" [ref=f1e1723]: Healthy
+                            - button "Character Helpful AI Assistant (next turn)" [ref=f1e1975] [cursor=pointer]:
+                              - generic [ref=f1e1976]: Character
+                              - generic [ref=f1e1977]: Helpful AI Assistant (next turn)
+                            - 'generic "Character context: Included" [ref=f1e1978]':
+                              - generic [ref=f1e1979]: Character context
+                              - generic [ref=f1e1980]: Included
+                            - button "System prompt Custom" [ref=f1e1730] [cursor=pointer]:
+                              - generic [ref=f1e1731]: System prompt
+                              - generic [ref=f1e1732]: Custom
+                            - button "Chat 2 messages" [ref=f1e1981] [cursor=pointer]:
+                              - generic [ref=f1e1982]: Chat
+                              - generic [ref=f1e1983]: 2 messages
+                            - button "Configure context window size" [ref=f1e1737] [cursor=pointer]:
+                              - generic [ref=f1e1738]: 28 + ~0 = 28 tokens
+                            - button "Saved" [ref=f1e1740] [cursor=pointer]
+                            - button "Advanced controls" [ref=f1e1742] [cursor=pointer]
+                        - status [ref=f1e1984]:
+                          - generic [ref=f1e1985]: Add expression images for Helpful AI Assistant.
+                          - generic [ref=f1e1986]:
+                            - link "Edit expressions" [ref=f1e1987] [cursor=pointer]:
+                              - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=3
+                            - button "Dismiss expression image setup" [ref=f1e1988] [cursor=pointer]: Dismiss
+                        - status [ref=f1e1989]:
+                          - generic [ref=f1e1990]: Character updates will apply on your next turn.
+                          - button "Review character" [ref=f1e1992] [cursor=pointer]
+                        - status [ref=f1e1993]:
+                          - generic [ref=f1e1994]: "Changed since last send:"
+                          - generic [ref=f1e1995]: Character changed
+                        - status [ref=f1e1996]:
+                          - generic [ref=f1e1997]:
+                            - generic [ref=f1e1998]: Character mode and custom prompt steering are both active. Verify intended behavior before sending.
+                            - button "Review modes" [ref=f1e1999] [cursor=pointer]
+              - generic [ref=f1e1755]:
+                - button "Restore context sidechannel" [ref=f1e1756] [cursor=pointer]:
+                  - generic [ref=f1e1760]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f1e1761]:
+                - button "Restore runtime sidechannel" [ref=f1e1762] [cursor=pointer]:
+                  - generic [ref=f1e1763]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f1e501] [cursor=pointer]
+  - alert [ref=f1e10]: /chat
+```

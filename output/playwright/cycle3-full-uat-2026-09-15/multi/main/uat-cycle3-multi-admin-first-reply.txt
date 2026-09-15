@@ -1,0 +1,162 @@
+### Open tabs
+- 0: (current) [Helpful AI Assistant (20260915_094656)](http://127.0.0.1:18281/chat)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+### Page
+- Page URL: http://127.0.0.1:18281/chat
+- Page Title: Helpful AI Assistant (20260915_094656)
+- Console: 2 errors, 2 warnings
+### Snapshot
+```yaml
+- generic [ref=f4e11]:
+  - generic [ref=f4e14]:
+    - link "Skip to main content" [ref=f4e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f4e16]:
+      - button "Expand sidebar" [ref=f4e17] [cursor=pointer]
+      - button "New Chat" [ref=f4e21] [cursor=pointer]
+      - generic [ref=f4e24]:
+        - button "Quick Ingest" [ref=f4e25] [cursor=pointer]
+        - button "Chat" [ref=f4e29] [cursor=pointer]
+        - button "Prompts" [ref=f4e32] [cursor=pointer]
+        - button "Characters" [ref=f4e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f4e41] [cursor=pointer]
+        - button "World Books" [ref=f4e45] [cursor=pointer]
+        - button "Notes" [ref=f4e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f4e52] [cursor=pointer]
+        - button "Media" [ref=f4e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f4e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f4e69] [cursor=pointer]
+        - button "Kanban" [ref=f4e75] [cursor=pointer]
+        - button "Watchlists" [ref=f4e77] [cursor=pointer]
+      - generic [ref=f4e82]:
+        - button "Open Notes Dock" [ref=f4e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f4e88] [cursor=pointer]
+        - button "Settings" [ref=f4e91] [cursor=pointer]
+    - main [ref=f4e95]:
+      - generic [ref=f4e96]:
+        - generic [ref=f4e99]:
+          - generic [ref=f4e100]:
+            - button "Expand sidebar" [ref=f4e101] [cursor=pointer]
+            - generic [ref=f4e103]:
+              - img "tldw Assistant" [ref=f4e104]
+              - generic [ref=f4e105]: tldw Assistant
+              - button "Companion Home" [ref=f4e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f4e110] [cursor=pointer]
+            - button "Untitled" [ref=f4e458] [cursor=pointer]
+            - generic "Saved chat. History is persisted." [ref=f4e114]: Saved
+          - generic [ref=f4e115]:
+            - button "Search - Open command palette" [ref=f4e116] [cursor=pointer]:
+              - generic [ref=f4e120]: Search
+              - generic [ref=f4e121]: ⌘K
+            - button "New saved chat" [ref=f4e122] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f4e126] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f4e127] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f4e128] [cursor=pointer]
+            - button "Open settings" [ref=f4e135] [cursor=pointer]
+            - generic [ref=f4e147]:
+              - button "Notifications, 0 unread" [ref=f4e384] [cursor=pointer]
+              - status [ref=f4e151]: Notifications are active
+            - button "Switch to light theme" [ref=f4e152] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f4e159] [cursor=pointer]:
+              - generic [ref=f4e160]: "?"
+        - generic [ref=f4e161]:
+          - heading "Chat" [level=1] [ref=f4e162]
+          - generic [ref=f4e165]:
+            - paragraph [ref=f4e166]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f4e167]:
+              - main [ref=f4e168]:
+                - generic [ref=f4e169]:
+                  - generic [ref=f4e171]:
+                    - generic [ref=f4e172]:
+                      - generic [ref=f4e173]:
+                        - text: Character Chat
+                        - generic [ref=f4e459]: Assistant
+                      - generic [ref=f4e174]: Conversation timeline
+                    - generic [ref=f4e175]:
+                      - button "Switch to light theme" [ref=f4e176] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f4e183] [cursor=pointer]:
+                        - generic [ref=f4e189]: Focus
+                      - button "Shortcuts" [ref=f4e190] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f4e194]
+                  - log "Chat messages" [ref=f4e196]:
+                    - generic [ref=f4e198]:
+                      - article "User message 1 of 2" [ref=f4e460]:
+                        - generic [ref=f4e463]:
+                          - generic [ref=f4e465]:
+                            - generic [ref=f4e466]: You
+                            - generic [ref=f4e467]: • 2:46 AM
+                          - paragraph [ref=f4e469]: "Reply with the exact words: MULTI CEDAR READY. This is a synthetic local acceptance check."
+                          - button "More actions" [ref=f4e472] [cursor=pointer]: •••
+                      - article "Assistant message 2 of 2" [ref=f4e476]:
+                        - generic [ref=f4e482]:
+                          - generic [ref=f4e484]:
+                            - generic [ref=f4e485]: llama:../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf
+                            - generic [ref=f4e486]: • 2:46 AM
+                          - paragraph [ref=f4e514]: MULTI CEDAR READY
+                          - generic [ref=f4e490]:
+                            - generic [ref=f4e491]:
+                              - generic [ref=f4e492]: Was this helpful?
+                              - generic [ref=f4e493]:
+                                - button "Helpful" [ref=f4e494] [cursor=pointer]
+                                - button "Not helpful" [ref=f4e497] [cursor=pointer]
+                                - button "More feedback" [ref=f4e500] [cursor=pointer]
+                            - button "More actions" [ref=f4e506] [cursor=pointer]: •••
+                  - generic [ref=f4e228]:
+                    - generic [ref=f4e229]: Composer
+                    - generic [ref=f4e240]:
+                      - button [aria-hidden] [ref=f4e241]
+                      - button [aria-hidden] [ref=f4e242]
+                      - generic [ref=f4e243]:
+                        - generic [ref=f4e245]:
+                          - button "Hide composer options" [expanded] [ref=f4e246] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f4e251]
+                          - generic [ref=f4e252]:
+                            - button "Improve prompt" [ref=f4e255] [cursor=pointer]
+                            - generic [ref=f4e260]:
+                              - button "Send message" [ref=f4e261] [cursor=pointer]:
+                                - generic [ref=f4e262]: Send
+                              - button "Open message delivery options" [ref=f4e267] [cursor=pointer]
+                        - generic [ref=f4e272]:
+                          - generic [ref=f4e274]:
+                            - group "Mode and context controls" [ref=f4e275]:
+                              - button "Modes" [ref=f4e276] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f4e389] [cursor=pointer]':
+                                - generic [ref=f4e390]:
+                                  - generic [ref=f4e391]: MCP
+                                  - generic [ref=f4e392]: None
+                              - button "Search & Context" [ref=f4e289] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f4e294] [cursor=pointer]:
+                                - generic [ref=f4e297]: Prompt
+                              - button "Select character or persona" [ref=f4e298] [cursor=pointer]
+                              - button "Role-play setup" [ref=f4e303] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f4e310] [cursor=pointer]
+                            - group "Run input controls" [ref=f4e316]:
+                              - button "OpenUI" [ref=f4e317] [cursor=pointer]
+                              - button "Start dictation" [ref=f4e395] [cursor=pointer]
+                              - generic [ref=f4e327]:
+                                - button "Attach image" [ref=f4e329] [cursor=pointer]
+                                - button "More attachments" [ref=f4e333] [cursor=pointer]
+                              - button "More tools" [ref=f4e336] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f4e339] [cursor=pointer]:
+                                - generic [ref=f4e343]: Chat Settings
+                          - generic "Active context" [ref=f4e344]:
+                            - button "LLaMa.cpp / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf" [ref=f4e454] [cursor=pointer]:
+                              - generic "Provider status" [ref=f4e352]: Healthy
+                            - button "Chat 2 messages" [ref=f4e511] [cursor=pointer]:
+                              - generic [ref=f4e512]: Chat
+                              - generic [ref=f4e513]: 2 messages
+                            - button "Configure context window size" [ref=f4e354] [cursor=pointer]:
+                              - generic [ref=f4e355]: 27 + ~0 = 27 tokens
+                            - button "Saved" [ref=f4e357] [cursor=pointer]
+                            - button "Advanced controls" [ref=f4e359] [cursor=pointer]
+              - generic [ref=f4e363]:
+                - button "Restore context sidechannel" [ref=f4e364] [cursor=pointer]:
+                  - generic [ref=f4e368]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f4e369]:
+                - button "Restore runtime sidechannel" [ref=f4e370] [cursor=pointer]:
+                  - generic [ref=f4e371]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f4e380] [cursor=pointer]
+  - alert [ref=f4e10]
+```

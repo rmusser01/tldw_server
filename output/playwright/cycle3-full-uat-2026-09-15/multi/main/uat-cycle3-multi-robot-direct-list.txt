@@ -1,0 +1,236 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [](http://127.0.0.1:18281/characters)
+### Page
+- Page URL: http://127.0.0.1:18281/characters
+- Console: 1 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f12e20]:
+  - generic [ref=f12e23]:
+    - link "Skip to main content" [ref=f12e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f12e25]:
+      - button "Expand sidebar" [ref=f12e26] [cursor=pointer]
+      - button "New Chat" [ref=f12e30] [cursor=pointer]
+      - generic [ref=f12e33]:
+        - button "Quick Ingest" [ref=f12e34] [cursor=pointer]
+        - button "Chat" [ref=f12e38] [cursor=pointer]
+        - button "Prompts" [ref=f12e41] [cursor=pointer]
+        - button "Characters" [ref=f12e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f12e50] [cursor=pointer]
+        - button "World Books" [ref=f12e54] [cursor=pointer]
+        - button "Notes" [ref=f12e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f12e61] [cursor=pointer]
+        - button "Media" [ref=f12e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f12e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f12e78] [cursor=pointer]
+        - button "Kanban" [ref=f12e84] [cursor=pointer]
+        - button "Watchlists" [ref=f12e86] [cursor=pointer]
+      - generic [ref=f12e91]:
+        - button "Open Notes Dock" [ref=f12e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f12e97] [cursor=pointer]
+        - button "Settings" [ref=f12e100] [cursor=pointer]
+    - main [ref=f12e104]:
+      - generic [ref=f12e105]:
+        - generic [ref=f12e108]:
+          - generic [ref=f12e109]:
+            - button "Expand sidebar" [ref=f12e110] [cursor=pointer]
+            - generic [ref=f12e112]:
+              - img "tldw Assistant" [ref=f12e113]
+              - generic [ref=f12e114]: tldw Assistant
+              - button "Companion Home" [ref=f12e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f12e119] [cursor=pointer]
+          - generic [ref=f12e122]:
+            - button "Search - Open command palette" [ref=f12e123] [cursor=pointer]:
+              - generic [ref=f12e127]: Search
+              - generic [ref=f12e128]: ⌘K
+            - button "Open settings" [ref=f12e129] [cursor=pointer]
+            - generic [ref=f12e141]:
+              - button "Notifications, 0 unread" [ref=f12e142] [cursor=pointer]
+              - status [ref=f12e146]: Notifications are active
+            - button "Switch to light theme" [ref=f12e147] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f12e154] [cursor=pointer]:
+              - generic [ref=f12e155]: "?"
+        - generic [ref=f12e157]:
+          - generic [ref=f12e158]:
+            - heading "Characters" [level=1] [ref=f12e159]
+            - paragraph [ref=f12e160]: Create reusable characters you can pick from the chat header and reuse across conversations.
+          - generic [ref=f12e161]:
+            - link "Skip to characters content" [ref=f12e162] [cursor=pointer]:
+              - /url: "#characters-main-content"
+            - main [ref=f12e163]:
+              - button [aria-hidden] [ref=f12e168] [cursor=pointer]: Upload character
+              - generic [ref=f12e169]: "Keyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal"
+              - generic [ref=f12e171]:
+                - button "New character" [ref=f12e172] [cursor=pointer]
+                - button "Import character" [ref=f12e174] [cursor=pointer]
+                - generic [ref=f12e179]:
+                  - textbox "Search characters" [ref=f12e180]
+                  - generic [ref=f12e181]: /
+                - radiogroup "View mode" [ref=f12e183]:
+                  - generic [ref=f12e184]:
+                    - generic [ref=f12e185] [cursor=pointer]:
+                      - radio [checked]
+                      - generic "Table view" [ref=f12e186]
+                    - generic [ref=f12e189] [cursor=pointer]:
+                      - radio
+                      - generic "Gallery view" [ref=f12e190]
+                - radiogroup "Character list view" [ref=f12e197]:
+                  - generic [ref=f12e198]:
+                    - generic [ref=f12e199] [cursor=pointer]:
+                      - radio "Active" [checked]
+                      - generic "Active characters" [ref=f12e200]: Active
+                    - generic [ref=f12e201] [cursor=pointer]:
+                      - radio "Trash"
+                      - generic "Recently deleted characters" [ref=f12e202]: Trash
+                - button "Filters" [ref=f12e203] [cursor=pointer]
+                - button "Display options" [ref=f12e208] [cursor=pointer]:
+                  - generic [ref=f12e209]: Display
+              - status [ref=f12e212]: 5 characters found
+              - generic [ref=f12e217]:
+                - table [ref=f12e221]:
+                  - rowgroup [ref=f12e229]:
+                    - row [ref=f12e230]:
+                      - columnheader "Select all on page" [ref=f12e231]:
+                        - checkbox "Select all on page" [ref=f12e234] [cursor=pointer]
+                      - columnheader "Name" [ref=f12e236] [cursor=pointer]
+                      - columnheader "Tags" [ref=f12e247]
+                      - columnheader "Creator" [ref=f12e248] [cursor=pointer]
+                      - columnheader "Activity" [ref=f12e259] [cursor=pointer]
+                      - columnheader "Actions" [ref=f12e270]
+                  - rowgroup [ref=f12e271]:
+                    - row [ref=f12e272]:
+                      - cell "Select Cycle3 Cedar Guide" [ref=f12e273]:
+                        - checkbox "Select Cycle3 Cedar Guide" [ref=f12e276] [cursor=pointer]
+                      - cell [ref=f12e278]:
+                        - generic [ref=f12e285]:
+                          - generic [ref=f12e286]:
+                            - button "Edit name inline for Cycle3 Cedar Guide" [ref=f12e288]: Cycle3 Cedar Guide
+                            - generic [ref=f12e291]: "2"
+                          - button "Edit description inline for Cycle3 Cedar Guide" [ref=f12e295]: A guide to the synthetic Cedar community library.
+                      - cell [ref=f12e298]
+                      - cell [ref=f12e299]
+                      - cell "19m ago Updated 19m ago" [ref=f12e300]:
+                        - generic [ref=f12e301]:
+                          - generic [ref=f12e302]: 19m ago
+                          - generic [ref=f12e303]: Updated 19m ago
+                      - cell [ref=f12e304]:
+                        - generic [ref=f12e305]:
+                          - button "Chat as Cycle3 Cedar Guide" [ref=f12e306] [cursor=pointer]
+                          - button "Edit character Cycle3 Cedar Guide" [ref=f12e309] [cursor=pointer]
+                          - button "Delete character Cycle3 Cedar Guide" [ref=f12e312] [cursor=pointer]
+                          - button "Add Cycle3 Cedar Guide to favorites" [ref=f12e316] [cursor=pointer]
+                          - button "More actions for Cycle3 Cedar Guide" [ref=f12e319] [cursor=pointer]
+                    - row [ref=f12e324]:
+                      - cell "Select Cycle3 BEEP Robot" [ref=f12e325]:
+                        - checkbox "Select Cycle3 BEEP Robot" [ref=f12e328] [cursor=pointer]
+                      - cell [ref=f12e330]:
+                        - generic [ref=f12e337]:
+                          - button "Edit name inline for Cycle3 BEEP Robot" [ref=f12e340]: Cycle3 BEEP Robot
+                          - button "Edit description inline for Cycle3 BEEP Robot" [ref=f12e344]: A synthetic robot for character replacement acceptance testing.
+                      - cell [ref=f12e347]
+                      - cell [ref=f12e348]
+                      - cell "18m ago Updated 18m ago" [ref=f12e349]:
+                        - generic [ref=f12e350]:
+                          - generic [ref=f12e351]: 18m ago
+                          - generic [ref=f12e352]: Updated 18m ago
+                      - cell [ref=f12e353]:
+                        - generic [ref=f12e354]:
+                          - button "Chat as Cycle3 BEEP Robot" [ref=f12e355] [cursor=pointer]
+                          - button "Edit character Cycle3 BEEP Robot" [ref=f12e358] [cursor=pointer]
+                          - button "Delete character Cycle3 BEEP Robot" [ref=f12e361] [cursor=pointer]
+                          - button "Add Cycle3 BEEP Robot to favorites" [ref=f12e365] [cursor=pointer]
+                          - button "More actions for Cycle3 BEEP Robot" [ref=f12e368] [cursor=pointer]
+                    - row [ref=f12e373]:
+                      - cell "Select Helpful AI Assistant" [ref=f12e374]:
+                        - checkbox "Select Helpful AI Assistant" [ref=f12e377] [cursor=pointer]
+                      - cell [ref=f12e379]:
+                        - generic [ref=f12e386]:
+                          - generic [ref=f12e387]:
+                            - button "Edit name inline for Helpful AI Assistant" [ref=f12e389]: Helpful AI Assistant
+                            - generic [ref=f12e392]: "4"
+                          - button "Edit description inline for Helpful AI Assistant" [ref=f12e396]: A default, friendly assistant created automatically by the system.
+                      - cell [ref=f12e399]:
+                        - generic [ref=f12e400]:
+                          - button "default" [ref=f12e401] [cursor=pointer]
+                          - button "neutral" [ref=f12e403] [cursor=pointer]
+                          - button "Show and filter +1 hidden tags" [ref=f12e405]: "+1"
+                      - cell "System" [ref=f12e406]
+                      - cell "1h ago Updated 1h ago" [ref=f12e408]:
+                        - generic [ref=f12e409]:
+                          - generic [ref=f12e410]: 1h ago
+                          - generic [ref=f12e411]: Updated 1h ago
+                      - cell [ref=f12e412]:
+                        - generic [ref=f12e413]:
+                          - button "Chat as Helpful AI Assistant" [ref=f12e414] [cursor=pointer]
+                          - button "Edit character Helpful AI Assistant" [ref=f12e417] [cursor=pointer]
+                          - button "Delete character Helpful AI Assistant" [ref=f12e420] [cursor=pointer]
+                          - button "Add Helpful AI Assistant to favorites" [ref=f12e424] [cursor=pointer]
+                          - button "More actions for Helpful AI Assistant" [ref=f12e427] [cursor=pointer]
+                    - row [ref=f12e432]:
+                      - cell "Select pixel-migu" [ref=f12e433]:
+                        - checkbox "Select pixel-migu" [ref=f12e436] [cursor=pointer]
+                      - cell [ref=f12e438]:
+                        - generic [ref=f12e439]:
+                          - img "Avatar of pixel-migu" [ref=f12e441]
+                          - generic [ref=f12e442]:
+                            - button "Edit name inline for pixel-migu" [ref=f12e445]: pixel-migu
+                            - button "Edit description inline for pixel-migu" [ref=f12e449]: A tiny turquoise pixel-art robot with a rectangular face, chunky black outlines, and long twin tails. A companion for chatting, re...
+                      - cell [ref=f12e452]:
+                        - generic [ref=f12e453]:
+                          - button "pixel-art" [ref=f12e454] [cursor=pointer]
+                          - button "robot" [ref=f12e456] [cursor=pointer]
+                          - button "Show and filter +2 hidden tags" [ref=f12e458]: "+2"
+                      - cell "User-directed pixel-migu adaptation" [ref=f12e459]
+                      - cell "1h ago Updated 1h ago" [ref=f12e461]:
+                        - generic [ref=f12e462]:
+                          - generic [ref=f12e463]: 1h ago
+                          - generic [ref=f12e464]: Updated 1h ago
+                      - cell [ref=f12e465]:
+                        - generic [ref=f12e466]:
+                          - button "Chat as pixel-migu" [ref=f12e467] [cursor=pointer]
+                          - button "Edit character pixel-migu" [ref=f12e470] [cursor=pointer]
+                          - button "Delete character pixel-migu" [ref=f12e473] [cursor=pointer]
+                          - button "Add pixel-migu to favorites" [ref=f12e477] [cursor=pointer]
+                          - button "More actions for pixel-migu" [ref=f12e480] [cursor=pointer]
+                    - row [ref=f12e485]:
+                      - cell "Select Default Assistant" [ref=f12e486]:
+                        - checkbox "Select Default Assistant" [ref=f12e489] [cursor=pointer]
+                      - cell [ref=f12e491]:
+                        - generic [ref=f12e498]:
+                          - button "Edit name inline for Default Assistant" [ref=f12e501]: Default Assistant
+                          - button "Edit description inline for Default Assistant" [ref=f12e505]: A general-purpose assistant.
+                      - cell [ref=f12e508]
+                      - cell "System" [ref=f12e509]
+                      - cell "6h ago Updated 6h ago" [ref=f12e511]:
+                        - generic [ref=f12e512]:
+                          - generic [ref=f12e513]: 6h ago
+                          - generic [ref=f12e514]: Updated 6h ago
+                      - cell [ref=f12e515]:
+                        - generic [ref=f12e516]:
+                          - button "Chat as Default Assistant" [ref=f12e517] [cursor=pointer]
+                          - button "Edit character Default Assistant" [ref=f12e520] [cursor=pointer]
+                          - button "Delete character Default Assistant" [ref=f12e523] [cursor=pointer]
+                          - button "Add Default Assistant to favorites" [ref=f12e527] [cursor=pointer]
+                          - button "More actions for Default Assistant" [ref=f12e530] [cursor=pointer]
+                - list [ref=f12e535]:
+                  - listitem "Previous Page" [ref=f12e536]:
+                    - button [disabled] [ref=f12e537]:
+                      - img "left" [ref=f12e538]
+                  - listitem "1" [ref=f12e541] [cursor=pointer]
+                  - listitem "Next Page" [ref=f12e543]:
+                    - button [disabled] [ref=f12e544]:
+                      - img "right" [ref=f12e545]
+                  - listitem [ref=f12e548]:
+                    - generic [ref=f12e549]:
+                      - generic [ref=f12e550]:
+                        - generic "10 / page" [ref=f12e551]
+                        - combobox "Page Size" [ref=f12e552]
+                      - img "down" [ref=f12e554]
+  - button "Open Next.js Dev Tools" [ref=f12e15] [cursor=pointer]
+  - alert [ref=f12e19]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T10-54-44-734Z.log#L3

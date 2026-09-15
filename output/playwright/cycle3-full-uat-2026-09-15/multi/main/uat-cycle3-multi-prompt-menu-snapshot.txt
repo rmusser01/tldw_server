@@ -1,0 +1,269 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [](http://127.0.0.1:18281/prompts)
+### Page
+- Page URL: http://127.0.0.1:18281/prompts
+- Console: 2 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [ref=f1e11]:
+  - generic [ref=f1e12]:
+    - generic [ref=f1e14]:
+      - link "Skip to main content" [ref=f1e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f1e16]:
+        - button "Expand sidebar" [ref=f1e17] [cursor=pointer]
+        - button "New Chat" [ref=f1e21] [cursor=pointer]
+        - generic [ref=f1e24]:
+          - button "Quick Ingest" [ref=f1e25] [cursor=pointer]
+          - button "Chat" [ref=f1e29] [cursor=pointer]
+          - button "Prompts" [ref=f1e32] [cursor=pointer]
+          - button "Characters" [ref=f1e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f1e41] [cursor=pointer]
+          - button "World Books" [ref=f1e45] [cursor=pointer]
+          - button "Notes" [ref=f1e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=f1e52] [cursor=pointer]
+          - button "Media" [ref=f1e60] [cursor=pointer]
+          - button "Document Workspace" [ref=f1e63] [cursor=pointer]
+          - button "Research Workspace" [ref=f1e69] [cursor=pointer]
+          - button "Kanban" [ref=f1e75] [cursor=pointer]
+          - button "Watchlists" [ref=f1e77] [cursor=pointer]
+        - generic [ref=f1e82]:
+          - button "Open Notes Dock" [ref=f1e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f1e88] [cursor=pointer]
+          - button "Settings" [ref=f1e91] [cursor=pointer]
+      - main [ref=f1e95]:
+        - generic [ref=f1e96]:
+          - generic [ref=f1e99]:
+            - generic [ref=f1e100]:
+              - button "Expand sidebar" [ref=f1e101] [cursor=pointer]
+              - generic [ref=f1e103]:
+                - img "tldw Assistant" [ref=f1e104]
+                - generic [ref=f1e105]: tldw Assistant
+                - button "Companion Home" [ref=f1e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=f1e110] [cursor=pointer]
+            - generic [ref=f1e113]:
+              - button "Search - Open command palette" [ref=f1e114] [cursor=pointer]:
+                - generic [ref=f1e118]: Search
+                - generic [ref=f1e119]: ⌘K
+              - button "Open settings" [ref=f1e120] [cursor=pointer]
+              - generic [ref=f1e132]:
+                - button "Notifications, 0 unread" [ref=f1e505] [cursor=pointer]
+                - status [ref=f1e136]: Notifications are active
+              - button "Switch to light theme" [ref=f1e137] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f1e144] [cursor=pointer]:
+                - generic [ref=f1e145]: "?"
+          - generic [ref=f1e784]:
+            - generic [ref=f1e785]:
+              - heading "Prompts" [level=1] [ref=f1e786]
+              - paragraph [ref=f1e787]: Create reusable prompts for recurring tasks, workflows, and team conventions.
+            - generic [ref=f1e788]:
+              - status [ref=f1e789]
+              - generic [ref=f1e790]:
+                - generic [ref=f1e791]:
+                  - generic [ref=f1e792]:
+                    - generic [ref=f1e793]: Prompts
+                    - button "Collapse sidebar" [expanded] [ref=f1e794] [cursor=pointer]
+                  - generic [ref=f1e798]:
+                    - generic [ref=f1e799]:
+                      - heading "Workspaces" [level=4] [ref=f1e800]
+                      - generic [ref=f1e801]:
+                        - button "Custom" [ref=f1e802] [cursor=pointer]
+                        - button "Copilot" [ref=f1e807] [cursor=pointer]
+                        - button "Studio" [ref=f1e812] [cursor=pointer]
+                        - button "Trash" [ref=f1e816] [cursor=pointer]
+                    - generic [ref=f1e821]:
+                      - heading "Collections" [level=4] [ref=f1e822]
+                      - generic [ref=f1e823]:
+                        - button "All Prompts 1" [ref=f1e1172] [cursor=pointer]:
+                          - generic [ref=f1e829]: All Prompts
+                          - generic [ref=f1e830]: "1"
+                        - button "Favorites 0" [ref=f1e831] [cursor=pointer]:
+                          - generic [ref=f1e834]: Favorites
+                          - generic [ref=f1e835]: "0"
+                        - button "Recently Used 0" [ref=f1e836] [cursor=pointer]:
+                          - generic [ref=f1e840]: Recently Used
+                          - generic [ref=f1e841]: "0"
+                        - button "Most Used 0" [ref=f1e842] [cursor=pointer]:
+                          - generic [ref=f1e846]: Most Used
+                          - generic [ref=f1e847]: "0"
+                        - button "Untagged 1" [ref=f1e1173] [cursor=pointer]:
+                          - generic [ref=f1e852]: Untagged
+                          - generic [ref=f1e853]: "1"
+                    - generic [ref=f1e854]:
+                      - generic [ref=f1e855]:
+                        - heading "Type" [level=4] [ref=f1e856]
+                        - generic [ref=f1e857]:
+                          - button "All 1" [ref=f1e1174] [cursor=pointer]:
+                            - generic [ref=f1e859]: All
+                            - generic [ref=f1e860]: "1"
+                          - button "System 1" [ref=f1e1175] [cursor=pointer]:
+                            - generic [ref=f1e862]: System
+                            - generic [ref=f1e1176]: "1"
+                          - button "Quick" [ref=f1e863] [cursor=pointer]
+                          - button "Mixed" [ref=f1e865] [cursor=pointer]
+                          - button "Recipes" [ref=f1e867] [cursor=pointer]
+                          - button "System recipes" [ref=f1e869] [cursor=pointer]
+                          - button "User recipes" [ref=f1e871] [cursor=pointer]
+                      - generic [ref=f1e873]:
+                        - heading "Sync Status" [level=4] [ref=f1e874]
+                        - generic [ref=f1e875]:
+                          - button "All 1" [ref=f1e1177] [cursor=pointer]:
+                            - generic [ref=f1e877]: All
+                            - generic [ref=f1e878]: "1"
+                          - button "Local" [ref=f1e879] [cursor=pointer]
+                          - button "Synced 1" [ref=f1e1178] [cursor=pointer]:
+                            - generic [ref=f1e882]: Synced
+                            - generic [ref=f1e1179]: "1"
+                          - button "Pending" [ref=f1e883] [cursor=pointer]
+                          - button "Conflict" [ref=f1e885] [cursor=pointer]
+                    - generic [ref=f1e887]:
+                      - heading "Filter Presets" [level=4] [ref=f1e888]
+                      - button "Save current filters" [ref=f1e890] [cursor=pointer]
+                - generic [ref=f1e895]:
+                  - generic [ref=f1e896]:
+                    - generic [ref=f1e897]:
+                      - generic [ref=f1e898] [cursor=pointer]:
+                        - generic [ref=f1e899]:
+                          - generic "All collections" [ref=f1e900]
+                          - combobox [ref=f1e901]
+                        - img "down" [ref=f1e1065]
+                      - button "New collection" [ref=f1e906] [cursor=pointer]
+                    - generic [ref=f1e909]:
+                      - generic [ref=f1e910]:
+                        - button "New prompt" [ref=f1e911] [cursor=pointer]
+                        - generic [ref=f1e912]:
+                          - button "Export prompts" [ref=f1e913] [cursor=pointer]: Export
+                          - generic [ref=f1e917] [cursor=pointer]:
+                            - generic [ref=f1e918]:
+                              - generic "JSON" [ref=f1e919]
+                              - combobox [ref=f1e920]
+                            - img "down" [ref=f1e922]
+                        - generic [ref=f1e925]:
+                          - button "Import" [ref=f1e926] [cursor=pointer]
+                          - generic [ref=f1e930] [cursor=pointer]:
+                            - generic [ref=f1e931]:
+                              - generic "Merge" [ref=f1e932]
+                              - combobox [ref=f1e933]
+                            - img "down" [ref=f1e935]
+                        - button "Open keyboard shortcuts" [ref=f1e938] [cursor=pointer]: Shortcuts
+                      - generic [ref=f1e941]:
+                        - generic [ref=f1e943]:
+                          - textbox "Search titles and contents" [ref=f1e944]:
+                            - /placeholder: Search name, content, keywords...
+                          - generic [ref=f1e945]: /
+                        - generic [ref=f1e948] [cursor=pointer]:
+                          - generic [ref=f1e949]:
+                            - generic "All" [ref=f1e950]
+                            - combobox "Filter by type" [ref=f1e951]
+                          - img "down" [ref=f1e953]
+                        - generic [ref=f1e957] [cursor=pointer]:
+                          - generic [ref=f1e958]:
+                            - generic "All usage" [ref=f1e959]
+                            - combobox "Filter by usage" [ref=f1e960]
+                          - img "down" [ref=f1e962]
+                        - generic [ref=f1e966]:
+                          - generic [ref=f1e967]:
+                            - generic: Add tags
+                            - combobox "Filter by keywords" [ref=f1e969]
+                          - img "down" [ref=f1e971]
+                        - radiogroup "segmented control" [ref=f1e975]:
+                          - generic [ref=f1e976]:
+                            - generic [ref=f1e977] [cursor=pointer]:
+                              - radio "Match any" [checked]
+                              - generic "Match any" [ref=f1e978]
+                            - generic [ref=f1e979] [cursor=pointer]:
+                              - radio "Match all"
+                              - generic "Match all" [ref=f1e980]
+                        - radiogroup "View mode" [ref=f1e982]:
+                          - generic [ref=f1e983]:
+                            - generic [ref=f1e984] [cursor=pointer]:
+                              - radio "Table" [checked]
+                              - generic [ref=f1e985]: Table
+                            - generic [ref=f1e988] [cursor=pointer]:
+                              - radio "Gallery"
+                              - generic [ref=f1e989]: Gallery
+                        - radiogroup "Table density" [ref=f1e997]:
+                          - generic [ref=f1e998]:
+                            - generic [ref=f1e999] [cursor=pointer]:
+                              - radio "Comfortable" [checked]
+                              - generic "Comfortable" [ref=f1e1000]
+                            - generic [ref=f1e1001] [cursor=pointer]:
+                              - radio "Compact"
+                              - generic "Compact" [ref=f1e1002]
+                            - generic [ref=f1e1003] [cursor=pointer]:
+                              - radio "Dense"
+                              - generic "Dense" [ref=f1e1004]
+                        - button "Save filters" [ref=f1e1006] [cursor=pointer]
+                  - generic [ref=f1e1180]:
+                    - status [ref=f1e1181]: 0 prompts selected
+                    - generic [ref=f1e1185]:
+                      - table [ref=f1e1189]:
+                        - rowgroup [ref=f1e1199]:
+                          - row [ref=f1e1200]:
+                            - columnheader "Select all" [ref=f1e1201]:
+                              - checkbox "Select all" [ref=f1e1205] [cursor=pointer]
+                            - columnheader [ref=f1e1207]
+                            - columnheader "Title" [ref=f1e1208] [cursor=pointer]
+                            - columnheader "Prompt" [ref=f1e1219]
+                            - columnheader "Tags" [ref=f1e1220]
+                            - columnheader "Updated" [ref=f1e1221] [cursor=pointer]
+                            - columnheader "Sync" [ref=f1e1232]
+                            - columnheader "Actions" [ref=f1e1233]
+                        - rowgroup [ref=f1e1234]:
+                          - 'row "Favorite prompt Cycle3 Alice Pirate System You are a pirate. Respond to everything in pirate speak. Always say ARRR at least once. Just now Last used: Unknown Synced #1 Edit Prompt More actions" [ref=f1e1235] [cursor=pointer]':
+                            - cell [ref=f1e1236]:
+                              - checkbox [ref=f1e1239]
+                            - cell [ref=f1e1241]:
+                              - button "Favorite prompt" [ref=f1e1242]
+                            - cell "Cycle3 Alice Pirate" [ref=f1e1245]
+                            - cell "System You are a pirate. Respond to everything in pirate speak. Always say ARRR at least once." [ref=f1e1249]:
+                              - generic [ref=f1e1251]:
+                                - generic [ref=f1e1252]: System
+                                - generic [ref=f1e1253]: You are a pirate. Respond to everything in pirate speak. Always say ARRR at least once.
+                            - cell [ref=f1e1254]
+                            - 'cell "Just now Last used: Unknown" [ref=f1e1255]':
+                              - generic [ref=f1e1256]:
+                                - generic [ref=f1e1257]: Just now
+                                - generic [ref=f1e1258]: "Last used: Unknown"
+                            - 'cell "Synced #1" [ref=f1e1259]':
+                              - generic [ref=f1e1261]:
+                                - generic [ref=f1e1262]: Synced
+                                - generic [ref=f1e1265]: "#1"
+                            - cell [ref=f1e1266]:
+                              - generic [ref=f1e1267]:
+                                - button "Edit Prompt" [ref=f1e1268]
+                                - button "More actions" [active] [ref=f1e1271]
+                      - list [ref=f1e1276]:
+                        - listitem [ref=f1e1277]: 1-1 of 1 prompts
+                        - listitem "Previous Page" [ref=f1e1278]:
+                          - button [disabled] [ref=f1e1279]:
+                            - img "left" [ref=f1e1280]
+                        - listitem "1" [ref=f1e1283] [cursor=pointer]
+                        - listitem "Next Page" [ref=f1e1285]:
+                          - button [disabled] [ref=f1e1286]:
+                            - img "right" [ref=f1e1287]
+                        - listitem [ref=f1e1290]:
+                          - generic [ref=f1e1291]:
+                            - generic [ref=f1e1292]:
+                              - generic "20 / page" [ref=f1e1293]
+                              - combobox "Page Size" [ref=f1e1294]
+                            - img "down" [ref=f1e1296]
+    - menu [ref=f1e1315]:
+      - menuitem "Pull from Server" [ref=f1e1316] [cursor=pointer]
+      - menuitem "Unlink from Server" [ref=f1e1322] [cursor=pointer]
+      - separator [ref=f1e1327]
+      - menuitem "Use in chat" [ref=f1e1328] [cursor=pointer]
+      - separator [ref=f1e1332]
+      - menuitem "Quick test" [ref=f1e1333] [cursor=pointer]
+      - separator [ref=f1e1337]
+      - menuitem "Copy share link" [ref=f1e1338] [cursor=pointer]
+      - separator [ref=f1e1343]
+      - menuitem "Duplicate Prompt" [ref=f1e1344] [cursor=pointer]
+      - menuitem "Version history" [ref=f1e1349] [cursor=pointer]
+      - separator [ref=f1e1355]
+      - menuitem "Delete" [ref=f1e1356] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f1e501] [cursor=pointer]
+  - alert [ref=f1e10]: Prompts
+```

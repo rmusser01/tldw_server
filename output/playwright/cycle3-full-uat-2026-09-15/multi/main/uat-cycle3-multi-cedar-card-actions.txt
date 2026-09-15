@@ -1,0 +1,4 @@
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByRole("article").last().hover(); await page.getByRole("button",{name:"More actions",exact:true}).last().click(); })(page);
+```

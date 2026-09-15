@@ -1,0 +1,232 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [Notes | tldw](http://127.0.0.1:18281/notes)
+### Page
+- Page URL: http://127.0.0.1:18281/notes
+- Page Title: Notes | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f13e10]:
+  - generic [ref=f13e13]:
+    - link "Skip to main content" [ref=f13e14] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f13e15]:
+      - button "Expand sidebar" [ref=f13e16] [cursor=pointer]
+      - button "New Chat" [ref=f13e20] [cursor=pointer]
+      - generic [ref=f13e23]:
+        - button "Quick Ingest" [ref=f13e24] [cursor=pointer]
+        - button "Chat" [ref=f13e28] [cursor=pointer]
+        - button "Prompts" [ref=f13e31] [cursor=pointer]
+        - button "Characters" [ref=f13e35] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f13e40] [cursor=pointer]
+        - button "World Books" [ref=f13e44] [cursor=pointer]
+        - button "Notes" [ref=f13e47] [cursor=pointer]
+        - button "Knowledge QA" [ref=f13e51] [cursor=pointer]
+        - button "Media" [ref=f13e59] [cursor=pointer]
+        - button "Document Workspace" [ref=f13e62] [cursor=pointer]
+        - button "Research Workspace" [ref=f13e68] [cursor=pointer]
+        - button "Kanban" [ref=f13e74] [cursor=pointer]
+        - button "Watchlists" [ref=f13e76] [cursor=pointer]
+      - generic [ref=f13e81]:
+        - button "Open Notes Dock" [ref=f13e82] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f13e87] [cursor=pointer]
+        - button "Settings" [ref=f13e90] [cursor=pointer]
+    - main [ref=f13e94]:
+      - generic [ref=f13e95]:
+        - generic [ref=f13e98]:
+          - generic [ref=f13e99]:
+            - button "Expand sidebar" [ref=f13e100] [cursor=pointer]
+            - generic [ref=f13e102]:
+              - img "tldw Assistant" [ref=f13e103]
+              - generic [ref=f13e104]: tldw Assistant
+              - button "Companion Home" [ref=f13e105] [cursor=pointer]
+              - button "Show shortcuts" [ref=f13e109] [cursor=pointer]
+          - generic [ref=f13e112]:
+            - button "Search - Open command palette" [ref=f13e113] [cursor=pointer]:
+              - generic [ref=f13e117]: Search
+              - generic [ref=f13e118]: ⌘K
+            - button "Open settings" [ref=f13e119] [cursor=pointer]
+            - generic [ref=f13e131]:
+              - button "Notifications, 0 unread" [ref=f13e132] [cursor=pointer]
+              - status [ref=f13e136]: Notifications are active
+            - button "Switch to light theme" [ref=f13e137] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f13e144] [cursor=pointer]:
+              - generic [ref=f13e145]: "?"
+        - generic [ref=f13e147]:
+          - link "Skip to notes list" [ref=f13e148] [cursor=pointer]:
+            - /url: "#notes-list-region"
+          - link "Skip to editor" [ref=f13e149] [cursor=pointer]:
+            - /url: "#notes-editor-region"
+          - paragraph [ref=f13e150]: "Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs."
+          - region "Notes list" [ref=f13e151]:
+            - generic [ref=f13e152]:
+              - generic [ref=f13e153]:
+                - generic [ref=f13e154]:
+                  - generic [ref=f13e155]:
+                    - generic [ref=f13e156]: Notes
+                    - generic [ref=f13e157]: 3 total
+                  - button "New note" [ref=f13e158] [cursor=pointer]
+                - generic [ref=f13e161]:
+                  - generic [ref=f13e162]:
+                    - button "Views" [expanded] [ref=f13e164] [cursor=pointer]
+                    - generic [ref=f13e169]:
+                      - generic [ref=f13e170]:
+                        - button "Notes" [ref=f13e171] [cursor=pointer]
+                        - button "Trash" [ref=f13e173] [cursor=pointer]
+                      - generic [ref=f13e175]:
+                        - button "List" [ref=f13e176] [cursor=pointer]
+                        - button "Timeline" [ref=f13e178] [cursor=pointer]
+                        - button "Inbox" [ref=f13e180] [cursor=pointer]
+                        - button "Collection" [ref=f13e182] [cursor=pointer]
+                        - button "Graph" [ref=f13e184] [cursor=pointer]
+                      - generic [ref=f13e193]:
+                        - button "Organize" [ref=f13e194] [cursor=pointer]
+                        - button "Organize help" [ref=f13e200] [cursor=pointer]:
+                          - img "question-circle" [ref=f13e201]
+                  - generic [ref=f13e205]:
+                    - textbox "Search notes" [ref=f13e212]:
+                      - /placeholder: Search titles and contents
+                    - generic [ref=f13e214] [cursor=pointer]:
+                      - generic [ref=f13e215]:
+                        - generic "Date modified (newest first)" [ref=f13e216]
+                        - combobox "Sort notes" [ref=f13e217]
+                      - img "down" [ref=f13e219]
+                  - generic [ref=f13e222]:
+                    - button "Filters" [expanded] [ref=f13e224] [cursor=pointer]
+                    - generic [ref=f13e229]:
+                      - generic [ref=f13e230]:
+                        - button "Captured" [ref=f13e231] [cursor=pointer]
+                        - button "Search tips" [ref=f13e233] [cursor=pointer]
+                      - generic [ref=f13e235]:
+                        - generic [ref=f13e236]:
+                          - generic: Filter by tag
+                          - combobox "Filter by tag" [ref=f13e238]
+                        - img "down" [ref=f13e240]
+                      - generic [ref=f13e243]:
+                        - generic [ref=f13e244]:
+                          - button "Browse tags" [ref=f13e245] [cursor=pointer]
+                          - button "Tags help" [ref=f13e247] [cursor=pointer]:
+                            - img "question-circle" [ref=f13e248]
+                        - generic [ref=f13e252]: 10 available
+                      - generic [ref=f13e253]: For in-note search, use browser Ctrl/Cmd+F.
+                  - generic [ref=f13e254]:
+                    - generic [ref=f13e255]: Recent notes
+                    - generic [ref=f13e256]:
+                      - 'button "Snippet: Cycle3 Cedar Guide Chat (20260915_103705)" [ref=f13e257] [cursor=pointer]'
+                      - 'button "Snippet: Helpful AI Assistant (20260915_094950)" [ref=f13e258] [cursor=pointer]'
+              - generic [ref=f13e260]:
+                - generic [ref=f13e262]:
+                  - generic [ref=f13e263]: Results
+                  - generic [ref=f13e264]:
+                    - button "Import" [ref=f13e265] [cursor=pointer]
+                    - button "Sync folder" [disabled] [ref=f13e267]
+                    - button "Export" [ref=f13e269] [cursor=pointer]
+                - list "Notes" [ref=f13e272]:
+                  - listitem [ref=f13e273]:
+                    - generic [ref=f13e274]:
+                      - 'checkbox "Select note Snippet: Cycle3 Cedar Guide Chat (20260915_103705) for bulk actions" [ref=f13e275]'
+                      - 'button "Pin note Snippet: Cycle3 Cedar Guide Chat (20260915_103705)" [ref=f13e276] [cursor=pointer]'
+                      - 'button "Open note Snippet: Cycle3 Cedar Guide Chat (20260915_103705)" [ref=f13e279] [cursor=pointer]':
+                        - generic [ref=f13e280]:
+                          - generic [ref=f13e281]: "Snippet: Cycle3 Cedar Guide Chat (20260915_103705)"
+                          - generic [ref=f13e290]: Jonah Patel coordinates Project Cedar, and volunteers meet every Tuesday at 18:15.
+                          - generic [ref=f13e291]: "Linked to conversation: 812385d9-f19b-4bdf-82a0-1d850884a4b3 · msg pa_eb5c-ce9c-231-88fd"
+                          - generic [ref=f13e292]: 9/15/2026, 3:38:51 AM
+                  - listitem [ref=f13e293]:
+                    - generic [ref=f13e294]:
+                      - 'checkbox "Select note Snippet: Helpful AI Assistant (20260915_094950) for bulk actions" [ref=f13e295]'
+                      - 'button "Pin note Snippet: Helpful AI Assistant (20260915_094950)" [ref=f13e296] [cursor=pointer]'
+                      - 'button "Open note Snippet: Helpful AI Assistant (20260915_094950)" [ref=f13e299] [cursor=pointer]':
+                        - generic [ref=f13e300]:
+                          - generic [ref=f13e301]: "Snippet: Helpful AI Assistant (20260915_094950)"
+                          - generic [ref=f13e310]: Jonah Patel coordinates the library, it opens on 22 November 2026, and the book return is beside the north entrance.
+                          - generic [ref=f13e311]: "Linked to conversation: a68ad772-d28d-43f1-b948-2b97119788e0 · msg ea6cd8f1-b52a-4c18-a912-339847e75453"
+                          - generic [ref=f13e312]: 9/15/2026, 3:06:27 AM
+                  - listitem [ref=f13e313]:
+                    - generic [ref=f13e314]:
+                      - 'checkbox "Select note Snippet: Helpful AI Assistant (20260915_094950) for bulk actions" [ref=f13e315]'
+                      - 'button "Pin note Snippet: Helpful AI Assistant (20260915_094950)" [ref=f13e316] [cursor=pointer]'
+                      - 'button "Open note Snippet: Helpful AI Assistant (20260915_094950)" [ref=f13e319] [cursor=pointer]':
+                        - generic [ref=f13e320]:
+                          - generic [ref=f13e321]: "Snippet: Helpful AI Assistant (20260915_094950)"
+                          - generic [ref=f13e330]: Jonah Patel coordinates the library, it opens on 22 November 2026, and the book return is beside the north entrance.
+                          - generic [ref=f13e331]: "Linked to conversation: a68ad772-d28d-43f1-b948-2b97119788e0 · msg ea6cd8f1-b52a-4c18-a912-339847e75453"
+                          - generic [ref=f13e332]: 9/15/2026, 3:05:43 AM
+                - generic [ref=f13e334]:
+                  - generic [ref=f13e335]: Showing 1-3 of 3
+                  - list [ref=f13e336]:
+                    - listitem "Previous Page" [ref=f13e337]:
+                      - button [disabled] [ref=f13e338]:
+                        - img "left" [ref=f13e339]
+                    - listitem "1" [ref=f13e342] [cursor=pointer]
+                    - listitem "Next Page" [ref=f13e344]:
+                      - button [disabled] [ref=f13e345]:
+                        - img "right" [ref=f13e346]
+                    - listitem [ref=f13e349]:
+                      - generic [ref=f13e350]:
+                        - generic [ref=f13e351]:
+                          - generic "20 / page" [ref=f13e352]
+                          - combobox "Page Size" [ref=f13e353]
+                        - img "down" [ref=f13e355]
+          - button "Collapse sidebar" [ref=f13e358] [cursor=pointer]
+          - region "Note editor" [ref=f13e362]:
+            - generic [ref=f13e363]:
+              - generic [ref=f13e365]:
+                - heading "New note" [level=5] [ref=f13e366]
+                - status [ref=f13e367]: No server save status yet
+              - generic [ref=f13e368]:
+                - button "Save note" [disabled] [ref=f13e369]:
+                  - generic: Save
+                - button "Save and start another note" [disabled] [ref=f13e370]:
+                  - generic: Save & new
+                - group "Editor mode" [ref=f13e371]:
+                  - button "Edit" [pressed] [ref=f13e372] [cursor=pointer]
+                  - button "Split" [ref=f13e377] [cursor=pointer]
+                  - button "Preview" [ref=f13e382] [cursor=pointer]
+                - button "Create study pack" [disabled] [ref=f13e388]
+                - button "More actions" [ref=f13e389] [cursor=pointer]
+            - generic [ref=f13e395]:
+              - generic [ref=f13e396]:
+                - generic [ref=f13e397]: Select or create a note
+                - generic [ref=f13e398]: Choose a note from the list to start editing, or create a new one.
+                - button "Create note" [ref=f13e399] [cursor=pointer]
+                - generic [ref=f13e401]: "Tip: Type [[ in a note to link to another note."
+              - generic [ref=f13e402]:
+                - textbox "Note title" [ref=f13e403]:
+                  - /placeholder: Title
+                - button "Generate title from content" [disabled] [ref=f13e404]:
+                  - generic: Generate title
+                - button "Keyboard shortcuts" [ref=f13e405] [cursor=pointer]
+              - generic [ref=f13e408]:
+                - generic [ref=f13e409]:
+                  - generic: Tags
+                  - combobox "Note tags" [ref=f13e411]
+                - img "down" [ref=f13e413]
+              - generic [ref=f13e416]:
+                - group "Input mode" [ref=f13e417]:
+                  - button "Markdown" [ref=f13e418] [cursor=pointer]
+                  - button "WYSIWYG" [ref=f13e420] [cursor=pointer]
+                - generic [ref=f13e422]: Formatting
+                - button "Bold" [ref=f13e423] [cursor=pointer]
+                - button "Italic" [ref=f13e427] [cursor=pointer]
+                - button "Heading" [ref=f13e431] [cursor=pointer]
+                - button "List" [ref=f13e435] [cursor=pointer]
+                - button "Link" [ref=f13e438] [cursor=pointer]
+                - button "Attachment" [ref=f13e443] [cursor=pointer]
+                - button "Code" [ref=f13e447] [cursor=pointer]
+                - generic [ref=f13e454]: Assist
+                - button "Summarize" [disabled] [ref=f13e455]
+                - button "Expand outline" [disabled] [ref=f13e456]
+                - button "Suggest tags" [disabled] [ref=f13e457]
+              - generic [ref=f13e459]:
+                - textbox "Note content" [ref=f13e460]:
+                  - /placeholder: Write your note here... (Markdown supported)
+                - generic [ref=f13e461]: Markdown + LaTeX supported
+              - generic [ref=f13e462]:
+                - text: 0 words · 0 chars · 0 mins read
+                - generic [ref=f13e463]: Version pending · Not saved yet
+                - generic [ref=f13e464]: "Origin: Typed manually"
+  - button "Open Next.js Dev Tools" [ref=f13e470] [cursor=pointer]
+  - alert [ref=f13e474]
+```

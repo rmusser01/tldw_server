@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-15 10:50'
+updated_date: '2026-09-15 11:19'
 labels:
   - uat
   - testing
@@ -79,12 +79,22 @@ Retained environment/cache evidence at output/playwright/cycle3-full-uat-2026-09
 Cycle3 continued: Bob five-card Biology generation/save/review/reload and actual server schedule/session checks pass after normal re-login; source link opens blank Note (UAT081/task25), though direct visible library selection loads exact source. Normal Bob logout/admin login exposes prior Bob Quick Ingest result metadata (UAT082/task26); no stale source action clicked. Admin own sole-item deletion/restore preserves exact content and truthful date; hidden Trash071 and notifications072 recur. Alice prompt real system/request/reload passes; character replacement068 and settled-reload070 recur. Full multi still running; no application/test changes.
 
 Independent Bob/admin evidence review passes69files/68hashes/20JSON and supports functional claims. It additionally identifies Study display UAT083 (remaining double subtraction) and084 (one-hour nextdue count presented at one timestamp); both added to task19 and tracker. Currenttotal30open:12P2/18P3. Original sealed captures/report preserved; addenda recorded in runningtracker. No product/test changes while mainUAT completes.
+
+UAT085 P2 added after coverage audit: directRobot5 baseline succeeds, butCedarNotebacklink restoresCedar messages withRobot stillselected andmissing SaveToNotes/Flashcards. DeliberateCedar card/study explicitlyBLOCKED; noextraturnworkaround. Task15 expanded with actualbacklink/selection/loader mismatch regression. Total31open:13P2/18P3. Bob evidence checkpoint committed ebb3d3643a; remainingmainoffline/accountchecks stillrunning.
+
+Cycle 3 frozen UAT now records UAT086: Bob sees Alice Knowledge QA recent query metadata after a same-browser account switch. Foreign conversation restoration remains denied with HTTP 404; no answer or source content was restored. Final offline recovery controls are finishing before the main evidence cutoff.
+
+Frozen Cycle 3 browser execution ended at 2026-09-15T11:14:21Z. Parent sealed 309 main captures (41 JSON, four inspected PNGs) plus report hash. Main and Bob/admin matrices retain explicit Wikipedia/Cedar blocks and the multi-user mixed-deck coverage limit. Offline Alice queued Note recovery and Bob GET404 passed; final browser-history control confirms UAT064 full private Note text exposed under Bob. Independent final evidence review is underway before repair release.
+
+Final independent evidence review is clear: all309 main captures and report hashes verified,41JSON parsed, UAT064/085/086 and offline recovery claims match retained controls. Parent verifier scanned552 retained files against14known runtime credential values and JWT/private-key markers with zero matches. FourPNG captures visually inspected. Frozen evidence checkpoint is ready; repair work may begin. All32 findings remain open until their fixes and targeted live verification pass.
+
+Checkpoint whitespace check: source documentation and task records are clean. Two immutable raw console captures contain their original trailing space/blank line; retained byte-for-byte so their reviewed hashes remain valid. These are evidence-format exceptions, not product or authored-document warnings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Cycle3 UAT remains active at application revision d40e17dc81 with documented cache-only exception c10e1464fc. Single execution finished with failures; main multi-user execution continues. Tracker has30open findings:12P2/18P3 across UAT056-084 plus reopened055, assigned to repair children13-26. Bob learning persistence and owned API/admin recovery controls are independently supported; source navigation081, cross-account ingest metadata082 and Study display083/084 fail. Exact Wikipedia stores zero articles in both modes and remains blocked. No full issue-free pass or completed repair claim.
+Cycle 3 execution ended with 32 open findings: 14 P2 and 18 P3 (reopened055 and056–086). Single-user, Bob/admin and main multi-user evidence is retained. Final review precedes repairs under13260.13–.27. Wikipedia search/Chat and deliberate Cedar card/study remain explicitly blocked; multi-user mixed-deck076 is not claimed passing. No product repairs occurred during the frozen run.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

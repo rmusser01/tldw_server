@@ -1,0 +1,142 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [Server Admin · Admin · tldw](http://127.0.0.1:18281/admin/server)
+### Page
+- Page URL: http://127.0.0.1:18281/admin/server
+- Page Title: Server Admin · Admin · tldw
+- Console: 5 errors, 5 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f10e11]:
+  - generic [ref=f10e14]:
+    - link "Skip to main content" [ref=f10e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f10e16]:
+      - button "Expand sidebar" [ref=f10e17] [cursor=pointer]
+      - button "New Chat" [ref=f10e21] [cursor=pointer]
+      - generic [ref=f10e24]:
+        - button "Quick Ingest" [ref=f10e25] [cursor=pointer]
+        - button "Chat" [ref=f10e29] [cursor=pointer]
+        - button "Prompts" [ref=f10e32] [cursor=pointer]
+        - button "Characters" [ref=f10e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f10e41] [cursor=pointer]
+        - button "World Books" [ref=f10e45] [cursor=pointer]
+        - button "Notes" [ref=f10e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f10e52] [cursor=pointer]
+        - button "Media" [ref=f10e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f10e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f10e69] [cursor=pointer]
+        - button "Kanban" [ref=f10e75] [cursor=pointer]
+        - button "Watchlists" [ref=f10e77] [cursor=pointer]
+      - generic [ref=f10e82]:
+        - button "Open Notes Dock" [ref=f10e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f10e88] [cursor=pointer]
+        - button "Settings" [ref=f10e91] [cursor=pointer]
+    - main [ref=f10e95]:
+      - generic [ref=f10e96]:
+        - generic [ref=f10e99]:
+          - generic [ref=f10e100]:
+            - button "Expand sidebar" [ref=f10e101] [cursor=pointer]
+            - generic [ref=f10e103]:
+              - img "tldw Assistant" [ref=f10e104]
+              - generic [ref=f10e105]: tldw Assistant
+              - button "Companion Home" [ref=f10e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f10e110] [cursor=pointer]
+          - generic [ref=f10e113]:
+            - button "Search - Open command palette" [ref=f10e114] [cursor=pointer]:
+              - generic [ref=f10e118]: Search
+              - generic [ref=f10e119]: ⌘K
+            - button "Open settings" [ref=f10e120] [cursor=pointer]
+            - generic [ref=f10e132]:
+              - button "Notifications, 0 unread" [ref=f10e133] [cursor=pointer]
+              - status [ref=f10e137]: Notifications are active
+            - button "Switch to light theme" [ref=f10e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f10e145] [cursor=pointer]:
+              - generic [ref=f10e146]: "?"
+        - generic [ref=f10e148]:
+          - link "Skip to admin content" [ref=f10e149] [cursor=pointer]:
+            - /url: "#admin-content"
+          - navigation "Admin modules" [ref=f10e150]:
+            - generic [ref=f10e151]:
+              - link "Admin" [ref=f10e152] [cursor=pointer]:
+                - /url: /admin
+              - generic [aria-hidden] [ref=f10e153]: /
+              - link "Server Admin" [ref=f10e154] [cursor=pointer]:
+                - /url: /admin/server
+              - link "Maintenance" [ref=f10e155] [cursor=pointer]:
+                - /url: /admin/maintenance
+              - link "Runtime Config" [ref=f10e156] [cursor=pointer]:
+                - /url: /admin/runtime-config
+              - link "API Keys" [ref=f10e157] [cursor=pointer]:
+                - /url: /admin/api-keys
+              - link "Roles & Permissions" [ref=f10e158] [cursor=pointer]:
+                - /url: /admin/rbac
+              - link "Organizations & Teams" [ref=f10e159] [cursor=pointer]:
+                - /url: /admin/orgs
+              - link "Rate Limiting" [ref=f10e160] [cursor=pointer]:
+                - /url: /admin/rate-limiting
+              - link "Data Operations" [ref=f10e161] [cursor=pointer]:
+                - /url: /admin/data-ops
+              - link "Sources" [ref=f10e162] [cursor=pointer]:
+                - /url: /admin/sources
+              - link "Llama.cpp" [ref=f10e163] [cursor=pointer]:
+                - /url: /admin/llamacpp
+              - link "MLX LM" [ref=f10e164] [cursor=pointer]:
+                - /url: /admin/mlx
+              - link "Monitoring" [ref=f10e165] [cursor=pointer]:
+                - /url: /admin/monitoring
+              - link "Usage Analytics" [ref=f10e166] [cursor=pointer]:
+                - /url: /admin/usage
+              - link "Billing" [ref=f10e167] [cursor=pointer]:
+                - /url: /admin/billing
+              - link "Workspace Integrations" [ref=f10e168] [cursor=pointer]:
+                - /url: /admin/integrations
+              - link "Watchlists Oversight" [ref=f10e169] [cursor=pointer]:
+                - /url: /admin/watchlists-items
+              - link "Watchlist RunsSoon" [ref=f10e170] [cursor=pointer]:
+                - /url: /admin/watchlists-runs
+          - generic [ref=f10e173]:
+            - generic [ref=f10e176]:
+              - generic [ref=f10e177]:
+                - generic [ref=f10e178]: Permission denied
+                - generic [ref=f10e179]:
+                  - heading "Admin access required for these controls" [level=2] [ref=f10e180]
+                  - generic [ref=f10e181]: Sign in as an admin user on your tldw server to view and manage users, roles, and system statistics.
+              - link "Learn more in the tldw server documentation." [ref=f10e183] [cursor=pointer]:
+                - /url: https://github.com/rmusser01/tldw_server#documentation--resources
+              - button "Request access" [ref=f10e185] [cursor=pointer]
+            - generic [ref=f10e186]: Admin-level details and controls are hidden until admin APIs are available.
+            - generic [ref=f10e188]:
+              - heading "Server Admin" [level=1] [ref=f10e189]
+              - text: Monitor core stats and configuration for your connected tldw server.
+            - generic [ref=f10e191]:
+              - generic [ref=f10e192]: Connection
+              - generic [ref=f10e195]:
+                - table [ref=f10e198]:
+                  - rowgroup [ref=f10e199]:
+                    - row [ref=f10e200]:
+                      - 'cell "Server URL : http://127.0.0.1:18201" [ref=f10e201]':
+                        - generic [ref=f10e202]:
+                          - generic [ref=f10e203]: "Server URL :"
+                          - generic [ref=f10e204]: http://127.0.0.1:18201
+                    - row [ref=f10e205]:
+                      - 'cell "Auth mode : multi-user" [ref=f10e206]':
+                        - generic [ref=f10e207]:
+                          - generic [ref=f10e208]: "Auth mode :"
+                          - generic [ref=f10e209]: multi-user
+                - text: Only basic connection details are shown; admin dashboards are disabled until admin APIs are available.
+            - generic [ref=f10e211]:
+              - generic [ref=f10e212]: Audio installer
+              - generic [ref=f10e216]:
+                - generic [ref=f10e217]: Install and verify server-side STT/TTS bundles for this connected server.
+                - alert [ref=f10e219]:
+                  - img "exclamation-circle" [ref=f10e221]
+                  - generic [ref=f10e224]:
+                    - generic [ref=f10e225]: Admin access required
+                    - generic [ref=f10e226]: Audio model installation requires server admin access.
+  - button "Open Next.js Dev Tools" [ref=f10e232] [cursor=pointer]
+  - alert [ref=f10e10]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T10-51-32-251Z.log#L4-L13

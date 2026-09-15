@@ -1,0 +1,12 @@
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByRole("button",{name:"Notes",exact:true}).click(); })(page);
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [Notes | tldw](http://127.0.0.1:18281/notes)
+### Page
+- Page URL: http://127.0.0.1:18281/notes
+- Page Title: Notes | tldw
+- Console: 1 errors, 0 warnings

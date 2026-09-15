@@ -1,0 +1,6 @@
+### Result
+- 0: [](http://127.0.0.1:18281/settings/tldw)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [Sign in | tldw](http://127.0.0.1:18281/login)
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T11-08-26-785Z.log#L3-L5

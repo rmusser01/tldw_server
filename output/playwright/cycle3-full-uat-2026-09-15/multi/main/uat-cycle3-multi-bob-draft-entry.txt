@@ -1,0 +1,14 @@
+### Ran Playwright code
+```js
+await page.goto('http://127.0.0.1:18281/notes');
+```
+### Open tabs
+- 0: [](http://127.0.0.1:18281/settings/tldw)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [](http://127.0.0.1:18281/notes)
+### Page
+- Page URL: http://127.0.0.1:18281/notes
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-15T11-05-12-119Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T11-05-12-010Z.log#L1-L2

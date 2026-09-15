@@ -1,0 +1,21 @@
+### Result
+38. [GET] http://127.0.0.1:18281/api/_tldw-webui/runtime-config => [200] OK
+39. [GET] http://127.0.0.1:18281/_next/static/development/_devMiddlewareManifest.json => [200] OK
+48. [GET] http://127.0.0.1:18201/api/v1/auth/me => [401] Unauthorized
+49. [POST] http://127.0.0.1:18201/api/v1/auth/refresh => [401] Unauthorized
+50. [GET] http://127.0.0.1:18201/api/v1/auth/me => [401] Unauthorized
+51. [POST] http://127.0.0.1:18201/api/v1/auth/logout => [401] Unauthorized
+52. [POST] http://127.0.0.1:18201/api/v1/auth/refresh => [401] Unauthorized
+53. [POST] http://127.0.0.1:18201/api/v1/auth/logout => [401] Unauthorized
+135. [GET] http://127.0.0.1:18201/api/v1/config/docs-info => [200] OK
+
+Note: 128 static requests not shown, run with --static option to see them.
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [](http://127.0.0.1:18281/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18281/settings/tldw
+- Console: 6 errors, 6 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T10-52-53-094Z.log#L17-L31

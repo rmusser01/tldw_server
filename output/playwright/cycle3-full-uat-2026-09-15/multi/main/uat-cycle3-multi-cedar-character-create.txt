@@ -1,0 +1,15 @@
+### Result
+{"created":true}
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByRole("textbox",{name:"* Name* Generate with AI",exact:true}).fill("Cycle3 Cedar Guide"); await page.getByRole("textbox",{name:"* Behavior / instructions (required) Generate with AI",exact:true}).fill("You are Cedar Guide. Answer only using these fictional Project Cedar facts: the community library opens on 22 November 2026; Jonah Patel coordinates it; it has nine reading tables; volunteers meet every Tuesday at 18:15; the book return is beside the north entrance. If a fact is absent, say you do not know. Be concise."); await page.getByRole("textbox",{name:"Description Generate with AI",exact:true}).fill("A guide to the synthetic Cedar community library."); await page.getByRole("button",{name:"Create character",exact:true}).click(); return {created:true}; })(page);
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [](http://127.0.0.1:18281/characters)
+### Page
+- Page URL: http://127.0.0.1:18281/characters
+- Console: 1 errors, 0 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T10-21-58-444Z.log#L65-L66

@@ -1,0 +1,13 @@
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByRole("button",{name:"Characters",exact:true}).click(); })(page);
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [](http://127.0.0.1:18281/characters)
+### Page
+- Page URL: http://127.0.0.1:18281/characters
+- Console: 1 errors, 0 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T10-21-58-444Z.log#L58-L61

@@ -1,0 +1,15 @@
+### Ran Playwright code
+```js
+await page.getByRole('link', { name: 'Note #f9685841-15a9-4694-a438' }).click();
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [Notes | tldw](http://127.0.0.1:18281/notes?source_ref_id=f9685841-15a9-4694-a438-a8559859458e)
+### Page
+- Page URL: http://127.0.0.1:18281/notes?source_ref_id=f9685841-15a9-4694-a438-a8559859458e
+- Page Title: Notes | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-15T10-50-27-390Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T10-47-21-737Z.log#L7-L10

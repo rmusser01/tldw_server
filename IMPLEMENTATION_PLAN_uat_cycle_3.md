@@ -19,13 +19,13 @@
 **Goal:** Complete both workflow matrices and retain auditable evidence.
 **Success criteria:** Every named journey/shared workflow has a result; all findings are tracked with expected/actual behavior and evidence limits.
 **Tests:** Actual UI workflows, real provider requests, independent owned/foreign API controls, evidence hash/JSON/credential checks.
-**Status:** In Progress
+**Status:** Complete
 
 - [x] Complete single-user execution and preserve144 captures through09:26:30UTC; initially record20new findings and reopened055. Independent evidence review additionally confirms076session accounting; retain its later read separately.
 - [x] Start fresh multi-user API18201/WebUI18281/browser; retain the existing documented admin bootstrap.
-- [ ] Complete admin/Alice/Bob UI workflows, public/confidential QA controls, cross-account metadata/content/draft isolation and offline two-tab recovery.
-- [ ] Reconcile the combined tracker and retained multi evidence, independently review claims, and commit the frozen-run checkpoint.
-- [ ] Incorporate multi-user-only findings into the repair tasks before beginning Stage2.
+- [x] Complete admin/Alice/Bob UI workflows, public/confidential QA controls, cross-account metadata/content/draft isolation and offline two-tab recovery. Browser cutoff2026-09-15T11:14:21Z; Wikipedia and deliberate Cedar card/study remain blocked. Multi mixed deck plus undecked076 is explicitly unexecuted, not a pass, and remains required for repair verification/full rerun.
+- [x] Reconcile the combined tracker and retained multi evidence, independently review claims, and retain the frozen-run checkpoint. Parent and independent reviewer verified309 main captures/report hashes and41JSON; all4PNGs inspected. Parent scanned552 retained files against14known runtime credentials plus JWT/private-key patterns; zero matches. Review found no material claim/evidence contradiction.
+- [x] Incorporate multi-user-only findings into the repair tasks before beginning Stage2. Open total32:14P2/18P3, including confirmed cross-account Note plaintext064 and QA metadata086.
 
 ## Stage 2: Repair private transfers and Chat ownership
 **Goal:** Protect Notes generation content and make Chat selection/history reliable.
@@ -61,13 +61,14 @@
 - [ ] Extend neutral saved-chat bootstrap, carry established IDs into inference/persistence, and recheck autosave ownership after awaited work.
 - [ ] Verify temporary promotion, explicit persona/character, failed/aborted creation and delayed A→B results. Review and commit selection and canonical-creation changes separately.
 
-### TASK-13260.15 — UAT070 mirror portion
+### TASK-13260.15 — UAT070 mirror and UAT085 backlink portion
 
-**Files:** `hooks/chat/useServerChatLoader.ts`, existing server-history linking/Dexie and session persistence utilities; `hooks/__tests__/useServerChatLoader.test.ts`, `usePlaygroundSessionPersistence.test.tsx`, and an adjacent integrated round-trip suite.
+**Files:** `hooks/chat/useServerChatLoader.ts`, NotesManager linked-Chat action, existing server-history linking/Dexie and session persistence utilities; `hooks/__tests__/useServerChatLoader.test.ts`, `usePlaygroundSessionPersistence.test.tsx`, and an adjacent integrated round-trip suite. Coordinate NotesManager edits with .13/.25.
 
 - [ ] Reproduce the exact pre-fix greeting/user mirror lacking serverMessageId with a fetched third reply, using real formatters/Dexie/session restoration.
 - [ ] Preserve server IDs and reconcile the owned existing mirror while retaining genuine unsynced/streaming/newer local rows.
 - [ ] Exercise concurrent bootstrap/loader mapping, account changes during transactions and repeated reload. Assert rows are not moved to a competing linked history. Use the existing browser harness for real Dexie; the named mocked Vitest fixtures alone do not prove this round trip.
+- [ ] Reproduce Cedar Note backlink retaining Robot selection and missing saved-message actions; restore owned conversation/character/message identities together with dirty/account/stale-source guards.
 - [ ] Independently review and perform the real tracked Chat→Note→backlink→settled reload sequence before committing.
 
 ## Stage 3: Repair ingest and Media feedback/recovery
@@ -93,6 +94,14 @@
 - [ ] Reject unowned persisted sessions/recent-document metadata; prevent late upserts recreating cleared state and old serial batch entries using new credentials.
 - [ ] Preserve same-account close/resume, reconnect and valid source actions; verify different servers and colliding numeric IDs.
 - [ ] Independently review, run scoped frontend checks, and exercise the exact same-browser account transition before the next full UAT.
+
+### TASK-13260.27 — UAT086 QA account history
+
+**Files:** active KnowledgeQAProvider, history persistence/selection and existing account/transport helpers; Provider history/persistence/streaming and actual Recent UI tests. Coordinate source presentation with .17.
+- [ ] Reproduce Alice questions and cited-result metadata visible to Bob from global local storage; keep the correct foreign-conversation404 as a negative control.
+- [ ] Scope history, active results, sources and pending work to verified account/server authority; reject legacy unowned entries and delayed A→B→A writes/restores.
+- [ ] Preserve same-account reload/server history and bounded storage behavior; verify actual Recent actions plus delayed stream/restore/delete/share/export boundaries.
+- [ ] Independently review, run focused frontend checks, and verify exact same-browser isolation before the next full UAT.
 
 ### TASK-13260.17 — UAT060/066/071/072/073
 

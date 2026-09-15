@@ -1,0 +1,248 @@
+### Open tabs
+- 0: (current) [](http://127.0.0.1:18281/chat)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+### Page
+- Page URL: http://127.0.0.1:18281/chat
+- Console: 2 errors, 1 warnings
+### Snapshot
+```yaml
+- generic [ref=f11e11]:
+  - generic [ref=f11e12]:
+    - generic [ref=f11e14]:
+      - link "Skip to main content" [ref=f11e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f11e16]:
+        - button "Expand sidebar" [ref=f11e17] [cursor=pointer]
+        - button "New Chat" [ref=f11e21] [cursor=pointer]
+        - generic [ref=f11e24]:
+          - button "Quick Ingest" [ref=f11e25] [cursor=pointer]
+          - button "Chat" [ref=f11e29] [cursor=pointer]
+          - button "Prompts" [ref=f11e32] [cursor=pointer]
+          - button "Characters" [ref=f11e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f11e41] [cursor=pointer]
+          - button "World Books" [ref=f11e45] [cursor=pointer]
+          - button "Notes" [ref=f11e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=f11e52] [cursor=pointer]
+          - button "Media" [ref=f11e60] [cursor=pointer]
+          - button "Document Workspace" [ref=f11e63] [cursor=pointer]
+          - button "Research Workspace" [ref=f11e69] [cursor=pointer]
+          - button "Kanban" [ref=f11e75] [cursor=pointer]
+          - button "Watchlists" [ref=f11e77] [cursor=pointer]
+        - generic [ref=f11e82]:
+          - button "Open Notes Dock" [ref=f11e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f11e88] [cursor=pointer]
+          - button "Settings" [ref=f11e91] [cursor=pointer]
+      - main [ref=f11e95]:
+        - generic [ref=f11e96]:
+          - generic [ref=f11e99]:
+            - generic [ref=f11e100]:
+              - button "Expand sidebar" [ref=f11e101] [cursor=pointer]
+              - generic [ref=f11e103]:
+                - img "tldw Assistant" [ref=f11e104]
+                - generic [ref=f11e105]: tldw Assistant
+                - button "Companion Home" [ref=f11e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=f11e110] [cursor=pointer]
+              - button "Untitled" [ref=f11e526] [cursor=pointer]
+              - generic [ref=f11e527]:
+                - generic "Saved chat. History is persisted." [ref=f11e528]: Saved
+                - generic "Character mode is active." [ref=f11e529]: "Character: Assistant"
+            - generic [ref=f11e113]:
+              - button "Search - Open command palette" [ref=f11e114] [cursor=pointer]:
+                - generic [ref=f11e118]: Search
+                - generic [ref=f11e119]: ⌘K
+              - button "New saved chat" [ref=f11e535] [cursor=pointer]
+              - button "Temporary chat (not saved)" [ref=f11e539] [cursor=pointer]: Temp
+              - button "Character chat" [ref=f11e540] [cursor=pointer]: Character
+              - button "Share conversation" [ref=f11e541] [cursor=pointer]
+              - button "Open settings" [ref=f11e120] [cursor=pointer]
+              - generic [ref=f11e132]:
+                - button "Notifications, 0 unread" [ref=f11e133] [cursor=pointer]
+                - status [ref=f11e137]: Notifications are active
+              - button "Switch to light theme" [ref=f11e138] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f11e145] [cursor=pointer]:
+                - generic [ref=f11e146]: "?"
+          - generic [ref=f11e147]:
+            - heading "Chat" [level=1] [ref=f11e548]
+            - generic [ref=f11e551]:
+              - paragraph [ref=f11e552]: Cockpit rails hidden. Chat and composer remain active.
+              - generic [ref=f11e553]:
+                - main [ref=f11e554]:
+                  - generic [ref=f11e555]:
+                    - generic [ref=f11e557]:
+                      - generic [ref=f11e558]:
+                        - generic [ref=f11e559]:
+                          - text: Character Chat
+                          - generic [ref=f11e560]: Assistant
+                        - generic [ref=f11e561]: Conversation timeline
+                      - generic [ref=f11e562]:
+                        - button "Switch to light theme" [ref=f11e563] [cursor=pointer]
+                        - button "Enter focus chat" [ref=f11e570] [cursor=pointer]:
+                          - generic [ref=f11e576]: Focus
+                        - button "Shortcuts" [ref=f11e577] [cursor=pointer]
+                        - button "Artifacts panel closed" [disabled] [ref=f11e581]
+                    - log "Chat messages" [ref=f11e594]:
+                      - generic [ref=f11e596]:
+                        - article "User message 1 of 6" [ref=f11e901]:
+                          - generic [ref=f11e600]:
+                            - generic [ref=f11e602]:
+                              - generic [ref=f11e603]: You
+                              - generic [ref=f11e604]: • 2:49 AM
+                            - paragraph [ref=f11e606]: "This synthetic acceptance conversation is called Cedar continuity. Remember the marker CEDAR-27. Reply only: CEDAR-27 remembered."
+                            - button "More actions" [ref=f11e904] [cursor=pointer]: •••
+                        - article "Assistant message 2 of 6" [ref=f11e905]:
+                          - generic [ref=f11e634]:
+                            - generic [ref=f11e636]:
+                              - generic [ref=f11e637]: Assistant
+                              - generic [ref=f11e638]: • 2:49 AM
+                            - paragraph [ref=f11e1259]: CEDAR-27 remembered.
+                            - generic [ref=f11e907]:
+                              - generic [ref=f11e908]:
+                                - generic [ref=f11e909]: Was this helpful?
+                                - generic [ref=f11e910]:
+                                  - button "Helpful" [ref=f11e911] [cursor=pointer]
+                                  - button "Not helpful" [ref=f11e914] [cursor=pointer]
+                                  - button "More feedback" [ref=f11e917] [cursor=pointer]
+                              - button "More actions" [ref=f11e923] [cursor=pointer]: •••
+                        - article "User message 3 of 6" [ref=f11e924]:
+                          - generic [ref=f11e662]:
+                            - generic [ref=f11e664]:
+                              - generic [ref=f11e665]: You
+                              - generic [ref=f11e666]: • 2:50 AM
+                            - paragraph [ref=f11e668]: What marker did I ask you to remember? Reply with the marker only.
+                            - button "More actions" [ref=f11e927] [cursor=pointer]: •••
+                        - article "Assistant message 4 of 6" [ref=f11e928]:
+                          - generic [ref=f11e681]:
+                            - generic [ref=f11e683]:
+                              - generic [ref=f11e684]: Assistant
+                              - generic [ref=f11e685]: • 2:50 AM
+                            - generic [ref=f11e686]:
+                              - button "collapsed Model’s reasoning (optional) 7s" [ref=f11e931] [cursor=pointer]:
+                                - img "collapsed" [ref=f11e933]
+                                - generic [ref=f11e937]:
+                                  - generic [ref=f11e938]: Model’s reasoning (optional)
+                                  - generic [ref=f11e939]: 7s
+                              - paragraph [ref=f11e1260]: CEDAR-27
+                            - button "More actions" [ref=f11e944] [cursor=pointer]: •••
+                        - article "User message 5 of 6" [ref=f11e945]:
+                          - generic [ref=f11e948]:
+                            - generic [ref=f11e950]:
+                              - generic [ref=f11e951]: You
+                              - generic [ref=f11e952]: • 3:02 AM
+                            - paragraph [ref=f11e954]: "Chat with this media: uat-cycle3-multi-source Project Cedar is a fictional community library used for acceptance testing. The library opens on 22 November 2026. Jonah Patel coordinates the library. The library has nine reading tables. Volunteers meet every Tuesday at 18:15. The book return is beside the north entrance. Using only this source, who coordinates the library, when does it open, and where is the book return?"
+                            - button "More actions" [ref=f11e957] [cursor=pointer]: •••
+                        - article "Assistant message 6 of 6" [ref=f11e961]:
+                          - generic [ref=f11e967]:
+                            - generic [ref=f11e969]:
+                              - generic [ref=f11e970]: Assistant
+                              - generic [ref=f11e971]: • 3:02 AM
+                            - generic [ref=f11e972]:
+                              - button "collapsed Model’s reasoning (optional) 16s" [ref=f11e975] [cursor=pointer]:
+                                - img "collapsed" [ref=f11e977]
+                                - generic [ref=f11e981]:
+                                  - generic [ref=f11e982]: Model’s reasoning (optional)
+                                  - generic [ref=f11e983]: 16s
+                              - paragraph [ref=f11e1261]: Jonah Patel coordinates the library, it opens on 22 November 2026, and the book return is beside the north entrance.
+                            - generic [ref=f11e986]:
+                              - generic [ref=f11e987]:
+                                - generic [ref=f11e988]: Was this helpful?
+                                - generic [ref=f11e989]:
+                                  - button "Helpful" [ref=f11e990] [cursor=pointer]
+                                  - button "Not helpful" [ref=f11e993] [cursor=pointer]
+                                  - button "More feedback" [ref=f11e996] [cursor=pointer]
+                              - button "More actions" [ref=f11e1002] [cursor=pointer]: •••
+                    - generic [ref=f11e703]:
+                      - generic [ref=f11e704]: Composer
+                      - generic [ref=f11e712]:
+                        - button [aria-hidden] [ref=f11e713]
+                        - button [aria-hidden] [ref=f11e714]
+                        - generic [ref=f11e715]:
+                          - generic [ref=f11e717]:
+                            - button "Hide composer options" [expanded] [ref=f11e718] [cursor=pointer]
+                            - textbox "Type a message... (/ commands, @ mentions)" [ref=f11e723]
+                            - generic [ref=f11e724]:
+                              - button "Improve prompt" [ref=f11e727] [cursor=pointer]
+                              - generic [ref=f11e732]:
+                                - button "Send message" [ref=f11e883] [cursor=pointer]:
+                                  - generic [ref=f11e734]: Send
+                                - button "Open message delivery options" [ref=f11e736] [cursor=pointer]
+                          - generic [ref=f11e741]:
+                            - generic [ref=f11e743]:
+                              - group "Mode and context controls" [ref=f11e744]:
+                                - button "Modes" [ref=f11e745] [cursor=pointer]
+                                - 'button "MCP tools: None, Not checked yet" [ref=f11e752] [cursor=pointer]':
+                                  - generic [ref=f11e753]:
+                                    - generic [ref=f11e754]: MCP
+                                    - generic [ref=f11e755]: None
+                                - button "Search & Context" [ref=f11e758] [cursor=pointer]
+                                - button "Select a Prompt" [ref=f11e763] [cursor=pointer]:
+                                  - generic [ref=f11e766]: Prompt
+                                - button "Assistant" [ref=f11e767] [cursor=pointer]
+                                - button "Role-play setup" [ref=f11e772] [cursor=pointer]
+                                - button "Buddy & Persona" [ref=f11e779] [cursor=pointer]
+                              - group "Run input controls" [ref=f11e785]:
+                                - button "OpenUI" [ref=f11e786] [cursor=pointer]
+                                - button "Start dictation" [ref=f11e792] [cursor=pointer]
+                                - generic [ref=f11e796]:
+                                  - button "Attach image" [ref=f11e798] [cursor=pointer]
+                                  - button "More attachments" [ref=f11e802] [cursor=pointer]
+                                - button "More tools" [ref=f11e805] [cursor=pointer]
+                                - button "Current Chat Model Settings" [ref=f11e808] [cursor=pointer]:
+                                  - generic [ref=f11e812]: Chat Settings
+                            - generic "Active context" [ref=f11e813]:
+                              - button "LLaMa.cpp / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf" [ref=f11e887] [cursor=pointer]:
+                                - generic "Provider status" [ref=f11e819]: Healthy
+                              - button "Character Assistant" [ref=f11e820] [cursor=pointer]:
+                                - generic [ref=f11e821]: Character
+                                - generic [ref=f11e822]: Assistant
+                              - 'generic "Character context: Included" [ref=f11e823]':
+                                - generic [ref=f11e824]: Character context
+                                - generic [ref=f11e825]: Included
+                              - button "Chat 6 messages" [ref=f11e1006] [cursor=pointer]:
+                                - generic [ref=f11e827]: Chat
+                                - generic [ref=f11e828]: 6 messages
+                              - button "Configure context window size" [ref=f11e830] [cursor=pointer]:
+                                - generic [ref=f11e831]: 578 + ~0 = 578 tokens
+                              - button "Saved" [ref=f11e833] [cursor=pointer]
+                              - button "Advanced controls" [ref=f11e835] [cursor=pointer]
+                          - status [ref=f11e839]:
+                            - generic [ref=f11e840]: Add expression images for Assistant.
+                            - generic [ref=f11e841]:
+                              - link "Edit expressions" [ref=f11e842] [cursor=pointer]:
+                                - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=3
+                              - button "Dismiss expression image setup" [ref=f11e843] [cursor=pointer]: Dismiss
+                - generic [ref=f11e844]:
+                  - button "Restore context sidechannel" [ref=f11e845] [cursor=pointer]:
+                    - generic [ref=f11e849]: Context rail
+                  - tooltip "Restore context sidechannel"
+                - generic [ref=f11e850]:
+                  - button "Restore runtime sidechannel" [ref=f11e851] [cursor=pointer]:
+                    - generic [ref=f11e852]: Runtime rail
+                  - tooltip "Restore runtime sidechannel"
+    - generic [ref=f11e1262]:
+      - dialog "Review flashcard":
+        - generic [ref=f11e1263]:
+          - button "Close" [active] [ref=f11e1264] [cursor=pointer]:
+            - generic "Close" [ref=f11e1265]:
+              - img "close" [ref=f11e1266]
+          - generic [ref=f11e1269]: Review flashcard
+          - generic [ref=f11e1272]:
+            - generic [ref=f11e1273]:
+              - text: Question
+              - textbox "Question" [ref=f11e1274]
+            - generic [ref=f11e1275]:
+              - text: Answer
+              - textbox "Answer" [ref=f11e1276]: Jonah Patel coordinates the library, it opens on 22 November 2026, and the book return is beside the north entrance.
+          - generic [ref=f11e1277]:
+            - button "Cancel" [ref=f11e1278] [cursor=pointer]
+            - button "Save flashcard" [disabled] [ref=f11e1280]
+  - generic [ref=f11e520] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=f11e521]
+    - generic [ref=f11e1113]:
+      - button "Open issues overlay" [ref=f11e1114]:
+        - generic [ref=f11e1115]:
+          - generic [aria-hidden] [ref=f11e1116]: "0"
+          - generic [ref=f11e1117]: "1"
+        - generic [ref=f11e1118]: Issue
+      - button "Collapse issues badge" [ref=f11e1119]
+  - alert [ref=f11e10]: /chat
+```

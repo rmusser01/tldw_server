@@ -1,0 +1,6 @@
+### Result
+{"bobDraftFilled":true}
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByRole("textbox",{name:"Note title",exact:true}).fill("Cycle3 Bob local draft boundary"); await page.getByRole("textbox",{name:"Note content",exact:true}).fill("Bob-only unsaved draft. The Copper Finch team carries eleven blue notebooks. Draft sentinel: BOB-DRAFT-COPPER-20260915."); return {bobDraftFilled:true}; })(page);
+```

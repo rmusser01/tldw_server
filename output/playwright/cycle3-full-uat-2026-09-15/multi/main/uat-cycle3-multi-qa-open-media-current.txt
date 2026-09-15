@@ -1,0 +1,196 @@
+### Open tabs
+- 0: (current) [](http://127.0.0.1:18281/knowledge)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: [](http://127.0.0.1:18281/media?id=1)
+### Page
+- Page URL: http://127.0.0.1:18281/knowledge
+### Snapshot
+```yaml
+- generic [ref=f14e20]:
+  - generic [ref=f14e23]:
+    - link "Skip to main content" [ref=f14e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f14e25]:
+      - button "Expand sidebar" [ref=f14e26] [cursor=pointer]
+      - button "New Chat" [ref=f14e30] [cursor=pointer]
+      - generic [ref=f14e33]:
+        - button "Quick Ingest" [ref=f14e34] [cursor=pointer]
+        - button "Chat" [ref=f14e38] [cursor=pointer]
+        - button "Prompts" [ref=f14e41] [cursor=pointer]
+        - button "Characters" [ref=f14e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f14e50] [cursor=pointer]
+        - button "World Books" [ref=f14e54] [cursor=pointer]
+        - button "Notes" [ref=f14e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f14e61] [cursor=pointer]
+        - button "Media" [ref=f14e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f14e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f14e78] [cursor=pointer]
+        - button "Kanban" [ref=f14e84] [cursor=pointer]
+        - button "Watchlists" [ref=f14e86] [cursor=pointer]
+      - generic [ref=f14e91]:
+        - button "Open Notes Dock" [ref=f14e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f14e97] [cursor=pointer]
+        - button "Settings" [ref=f14e100] [cursor=pointer]
+    - main [ref=f14e104]:
+      - generic [ref=f14e105]:
+        - generic [ref=f14e108]:
+          - generic [ref=f14e109]:
+            - button "Expand sidebar" [ref=f14e110] [cursor=pointer]
+            - generic [ref=f14e112]:
+              - img "tldw Assistant" [ref=f14e113]
+              - generic [ref=f14e114]: tldw Assistant
+              - button "Companion Home" [ref=f14e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f14e119] [cursor=pointer]
+          - generic [ref=f14e122]:
+            - button "Search - Open command palette" [ref=f14e123] [cursor=pointer]:
+              - generic [ref=f14e127]: Search
+              - generic [ref=f14e128]: ⌘K
+            - button "Open settings" [ref=f14e129] [cursor=pointer]
+            - generic [ref=f14e141]:
+              - button "Notifications, 0 unread" [ref=f14e259] [cursor=pointer]
+              - status [ref=f14e145]: Notifications are active
+            - button "Switch to light theme" [ref=f14e146] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f14e153] [cursor=pointer]:
+              - generic [ref=f14e154]: "?"
+        - generic [ref=f14e158]:
+          - link "Skip to search" [ref=f14e159] [cursor=pointer]:
+            - /url: "#knowledge-search-input"
+          - main [ref=f14e160]:
+            - generic [ref=f14e161]:
+              - generic [ref=f14e163]:
+                - generic [ref=f14e164]:
+                  - 'button "Open source scope and saved profiles. Sources: Documents & Media. Specific: 1 doc" [ref=f14e263] [cursor=pointer]':
+                    - text: "Sources: Documents & Media"
+                    - generic [ref=f14e264]: "• Specific: 1 doc"
+                  - button "Custom" [ref=f14e265] [cursor=pointer]
+                  - button "Web fallback is currently disabled. Click to toggle." [ref=f14e175] [cursor=pointer]: Web
+                  - button "Choose answer model" [ref=f14e180] [cursor=pointer]:
+                    - generic [ref=f14e184]: "AI: Server default"
+                  - button "Refresh source health" [ref=f14e187] [cursor=pointer]: "Sources ready: 8 of 8"
+                  - button "Open Knowledge QA settings" [ref=f14e188] [cursor=pointer]
+                - generic [ref=f14e245]:
+                  - paragraph [ref=f14e246]: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
+                  - generic [ref=f14e247]:
+                    - textbox "Search your knowledge base" [ref=f14e248]:
+                      - /placeholder: What are the key findings from the research?
+                      - text: Who coordinates Project Cedar, how many reading tables does it have, and where is the book return?
+                    - button "Clear search" [ref=f14e266] [cursor=pointer]
+                    - button "Ask" [ref=f14e250] [cursor=pointer]
+                  - generic [ref=f14e251]:
+                    - generic [ref=f14e252]: Press / to focus, Cmd+K for new search
+                    - button "New search" [ref=f14e271] [cursor=pointer]
+              - generic [ref=f14e273]:
+                - button "Export" [ref=f14e275] [cursor=pointer]
+                - generic [ref=f14e279]:
+                  - generic [ref=f14e280]: Search complete. 1 source found.
+                  - generic [ref=f14e282]:
+                    - generic [ref=f14e283]:
+                      - generic [ref=f14e284]:
+                        - generic [ref=f14e288]: AI Answer
+                        - generic [ref=f14e289]: "Answer status: Cited answer"
+                        - generic [ref=f14e290]: 1 citation
+                      - generic [ref=f14e291]:
+                        - generic [ref=f14e292]:
+                          - button "Summarize" [ref=f14e293] [cursor=pointer]
+                          - button "Show more" [ref=f14e294] [cursor=pointer]
+                        - generic [ref=f14e295]:
+                          - button "Copy answer" [ref=f14e296] [cursor=pointer]
+                          - button "Continue in editor" [ref=f14e297] [cursor=pointer]
+                      - note "Answer trust summary" [ref=f14e298]:
+                        - generic [ref=f14e299]: Searched Documents & Media. 1 source returned, 1 cited.
+                        - generic [ref=f14e300]: Web fallback disabled.
+                        - generic [ref=f14e301]: "AI model: Server default."
+                        - generic [ref=f14e302]: Selected sources look ready.
+                        - generic [ref=f14e303]: "Trust: Cited answer."
+                    - generic [ref=f14e305]:
+                      - paragraph [ref=f14e306]: This answer includes inline citation buttons. Press Tab to move between citation controls and source links.
+                      - paragraph [ref=f14e442]:
+                        - text: Project Cedar is coordinated by Jonah Patel
+                        - button "Jump to source 1" [ref=f14e443] [cursor=pointer]: "[1]"
+                        - text: ", has nine reading tables"
+                        - button "Jump to source 1" [ref=f14e444] [cursor=pointer]: "[1]"
+                        - text: ", and its book return is beside the north entrance"
+                        - button "Jump to source 1" [ref=f14e445] [cursor=pointer]: "[1]"
+                        - text: .
+                    - generic [ref=f14e312]:
+                      - generic [ref=f14e313]:
+                        - generic [ref=f14e314]: "Sources:"
+                        - button "Jump to source 1" [ref=f14e315] [cursor=pointer]: "[1]"
+                      - generic [ref=f14e316]:
+                        - generic [ref=f14e317]: Was this answer helpful?
+                        - button "Helpful" [ref=f14e318] [cursor=pointer]
+                        - button "Needs work" [ref=f14e321] [cursor=pointer]
+                  - generic [ref=f14e324]:
+                    - generic [ref=f14e325]:
+                      - generic [ref=f14e326]:
+                        - textbox "Ask a follow-up question" [ref=f14e327]:
+                          - /placeholder: Ask a follow-up question...
+                        - button "Submit follow-up question" [disabled] [ref=f14e328]
+                      - button "Start new topic" [ref=f14e331] [cursor=pointer]:
+                        - generic [ref=f14e333]: New Topic
+                    - paragraph [ref=f14e334]: Follow-up questions maintain context. Click "New Topic" to start fresh.
+            - complementary "Evidence panel" [ref=f14e335]:
+              - generic [ref=f14e336]:
+                - generic [ref=f14e337]: Evidence updated. 1 source and 1 citation.
+                - generic [ref=f14e338]:
+                  - heading "Evidence" [level=2] [ref=f14e339]
+                  - generic [ref=f14e340]: 1 sources • 1 citations
+                  - button "Close evidence panel" [ref=f14e341] [cursor=pointer]
+                - generic [ref=f14e346]:
+                  - button "Sources" [pressed] [ref=f14e347] [cursor=pointer]
+                  - button "Details" [ref=f14e351] [cursor=pointer]
+                - generic [ref=f14e354]:
+                  - paragraph [ref=f14e355]: Use each source card to inspect excerpts, unavailable reasons, citations, and supported source links.
+                  - generic [ref=f14e356]:
+                    - heading "Sources (1)" [level=3] [ref=f14e362]
+                    - button "Show filters" [ref=f14e363] [cursor=pointer]
+                    - generic [ref=f14e364]:
+                      - generic [ref=f14e365]: Showing 1 of 1 sources
+                      - generic [ref=f14e366]:
+                        - generic [ref=f14e367]: "Jump: 1-9 • Tab cycles"
+                        - button "Open source keyboard shortcuts" [ref=f14e368] [cursor=pointer]: "?"
+                    - list "Retrieved sources" [ref=f14e371]:
+                      - listitem "Source 1. Cited in answer. Press Enter to jump to citation 1." [ref=f14e372] [cursor=pointer]:
+                        - generic [ref=f14e373]:
+                          - generic [ref=f14e374]: "1"
+                          - generic [ref=f14e380]:
+                            - generic [ref=f14e381]:
+                              - heading "uat-cycle3-multi-source" [level=4] [ref=f14e382]
+                              - generic [ref=f14e383]: Relevance not measured
+                            - generic [ref=f14e384]: Document
+                            - button "Jump to citation 1 in answer" [ref=f14e387]: Cited
+                            - generic [ref=f14e391]:
+                              - generic [ref=f14e392]: "Used in answer:"
+                              - 'button "Jump to citation 1 in answer sentence 1: Project Cedar is coordinated by Jonah Patel [1], has nine reading tables [1], and its book return is beside the north entrance [1]." [ref=f14e393]': S1
+                        - generic [ref=f14e394]:
+                          - paragraph [ref=f14e395]:
+                            - text: uat-cycle3-multi-source
+                            - mark [ref=f14e396]: Project
+                            - mark [ref=f14e397]: Cedar
+                            - text: is a fictional community library used for acceptance testing. The library opens on 22 November 2026. Jonah Patel
+                            - mark [ref=f14e398]: coordinates
+                            - text: the library. The...
+                          - button "Show more" [ref=f14e399]
+                        - generic [ref=f14e401]:
+                          - button "View source 1" [ref=f14e402]: View
+                          - button "Copy citation for source 1" [ref=f14e406]: Copy citation
+                          - button "More actions for source 1" [ref=f14e408]
+                        - generic [ref=f14e413]:
+                          - button "Yes" [ref=f14e414]
+                          - button "No" [ref=f14e417]
+                    - dialog [ref=f14e425]:
+                      - generic [ref=f14e426]:
+                        - generic [ref=f14e427]:
+                          - 'heading "Source 1: uat-cycle3-multi-source" [level=3] [ref=f14e428]'
+                          - paragraph [ref=f14e429]: Other • Source ID 1 • Chunk late_chunk:1:0
+                        - generic [ref=f14e430]:
+                          - button "Open in Media" [active] [ref=f14e431] [cursor=pointer]
+                          - button "Close source preview" [ref=f14e436] [cursor=pointer]
+                      - generic [ref=f14e440]: uat-cycle3-multi-source Project Cedar is a fictional community library used for acceptance testing. The library opens on 22 November 2026. Jonah Patel coordinates the library. The library has nine reading tables. Volunteers meet every Tuesday at 18:15. The book return is beside the north entrance.
+          - generic [ref=f14e253]:
+            - button "Switch to detailed view" [ref=f14e254] [cursor=pointer]
+            - link "Help & Documentation" [ref=f14e258] [cursor=pointer]:
+              - /url: https://github.com/rmusser01/tldw_server2#readme
+  - button "Open Next.js Dev Tools" [ref=f14e15] [cursor=pointer]
+  - alert [ref=f14e19]
+```

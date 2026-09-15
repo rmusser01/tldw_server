@@ -1,0 +1,15 @@
+### Ran Playwright code
+```js
+await page.getByTestId('chat-sidebar-shortcut-prompts').click();
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [](http://127.0.0.1:18281/prompts)
+### Page
+- Page URL: http://127.0.0.1:18281/prompts
+- Console: 1 errors, 0 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-15T10-28-25-310Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T10-21-58-444Z.log#L7-L10

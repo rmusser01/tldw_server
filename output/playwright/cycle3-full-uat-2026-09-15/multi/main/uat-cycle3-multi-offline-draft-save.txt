@@ -1,0 +1,16 @@
+### Result
+{"offline":true,"saveAttempted":true,"url":"http://127.0.0.1:18281/notes"}
+### Ran Playwright code
+```js
+await (async (page) => { await page.context().setOffline(true); await page.getByRole("textbox",{name:"Note title",exact:true}).fill("Cycle3 Alice offline private draft"); await page.getByRole("textbox",{name:"Note content",exact:true}).fill("Alice-only fictional draft. The Juniper Lantern reading circle meets at 07:25 on Fridays. Private boundary sentinel: ALICE-JUNIPER-LANTERN-20260915."); await page.getByRole("button",{name:"Save note",exact:true}).click(); return {offline:true,saveAttempted:true,url:page.url()}; })(page);
+```
+### Open tabs
+- 0: [](http://127.0.0.1:18281/settings/tldw)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [Notes | tldw](http://127.0.0.1:18281/notes)
+### Page
+- Page URL: http://127.0.0.1:18281/notes
+- Page Title: Notes | tldw
+- Console: 2 errors, 1 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T10-58-34-468Z.log#L3-L5

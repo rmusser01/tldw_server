@@ -1,0 +1,33 @@
+### Open tabs
+- 0: [](http://127.0.0.1:18281/settings/tldw)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [Sign in | tldw](http://127.0.0.1:18281/login)
+### Page
+- Page URL: http://127.0.0.1:18281/login
+- Page Title: Sign in | tldw
+- Console: 0 errors, 3 warnings
+### Snapshot
+```yaml
+- generic [ref=f20e11]:
+  - generic [ref=f20e924]:
+    - heading "Sign in to tldw" [level=1] [ref=f20e925]
+    - paragraph [ref=f20e926]:
+      - text: http://127.0.0.1:18201
+      - link "Change server" [ref=f20e927] [cursor=pointer]:
+        - /url: /settings/tldw
+    - generic [ref=f20e928]:
+      - generic [ref=f20e929]:
+        - text: Username
+        - textbox "Username" [active] [ref=f20e930]
+      - generic [ref=f20e931]:
+        - text: Password
+        - textbox "Password" [ref=f20e932]
+      - button "Sign in" [ref=f20e933] [cursor=pointer]
+    - paragraph [ref=f20e934]:
+      - text: Trouble signing in? Server URL and auth mode are configured in
+      - link "tldw settings" [ref=f20e935] [cursor=pointer]:
+        - /url: /settings/tldw
+      - text: .
+  - button "Open Next.js Dev Tools" [ref=f20e527] [cursor=pointer]
+  - alert [ref=f20e10]: /login
+```

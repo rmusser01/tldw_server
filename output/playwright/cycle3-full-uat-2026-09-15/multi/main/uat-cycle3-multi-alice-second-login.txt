@@ -1,0 +1,15 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Login' }).click();
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [](http://127.0.0.1:18281/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18281/settings/tldw
+- Console: 6 errors, 6 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-15T10-54-30-370Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T10-52-53-094Z.log#L32-L33

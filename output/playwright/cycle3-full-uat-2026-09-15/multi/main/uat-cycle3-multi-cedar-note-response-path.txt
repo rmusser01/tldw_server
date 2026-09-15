@@ -1,0 +1,1 @@
+{"note_id":"0d6a6904-c5b4-4d38-a8c6-18b1c36f46e2","flashcard_id":null,"conversation_id":"812385d9-f19b-4bdf-82a0-1d850884a4b3","message_id":"pa_eb5c-ce9c-231-88fd","export_status":"not_requested","export_job_id":null}

@@ -1,0 +1,14 @@
+### Result
+{"submitted":true}
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByRole("textbox",{name:"Type a message... (/ commands, @ mentions)",exact:true}).fill("Say your required response now."); await page.getByRole("button",{name:"Send message",exact:true}).click(); return {submitted:true}; })(page);
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [Cycle3 BEEP Robot Chat (20260915_105530)](http://127.0.0.1:18281/chat?mode=character&characterId=5)
+### Page
+- Page URL: http://127.0.0.1:18281/chat?mode=character&characterId=5
+- Page Title: Cycle3 BEEP Robot Chat (20260915_105530)
+- Console: 1 errors, 0 warnings

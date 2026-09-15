@@ -1,0 +1,1 @@
+{"detail":"BYOK is disabled in this deployment"}

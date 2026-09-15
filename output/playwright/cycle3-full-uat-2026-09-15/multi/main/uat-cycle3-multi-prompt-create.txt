@@ -1,0 +1,13 @@
+### Ran Playwright code
+```js
+await page.getByTestId('prompts-add').click();
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [](http://127.0.0.1:18281/prompts?new=1)
+### Page
+- Page URL: http://127.0.0.1:18281/prompts?new=1
+- Console: 2 errors, 0 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-15T10-29-05-918Z.yml)

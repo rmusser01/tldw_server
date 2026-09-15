@@ -1,0 +1,151 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [](http://127.0.0.1:18281/flashcards)
+### Page
+- Page URL: http://127.0.0.1:18281/flashcards
+### Snapshot
+```yaml
+- generic [active] [ref=f8e20]:
+  - generic [ref=f8e23]:
+    - link "Skip to main content" [ref=f8e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f8e25]:
+      - button "Expand sidebar" [ref=f8e26] [cursor=pointer]
+      - button "New Chat" [ref=f8e30] [cursor=pointer]
+      - generic [ref=f8e33]:
+        - button "Quick Ingest" [ref=f8e34] [cursor=pointer]
+        - button "Chat" [ref=f8e38] [cursor=pointer]
+        - button "Prompts" [ref=f8e41] [cursor=pointer]
+        - button "Characters" [ref=f8e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f8e50] [cursor=pointer]
+        - button "World Books" [ref=f8e54] [cursor=pointer]
+        - button "Notes" [ref=f8e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f8e61] [cursor=pointer]
+        - button "Media" [ref=f8e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f8e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f8e78] [cursor=pointer]
+        - button "Kanban" [ref=f8e84] [cursor=pointer]
+        - button "Watchlists" [ref=f8e86] [cursor=pointer]
+      - generic [ref=f8e91]:
+        - button "Open Notes Dock" [ref=f8e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f8e97] [cursor=pointer]
+        - button "Settings" [ref=f8e100] [cursor=pointer]
+    - main [ref=f8e104]:
+      - generic [ref=f8e105]:
+        - generic [ref=f8e108]:
+          - generic [ref=f8e109]:
+            - button "Expand sidebar" [ref=f8e110] [cursor=pointer]
+            - generic [ref=f8e112]:
+              - img "tldw Assistant" [ref=f8e113]
+              - generic [ref=f8e114]: tldw Assistant
+              - button "Companion Home" [ref=f8e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f8e119] [cursor=pointer]
+          - generic [ref=f8e122]:
+            - button "Search - Open command palette" [ref=f8e123] [cursor=pointer]:
+              - generic [ref=f8e127]: Search
+              - generic [ref=f8e128]: ⌘K
+            - button "Open settings" [ref=f8e129] [cursor=pointer]
+            - generic [ref=f8e141]:
+              - button "Notifications, 0 unread" [ref=f8e142] [cursor=pointer]
+              - status [ref=f8e146]: Notifications are active
+            - button "Switch to light theme" [ref=f8e147] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f8e154] [cursor=pointer]:
+              - generic [ref=f8e155]: "?"
+        - generic [ref=f8e157]:
+          - generic [ref=f8e159]:
+            - generic [ref=f8e161]:
+              - generic [ref=f8e162]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f8e163]
+            - navigation "Flashcards modes" [ref=f8e164]:
+              - generic [ref=f8e165]: Study
+              - generic [ref=f8e166]: Manage
+              - generic [ref=f8e167]: Import / Export
+              - generic [ref=f8e168]: Templates
+              - generic [ref=f8e169]: Scheduler
+          - generic [ref=f8e172]:
+            - tablist [ref=f8e173]:
+              - generic [ref=f8e175]:
+                - tab "Study" [selected] [ref=f8e177] [cursor=pointer]
+                - tab "Manage" [ref=f8e179] [cursor=pointer]
+                - tab "Import / Export" [ref=f8e181] [cursor=pointer]
+                - tab "Templates" [ref=f8e183] [cursor=pointer]
+                - tab "Scheduler" [ref=f8e185] [cursor=pointer]
+              - generic [ref=f8e187]:
+                - button "Test with Quiz" [disabled] [ref=f8e189]
+                - button "Keyboard Shortcuts" [ref=f8e190] [cursor=pointer]
+            - tabpanel "Study" [ref=f8e197]:
+              - generic [ref=f8e198]:
+                - generic [ref=f8e199]:
+                  - generic [ref=f8e200] [cursor=pointer]:
+                    - generic [ref=f8e201]:
+                      - generic: Select deck
+                      - combobox [ref=f8e202]
+                    - img "down" [ref=f8e204]
+                  - radiogroup "segmented control" [ref=f8e207]:
+                    - generic [ref=f8e208]:
+                      - generic [ref=f8e209] [cursor=pointer]:
+                        - radio "Due only" [checked]
+                        - generic "Due only" [ref=f8e210]
+                      - generic [ref=f8e211] [cursor=pointer]:
+                        - radio "Cram"
+                        - generic "Cram" [ref=f8e212]
+                  - radiogroup "segmented control" [ref=f8e213]:
+                    - generic [ref=f8e214]:
+                      - generic [ref=f8e215] [cursor=pointer]:
+                        - radio "Front first" [checked]
+                        - generic "Front first" [ref=f8e216]
+                      - generic [ref=f8e217] [cursor=pointer]:
+                        - radio "Back first"
+                        - generic "Back first" [ref=f8e218]
+                - region [ref=f8e219]:
+                  - generic [ref=f8e220]:
+                    - generic [ref=f8e226]:
+                      - strong [ref=f8e228]: Source reviews
+                      - generic [ref=f8e229]: No source reviews due
+                    - button "Schedule" [ref=f8e230] [cursor=pointer]
+                - generic [ref=f8e236]:
+                  - generic [ref=f8e237]:
+                    - generic [ref=f8e238]: Reviewed today
+                    - strong [ref=f8e240]: "1"
+                  - generic [ref=f8e241]:
+                    - generic [ref=f8e242]: Retention rate
+                    - strong [ref=f8e244]: 100.0%
+                  - generic [ref=f8e245]:
+                    - generic [ref=f8e246]: Lapse rate
+                    - strong [ref=f8e248]: 0.0%
+                  - generic [ref=f8e249]:
+                    - generic [ref=f8e250]: Avg answer time
+                    - strong [ref=f8e252]: 22.6s
+                  - generic [ref=f8e253]:
+                    - generic [ref=f8e254]: Study streak
+                    - strong [ref=f8e256]: 1 days
+                - generic [ref=f8e259]:
+                  - img "No data" [ref=f8e261]
+                  - generic [ref=f8e273]: You're all caught up!
+                  - generic [ref=f8e275]:
+                    - generic [ref=f8e276]: No cards are due for review. Great job!
+                    - generic [ref=f8e278]:
+                      - strong [ref=f8e283]: "Next review: in 10 minutes"
+                      - generic [ref=f8e284]: Tuesday, September 15 at 3:58 AM · 1 cards due
+                    - generic [ref=f8e286]:
+                      - button "Practice again" [ref=f8e288] [cursor=pointer]
+                      - button "Create more cards" [ref=f8e291] [cursor=pointer]
+                - generic [ref=f8e294]:
+                  - generic [ref=f8e295]: Recent study sessions
+                  - list "Recent study sessions" [ref=f8e299]:
+                    - listitem [ref=f8e300]:
+                      - generic [ref=f8e301]:
+                        - generic [ref=f8e302]:
+                          - strong [ref=f8e304]: All decks
+                          - button "View completed session" [ref=f8e305] [cursor=pointer]
+                        - generic [ref=f8e307]:
+                          - generic [ref=f8e308]: Completed
+                          - generic [ref=f8e309]: Due review
+                          - generic [ref=f8e310]: 1 card reviewed
+                        - generic [ref=f8e311]: Completed 2026-09-15 03:48
+  - button "Open Next.js Dev Tools" [ref=f8e15] [cursor=pointer]
+  - alert [ref=f8e19]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T10-47-21-737Z.log#L5-L6

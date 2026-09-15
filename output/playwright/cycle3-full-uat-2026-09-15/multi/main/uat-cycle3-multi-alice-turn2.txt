@@ -1,0 +1,273 @@
+### Open tabs
+- 0: (current) [Helpful AI Assistant (20260915_094950)](http://127.0.0.1:18281/chat)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+### Page
+- Page URL: http://127.0.0.1:18281/chat
+- Page Title: Helpful AI Assistant (20260915_094950)
+- Console: 2 errors, 1 warnings
+### Snapshot
+```yaml
+- generic [ref=f7e11]:
+  - generic [ref=f7e14]:
+    - link "Skip to main content" [ref=f7e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f7e16]:
+      - button "Expand sidebar" [ref=f7e17] [cursor=pointer]
+      - button "New Chat" [ref=f7e21] [cursor=pointer]
+      - generic [ref=f7e24]:
+        - button "Quick Ingest" [ref=f7e25] [cursor=pointer]
+        - button "Chat" [ref=f7e29] [cursor=pointer]
+        - button "Prompts" [ref=f7e32] [cursor=pointer]
+        - button "Characters" [ref=f7e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f7e41] [cursor=pointer]
+        - button "World Books" [ref=f7e45] [cursor=pointer]
+        - button "Notes" [ref=f7e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f7e52] [cursor=pointer]
+        - button "Media" [ref=f7e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f7e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f7e69] [cursor=pointer]
+        - button "Kanban" [ref=f7e75] [cursor=pointer]
+        - button "Watchlists" [ref=f7e77] [cursor=pointer]
+      - generic [ref=f7e82]:
+        - button "Open Notes Dock" [ref=f7e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f7e88] [cursor=pointer]
+        - button "Settings" [ref=f7e91] [cursor=pointer]
+    - main [ref=f7e95]:
+      - generic [ref=f7e96]:
+        - generic [ref=f7e99]:
+          - generic [ref=f7e100]:
+            - button "Expand sidebar" [ref=f7e101] [cursor=pointer]
+            - generic [ref=f7e103]:
+              - img "tldw Assistant" [ref=f7e104]
+              - generic [ref=f7e105]: tldw Assistant
+              - button "Companion Home" [ref=f7e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f7e110] [cursor=pointer]
+            - button "Untitled" [ref=f7e384] [cursor=pointer]
+            - generic "Saved chat. History is persisted." [ref=f7e114]: Saved
+          - generic [ref=f7e115]:
+            - button "Search - Open command palette" [ref=f7e116] [cursor=pointer]:
+              - generic [ref=f7e120]: Search
+              - generic [ref=f7e121]: ⌘K
+            - button "New saved chat" [ref=f7e122] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f7e126] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f7e127] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f7e128] [cursor=pointer]
+            - button "Open settings" [ref=f7e135] [cursor=pointer]
+            - generic [ref=f7e147]:
+              - button "Notifications, 0 unread" [ref=f7e385] [cursor=pointer]
+              - status [ref=f7e151]: Notifications are active
+            - button "Switch to light theme" [ref=f7e152] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f7e159] [cursor=pointer]:
+              - generic [ref=f7e160]: "?"
+        - generic [ref=f7e161]:
+          - heading "Chat" [level=1] [ref=f7e162]
+          - generic [ref=f7e165]:
+            - paragraph [ref=f7e166]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f7e167]:
+              - main [ref=f7e168]:
+                - generic [ref=f7e169]:
+                  - generic [ref=f7e171]:
+                    - generic [ref=f7e172]:
+                      - generic [ref=f7e173]:
+                        - text: Character Chat
+                        - generic [ref=f7e389]: Assistant
+                      - generic [ref=f7e174]: Conversation timeline
+                    - generic [ref=f7e175]:
+                      - button "Switch to light theme" [ref=f7e176] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f7e183] [cursor=pointer]:
+                        - generic [ref=f7e189]: Focus
+                      - button "Shortcuts" [ref=f7e190] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f7e194]
+                  - log "Chat messages" [ref=f7e196]:
+                    - generic [ref=f7e198]:
+                      - article "User message 1 of 4" [ref=f7e454]:
+                        - generic [ref=f7e393]:
+                          - generic [ref=f7e395]:
+                            - generic [ref=f7e396]: You
+                            - generic [ref=f7e397]: • 2:49 AM
+                          - paragraph [ref=f7e399]: "This synthetic acceptance conversation is called Cedar continuity. Remember the marker CEDAR-27. Reply only: CEDAR-27 remembered."
+                          - button "More actions" [ref=f7e457] [cursor=pointer]: •••
+                      - article "Assistant message 2 of 4" [ref=f7e458]:
+                        - generic [ref=f7e412]:
+                          - generic [ref=f7e414]:
+                            - generic [ref=f7e415]: llama:../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf
+                            - generic [ref=f7e416]: • 2:49 AM
+                          - paragraph [ref=f7e460]: CEDAR-27 remembered.
+                          - generic [ref=f7e461]:
+                            - generic [ref=f7e462]:
+                              - generic [ref=f7e463]: Was this helpful?
+                              - generic [ref=f7e464]:
+                                - button "Helpful" [ref=f7e465] [cursor=pointer]
+                                - button "Not helpful" [ref=f7e468] [cursor=pointer]
+                                - button "More feedback" [ref=f7e471] [cursor=pointer]
+                            - button "More actions" [ref=f7e477] [cursor=pointer]: •••
+                      - article "User message 3 of 4" [ref=f7e478]:
+                        - generic [ref=f7e481]:
+                          - generic [ref=f7e483]:
+                            - generic [ref=f7e484]: You
+                            - generic [ref=f7e485]: • 2:50 AM
+                          - paragraph [ref=f7e487]: What marker did I ask you to remember? Reply with the marker only.
+                          - button "More actions" [ref=f7e490] [cursor=pointer]: •••
+                      - article "Assistant message 4 of 4" [ref=f7e494]:
+                        - generic [ref=f7e500]:
+                          - generic [ref=f7e502]:
+                            - generic [ref=f7e503]: Assistant
+                            - generic [ref=f7e504]: • 2:50 AM
+                          - generic [ref=f7e505]:
+                            - button "collapsed Model’s reasoning (optional) 7s" [ref=f7e508] [cursor=pointer]:
+                              - img "collapsed" [ref=f7e510]
+                              - generic [ref=f7e514]:
+                                - generic [ref=f7e515]: Model’s reasoning (optional)
+                                - generic [ref=f7e516]: 7s
+                            - paragraph [ref=f7e518]: CEDAR-27
+                          - generic [ref=f7e519]:
+                            - generic [ref=f7e520]:
+                              - generic [ref=f7e521]: Was this helpful?
+                              - generic [ref=f7e522]:
+                                - button "Helpful" [ref=f7e523] [cursor=pointer]
+                                - button "Not helpful" [ref=f7e526] [cursor=pointer]
+                                - button "More feedback" [ref=f7e529] [cursor=pointer]
+                            - button "More actions" [ref=f7e535] [cursor=pointer]: •••
+                  - generic [ref=f7e228]:
+                    - generic [ref=f7e229]: Composer
+                    - generic [ref=f7e240]:
+                      - button [aria-hidden] [ref=f7e241]
+                      - button [aria-hidden] [ref=f7e242]
+                      - generic [ref=f7e243]:
+                        - generic [ref=f7e245]:
+                          - button "Hide composer options" [expanded] [ref=f7e246] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f7e251]
+                          - generic [ref=f7e252]:
+                            - button "Improve prompt" [ref=f7e255] [cursor=pointer]
+                            - generic [ref=f7e260]:
+                              - button "Send message" [ref=f7e261] [cursor=pointer]:
+                                - generic [ref=f7e262]: Send
+                              - button "Open message delivery options" [ref=f7e267] [cursor=pointer]
+                        - generic [ref=f7e272]:
+                          - generic [ref=f7e274]:
+                            - group "Mode and context controls" [ref=f7e275]:
+                              - button "Modes" [ref=f7e276] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f7e441] [cursor=pointer]':
+                                - generic [ref=f7e442]:
+                                  - generic [ref=f7e443]: MCP
+                                  - generic [ref=f7e444]: None
+                              - button "Search & Context" [ref=f7e289] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f7e294] [cursor=pointer]:
+                                - generic [ref=f7e297]: Prompt
+                              - button "Select character or persona" [ref=f7e298] [cursor=pointer]
+                              - button "Role-play setup" [ref=f7e303] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f7e310] [cursor=pointer]
+                            - group "Run input controls" [ref=f7e316]:
+                              - button "OpenUI" [ref=f7e317] [cursor=pointer]
+                              - button "Start dictation" [ref=f7e447] [cursor=pointer]
+                              - generic [ref=f7e327]:
+                                - button "Attach image" [ref=f7e329] [cursor=pointer]
+                                - button "More attachments" [ref=f7e333] [cursor=pointer]
+                              - button "More tools" [ref=f7e336] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f7e339] [cursor=pointer]:
+                                - generic [ref=f7e343]: Chat Settings
+                          - generic "Active context" [ref=f7e344]:
+                            - button "LLaMa.cpp / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf" [ref=f7e448] [cursor=pointer]:
+                              - generic "Provider status" [ref=f7e351]: Healthy
+                            - button "Chat 4 messages" [ref=f7e539] [cursor=pointer]:
+                              - generic [ref=f7e452]: Chat
+                              - generic [ref=f7e453]: 4 messages
+                            - button "Configure context window size" [ref=f7e353] [cursor=pointer]:
+                              - generic [ref=f7e354]: 178 + ~0 = 178 tokens
+                            - button "Saved" [ref=f7e356] [cursor=pointer]
+                            - button "Advanced controls" [ref=f7e358] [cursor=pointer]
+              - generic [ref=f7e362]:
+                - button "Restore context sidechannel" [ref=f7e363] [cursor=pointer]:
+                  - generic [ref=f7e367]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f7e368]:
+                - button "Restore runtime sidechannel" [ref=f7e369] [cursor=pointer]:
+                  - generic [ref=f7e370]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - generic:
+    - generic [ref=f7e542]:
+      - generic [ref=f7e543]:
+        - navigation [ref=f7e545]:
+          - button [disabled] [ref=f7e546]:
+            - img "previous" [ref=f7e547]
+          - generic [ref=f7e549]:
+            - generic [ref=f7e550]: 1/
+            - text: "1"
+          - button [disabled] [ref=f7e551]:
+            - img "next" [ref=f7e552]
+        - link "Next.js 16.1.4 (stale) Turbopack" [ref=f7e555] [cursor=pointer]:
+          - /url: https://nextjs.org/docs/messages/version-staleness
+          - generic "There is a newer version (16.3.5) available, upgrade recommended!" [ref=f7e558]: Next.js 16.1.4 (stale)
+          - generic [ref=f7e559]: Turbopack
+      - dialog "Runtime Error" [ref=f7e561]:
+        - generic [ref=f7e564]:
+          - generic [ref=f7e565]:
+            - generic [ref=f7e566]:
+              - generic [ref=f7e567]: Runtime Error
+              - generic [ref=f7e569]:
+                - button "Copy Error Info" [ref=f7e570] [cursor=pointer]
+                - button "No related documentation found" [disabled] [ref=f7e573]
+                - button "Attach Node.js inspector" [ref=f7e576] [cursor=pointer]
+            - generic [ref=f7e585]: speaker_character_name must reference a selected participant in this chat (POST /api/v1/chats/a68ad772-d28d-43f1-b948-2b97119788e0/completions/persist?scope_type=global)
+          - generic [ref=f7e587]:
+            - generic [ref=f7e588]:
+              - paragraph [ref=f7e590]:
+                - generic [ref=f7e596]: ../packages/ui/src/services/background-proxy.ts (1042:19) @ buildRequestError
+                - button "Open in editor" [ref=f7e597] [cursor=pointer]
+              - generic [ref=f7e602]:
+                - generic [ref=f7e603]: 1040 | return createAbortError(msg, status, details)
+                - generic [ref=f7e604]: "1041 | }"
+                - generic [ref=f7e605]: "> 1042 | const error = new Error(`${msg} (${method} ${path})`) as Error & {"
+                - generic [ref=f7e606]: "| ^"
+                - generic [ref=f7e607]: "1043 | status?: number"
+                - generic [ref=f7e608]: "1044 | code?: string"
+                - generic [ref=f7e609]: "1045 | details?: unknown"
+            - generic [ref=f7e610]:
+              - paragraph [ref=f7e612]:
+                - text: Call Stack
+                - generic [ref=f7e613]: "6"
+              - generic [ref=f7e614]:
+                - generic [ref=f7e615]:
+                  - text: buildRequestError
+                  - button "Open buildRequestError in editor" [ref=f7e616] [cursor=pointer]
+                - text: ../packages/ui/src/services/background-proxy.ts (1042:19)
+              - generic [ref=f7e619]:
+                - generic [ref=f7e620]:
+                  - text: handleFailedResponse
+                  - button "Open handleFailedResponse in editor" [ref=f7e621] [cursor=pointer]
+                - text: ../packages/ui/src/services/background-proxy.ts (1181:14)
+              - generic [ref=f7e624]:
+                - generic [ref=f7e625]:
+                  - text: async bgRequestImpl
+                  - button "Open async bgRequestImpl in editor" [ref=f7e626] [cursor=pointer]
+                - text: ../packages/ui/src/services/background-proxy.ts (1426:21)
+              - generic [ref=f7e629]:
+                - generic [ref=f7e630]:
+                  - text: async TldwApiClient.persistCharacterCompletion
+                  - button "Open async TldwApiClient.persistCharacterCompletion in editor" [ref=f7e631] [cursor=pointer]
+                - text: ../packages/ui/src/services/tldw/domains/chat-rag.ts (1291:19)
+              - generic [ref=f7e634]:
+                - generic [ref=f7e635]:
+                  - text: async characterChatMode
+                  - button "Open async characterChatMode in editor" [ref=f7e636] [cursor=pointer]
+                - text: ../packages/ui/src/hooks/chat/useChatActions.ts (2489:30)
+              - generic [ref=f7e639]:
+                - generic [ref=f7e640]:
+                  - text: async onSubmit
+                  - button "Open async onSubmit in editor" [ref=f7e641] [cursor=pointer]
+                - text: ../packages/ui/src/hooks/chat/useChatActions.ts (3656:37)
+        - generic [ref=f7e644]: "1"
+        - generic [ref=f7e645]: "2"
+    - generic [ref=f7e378] [cursor=pointer]:
+      - button "Open Next.js Dev Tools" [ref=f7e379]
+      - generic [ref=f7e646]:
+        - button "Open issues overlay" [ref=f7e647]:
+          - generic [ref=f7e648]:
+            - generic [aria-hidden] [ref=f7e649]: "0"
+            - generic [ref=f7e650]: "1"
+          - generic [ref=f7e651]: Issue
+        - button "Collapse issues badge" [ref=f7e652]
+  - alert [ref=f7e10]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T09-49-33-627Z.log#L4-L12

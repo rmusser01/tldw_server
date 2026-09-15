@@ -1,0 +1,24 @@
+{
+  "checkedAt": "2026-09-15T11:02:50.436Z",
+  "identity": "bob",
+  "verifierAuth": "login",
+  "method": "GET",
+  "path": "/api/v1/notes/a80707b3-c761-4d8a-8bbe-fe2222886bc2",
+  "status": 200,
+  "body": {
+    "title": "Cycle3 Bob private note",
+    "content": "Bob owns this fictional notebook entry. The Copper Finch observatory opens at 09:40 on Tuesdays. Bob-only sentinel: BOB-COPPER-FINCH-20260915.",
+    "conversation_id": null,
+    "message_id": null,
+    "id": "a80707b3-c761-4d8a-8bbe-fe2222886bc2",
+    "created_at": "2026-09-15T09:52:50.168000Z",
+    "last_modified": "2026-09-15T09:52:50.168000Z",
+    "version": 1,
+    "client_id": "3",
+    "deleted": false,
+    "studio": null,
+    "keywords": [],
+    "folders": [],
+    "keyword_sync": null
+  }
+}

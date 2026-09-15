@@ -1,0 +1,12 @@
+### Ran Playwright code
+```js
+await page.getByTestId('flashcards-review-rate-3').click();
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [](http://127.0.0.1:18281/flashcards)
+### Page
+- Page URL: http://127.0.0.1:18281/flashcards
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-15T10-48-37-642Z.yml)

@@ -1,0 +1,16 @@
+### Result
+{"online":true}
+### Ran Playwright code
+```js
+await (async (page) => { await page.context().setOffline(false); return {online:true}; })(page);
+```
+### Open tabs
+- 0: [](http://127.0.0.1:18281/settings/tldw)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [Loading http://127.0.0.1:18281/login](http://127.0.0.1:18281/notes)
+### Page
+- Page URL: http://127.0.0.1:18281/notes
+- Page Title: Loading http://127.0.0.1:18281/login
+- Console: 16 errors, 10 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T10-58-34-468Z.log#L28-L31

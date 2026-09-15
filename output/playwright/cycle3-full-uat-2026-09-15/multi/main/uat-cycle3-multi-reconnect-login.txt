@@ -1,0 +1,34 @@
+### Open tabs
+- 0: [](http://127.0.0.1:18281/settings/tldw)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [Sign in | tldw](http://127.0.0.1:18281/login)
+### Page
+- Page URL: http://127.0.0.1:18281/login
+- Page Title: Sign in | tldw
+### Snapshot
+```yaml
+- generic [ref=f14e1]:
+  - generic [ref=f14e5]:
+    - heading "Sign in to tldw" [level=1] [ref=f14e6]
+    - paragraph [ref=f14e7]:
+      - text: http://127.0.0.1:18201
+      - link "Change server" [ref=f14e8] [cursor=pointer]:
+        - /url: /settings/tldw
+    - generic [ref=f14e9]:
+      - generic [ref=f14e10]:
+        - text: Username
+        - textbox "Username" [active] [ref=f14e11]
+      - generic [ref=f14e12]:
+        - text: Password
+        - textbox "Password" [ref=f14e13]
+      - button "Sign in" [ref=f14e14] [cursor=pointer]
+    - paragraph [ref=f14e15]:
+      - text: Trouble signing in? Server URL and auth mode are configured in
+      - link "tldw settings" [ref=f14e16] [cursor=pointer]:
+        - /url: /settings/tldw
+      - text: .
+  - button "Open Next.js Dev Tools" [ref=f14e22] [cursor=pointer]
+  - alert [ref=f14e26]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T10-58-34-468Z.log#L32-L33

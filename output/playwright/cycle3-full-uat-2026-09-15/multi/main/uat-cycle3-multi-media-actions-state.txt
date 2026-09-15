@@ -1,0 +1,300 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [](http://127.0.0.1:18281/media?id=1)
+### Page
+- Page URL: http://127.0.0.1:18281/media?id=1
+### Snapshot
+```yaml
+- generic [ref=f4e20]:
+  - generic [ref=f4e21]:
+    - generic [ref=f4e23]:
+      - link "Skip to main content" [ref=f4e24] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f4e25]:
+        - button "Expand sidebar" [ref=f4e26] [cursor=pointer]
+        - button "New Chat" [ref=f4e30] [cursor=pointer]
+        - generic [ref=f4e33]:
+          - button "Quick Ingest" [ref=f4e34] [cursor=pointer]
+          - button "Chat" [ref=f4e38] [cursor=pointer]
+          - button "Prompts" [ref=f4e41] [cursor=pointer]
+          - button "Characters" [ref=f4e45] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f4e50] [cursor=pointer]
+          - button "World Books" [ref=f4e54] [cursor=pointer]
+          - button "Notes" [ref=f4e57] [cursor=pointer]
+          - button "Knowledge QA" [ref=f4e61] [cursor=pointer]
+          - button "Media" [ref=f4e69] [cursor=pointer]
+          - button "Document Workspace" [ref=f4e72] [cursor=pointer]
+          - button "Research Workspace" [ref=f4e78] [cursor=pointer]
+          - button "Kanban" [ref=f4e84] [cursor=pointer]
+          - button "Watchlists" [ref=f4e86] [cursor=pointer]
+        - generic [ref=f4e91]:
+          - button "Open Notes Dock" [ref=f4e92] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f4e97] [cursor=pointer]
+          - button "Settings" [ref=f4e100] [cursor=pointer]
+      - main [ref=f4e104]:
+        - generic [ref=f4e105]:
+          - generic [ref=f4e108]:
+            - generic [ref=f4e109]:
+              - button "Expand sidebar" [ref=f4e110] [cursor=pointer]
+              - generic [ref=f4e112]:
+                - img "tldw Assistant" [ref=f4e113]
+                - generic [ref=f4e114]: tldw Assistant
+                - button "Companion Home" [ref=f4e115] [cursor=pointer]
+                - button "Show shortcuts" [ref=f4e119] [cursor=pointer]
+            - generic [ref=f4e122]:
+              - button "Search - Open command palette" [ref=f4e123] [cursor=pointer]:
+                - generic [ref=f4e127]: Search
+                - generic [ref=f4e128]: ⌘K
+              - button "Open settings" [ref=f4e129] [cursor=pointer]
+              - generic [ref=f4e141]:
+                - button "Notifications, 0 unread" [ref=f4e142] [cursor=pointer]
+                - status [ref=f4e146]: Notifications are active
+              - button "Switch to light theme" [ref=f4e147] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f4e154] [cursor=pointer]:
+                - generic [ref=f4e155]: "?"
+          - generic [ref=f4e157]:
+            - generic [ref=f4e159]:
+              - generic [ref=f4e160]:
+                - generic [ref=f4e161]:
+                  - heading "Media Inspector" [level=1] [ref=f4e162]
+                  - generic [ref=f4e163]:
+                    - generic [ref=f4e164]: 2 / 2
+                    - button "Trash" [ref=f4e165] [cursor=pointer]
+                    - button "Bulk" [ref=f4e169] [cursor=pointer]
+                - generic [ref=f4e172]:
+                  - button "Show media only" [pressed] [ref=f4e173] [cursor=pointer]:
+                    - generic [ref=f4e174]: Media
+                    - generic [ref=f4e175]: "2"
+                  - button "Show notes only" [ref=f4e176] [cursor=pointer]:
+                    - generic [ref=f4e177]: Notes
+                    - generic [ref=f4e178]: "0"
+              - generic [ref=f4e180]:
+                - generic [ref=f4e181]:
+                  - generic [ref=f4e182]: Find media
+                  - button "Collapse find media panel" [expanded] [ref=f4e184] [cursor=pointer]
+                - generic [ref=f4e187]:
+                  - generic [ref=f4e188]:
+                    - textbox "Search media (title/content)" [ref=f4e193]
+                    - button "Search syntax help" [ref=f4e195] [cursor=pointer]: "?"
+                  - button "Search" [ref=f4e196] [cursor=pointer]
+                  - generic [ref=f4e197]:
+                    - generic [ref=f4e198]:
+                      - generic [ref=f4e199]: Filters
+                      - button "Clear all" [ref=f4e203] [cursor=pointer]
+                    - generic [ref=f4e204]:
+                      - generic [ref=f4e205]: Search mode
+                      - generic [ref=f4e206]:
+                        - button "Full-text search" [pressed] [ref=f4e207] [cursor=pointer]: Full-text
+                        - button "Metadata search" [ref=f4e208] [cursor=pointer]: Metadata
+                    - generic [ref=f4e209]:
+                      - generic [ref=f4e210]: Sort by
+                      - generic [ref=f4e211] [cursor=pointer]:
+                        - generic [ref=f4e212]:
+                          - generic "Relevance" [ref=f4e213]
+                          - combobox [ref=f4e214]
+                        - img "down" [ref=f4e216]
+                    - generic [ref=f4e219]:
+                      - generic [ref=f4e220]: Date range
+                      - generic [ref=f4e221]:
+                        - generic [ref=f4e222]:
+                          - text: Start date
+                          - textbox "Start date" [ref=f4e223]
+                        - generic [ref=f4e224]:
+                          - text: End date
+                          - textbox "End date" [ref=f4e225]
+                    - button "Advanced search" [ref=f4e227] [cursor=pointer]
+                    - generic [ref=f4e231] [cursor=pointer]:
+                      - checkbox "Favorites only" [ref=f4e232]
+                      - generic [ref=f4e235]: Favorites only
+                    - generic [ref=f4e236]:
+                      - button "Media types" [ref=f4e237] [cursor=pointer]
+                      - generic [ref=f4e243] [cursor=pointer]:
+                        - checkbox "Filter by Document" [ref=f4e244]
+                        - generic [ref=f4e245]: Document
+                    - button "Keywords" [ref=f4e247] [cursor=pointer]
+                    - generic [ref=f4e252]:
+                      - generic [ref=f4e253]: Exclude keywords
+                      - generic [ref=f4e255]:
+                        - generic [ref=f4e256]:
+                          - generic: Exclude keyword
+                          - combobox "Exclude keyword" [ref=f4e258]
+                        - img "down" [ref=f4e260]
+                      - generic [ref=f4e263]: Use excluded keywords to remove items containing those terms.
+                      - generic [ref=f4e264]: 0 exclude keyword suggestions available
+                  - generic [ref=f4e265]:
+                    - generic [ref=f4e266]:
+                      - generic [ref=f4e267]: Collection
+                      - combobox "Collection" [ref=f4e268]:
+                        - option "All items" [selected]
+                    - paragraph [ref=f4e269]: Create collections from bulk selection to organize related items.
+              - generic [ref=f4e270]:
+                - generic [ref=f4e272]:
+                  - generic [ref=f4e273]:
+                    - generic [ref=f4e274]:
+                      - generic [ref=f4e275]: Results
+                      - generic [ref=f4e276]: 2 / 2
+                    - generic [ref=f4e277]:
+                      - button "Standard view" [pressed] [ref=f4e278] [cursor=pointer]
+                      - button "Compact view" [ref=f4e284] [cursor=pointer]
+                  - generic [ref=f4e286]:
+                    - 'button "Select media: uat-cycle3-single-confidential-source" [ref=f4e287] [cursor=pointer]':
+                      - generic [ref=f4e288]:
+                        - button "Add to favorites" [ref=f4e293]
+                        - generic [ref=f4e296]:
+                          - generic [ref=f4e297]:
+                            - generic [ref=f4e298]: MEDIA
+                            - generic [ref=f4e299]: document
+                            - generic [ref=f4e304]: 24m ago
+                          - generic [ref=f4e305]: uat-cycle3-single-confidential-source
+                    - 'button "Select media: uat-cycle3-multi-source" [ref=f4e306] [cursor=pointer]':
+                      - generic [ref=f4e307]:
+                        - button "Add to favorites" [ref=f4e312]
+                        - generic [ref=f4e315]:
+                          - generic [ref=f4e316]:
+                            - generic [ref=f4e317]: MEDIA
+                            - generic [ref=f4e318]: document
+                            - generic [ref=f4e319]: 50m ago
+                          - generic [ref=f4e320]: uat-cycle3-multi-source
+                - generic [ref=f4e321]:
+                  - generic [ref=f4e322]:
+                    - generic [ref=f4e323]: 2 of 2 results
+                    - generic [ref=f4e324]:
+                      - generic [ref=f4e325]: "Per page:"
+                      - combobox "Per page:" [ref=f4e326]:
+                        - option "20" [selected]
+                        - option "50"
+                        - option "100"
+                  - button "? for shortcuts" [ref=f4e328] [cursor=pointer]:
+                    - generic [ref=f4e329]: "?"
+                    - generic [ref=f4e330]: for shortcuts
+              - button "Library tools" [ref=f4e332] [cursor=pointer]
+            - button "Collapse sidebar" [ref=f4e337] [cursor=pointer]
+            - generic [ref=f4e341]:
+              - generic [ref=f4e343]:
+                - generic [ref=f4e344] [cursor=pointer]:
+                  - checkbox "Show chapters/sections panel" [checked] [ref=f4e345]
+                  - generic [ref=f4e346]: Show chapters/sections panel
+                - generic [ref=f4e347] [cursor=pointer]:
+                  - checkbox "Allow generated fallback structure" [checked] [ref=f4e348]
+                  - generic [ref=f4e349]: Allow generated fallback structure
+                - generic [ref=f4e350]: "Generated sections: 1"
+              - generic [ref=f4e351]:
+                - complementary "Chapters and sections" [ref=f4e352]:
+                  - generic [ref=f4e353]:
+                    - generic [ref=f4e354]: Chapters/Sections
+                    - textbox "Jump to 12.5 or title" [ref=f4e359]
+                    - generic [ref=f4e360]: Project Cedar is a fictional community library used for acceptance testing. The library opens on...
+                  - tree [ref=f4e361]:
+                    - button "1 Project Cedar is a fictional community library used for acceptance testing. The library opens on..." [ref=f4e365] [cursor=pointer]:
+                      - generic [ref=f4e366]: "1"
+                      - generic [ref=f4e367]: Project Cedar is a fictional community library used for acceptance testing. The library opens on...
+                - generic [ref=f4e368]:
+                  - button "Create study pack" [ref=f4e370] [cursor=pointer]
+                  - generic [ref=f4e371]:
+                    - generic [ref=f4e372]: Showing uat-cycle3-multi-source
+                    - generic [ref=f4e374]:
+                      - generic [ref=f4e375]:
+                        - button "Previous" [ref=f4e376] [cursor=pointer]
+                        - generic [ref=f4e379]: 2/2
+                        - button "Next" [disabled] [ref=f4e380]
+                      - heading "uat-cycle3-multi-source" [level=3] [ref=f4e383]
+                      - generic [ref=f4e384]:
+                        - button "Chat with this media" [ref=f4e385] [cursor=pointer]
+                        - button "Analyze" [ref=f4e388] [cursor=pointer]
+                        - button "Actions" [active] [ref=f4e392] [cursor=pointer]
+                    - generic [ref=f4e398]:
+                      - generic [ref=f4e399]:
+                        - generic [ref=f4e400]: 43 Words
+                        - generic [ref=f4e404]: 1 min read
+                        - generic "Reading progress" [ref=f4e405]: 0% read
+                        - generic [ref=f4e406]: "Chunking: Completed"
+                        - generic [ref=f4e407]: "Vector: Pending"
+                      - button "Metadata details Show" [ref=f4e409] [cursor=pointer]:
+                        - generic [ref=f4e410]: Metadata details
+                        - generic [ref=f4e411]: Show
+                      - generic [ref=f4e413]:
+                        - generic [ref=f4e414]:
+                          - generic: Add keywords...
+                          - combobox [ref=f4e416]
+                        - img "down" [ref=f4e418]
+                      - generic [ref=f4e421]:
+                        - generic [ref=f4e422]:
+                          - button "Content" [ref=f4e423] [cursor=pointer]
+                          - generic [ref=f4e427]:
+                            - generic [ref=f4e428]: Chars 0-274
+                            - generic [ref=f4e429] [cursor=pointer]:
+                              - generic [ref=f4e430]:
+                                - generic "Auto" [ref=f4e431]
+                                - combobox "Display mode" [ref=f4e432]
+                              - img "down" [ref=f4e434]
+                            - group "Text size" [ref=f4e437]:
+                              - button "Text size S" [ref=f4e438] [cursor=pointer]: S
+                              - button "Text size M" [pressed] [ref=f4e439] [cursor=pointer]: M
+                              - button "Text size L" [ref=f4e440] [cursor=pointer]: L
+                            - button "Edit content" [ref=f4e441] [cursor=pointer]
+                            - button "Find in content" [ref=f4e444] [cursor=pointer]
+                        - region "Media content" [ref=f4e451]:
+                          - paragraph [ref=f4e453]: Project Cedar is a fictional community library used for acceptance testing. The library opens on 22 November 2026. Jonah Patel coordinates the library. The library has nine reading tables. Volunteers meet every Tuesday at 18:15. The book return is beside the north entrance.
+                      - generic [ref=f4e454]:
+                        - generic [ref=f4e455]:
+                          - button "Analysis" [ref=f4e456] [cursor=pointer]
+                          - generic [ref=f4e460]:
+                            - button "Generate" [ref=f4e461] [cursor=pointer]
+                            - button "Send analysis to chat" [ref=f4e465] [cursor=pointer]
+                            - button "Copy analysis" [ref=f4e469] [cursor=pointer]
+                            - button "Edit analysis" [ref=f4e473] [cursor=pointer]
+                        - generic [ref=f4e477]:
+                          - generic [ref=f4e478]:
+                            - generic [ref=f4e479]: Analysis
+                            - generic [ref=f4e480] [cursor=pointer]:
+                              - generic [ref=f4e481]:
+                                - generic "Analysis" [ref=f4e482]
+                                - combobox "Analysis" [ref=f4e483]
+                              - img "down" [ref=f4e485]
+                          - generic [ref=f4e488]:
+                            - generic [ref=f4e489]:
+                              - generic [ref=f4e490]: Analysis
+                              - button "Copy analysis to clipboard" [ref=f4e492] [cursor=pointer]
+                            - generic [ref=f4e496]: "**Project Cedar** - **Project Cedar** is a fictional **community library** used for **acceptance testing**. **Opening** - The library opens on **22 November 2026**. **Coordination** - **Jonah Patel** coordinates the library. **Reading Tables** - The library has **nine reading tables**. **Volunteer Meetings** - **Volunteers** meet every **Tuesday** at **18:15**. **Book Return** - The **book return** is beside the **north entrance**."
+                      - generic [ref=f4e497]:
+                        - button "Statistics" [ref=f4e498] [cursor=pointer]
+                        - generic [ref=f4e503]:
+                          - generic [ref=f4e504]:
+                            - generic [ref=f4e505]: Words
+                            - generic [ref=f4e506]: "43"
+                          - generic [ref=f4e507]:
+                            - generic [ref=f4e508]: Characters
+                            - generic [ref=f4e509]: "274"
+                          - generic [ref=f4e510]:
+                            - generic [ref=f4e511]: Paragraphs
+                            - generic [ref=f4e512]: "1"
+                      - button "Metadata" [ref=f4e514] [cursor=pointer]
+                      - button "Document Intelligence" [ref=f4e519] [cursor=pointer]
+                      - button "Version History" [ref=f4e525] [cursor=pointer]
+                      - generic [ref=f4e534]:
+                        - button "Delete item" [disabled] [ref=f4e535]
+                        - paragraph [ref=f4e539]: Your account does not have permission to delete media.
+    - menu [ref=f4e541]:
+      - text: Use
+      - group [ref=f4e542]:
+        - menuitem "Chat with this media (full content)" [ref=f4e543] [cursor=pointer]
+        - menuitem "Chat about this media (RAG context)" [ref=f4e548] [cursor=pointer]
+      - separator [ref=f4e552]
+      - text: Create
+      - group [ref=f4e553]:
+        - menuitem "Create note with content" [ref=f4e554] [cursor=pointer]
+        - menuitem "Create note with content + analysis" [ref=f4e559] [cursor=pointer]
+        - menuitem "Generate flashcards from content" [ref=f4e564] [cursor=pointer]
+      - separator [ref=f4e569]
+      - text: Copy
+      - group [ref=f4e570]:
+        - menuitem "Copy content" [ref=f4e571] [cursor=pointer]
+        - menuitem "Copy metadata" [ref=f4e576] [cursor=pointer]
+      - separator [ref=f4e581]
+      - menuitem "Export content" [ref=f4e582] [cursor=pointer]
+      - menuitem "Reprocess content" [ref=f4e587] [cursor=pointer]
+      - menuitem "Open in Multi-Item Review" [ref=f4e592] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f4e15] [cursor=pointer]
+  - alert [ref=f4e19]: Media Inspector
+```

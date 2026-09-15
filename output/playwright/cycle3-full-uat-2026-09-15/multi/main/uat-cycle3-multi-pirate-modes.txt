@@ -1,0 +1,4 @@
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByRole("button",{name:"New saved chat",exact:true}).click(); await page.getByRole("button",{name:"Modes",exact:true}).click(); })(page);
+```

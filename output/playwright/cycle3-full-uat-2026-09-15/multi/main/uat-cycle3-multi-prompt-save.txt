@@ -1,0 +1,15 @@
+### Result
+{"saved":true}
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByRole("textbox",{name:"* Title",exact:true}).fill("Cycle3 Alice Pirate"); await page.getByRole("textbox",{name:"AI Instructions (System Prompt)",exact:true}).fill("You are a pirate. Respond to everything in pirate speak. Always say ARRR at least once."); await page.getByRole("button",{name:"Save",exact:true}).click(); return {saved:true}; })(page);
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18281/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
+- 2: (current) [](http://127.0.0.1:18281/prompts?edit=pa_5fef-8acd-ea2-e3c6)
+### Page
+- Page URL: http://127.0.0.1:18281/prompts?edit=pa_5fef-8acd-ea2-e3c6
+- Console: 2 errors, 0 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T10-21-58-444Z.log#L13-L20
