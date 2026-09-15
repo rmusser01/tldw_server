@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-15 18:04'
+updated_date: '2026-09-15 18:59'
 labels:
   - uat
   - testing
@@ -97,6 +97,8 @@ Cycle3 targeted repair checkpoint: commits7db8f5d851/b993995dfe extraction,7e48f
 2026-09-15 checkpoint: committed Media repairs9c21e08f0c after independent89/parent48 tests; committed route titles, Reading Queue prerequisite guidance and18-locale server guide545a7a59d2 after102 aggregate controls and lint0/0. Notes remains in review correction: actual canonical loading cancels pending saves, valid-rotation proof now being tested. Isolated frontend served stale Notes classes at17:05–17:07 despite reload, so restart is required before acceptance. Private handoff and Automation Inbox permission fixes active. Tracker remains36 open; no new full fresh run started.
 
 Continued repair loop: committed Notes af14ac1258, Automation f45f7749c1, and independently re-reviewed mixed-session backend982b03a940. Targeted live Notes/Home controls pass with retained notes-home-round3 evidence (9files +hashmanifest,14knowncredentials/patternscan0matches,PNGsinspected); new Notes header UAT091P3 logged and narrowfixunder.18. Current37open=14P2/23P3 pendingfullfresh. Private transfer .13 independent review exposed real-router delivery deletion, Quiz cleanup deletion and Chat provenance/captured-owner gaps; implementer correcting. Study frontend .21 and QA history .27 active; .26privateingest paused at3REDtestcheckpoint until.13corrected. No new fullfresh run.
+
+Continuing authorized repair-before-full-UAT loop: private Flashcard handoff committedaae6b72d05; reviewed coherent Study frontend536ad461e9; reviewed source destinations16485e90d4. Review defects in Study canonical expiry/principal and Notes save-confirmation boundaries were reproduced and repaired, retained in child tasks. Parent latest82Study/47Notes tests pass, explicit-root lint adds0 and full TS matches90baseline. Preparing retained route/guide and actual Note source evidence; no full fresh run started and37findings remain open. Current multi API restarted to include982backend; temporary shared Next build cache/WIP compile failures are environment/implementation observations, not accepted live outcomes.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

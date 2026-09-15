@@ -48,10 +48,11 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 
 **Files:** `apps/packages/ui/src/services/tldw/flashcards-generate-handoff.ts`, its five Notes/Media/sidepanel/Quiz producers, Flashcards page/GeneratePanel consumers, existing authority/logout cleanup; adjacent handoff and Notes/Flashcards/platform integration suites.
 
-- [ ] Add regressions for exact unsaved source transfer, URL privacy, expiry/consume/storage failure and A→B→A with delayed generation/save; observe the original plaintext-route failure.
-- [ ] Cover authority changes during source acquisition, blocked/new-tab opening, unresolved target authentication, simultaneous consumption and StrictMode replay, whitespace/length bounds, legacy plaintext rejection and URL cleanup without overwriting subsequent edits.
-- [ ] Implement the account-bound opaque transfer for all five known producers and consumer invalidation from the design. Preserve actual same-tab and extension/new-tab delivery; retain source drafts on storage/navigation failure.
+- [x] Add regressions for exact unsaved source transfer, URL privacy, expiry/consume/storage failure and A→B→A with delayed generation/save; observe the original plaintext-route failure.
+- [x] Cover authority changes during source acquisition, blocked/new-tab opening, unresolved target authentication, simultaneous consumption and StrictMode replay, whitespace/length bounds, legacy plaintext rejection and URL cleanup without overwriting subsequent edits.
+- [x] Implement the account-bound opaque transfer for all five known producers and consumer invalidation from the design. Preserve actual same-tab and extension/new-tab delivery; retain source drafts on storage/navigation failure.
 - [ ] Run the existing handoff suite and new interacting consumer/authority/platform tests, including unavailable shared storage despite a memory fallback; review browser URLs, provenance and actual intended-account generation in live targeted UAT.
+- Reviewed implementation checkpoint `aae6b72d05`: parent63 WebUI and12 shared storage controls pass after correcting a WebUI test spy leak; broader172 controls and independent review clear. Native handoff/generation acceptance remains pending.
 
 ### TASK-13260.15 — UAT067/068 selection portion, then TASK-13260.14 — UAT062
 
@@ -145,10 +146,11 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 ### TASK-13260.25 — UAT081 Flashcard source links
 
 **Files:** `Flashcards/utils/source-reference.ts`, Notes route/editor hydration and canonical Media/Chat route helpers; source action and actual destination integration tests. Coordinate Notes edits with .13 and Chat changes with .14/.15.
-- [ ] Reproduce the actual Note source click leaving a blank editor while an owned source exists; compare the Media/message builder branches with their actual route consumers.
-- [ ] Use canonical destinations and owned loading, preserving dirty drafts and giving truthful missing/deleted/foreign source feedback.
+- [x] Reproduce the actual Note source click leaving a blank editor while an owned source exists; compare the Media/message builder branches with their actual route consumers.
+- [x] Use canonical destinations and owned loading, preserving dirty drafts and giving truthful missing/deleted/foreign source feedback.
 - [ ] Test click-to-loaded-source and reload for all three types, target changes, account generations and unavailable message conversation identity; URL-only tests are insufficient.
 - [ ] Independently review and confirm actual linked Note/Media/Chat content in targeted live checks.
+- Reviewed checkpoint `16485e90d4`: confirmation-save review findings (newer typing loss and new-draft navigation cancellation) reproduced and corrected; original confirmation2/guard2 probes, parent47 Notes and39 consumer controls pass. Lint144 unchanged warnings; compiler90 baseline. Actual saved Biology card → Note and exact reload content pass in source-guide-round4 evidence; native Media/Chat and negative source checks remain.
 
 ### TASK-13260.19 — UAT055/074/083/084
 
@@ -167,14 +169,15 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 - [x] Apply existing title ownership, prerequisite ordering and a verified maintained server documentation target.
 - [x] Reproduce Automation Inbox's temporary-outage copy for `tasks.read`403. Separate denial from service failure, preserve independently available sources, use authoritative account gating when supported, and clear/guard results across disable/account changes.
 - [ ] Verify route changes/logout cannot retain Chat metadata; capability-disabled/profile-disabled/fetch-failure/empty-success branches; localization overrides and actual guide navigation. Review and commit.
-- Code checkpoint `545a7a59d2`:9 actual Next Head transitions,17 Home controls,20 guide locale/fallback controls and56 existing app/route checks pass; lint0/0. Automation checkpoint `f45f7749c1` independently reviewed with87 parent WebUI/141shared controls; no new lint/type signatures. Browser route/guide/Automation checks remain.
+- Code checkpoint `545a7a59d2`:9 actual Next Head transitions,17 Home controls,20 guide locale/fallback controls and56 existing app/route checks pass; lint0/0. Automation checkpoint `f45f7749c1` independently reviewed with87 parent WebUI/141shared controls; no new lint/type signatures. Targeted core titles and actual maintained guide navigation pass in the retained source-guide-round4 bundle. Ordinary-user Automation restriction and Reading setup state pass; remaining roles and full fresh acceptance remain.
 
 ### TASK-13260.21 — UAT076
 
 **Files:** `tldw_Server_API/app/api/v1/schemas/flashcards.py`, `endpoints/flashcards.py`, `core/DB_Management/ChaChaNotes_DB.py`; frontend `services/flashcards.ts`, `useReviewFlashcardMutation` and `tabs/ReviewTab.tsx`; backend `tests/StudySuggestions/test_flashcard_review_sessions.py` and frontend `tabs/__tests__/ReviewTab.study-suggestions.test.tsx`.
 - [x] Reproduce the exact mixed seven-card global run split into two server sessions using real request/schema/database behavior and nonconstant returned session IDs in the UI test.
-- [ ] Add optional explicit scope/session context, validate and retain one acknowledged run ID, support mixed cards only in validated global scope, and end exactly that session.
+- [x] Add optional explicit scope/session context, validate and retain one acknowledged run ID, support mixed cards only in validated global scope, and end exactly that session.
 - [ ] Verify legacy requests, wrong/foreign/inactive sessions, no-write failure, unrelated active sessions, pending account/scope changes, transient queue gaps, practice-only Cram and Undo. Run backend tests/Bandit and frontend regressions; review and live-check a mixed-deck session and reload rollup.
+- Reviewed backend `982b03a940` and frontend `536ad461e9`: backend35 controls/1 official PostgreSQL skip and Bandit0; parent82 WebUI controls, lint285 unchanged warnings and TypeScript90 baseline. Original canonical expiry/principal review probes now pass unchanged. The multi API was restarted to include the backend; native seven-card session, End and reload-rollup checks remain pending.
 
 ### TASK-13260.22 — UAT077 Provider Keys loading
 

@@ -1,0 +1,14 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'View server setup guide' }).click();
+```
+### Open tabs
+- 0: (current) [Server Settings | tldw](http://127.0.0.1:18281/settings/tldw)
+- 1: [Server Settings | tldw](http://127.0.0.1:18281/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18281/settings/tldw
+- Page Title: Server Settings | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-15T18-18-10-268Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T15-53-06-901Z.log#L1787-L1788

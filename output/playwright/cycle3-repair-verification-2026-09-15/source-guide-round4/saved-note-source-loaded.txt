@@ -1,0 +1,266 @@
+### Open tabs
+- 0: (current) [Notes | tldw](http://127.0.0.1:18281/notes?source_ref_id=9ae43c6a-2458-4910-97fd-013d888914f7)
+- 1: [Server Settings | tldw](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/notes?source_ref_id=9ae43c6a-2458-4910-97fd-013d888914f7
+- Page Title: Notes | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f24e1]:
+  - generic [ref=f24e4]:
+    - link "Skip to main content" [ref=f24e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f24e6]:
+      - button "Expand sidebar" [ref=f24e7] [cursor=pointer]
+      - button "New Chat" [ref=f24e11] [cursor=pointer]
+      - generic [ref=f24e14]:
+        - button "Quick Ingest" [ref=f24e15] [cursor=pointer]
+        - button "Chat" [ref=f24e19] [cursor=pointer]
+        - button "Prompts" [ref=f24e22] [cursor=pointer]
+        - button "Characters" [ref=f24e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f24e31] [cursor=pointer]
+        - button "World Books" [ref=f24e35] [cursor=pointer]
+        - button "Notes" [ref=f24e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f24e42] [cursor=pointer]
+        - button "Media" [ref=f24e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f24e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f24e59] [cursor=pointer]
+        - button "Kanban" [ref=f24e65] [cursor=pointer]
+        - button "Watchlists" [ref=f24e67] [cursor=pointer]
+      - generic [ref=f24e72]:
+        - button "Open Notes Dock" [ref=f24e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f24e78] [cursor=pointer]
+        - button "Settings" [ref=f24e81] [cursor=pointer]
+    - main [ref=f24e85]:
+      - generic [ref=f24e86]:
+        - generic [ref=f24e89]:
+          - generic [ref=f24e90]:
+            - button "Expand sidebar" [ref=f24e91] [cursor=pointer]
+            - generic [ref=f24e93]:
+              - img "tldw Assistant" [ref=f24e94]
+              - generic [ref=f24e95]: tldw Assistant
+              - button "Companion Home" [ref=f24e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f24e100] [cursor=pointer]
+          - generic [ref=f24e103]:
+            - button "Search - Open command palette" [ref=f24e104] [cursor=pointer]:
+              - generic [ref=f24e108]: Search
+              - generic [ref=f24e109]: ⌘K
+            - button "Open settings" [ref=f24e110] [cursor=pointer]
+            - generic [ref=f24e122]:
+              - button "Notifications, 0 unread" [ref=f24e147] [cursor=pointer]
+              - status [ref=f24e126]: Notifications are active
+            - button "Switch to light theme" [ref=f24e127] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f24e134] [cursor=pointer]:
+              - generic [ref=f24e135]: "?"
+        - generic [ref=f24e151]:
+          - link "Skip to notes list" [ref=f24e152] [cursor=pointer]:
+            - /url: "#notes-list-region"
+          - link "Skip to editor" [ref=f24e153] [cursor=pointer]:
+            - /url: "#notes-editor-region"
+          - paragraph [ref=f24e154]: "Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs."
+          - region "Notes list" [ref=f24e155]:
+            - generic [ref=f24e156]:
+              - generic [ref=f24e157]:
+                - generic [ref=f24e158]:
+                  - generic [ref=f24e159]:
+                    - generic [ref=f24e160]: Notes
+                    - generic [ref=f24e161]: 5 total
+                  - button "New note" [ref=f24e162] [cursor=pointer]
+                - generic [ref=f24e165]:
+                  - generic [ref=f24e166]:
+                    - button "Views" [expanded] [ref=f24e168] [cursor=pointer]
+                    - generic [ref=f24e173]:
+                      - generic [ref=f24e174]:
+                        - button "Notes" [ref=f24e175] [cursor=pointer]
+                        - button "Trash" [ref=f24e177] [cursor=pointer]
+                      - generic [ref=f24e179]:
+                        - button "List" [ref=f24e180] [cursor=pointer]
+                        - button "Timeline" [ref=f24e182] [cursor=pointer]
+                        - button "Inbox" [ref=f24e184] [cursor=pointer]
+                        - button "Collection" [ref=f24e186] [cursor=pointer]
+                        - button "Graph" [ref=f24e188] [cursor=pointer]
+                      - generic [ref=f24e196]:
+                        - generic [ref=f24e197]:
+                          - button "Organize" [expanded] [ref=f24e198] [cursor=pointer]
+                          - button "Organize help" [ref=f24e204] [cursor=pointer]:
+                            - img "question-circle" [ref=f24e205]
+                        - generic [ref=f24e210]:
+                          - generic [ref=f24e211]: Saved filter
+                          - generic [ref=f24e212]:
+                            - generic [ref=f24e213] [cursor=pointer]:
+                              - generic [ref=f24e214]:
+                                - generic: All saved filters
+                                - combobox "Saved filter" [ref=f24e215]
+                              - img "down" [ref=f24e217]
+                            - button "Save" [disabled] [ref=f24e220]
+                            - button "Remove" [disabled] [ref=f24e221]
+                          - generic [ref=f24e222]: Save current tag filters as saved filters.
+                  - generic [ref=f24e223]:
+                    - textbox "Search notes" [ref=f24e230]:
+                      - /placeholder: Search titles and contents
+                    - generic [ref=f24e232] [cursor=pointer]:
+                      - generic [ref=f24e233]:
+                        - generic "Date modified (newest first)" [ref=f24e234]
+                        - combobox "Sort notes" [ref=f24e235]
+                      - img "down" [ref=f24e237]
+                  - generic [ref=f24e240]:
+                    - button "Filters" [expanded] [ref=f24e242] [cursor=pointer]
+                    - generic [ref=f24e247]:
+                      - generic [ref=f24e248]:
+                        - button "Captured" [ref=f24e249] [cursor=pointer]
+                        - button "Search tips" [ref=f24e251] [cursor=pointer]
+                      - generic [ref=f24e253]:
+                        - generic [ref=f24e254]:
+                          - generic: Filter by tag
+                          - combobox "Filter by tag" [ref=f24e256]
+                        - img "down" [ref=f24e258]
+                      - generic [ref=f24e261]:
+                        - generic [ref=f24e262]:
+                          - button "Browse tags" [ref=f24e263] [cursor=pointer]
+                          - button "Tags help" [ref=f24e265] [cursor=pointer]:
+                            - img "question-circle" [ref=f24e266]
+                        - generic [ref=f24e270]: 11 available
+                      - generic [ref=f24e271]: For in-note search, use browser Ctrl/Cmd+F.
+                  - generic [ref=f24e272]:
+                    - generic [ref=f24e273]: Recent notes
+                    - generic [ref=f24e274]:
+                      - button "Cycle3 Bob Biology study note" [ref=f24e275] [cursor=pointer]
+                      - button "UAT repair sidebar note four" [ref=f24e276] [cursor=pointer]
+                      - button "UAT repair sidebar note five" [ref=f24e277] [cursor=pointer]
+                      - button "Cycle3 Bob private note" [ref=f24e278] [cursor=pointer]
+                      - button "Cycle3 Bob local draft boundary" [ref=f24e279] [cursor=pointer]
+              - generic [ref=f24e281]:
+                - generic [ref=f24e283]:
+                  - generic [ref=f24e284]: Results
+                  - generic [ref=f24e285]:
+                    - button "Import" [ref=f24e286] [cursor=pointer]
+                    - button "Sync folder" [disabled] [ref=f24e288]
+                    - button "Export" [ref=f24e290] [cursor=pointer]
+                - list "Notes" [ref=f24e293]:
+                  - listitem [ref=f24e294]:
+                    - generic [ref=f24e295]:
+                      - checkbox "Select note UAT repair sidebar note five for bulk actions" [ref=f24e296]
+                      - button "Pin note UAT repair sidebar note five" [ref=f24e297] [cursor=pointer]
+                      - button "Open note UAT repair sidebar note five" [ref=f24e300] [cursor=pointer]:
+                        - generic [ref=f24e301]:
+                          - generic [ref=f24e302]: UAT repair sidebar note five
+                          - generic [ref=f24e308]: "Synthetic UAT note: the Maple archive closes at 17:15 on Fridays."
+                          - generic [ref=f24e309]: 9/15/2026, 10:44:07 AM
+                  - listitem [ref=f24e310]:
+                    - generic [ref=f24e311]:
+                      - checkbox "Select note UAT repair sidebar note four for bulk actions" [ref=f24e312]
+                      - button "Pin note UAT repair sidebar note four" [ref=f24e313] [cursor=pointer]
+                      - button "Open note UAT repair sidebar note four" [ref=f24e316] [cursor=pointer]:
+                        - generic [ref=f24e317]:
+                          - generic [ref=f24e318]: UAT repair sidebar note four
+                          - generic [ref=f24e324]: "Synthetic UAT note: the Willow library opens at 08:30 on Mondays."
+                          - generic [ref=f24e325]: 9/15/2026, 10:43:46 AM
+                  - listitem [ref=f24e326]:
+                    - generic [ref=f24e327]:
+                      - checkbox "Select note Cycle3 Bob local draft boundary for bulk actions" [ref=f24e328]
+                      - button "Pin note Cycle3 Bob local draft boundary" [ref=f24e329] [cursor=pointer]
+                      - button "Open note Cycle3 Bob local draft boundary" [ref=f24e332] [cursor=pointer]:
+                        - generic [ref=f24e333]:
+                          - generic [ref=f24e334]: Cycle3 Bob local draft boundary
+                          - generic [ref=f24e340]: "Bob-only unsaved draft. The Copper Finch team carries eleven blue notebooks. Draft sentinel: BOB-DRAFT-COPPER-20260915."
+                          - generic [ref=f24e341]: 9/15/2026, 4:05:48 AM
+                  - listitem [ref=f24e342]:
+                    - generic [ref=f24e343]:
+                      - checkbox "Select note Cycle3 Bob Biology study note for bulk actions" [ref=f24e344]
+                      - button "Pin note Cycle3 Bob Biology study note" [ref=f24e345] [cursor=pointer]
+                      - button "Open note Cycle3 Bob Biology study note" [ref=f24e348] [cursor=pointer]:
+                        - generic [ref=f24e349]:
+                          - generic [ref=f24e350]: Cycle3 Bob Biology study note
+                          - generic [ref=f24e356]: The mitochondria is the powerhouse of the cell.
+                          - generic [ref=f24e357]: 9/15/2026, 3:10:05 AM
+                  - listitem [ref=f24e358]:
+                    - generic [ref=f24e359]:
+                      - checkbox "Select note Cycle3 Bob private note for bulk actions" [ref=f24e360]
+                      - button "Pin note Cycle3 Bob private note" [ref=f24e361] [cursor=pointer]
+                      - button "Open note Cycle3 Bob private note" [ref=f24e364] [cursor=pointer]:
+                        - generic [ref=f24e365]:
+                          - generic [ref=f24e366]: Cycle3 Bob private note
+                          - generic [ref=f24e372]: "Bob owns this fictional notebook entry. The Copper Finch observatory opens at 09:40 on Tuesdays. Bob-only sentinel: BOB-COPPER-FINCH-2026091..."
+                          - generic [ref=f24e373]: 9/15/2026, 2:52:50 AM
+                - generic [ref=f24e375]:
+                  - generic [ref=f24e376]: Showing 1-5 of 5
+                  - list [ref=f24e377]:
+                    - listitem "Previous Page" [ref=f24e378]:
+                      - button [disabled] [ref=f24e379]:
+                        - img "left" [ref=f24e380]
+                    - listitem "1" [ref=f24e383] [cursor=pointer]
+                    - listitem "Next Page" [ref=f24e385]:
+                      - button [disabled] [ref=f24e386]:
+                        - img "right" [ref=f24e387]
+                    - listitem [ref=f24e390]:
+                      - generic [ref=f24e391]:
+                        - generic [ref=f24e392]:
+                          - generic "20 / page" [ref=f24e393]
+                          - combobox "Page Size" [ref=f24e394]
+                        - img "down" [ref=f24e396]
+          - button "Collapse sidebar" [ref=f24e399] [cursor=pointer]
+          - region "Note editor" [ref=f24e403]:
+            - generic [ref=f24e404]:
+              - generic [ref=f24e406]:
+                - heading "Cycle3 Bob Biology study note" [level=5] [ref=f24e407]
+                - status [ref=f24e408]:
+                  - generic [ref=f24e410]: Saved
+              - generic [ref=f24e411]:
+                - button "Save note" [ref=f24e412] [cursor=pointer]:
+                  - generic [ref=f24e418]: Save
+                - button "Save and start another note" [ref=f24e419] [cursor=pointer]:
+                  - generic [ref=f24e424]: Save & new
+                - group "Editor mode" [ref=f24e425]:
+                  - button "Edit" [pressed] [ref=f24e426] [cursor=pointer]
+                  - button "Split" [ref=f24e431] [cursor=pointer]
+                  - button "Preview" [ref=f24e436] [cursor=pointer]
+                - button "Create study pack" [ref=f24e442] [cursor=pointer]
+                - button "More actions" [ref=f24e444] [cursor=pointer]
+            - generic [ref=f24e450]:
+              - generic [ref=f24e451]:
+                - textbox "Note title" [ref=f24e452]:
+                  - /placeholder: Title
+                  - text: Cycle3 Bob Biology study note
+                - button "Generate title from content" [ref=f24e453] [cursor=pointer]:
+                  - generic [ref=f24e458]: Generate title
+                - button "Keyboard shortcuts" [ref=f24e459] [cursor=pointer]
+              - generic [ref=f24e461]:
+                - generic [ref=f24e462]:
+                  - generic [ref=f24e463]:
+                    - generic: Tags
+                    - combobox "Note tags" [ref=f24e465]
+                  - img "down" [ref=f24e467]
+                - status "Note save status" [ref=f24e470]: All changes saved
+              - generic [ref=f24e472]:
+                - button "Connections" [ref=f24e473] [cursor=pointer]
+                - button "Connections help" [ref=f24e479] [cursor=pointer]:
+                  - img "question-circle" [ref=f24e480]
+              - generic [ref=f24e484]:
+                - group "Input mode" [ref=f24e485]:
+                  - button "Markdown" [ref=f24e486] [cursor=pointer]
+                  - button "WYSIWYG" [ref=f24e488] [cursor=pointer]
+                - generic [ref=f24e490]: Formatting
+                - button "Bold" [ref=f24e491] [cursor=pointer]
+                - button "Italic" [ref=f24e495] [cursor=pointer]
+                - button "Heading" [ref=f24e499] [cursor=pointer]
+                - button "List" [ref=f24e503] [cursor=pointer]
+                - button "Link" [ref=f24e506] [cursor=pointer]
+                - button "Attachment" [ref=f24e511] [cursor=pointer]
+                - button "Code" [ref=f24e515] [cursor=pointer]
+                - generic [ref=f24e522]: Assist
+                - button "Summarize" [ref=f24e523] [cursor=pointer]
+                - button "Expand outline" [ref=f24e529] [cursor=pointer]
+                - button "Suggest tags" [ref=f24e535] [cursor=pointer]
+              - generic [ref=f24e542]:
+                - textbox "Note content" [ref=f24e543]:
+                  - /placeholder: Write your note here... (Markdown supported)
+                  - text: The mitochondria is the powerhouse of the cell. DNA stands for deoxyribonucleic acid. Photosynthesis converts light energy into chemical energy. The human body has 206 bones. Water boils at 100 degrees Celsius at sea level.
+                - generic [ref=f24e544]: Markdown + LaTeX supported
+              - generic [ref=f24e545]:
+                - text: 35 words · 228 chars · 1 min read
+                - generic [ref=f24e546]: Version 1 · Last saved 9/15/2026, 3:10:05 AM
+                - generic [ref=f24e547]: "Origin: Typed manually"
+  - button "Open Next.js Dev Tools" [ref=f24e142] [cursor=pointer]
+  - alert [ref=f24e146]
+```

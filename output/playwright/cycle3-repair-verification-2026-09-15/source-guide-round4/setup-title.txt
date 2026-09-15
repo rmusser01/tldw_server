@@ -1,0 +1,15 @@
+### Result
+{"checkedAt":"2026-09-15T18:22:09.987Z","path":"/setup","title":"Setup | tldw","headings":["Choose where to set up tldw","WebUI setup","API server setup"]}
+### Ran Playwright code
+```js
+await (async (page) => { await page.waitForFunction(() => document.title === "Setup | tldw"); return { checkedAt:new Date().toISOString(), path:page.url().split(":18281")[1], title:await page.title(), headings:await page.getByRole("heading").allTextContents() }; })(page);
+```
+### Open tabs
+- 0: (current) [Setup | tldw](http://127.0.0.1:18281/setup)
+- 1: [Server Settings | tldw](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/setup
+- Page Title: Setup | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T18-21-32-332Z.log#L4-L5

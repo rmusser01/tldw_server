@@ -1,0 +1,15 @@
+### Result
+{"checkedAt":"2026-09-15T18:42:52.283Z","path":"/notes?source_ref_id=9ae43c6a-2458-4910-97fd-013d888914f7","title":"Cycle3 Bob Biology study note","content":"The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.\n","saveStatus":"Saved","detailRequests":[{"path":"/api/v1/notes/9ae43c6a-2458-4910-97fd-013d888914f7","status":200},{"path":"/api/v1/notes/9ae43c6a-2458-4910-97fd-013d888914f7","status":200},{"path":"/api/v1/notes/9ae43c6a-2458-4910-97fd-013d888914f7","status":200}]}
+### Ran Playwright code
+```js
+await (async (page) => { await page.waitForFunction(() => document.querySelector("input[placeholder=\"Title\"]")?.value === "Cycle3 Bob Biology study note", null, {timeout:10000}); await page.getByText("Loading note details...",{exact:true}).waitFor({state:"hidden",timeout:10000}); return {checkedAt:new Date().toISOString(),path:page.url().split(":18281")[1],title:await page.getByRole("textbox",{name:"Note title",exact:true}).inputValue(),content:await page.getByRole("textbox",{name:"Note content",exact:true}).inputValue(),saveStatus:await page.getByTestId("notes-save-status").innerText(),detailRequests:await page.evaluate(()=>performance.getEntriesByType("resource").filter(e=>new URL(e.name).pathname==="/api/v1/notes/9ae43c6a-2458-4910-97fd-013d888914f7").map(e=>({path:new URL(e.name).pathname,status:e.responseStatus}))) }; })(page);
+```
+### Open tabs
+- 0: (current) [Notes | tldw](http://127.0.0.1:18281/notes?source_ref_id=9ae43c6a-2458-4910-97fd-013d888914f7)
+- 1: [Server Settings | tldw](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/notes?source_ref_id=9ae43c6a-2458-4910-97fd-013d888914f7
+- Page Title: Notes | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T18-37-05-960Z.log#L1054-L1055
