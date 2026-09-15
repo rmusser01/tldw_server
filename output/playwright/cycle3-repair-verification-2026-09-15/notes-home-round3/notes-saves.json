@@ -1,0 +1,140 @@
+{
+  "at": "2026-09-15T17:44:31.001Z",
+  "path": "/notes",
+  "title": "Notes | tldw",
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "saved": "Saved just now",
+  "feedback": "All changes saved",
+  "controls": {
+    "top": 132,
+    "bottom": 431,
+    "height": 299,
+    "clientHeight": 298,
+    "scrollHeight": 637
+  },
+  "results": {
+    "top": 431,
+    "bottom": 730,
+    "height": 299,
+    "clientHeight": 299,
+    "scrollHeight": 299
+  },
+  "scroll": {
+    "top": 472,
+    "bottom": 681,
+    "height": 209,
+    "clientHeight": 209,
+    "scrollHeight": 456
+  },
+  "noteButtons": [
+    {
+      "name": "Open note UAT repair sidebar note five",
+      "expanded": null
+    },
+    {
+      "name": "Open note UAT repair sidebar note four",
+      "expanded": null
+    },
+    {
+      "name": "Open note Cycle3 Bob local draft boundary",
+      "expanded": null
+    },
+    {
+      "name": "Open note Cycle3 Bob Biology study note",
+      "expanded": null
+    },
+    {
+      "name": "Open note Cycle3 Bob private note",
+      "expanded": null
+    }
+  ],
+  "sections": [
+    {
+      "name": "Open Notes Dock",
+      "expanded": "false"
+    },
+    {
+      "name": "Open Quick Chat Helper (sidebar)",
+      "expanded": "false"
+    },
+    {
+      "name": "Show shortcuts",
+      "expanded": "false"
+    },
+    {
+      "name": "Notifications, 0 unread",
+      "expanded": "false"
+    },
+    {
+      "name": "Views",
+      "expanded": "true"
+    },
+    {
+      "name": "Organize",
+      "expanded": "false"
+    },
+    {
+      "name": "Filters",
+      "expanded": "true"
+    },
+    {
+      "name": "Connections",
+      "expanded": "false"
+    }
+  ],
+  "monitoringRequests": 0,
+  "notesRequests": [
+    {
+      "status": 201,
+      "initiatorType": "fetch"
+    },
+    {
+      "status": 200,
+      "initiatorType": "fetch"
+    },
+    {
+      "status": 200,
+      "initiatorType": "fetch"
+    },
+    {
+      "status": 200,
+      "initiatorType": "fetch"
+    },
+    {
+      "status": 200,
+      "initiatorType": "fetch"
+    },
+    {
+      "status": 200,
+      "initiatorType": "fetch"
+    },
+    {
+      "status": 201,
+      "initiatorType": "fetch"
+    },
+    {
+      "status": 200,
+      "initiatorType": "fetch"
+    },
+    {
+      "status": 200,
+      "initiatorType": "fetch"
+    },
+    {
+      "status": 200,
+      "initiatorType": "fetch"
+    },
+    {
+      "status": 200,
+      "initiatorType": "fetch"
+    },
+    {
+      "status": 200,
+      "initiatorType": "fetch"
+    }
+  ],
+  "buildError": false
+}

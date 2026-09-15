@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-15 16:59'
+updated_date: '2026-09-15 18:04'
 labels:
   - uat
   - testing
@@ -93,6 +93,10 @@ Checkpoint whitespace check: source documentation and task records are clean. Tw
 Cycle3 targeted repair checkpoint: commits7db8f5d851/b993995dfe extraction,7e48f29cb1ProviderKeys,bfcb393a44revokedrotation,fb79cc565a notifications. All fullUAT findings remainopen; targeted087notifications and088staleSettings add2P3 for34currentopen(14P2/20P3). Retained22 credential-scanned captures plus safe request metadata in output/playwright/cycle3-repair-verification-2026-09-15/auth-and-provider withREADME/SHA256SUMS. Originalfrozen552-filebundleunchanged. Live naturalrefresh200 and revocation/relogin recorded; secondtabSettingsstillLoginRequired(.29). SavedChatpromotion has furtherreviewfailuresunderrepair. Narrowcapabilities .23 active, adding selfidentity inbody avoidsdeprecated/profile dependencies.
 
 2026-09-15 continuation: committed65b8914dbd optional browser guard, a3542ea385 Settings cross-tab/mode Cancel/context repair, af725e4330 app shell login recovery,68906b148b canonical saved Chat/incomplete recovery,9d9f5222f5 Study counts/window/Manage lists. Parent306 Chat frontend +9 backend,82 Settings,61 App,70 broadStudy +22 final controls passed; known TypeScript90 baseline unchanged. Natural expiry16:22:26 refresh passed; revoked session stopped polling; repeated normal UI login recovered existing Settings shell and notifications. UAT089/090 added, current36 open pending fullfresh acceptance. Safe20-file hash-indexed auth-recovery-round2 evidence retained. Isolated API18201 restarted with existing data, PID6720, health200. Remaining Notes review corrections, .13 private handoff and .17 Media repairs continue; full fresh UAT has not restarted.
+
+2026-09-15 checkpoint: committed Media repairs9c21e08f0c after independent89/parent48 tests; committed route titles, Reading Queue prerequisite guidance and18-locale server guide545a7a59d2 after102 aggregate controls and lint0/0. Notes remains in review correction: actual canonical loading cancels pending saves, valid-rotation proof now being tested. Isolated frontend served stale Notes classes at17:05–17:07 despite reload, so restart is required before acceptance. Private handoff and Automation Inbox permission fixes active. Tracker remains36 open; no new full fresh run started.
+
+Continued repair loop: committed Notes af14ac1258, Automation f45f7749c1, and independently re-reviewed mixed-session backend982b03a940. Targeted live Notes/Home controls pass with retained notes-home-round3 evidence (9files +hashmanifest,14knowncredentials/patternscan0matches,PNGsinspected); new Notes header UAT091P3 logged and narrowfixunder.18. Current37open=14P2/23P3 pendingfullfresh. Private transfer .13 independent review exposed real-router delivery deletion, Quiz cleanup deletion and Chat provenance/captured-owner gaps; implementer correcting. Study frontend .21 and QA history .27 active; .26privateingest paused at3REDtestcheckpoint until.13corrected. No new fullfresh run.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

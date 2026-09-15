@@ -111,10 +111,11 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 
 **Files:** `components/Media/ContentViewer.tsx`, Knowledge source card/preview type normalization, `components/Review/ViewMediaPage.tsx`, `hooks/useUndoNotification.tsx`, `components/Media/hooks/useContentEditState.tsx`, `hooks/useMediaReadingProgress.ts`; associated behavior suites.
 
-- [ ] Reproduce Markdown presented literally, mismatched missing source type, inaccessible Trash after last deletion, actual AntD warnings and invalid zoom1 payload.
-- [ ] Reuse safe Markdown/type fallback, expose Trash in the empty return, use context notifications/actions and percentage zoom100.
-- [ ] Verify original copy/edit text, unsafe rendering controls, actual App-context Undo once/dismiss/failure, selection cleanup old/new IDs and restored reading position.
+- [x] Reproduce Markdown presented literally, mismatched missing source type, inaccessible Trash after last deletion, actual AntD warnings and invalid zoom1 payload.
+- [x] Reuse safe Markdown/type fallback, expose Trash in the empty return, use context notifications/actions and percentage zoom100.
+- [x] Verify original copy/edit text, unsafe rendering controls, actual App-context Undo once/dismiss/failure, selection cleanup old/new IDs and restored reading position.
 - [ ] Independently review and run targeted Media analysis/reload/delete/Trash/restore UI controls with API corroboration.
+- Reviewed code checkpoint `9c21e08f0c`: independent89 and parent48 WebUI tests pass; broader shared110 pass. The related pre-existing empty-library stale-selection notice was reproduced on HEAD and repaired. Live acceptance remains.
 
 ## Stage 4: Repair Notes, Study and setup presentation
 **Goal:** Keep core route status, navigation and study counts useful and truthful.
@@ -137,6 +138,9 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 - [ ] Correct successful authority-scoped hydration status and bound/scroll controls with reserved results space.
 - [ ] Reproduce the successful ordinary Note save followed by `system.logs`403. Resolve a narrow authoritative entitlement contract, gate optional monitoring reads and discard delayed notices after account/note changes without weakening permissions or losing authorized feedback.
 - [ ] Verify real pointer/keyboard use with five notes/three recents, resize/reload/mobile, plus new/dirty/offline/stale-account status protections; review and commit.
+- Reviewed Notes checkpoint `af14ac1258`: actual canonical/owner/editor89 independent tests and65 parent WebUI controls pass. Same-authority continuity requires valid refresh source lineage; initial, failed or changed authority masks. Live geometry/save verification remains pending.
+
+- [x] UAT091 live follow-up: let heading/status and desktop action groups wrap at constrained widths while preserving compact controls and mobile targets; verify actual1280×720/390px layout. Reviewed/live-verified checkpoint `062e8b7cb2` also passes1024px, parent14tests and independent7tests.
 
 ### TASK-13260.25 — UAT081 Flashcard source links
 
@@ -159,15 +163,16 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 ### TASK-13260.20 — UAT058/059/075/078
 
 **Files:** tested Next page wrappers, `components/Option/CompanionHome/CompanionHomePage.tsx`, `components/Common/ServerOverviewHint.tsx`, relevant locale targets and associated route/Home tests.
-- [ ] Verify empty titles, Reading Queue prerequisite classification and both effective setup-guide URL keys against the retained evidence.
-- [ ] Apply existing title ownership, prerequisite ordering and a verified maintained server documentation target.
-- [ ] Reproduce Automation Inbox's temporary-outage copy for `tasks.read`403. Separate denial from service failure, preserve independently available sources, use authoritative account gating when supported, and clear/guard results across disable/account changes.
+- [x] Verify empty titles, Reading Queue prerequisite classification and both effective setup-guide URL keys against the retained evidence.
+- [x] Apply existing title ownership, prerequisite ordering and a verified maintained server documentation target.
+- [x] Reproduce Automation Inbox's temporary-outage copy for `tasks.read`403. Separate denial from service failure, preserve independently available sources, use authoritative account gating when supported, and clear/guard results across disable/account changes.
 - [ ] Verify route changes/logout cannot retain Chat metadata; capability-disabled/profile-disabled/fetch-failure/empty-success branches; localization overrides and actual guide navigation. Review and commit.
+- Code checkpoint `545a7a59d2`:9 actual Next Head transitions,17 Home controls,20 guide locale/fallback controls and56 existing app/route checks pass; lint0/0. Automation checkpoint `f45f7749c1` independently reviewed with87 parent WebUI/141shared controls; no new lint/type signatures. Browser route/guide/Automation checks remain.
 
 ### TASK-13260.21 — UAT076
 
 **Files:** `tldw_Server_API/app/api/v1/schemas/flashcards.py`, `endpoints/flashcards.py`, `core/DB_Management/ChaChaNotes_DB.py`; frontend `services/flashcards.ts`, `useReviewFlashcardMutation` and `tabs/ReviewTab.tsx`; backend `tests/StudySuggestions/test_flashcard_review_sessions.py` and frontend `tabs/__tests__/ReviewTab.study-suggestions.test.tsx`.
-- [ ] Reproduce the exact mixed seven-card global run split into two server sessions using real request/schema/database behavior and nonconstant returned session IDs in the UI test.
+- [x] Reproduce the exact mixed seven-card global run split into two server sessions using real request/schema/database behavior and nonconstant returned session IDs in the UI test.
 - [ ] Add optional explicit scope/session context, validate and retain one acknowledged run ID, support mixed cards only in validated global scope, and end exactly that session.
 - [ ] Verify legacy requests, wrong/foreign/inactive sessions, no-write failure, unrelated active sessions, pending account/scope changes, transient queue gaps, practice-only Cram and Undo. Run backend tests/Bandit and frontend regressions; review and live-check a mixed-deck session and reload rollup.
 

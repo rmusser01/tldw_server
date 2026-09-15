@@ -90,6 +90,8 @@ Expanded Views, Filters and Recent Notes must not consume all sidebar height. Bo
 
 Ordinary successful saves must not eagerly read `monitoring/alerts`, whose router requires `system.logs`. Preserve optional feedback for users who actually have that permission, including custom roles. Use TASK-13260.23's narrow current-user capabilities; deployment/OpenAPI flags and an `admin` role-name check are not authoritative entitlement checks. Capture the save's authority generation before its first await and carry it into monitoring, using the existing guarded Notes transport and the verified owner's `user_id` filter. Check the originating account and selected Note before dispatch and before publishing any alert. Permission lookup failure must not turn a successful Note save into an error or reveal a prior account's notice. Test ordinary denial, authorized feedback, unavailable lookup and delayed save/alert A→B→A or note replacement.
 
+Review correction: configuration loading and authority replacement are distinct. Keep existing loading semantics for other consumers, but let the canonical hook identify an already resolved authority during a valid refresh whose stored source access/refresh lineage and target match the previously resolved configuration. Notes may retain its verified owner across that proven refresh. Initial, malformed, failed, unknown or changed authority must still mask immediately; matching unverified JWT subject claims alone is insufficient. Exercise the actual storage, canonical hook, owner hook and editor together, including a successful pending create acknowledgment, newer edits, repeated rotations and A→B→A replacement. Preserve the acknowledged Note ID/version before detail rehydration so a retry updates the same Note.
+
 ## 7. Study counts and supported lists — TASK-13260.19 / UAT055/074/083/084
 
 Backend analytics categories overlap: `due` includes expired learning/relearning/review cards; `learning` includes future learning too. Dashboard readiness is `due + new`. Keep Learning as a descriptive count and preserve the actual queue's existing disjoint filters. Test future learning, expired learning, mixed states and a controlled due-time transition; capping the incorrect sum at total is insufficient.
@@ -197,3 +199,7 @@ The mounted Settings owner loads authentication only at initialization. A normal
 ## Targeted follow-up UAT089: application shell recovery across tabs
 
 The WebUI app owner must resolve current effective canonical authentication when another tab signs in. Local Settings form recovery does not establish the shell's authentication state. Refresh only authenticated shell presentation and authorized polling; preserve Settings drafts, exact revoked-session invalidation and generation guards against delayed reads. Validate with the actual app owner and real storage events before repeating the two-tab browser control.
+
+### Targeted Notes header follow-up — UAT091
+
+The live1280×720 result shows that restored saved-time text exposes the existing nonwrapping toolbar squeeze. Allow header/action groups to wrap, reserve a readable title region and keep the short save status together. Preserve compact desktop controls and mobile touch targets. This is a layout correction under13260.18; no save, auth or navigation behavior changes.
