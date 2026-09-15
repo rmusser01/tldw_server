@@ -98,6 +98,10 @@ export const isServicePromptRequestPath = (
   const pathname = readCanonicalPathname(path)
   if (!pathname) return false
   const requestMethod = String(method || "GET").toUpperCase()
+  if (pathname === "/api/v1/notes/") return requestMethod === "POST"
+  if (/^\/api\/v1\/notes\/[^/]+$/.test(pathname)) {
+    return ["GET", "PUT"].includes(requestMethod)
+  }
   if (pathname === "/api/v1/service-prompts") {
     return requestMethod === "GET"
   }

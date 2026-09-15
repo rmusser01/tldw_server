@@ -255,6 +255,11 @@ export const TldwConnectionSettings = ({
                   'Keep signed in until this browser closes.'
                 )}
           </p>
+          {configuredServerUrl && (
+            <Button onClick={onLogout} loading={logoutLoading} className="mb-4">
+              {t('settings:tldw.buttons.disconnect', 'Disconnect')}
+            </Button>
+          )}
         </>
       )}
 

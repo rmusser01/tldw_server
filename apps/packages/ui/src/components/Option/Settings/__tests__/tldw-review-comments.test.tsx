@@ -287,6 +287,13 @@ const createBillingProps = (
 })
 
 describe("settings PR review fixes", () => {
+  it("offers a working Disconnect action for a configured manual single-user connection", () => {
+    const props = createConnectionProps()
+    render(<TldwConnectionSettings {...props} />)
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }))
+    expect(props.onLogout).toHaveBeenCalledTimes(1)
+  })
+
   beforeEach(() => {
     formItemSpy.mockClear()
     modalConfirmMock.mockReset()

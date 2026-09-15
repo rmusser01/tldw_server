@@ -13,6 +13,19 @@ import {
 
 describe("Service Prompt scope policy", () => {
   it.each([
+    ["/api/v1/notes/", "POST", true],
+    ["/api/v1/notes/private-note", "GET", true],
+    ["/api/v1/notes/private-note", "PUT", true],
+    ["/api/v1/notes/", "GET", false],
+    ["/api/v1/notes/private-note", "DELETE", false],
+    ["/api/v1/notes/private-note", "PATCH", false],
+    ["/api/v1/notes/private-note/attachments", "POST", false],
+    ["/api/v1/notes/%2e%2e", "PUT", false],
+    ["/api/v1/notes/a%2fb", "PUT", false],
+  ])("bounds Notes request %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+  it.each([
     "/api/v1/writing/manuscripts/scenes/scene-a",
     "/api/v1/writing/manuscripts/projects/project-a/characters?role=protagonist",
     "/api/v1/writing/manuscripts/projects/project-a/world-info?kind=location",

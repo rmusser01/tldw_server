@@ -250,6 +250,7 @@ const NotesManagerPage: React.FC = () => {
 
   // ---- Editor hook (use actual deps now that list and kw are available) ----
   const ed = useNotesEditorState({
+    connectionConfig: canonicalConnectionConfig,
     authorityScope: notesGraphAuthorityScope,
     isOnline,
     isMobileViewport,

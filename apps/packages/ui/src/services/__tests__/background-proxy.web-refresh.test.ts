@@ -61,6 +61,96 @@ const jwtForUser = (userId: string | number): string =>
   `header.${btoa(JSON.stringify({ sub: String(userId) }))}.signature`
 
 describe("background proxy web token refresh", () => {
+  it.each(["POST", "PUT"] as const)("does not dispatch a scoped Notes %s after credential loading switches accounts", async (method) => {
+    let release!: () => void
+    let started!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const entered = new Promise<void>((resolve) => { started = resolve })
+    mocks.storageGet.mockImplementation(async (key: string) => {
+      if (key === "tldwConfig") { started(); await gate }
+      return mocks.store[key] ?? null
+    })
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    const { bgRequest } = await importProxy()
+    const pending = expect(bgRequest({
+      path: method === "POST" ? "/api/v1/notes/" : "/api/v1/notes/private",
+      method, body: { content: "Alice private draft" },
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com", authMode: "multi-user", expectedUserId: 42
+      }
+    })).rejects.toMatchObject({ status: 412 })
+    // An unrecognized scoped route fails before storage; avoid hanging the red run.
+    await Promise.race([entered, pending])
+    mocks.store.tldwConfig = {
+      serverUrl: "https://api.example.com", authMode: "multi-user", accessToken: jwtForUser(84)
+    }
+    release()
+    await pending
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("never retries a scoped Notes write as the account selected during refresh", async () => {
+    const original = { serverUrl: "https://api.example.com", authMode: "multi-user", accessToken: jwtForUser(42), refreshToken: "alice-refresh" }
+    const replacement = { ...original, accessToken: jwtForUser(84), refreshToken: "bob-refresh" }
+    mocks.store.tldwConfig = original
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/auth/refresh")) {
+        mocks.store.tldwConfig = replacement
+        return new Response(JSON.stringify({ access_token: `${jwtForUser(42)}-new`, refresh_token: "alice-rotated" }), {
+          status: 200, headers: { "content-type": "application/json" }
+        })
+      }
+      return new Response("unauthorized", { status: 401 })
+    })
+    vi.stubGlobal("fetch", fetchSpy)
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({
+      path: "/api/v1/notes/", method: "POST", body: { content: "Alice private draft" },
+      servicePromptConfig: { serverUrl: original.serverUrl, authMode: "multi-user", expectedUserId: 42 }
+    })).rejects.toMatchObject({ status: 412 })
+    expect(fetchSpy.mock.calls.filter(([url]) => String(url).endsWith("/notes/"))).toHaveLength(1)
+    expect(mocks.store.tldwConfig).toEqual(replacement)
+  })
+
+  it("retries a scoped Notes write with refreshed credentials for the same principal", async () => {
+    const original = { serverUrl: "https://api.example.com", authMode: "multi-user", accessToken: jwtForUser(42), refreshToken: "alice-refresh" }
+    mocks.store.tldwConfig = original
+    const rotated = `${jwtForUser(42)}-new`
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/auth/refresh")) return new Response(JSON.stringify({ access_token: rotated, refresh_token: "alice-rotated" }), { status: 200, headers: { "content-type": "application/json" } })
+      return new Headers(init?.headers).get("Authorization") === `Bearer ${rotated}`
+        ? new Response(JSON.stringify({ id: "saved" }), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response("unauthorized", { status: 401 })
+    })
+    vi.stubGlobal("fetch", fetchSpy)
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({
+      path: "/api/v1/notes/", method: "POST", body: { content: "Alice private draft" },
+      headers: { "X-TLDW-Expected-User-ID": "42" },
+      servicePromptConfig: { serverUrl: original.serverUrl, authMode: "multi-user", expectedUserId: 42 }
+    })).resolves.toEqual({ id: "saved" })
+    const writes = fetchSpy.mock.calls.filter(([url]) => String(url).endsWith("/notes/"))
+    expect(writes).toHaveLength(2)
+    expect(writes.every(([, init]) => new Headers(init?.headers).get("X-TLDW-Expected-User-ID") === "42")).toBe(true)
+  })
+
+  it("rejects a changed runtime key before a scoped Notes write", async () => {
+    mocks.store.tldwConfig = { serverUrl: "https://api.example.com", authMode: "single-user", apiKey: "alice-key" }
+    mocks.runtimeApiKey = "bob-key"
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({
+      path: "/api/v1/notes/", method: "POST", body: { content: "Alice private draft" },
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com", authMode: "single-user",
+        expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope("single-user", "alice-key")
+      }
+    })).rejects.toMatchObject({ status: 412 })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
   it.each([
     "/api/v1/writing/manuscripts/scenes/scene-a",
     "/api/v1/writing/manuscripts/projects/project-a/characters?role=protagonist",

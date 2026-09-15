@@ -6,6 +6,8 @@ import type { QueryClient } from '@tanstack/react-query'
 import { useQuery } from '@tanstack/react-query'
 import { bgRequest } from '@/services/background-proxy'
 import { tldwAuth } from '@/services/tldw/TldwAuth'
+import type { ServicePromptTargetConfig, TldwConfig } from '@/services/tldw/TldwApiClient'
+import { deriveSingleUserApiKeyCredentialScope } from '@/services/chat-surface-scope'
 import {
   listNoteTasks,
   listTaskActivity,
@@ -67,11 +69,15 @@ import {
   toAttachmentMarkdown,
 } from '../notes-manager-utils'
 import type { NoteStudioDocumentSummary } from '../notes-studio-types'
+import { notesAuthoritySetting } from '../notes-authority-storage'
+import { useNotesAuthorityState } from './useNotesAuthorityState'
+import { createNotesGraphAuthorityScope } from './useNotesGraphAuthorityScope'
 
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
 
 export interface UseNotesEditorStateDeps {
   authorityScope?: string | null
+  connectionConfig?: TldwConfig | null
   isOnline: boolean
   isMobileViewport: boolean
   message: MessageInstance
@@ -105,6 +111,7 @@ const noteResourcePath = (id: string | number) =>
 export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const {
     authorityScope,
+    connectionConfig,
     isOnline,
     isMobileViewport,
     message,
@@ -128,13 +135,30 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     editorDisabled,
   } = deps
   const authorityScopeRef = React.useRef(authorityScope)
+  const authorityEpochRef = React.useRef(0)
+  const authorityRequestsRef = React.useRef(new Set<AbortController>())
+  if (authorityScopeRef.current !== authorityScope) authorityEpochRef.current += 1
   authorityScopeRef.current = authorityScope
+  React.useEffect(() => {
+    const cancelRequests = () => {
+      authorityEpochRef.current += 1
+      for (const controller of authorityRequestsRef.current) controller.abort()
+      authorityRequestsRef.current.clear()
+    }
+    window.addEventListener('tldw:config-updated', cancelRequests)
+    window.addEventListener('tldw:auth-principal-changed', cancelRequests)
+    return () => {
+      cancelRequests()
+      window.removeEventListener('tldw:config-updated', cancelRequests)
+      window.removeEventListener('tldw:auth-principal-changed', cancelRequests)
+    }
+  }, [authorityScope])
 
   // ---- editor state ----
   const [selectedId, setSelectedId] = React.useState<string | number | null>(null)
   const [title, setTitle] = React.useState('')
   const [content, setContent] = React.useState('')
-  const [loadingDetail, setLoadingDetail] = React.useState(false)
+  const [loadingDetail, setLoadingDetail] = useNotesAuthorityState(authorityScope, false)
   const [saving, setSaving] = React.useState(false)
   const [saveIndicator, setSaveIndicator] = React.useState<SaveIndicatorState>('idle')
   const [saveRecoveryNotice, setSaveRecoveryNotice] =
@@ -162,9 +186,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     React.useState<NoteTaskReconciliationSummary | null>(null)
   const [taskActivityEvents, setTaskActivityEvents] = React.useState<NoteTaskActivityEvent[]>([])
   const [taskConflictNotice, setTaskConflictNotice] = React.useState<string | null>(null)
-  const [recentNotes, setRecentNotes] = React.useState<NotesRecentOpenedEntry[]>([])
+  const [recentNotes, setRecentNotes] = useNotesAuthorityState<NotesRecentOpenedEntry[]>(authorityScope, [])
   const recentNotesRef = React.useRef<NotesRecentOpenedEntry[]>([])
-  const [pinnedNoteIds, setPinnedNoteIds] = React.useState<string[]>([])
+  recentNotesRef.current = recentNotes
+  const recentRevisionRef = React.useRef(0)
+  const [pinnedNoteIds, setPinnedNoteIds] = useNotesAuthorityState<string[]>(authorityScope, [])
+  const recentNotesSetting = React.useMemo(() => notesAuthoritySetting(NOTES_RECENT_OPENED_SETTING, authorityScope), [authorityScope])
+  const pinnedNotesSetting = React.useMemo(() => notesAuthoritySetting(NOTES_PINNED_IDS_SETTING, authorityScope), [authorityScope])
   const [titleSuggestStrategy, setTitleSuggestStrategy] =
     React.useState<NotesTitleSuggestStrategy>('heuristic')
   const [graphMutationTick, setGraphMutationTick] = React.useState(0)
@@ -174,11 +202,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [openingLinkedChat, setOpeningLinkedChat] = React.useState(false)
 
   // ---- offline draft state ----
-  const [offlineDraftQueue, setOfflineDraftQueue] = React.useState<Record<string, OfflineDraftEntry>>({})
-  const [offlineDraftQueueHydrated, setOfflineDraftQueueHydrated] = React.useState(false)
+  const [offlineDraftQueue, setOfflineDraftQueue] = useNotesAuthorityState<Record<string, OfflineDraftEntry>>(authorityScope, {})
+  const [offlineDraftQueueHydrated, setOfflineDraftQueueHydrated] = useNotesAuthorityState(authorityScope, false)
+  const offlineDraftStorageKey = authorityScope ? `${NOTES_OFFLINE_DRAFT_QUEUE_STORAGE_KEY}:${authorityScope}` : null
   const offlineDraftQueueRef = React.useRef<Record<string, OfflineDraftEntry>>({})
   offlineDraftQueueRef.current = offlineDraftQueue
-  const offlineSyncInFlightRef = React.useRef(false)
+  const offlineSyncInFlightRef = React.useRef<number | null>(null)
   const restoredInitialOfflineDraftRef = React.useRef(false)
 
   // ---- refs ----
@@ -319,7 +348,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         [nextDraft.key]: nextDraft
       }))
     },
-    [buildCurrentOfflineDraft]
+    [buildCurrentOfflineDraft, setOfflineDraftQueue]
   )
 
   const removeOfflineDraftByKey = React.useCallback((key: string) => {
@@ -331,7 +360,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       delete next[normalized]
       return next
     })
-  }, [])
+  }, [setOfflineDraftQueue])
 
   const queuedOfflineDraftCount = React.useMemo(() => {
     return Object.values(offlineDraftQueue).filter((draft) => {
@@ -393,24 +422,30 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   }, [])
 
   const loadTaskActivityForNote = React.useCallback(async (noteId: string | number) => {
+    const requestEpoch = authorityEpochRef.current
     try {
       const response = await listTaskActivity({ note_id: noteId, limit: 50 })
+      if (authorityEpochRef.current !== requestEpoch) return
       const noteIdText = String(noteId)
       const events = Array.isArray(response.events)
         ? response.events.filter((event) => String(event.note_id || '') === noteIdText)
         : []
       setTaskActivityEvents(events)
     } catch {
+      if (authorityEpochRef.current !== requestEpoch) return
       setTaskActivityEvents([])
     }
   }, [])
 
   const refreshTaskStateForNote = React.useCallback(async (noteId: string | number) => {
+    const requestEpoch = authorityEpochRef.current
     try {
       const response = await listNoteTasks(noteId, { limit: 500 })
+      if (authorityEpochRef.current !== requestEpoch) return
       setNoteTasks(Array.isArray(response.tasks) ? response.tasks : [])
       setTaskReconciliation(response.reconciliation ?? null)
     } catch {
+      if (authorityEpochRef.current !== requestEpoch) return
       setNoteTasks([])
       setTaskReconciliation(null)
     }
@@ -434,16 +469,18 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   // ---- load/reset ----
   const updateRecentNotes = React.useCallback(
     (getNext: (current: NotesRecentOpenedEntry[]) => NotesRecentOpenedEntry[]) => {
+      if (!recentNotesSetting || authorityScopeRef.current !== authorityScope) return
       const current = recentNotesRef.current
       const next = getNext(current)
       if (next === current) return
       recentNotesRef.current = next
+      recentRevisionRef.current += 1
       setRecentNotes(next)
-      void setSetting(NOTES_RECENT_OPENED_SETTING, next).catch(() => {
+      void setSetting(recentNotesSetting, next).catch(() => {
         // Keep the in-memory recent list even if settings persistence fails.
       })
     },
-    []
+    [authorityScope, recentNotesSetting, setRecentNotes]
   )
 
   const rememberRecentNote = React.useCallback((noteId: string | number, noteTitle: string) => {
@@ -474,17 +511,14 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   const loadDetail = React.useCallback(async (id: string | number): Promise<boolean> => {
     const requestAuthorityScope = authorityScope
+    const requestEpoch = authorityEpochRef.current
+    const isCurrent = () => authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestAuthorityScope
     if (requestAuthorityScope === null) return false
     clearAssistUndoState()
     setLoadingDetail(true)
     try {
       const d = await bgRequest<any>({ path: noteResourcePath(id) as any, method: 'GET' as any })
-      if (
-        requestAuthorityScope !== undefined &&
-        authorityScopeRef.current !== requestAuthorityScope
-      ) {
-        return false
-      }
+      if (!isCurrent()) return false
       const loadedTitle = String(d?.title || `Note ${id}`)
       setSelectedId(id)
       setTitle(String(d?.title || ''))
@@ -522,12 +556,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         applyOfflineDraftToEditor(queuedDraft)
       }
       await refreshTaskStateForNote(id)
-      return true
+      return isCurrent()
     } catch {
-      message.error('Failed to load note')
+      if (isCurrent()) message.error('Failed to load note')
       return false
-    } finally { setLoadingDetail(false) }
-  }, [applyOfflineDraftToEditor, authorityScope, clearAssistUndoState, clearTaskState, message, refreshTaskStateForNote, rememberRecentNote, setEditorKeywords])
+    } finally { if (isCurrent()) setLoadingDetail(false) }
+  }, [applyOfflineDraftToEditor, authorityScope, clearAssistUndoState, clearTaskState, message, refreshTaskStateForNote, rememberRecentNote, setEditorKeywords, setLoadingDetail])
 
   const dismissTaskActivity = React.useCallback(async (eventId: string) => {
     const normalizedEventId = String(eventId || '').trim()
@@ -1140,6 +1174,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   // ---- offline sync ----
   const syncOfflineDraftEntry = React.useCallback(
     async (draft: OfflineDraftEntry): Promise<OfflineDraftSyncResult> => {
+      const requestScope = authorityScope
+      const requestEpoch = authorityEpochRef.current
+      const capturedConfig = connectionConfig ? { ...connectionConfig } : null
+      const authorityChanged = () => !requestScope || authorityEpochRef.current !== requestEpoch || authorityScopeRef.current !== requestScope
+      const cancelledResult: OfflineDraftSyncResult = { status: 'error', key: draft.key, message: 'Account changed during draft sync.' }
+      if (authorityChanged()) return cancelledResult
+      if (!capturedConfig) return cancelledResult
       const metadata: Record<string, any> = {
         ...(draft.metadata || {}),
         keywords: draft.keywords
@@ -1155,12 +1196,34 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (draft.backlinkConversationId) payload.conversation_id = draft.backlinkConversationId
       if (draft.backlinkMessageId) payload.message_id = draft.backlinkMessageId
 
+      const controller = new AbortController()
+      authorityRequestsRef.current.add(controller)
       try {
+        const user = await tldwAuth.getCurrentUser()
+        if (
+          authorityChanged() || controller.signal.aborted || !user?.is_active ||
+          user.id == null || createNotesGraphAuthorityScope(capturedConfig.serverUrl, user.id) !== requestScope
+        ) return cancelledResult
+        // Reuse the guarded transport in both the browser and extension worker.
+        // It checks every credential load and refresh against this verified owner.
+        const servicePromptConfig: ServicePromptTargetConfig = {
+          serverUrl: capturedConfig.serverUrl,
+          authMode: capturedConfig.authMode,
+          authSource: capturedConfig.authSource,
+          orgId: capturedConfig.orgId,
+          expectedUserId: user.id,
+          expectedSingleUserApiKeyScope: capturedConfig.authMode === 'single-user'
+            ? deriveSingleUserApiKeyCredentialScope('single-user', capturedConfig.apiKey)
+            : undefined
+        }
+        const requestScopeOptions = { servicePromptConfig, abortSignal: controller.signal }
+        const ownerHeader = { 'X-TLDW-Expected-User-ID': String(user.id) }
         if (!draft.noteId) {
           const created = await bgRequest<any>({
+            ...requestScopeOptions,
             path: '/api/v1/notes/' as any,
             method: 'POST' as any,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { ...ownerHeader, 'Content-Type': 'application/json' },
             body: payload
           })
           const createdId = String(created?.id || '').trim()
@@ -1182,9 +1245,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
         const draftNotePath = noteResourcePath(draft.noteId)
         const remote = await bgRequest<any>({
+          ...requestScopeOptions,
+          headers: ownerHeader,
           path: draftNotePath as any,
           method: 'GET' as any
         })
+        if (authorityChanged()) return cancelledResult
         const remoteVersion = toNoteVersion(remote)
         if (
           draft.baseVersion != null &&
@@ -1207,9 +1273,11 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
 
         const updated = await bgRequest<any>({
+          ...requestScopeOptions,
           path: draftNotePath as any,
           method: 'PUT' as any,
           headers: {
+            ...ownerHeader,
             'Content-Type': 'application/json',
             'expected-version': String(expectedVersion)
           },
@@ -1224,6 +1292,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           lastSavedAt: toNoteLastModified(updated)
         }
       } catch (error: any) {
+        if (authorityChanged() || controller.signal.aborted) return cancelledResult
         if (isVersionConflictError(error)) {
           return {
             status: 'conflict',
@@ -1236,23 +1305,29 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           key: draft.key,
           message: String(error?.message || 'Queued sync failed.')
         }
+      } finally {
+        authorityRequestsRef.current.delete(controller)
       }
     },
-    [isVersionConflictError]
+    [authorityScope, connectionConfig, isVersionConflictError]
   )
 
   const syncOfflineDraftQueue = React.useCallback(async () => {
     if (!isOnline) return
-    if (offlineSyncInFlightRef.current) return
+    if (!authorityScope || !offlineDraftQueueHydrated) return
+    const requestScope = authorityScope
+    const requestEpoch = authorityEpochRef.current
+    if (offlineSyncInFlightRef.current === requestEpoch) return
     const queuedEntries = Object.values(offlineDraftQueueRef.current)
       .filter((entry) => entry.syncState !== 'conflict')
       .sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
     if (queuedEntries.length === 0) return
 
-    offlineSyncInFlightRef.current = true
+    offlineSyncInFlightRef.current = requestEpoch
     let successfulSyncs = 0
     try {
       for (const queuedEntry of queuedEntries) {
+        if (authorityEpochRef.current !== requestEpoch || authorityScopeRef.current !== requestScope) return
         setOfflineDraftQueue((current) => {
           const existing = current[queuedEntry.key]
           if (!existing) return current
@@ -1268,6 +1343,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
         const latestEntry = offlineDraftQueueRef.current[queuedEntry.key] || queuedEntry
         const syncResult = await syncOfflineDraftEntry(latestEntry)
+        if (authorityEpochRef.current !== requestEpoch || authorityScopeRef.current !== requestScope) return
         if (syncResult.status === 'synced' && syncResult.noteId) {
           successfulSyncs += 1
           setOfflineDraftQueue((current) => {
@@ -1327,7 +1403,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
       }
     } finally {
-      offlineSyncInFlightRef.current = false
+      if (offlineSyncInFlightRef.current === requestEpoch) offlineSyncInFlightRef.current = null
     }
 
     if (successfulSyncs > 0) {
@@ -1340,6 +1416,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       )
     }
   }, [
+    authorityScope,
+    offlineDraftQueueHydrated,
+    setOfflineDraftQueue,
     currentOfflineDraftKey,
     isOnline,
     loadDetail,
@@ -1625,6 +1704,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   const toggleNotePinned = React.useCallback(
     async (id: string | number) => {
+      if (!pinnedNotesSetting) return
       const targetId = String(id || '').trim()
       if (!targetId) return
       const currentlyPinned = pinnedNoteIdSet.has(targetId)
@@ -1633,7 +1713,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         : [targetId, ...pinnedNoteIds.filter((entry) => entry !== targetId)].slice(0, 500)
       setPinnedNoteIds(nextPinnedIds)
       try {
-        await setSetting(NOTES_PINNED_IDS_SETTING, nextPinnedIds)
+        await setSetting(pinnedNotesSetting, nextPinnedIds)
       } catch {
         // Keep UI state even if persistence fails.
       }
@@ -1643,7 +1723,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         message.success('Note pinned to top')
       }
     },
-    [message, pinnedNoteIdSet, pinnedNoteIds]
+    [message, pinnedNoteIdSet, pinnedNoteIds, pinnedNotesSetting, setPinnedNoteIds]
   )
 
   // ---- effects ----
@@ -1768,12 +1848,14 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   // Offline draft persistence
   React.useEffect(() => {
+    restoredInitialOfflineDraftRef.current = false
+    if (!offlineDraftStorageKey) return
     if (typeof window === 'undefined') {
       setOfflineDraftQueueHydrated(true)
       return
     }
     try {
-      const raw = window.localStorage.getItem(NOTES_OFFLINE_DRAFT_QUEUE_STORAGE_KEY)
+      const raw = window.localStorage.getItem(offlineDraftStorageKey)
       if (!raw) {
         setOfflineDraftQueue({})
         return
@@ -1785,20 +1867,21 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     } finally {
       setOfflineDraftQueueHydrated(true)
     }
-  }, [])
+  }, [offlineDraftStorageKey, setOfflineDraftQueue, setOfflineDraftQueueHydrated])
 
   React.useEffect(() => {
     if (!offlineDraftQueueHydrated) return
+    if (!offlineDraftStorageKey) return
     if (typeof window === 'undefined') return
     try {
       window.localStorage.setItem(
-        NOTES_OFFLINE_DRAFT_QUEUE_STORAGE_KEY,
+        offlineDraftStorageKey,
         JSON.stringify(offlineDraftQueue)
       )
     } catch {
       // Ignore localStorage quota/transient persistence failures.
     }
-  }, [offlineDraftQueue, offlineDraftQueueHydrated])
+  }, [offlineDraftQueue, offlineDraftQueueHydrated, offlineDraftStorageKey])
 
   React.useEffect(() => {
     if (!offlineDraftQueueHydrated) return
@@ -1868,9 +1951,11 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   React.useEffect(() => {
     let cancelled = false
+    if (!recentNotesSetting) return
+    const revision = recentRevisionRef.current
     void (async () => {
-      const savedRecent = await getSetting(NOTES_RECENT_OPENED_SETTING)
-      if (cancelled) return
+      const savedRecent = await getSetting(recentNotesSetting)
+      if (cancelled || recentRevisionRef.current !== revision) return
       if (!Array.isArray(savedRecent)) return
       recentNotesRef.current = savedRecent
       setRecentNotes(savedRecent)
@@ -1878,12 +1963,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [recentNotesSetting, setRecentNotes])
 
   React.useEffect(() => {
     let cancelled = false
+    if (!pinnedNotesSetting) return
     void (async () => {
-      const savedPinned = await getSetting(NOTES_PINNED_IDS_SETTING)
+      const savedPinned = await getSetting(pinnedNotesSetting)
       if (cancelled) return
       if (!Array.isArray(savedPinned)) return
       const normalized = savedPinned
@@ -1896,7 +1982,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [pinnedNotesSetting, setPinnedNoteIds])
 
   // Cleanup
   React.useEffect(() => {
@@ -1999,6 +2085,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   const provenanceSummaryText = React.useMemo(() => {
     if (editProvenance.mode === 'manual') {
+      if (backlinkConversationId) {
+        return t('option:notesSearch.provenanceChat', { defaultValue: 'Origin: Saved from Chat' })
+      }
       return t('option:notesSearch.provenanceManual', {
         defaultValue: 'Origin: Typed manually'
       })
@@ -2014,7 +2103,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       defaultValue: 'Origin: AI-generated'
     })
     return `${generatedPrefix} (${actionLabel} at ${generatedAt})`
-  }, [editProvenance, t])
+  }, [backlinkConversationId, editProvenance, t])
 
   const monitoringNoticeClasses = React.useMemo(() => {
     if (!monitoringNotice) return ''

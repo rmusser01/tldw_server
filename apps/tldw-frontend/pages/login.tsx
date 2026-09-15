@@ -1,6 +1,7 @@
 import React from "react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
+import Head from "next/head"
 import { useRouter } from "next/router"
 
 import { RouteRedirect } from "@web/components/navigation/RouteRedirect"
@@ -195,4 +196,6 @@ const LoginPage = () => {
   )
 }
 
-export default LoginPage
+export default function Login() {
+  return <><Head><title>Sign in | tldw</title></Head><LoginPage /></>
+}

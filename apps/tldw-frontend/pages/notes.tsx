@@ -1,3 +1,8 @@
 import dynamic from "next/dynamic"
+import Head from "next/head"
 
-export default dynamic(() => import("@/routes/option-notes"), { ssr: false })
+const Notes = dynamic(() => import("@/routes/option-notes"), { ssr: false })
+
+export default function NotesPage() {
+  return <><Head><title>Notes | tldw</title></Head><Notes /></>
+}
