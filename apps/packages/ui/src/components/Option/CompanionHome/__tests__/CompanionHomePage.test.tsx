@@ -374,6 +374,7 @@ describe("CompanionHomePage", () => {
     renderPage()
 
     expect(await screen.findByText("Companion setup required")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Personalization configuration guide" })).toHaveAttribute("href", "https://github.com/rmusser01/tldw_server/blob/main/Docs/Product/Personalization_Design.md#current-status-v02x-dev")
     expect(screen.getByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /Source monitor/i })).toHaveAttribute(
       "href",

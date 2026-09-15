@@ -30,13 +30,13 @@ export function CompanionHomeShell({
   const demoExitPath = surface === "sidepanel" ? "/settings" : "/setup"
 
   const isConnected = useIsConnected()
-  const { data: models = [] } = useQuery({
+  const { data: models = [], isSuccess } = useQuery({
     queryKey: ["companion-home:chatModels"],
-    queryFn: () => fetchChatModels({ returnEmpty: true }),
+    queryFn: () => fetchChatModels(),
     enabled: isConnected && !demoEnabled,
     staleTime: 30_000,
   })
-  const needsProvider = isConnected && !demoEnabled && models.length === 0
+  const needsProvider = isConnected && !demoEnabled && isSuccess && models.length === 0
 
   const actions: QuickAction[] =
     surface === "sidepanel"
@@ -128,7 +128,7 @@ export function CompanionHomeShell({
                 Configure an LLM provider to start chatting
               </p>
               <p className="mt-1 text-xs text-text-muted">
-                Add an API key for OpenAI, Anthropic, or another provider in your server&apos;s .env file, then restart.
+                Connect a local model server or a hosted provider in Model Settings.
               </p>
             </div>
             <Link

@@ -1,8 +1,10 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader";
 import { useSetupReadinessSummary } from "@/hooks/useSetupReadinessSummary";
 import { useSetupOnboarding } from "@/hooks/useSetupOnboarding";
+import { useConnectionActions } from "@/hooks/useConnectionState";
 import type {
   FirstRunMetadata,
   FirstRunState,
@@ -93,6 +95,8 @@ export function UnifiedSetupWizard({
   onStateChange,
   onComplete,
 }: UnifiedSetupWizardProps = {}) {
+  const navigate = useNavigate();
+  const { setConfigPartial } = useConnectionActions();
   const {
     state,
     metadata,
@@ -126,7 +130,9 @@ export function UnifiedSetupWizard({
     loading: setupReadinessLoading,
     error: setupReadinessError,
     refresh: refreshSetupReadinessStatus,
-  } = useSetupReadinessSummary();
+  } = useSetupReadinessSummary({
+    enabled: Boolean(metadata) && metadata.auth_mode !== "multi_user",
+  });
   const [step, setStep] = React.useState<WizardStep>(() =>
     stepFromState(initialState),
   );
@@ -157,6 +163,22 @@ export function UnifiedSetupWizard({
   const [mcpToolsSkipPending, setMcpToolsSkipPending] = React.useState(false);
   const mcpToolsSkipPendingRef = React.useRef(false);
   const [stepError, setStepError] = React.useState<string | null>(null);
+  const [loginPending, setLoginPending] = React.useState(false);
+  const isMultiUserServer = metadata?.auth_mode === "multi_user";
+  const activeStep = isMultiUserServer ? "multi_user_exit" : step;
+
+  const handleSignIn = async () => {
+    setLoginPending(true);
+    setStepError(null);
+    try {
+      await setConfigPartial({ authMode: "multi-user" });
+      navigate("/settings/tldw");
+    } catch {
+      setStepError("Login settings could not be opened. Try again.");
+    } finally {
+      setLoginPending(false);
+    }
+  };
 
   React.useEffect(() => {
     if (!state) return;
@@ -395,7 +417,7 @@ export function UnifiedSetupWizard({
     >
       <header className="mb-6">
         <p className="text-xs font-medium uppercase tracking-normal text-text-muted">
-          Solo onboarding
+          {isMultiUserServer ? "Multi-user connection" : "Solo onboarding"}
         </p>
         <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -403,17 +425,19 @@ export function UnifiedSetupWizard({
               First-time setup
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-text-muted">
-              Configure the minimum needed to reach a successful first chat.
+              {isMultiUserServer
+                ? "Sign in to your server with an account created by its administrator."
+                : "Configure the minimum needed to reach a successful first chat."}
             </p>
           </div>
-          <button
+          {!isMultiUserServer ? <button
             type="button"
             onClick={handleSkip}
             disabled={skipPending}
             className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
           >
             {skipPending ? "Skipping..." : "Skip for now"}
-          </button>
+          </button> : null}
         </div>
       </header>
 
@@ -437,18 +461,18 @@ export function UnifiedSetupWizard({
         </div>
       ) : null}
 
-      <SetupReadinessPanel
+      {!isMultiUserServer ? <SetupReadinessPanel
         status={setupReadinessStatus}
         loading={setupReadinessLoading}
         error={setupReadinessError}
         onRetry={refreshSetupReadiness}
-      />
+      /> : null}
 
       <div className="rounded-md border border-border bg-bg px-4 py-5 shadow-sm md:px-6">
-        {step === "setup_path" ? (
+        {activeStep === "setup_path" ? (
           <SetupPathStep onSelect={handlePathSelect} />
         ) : null}
-        {step === "privacy_security" ? (
+        {activeStep === "privacy_security" ? (
           <PrivacySecurityStep
             metadata={metadata}
             onBack={() => setStep("setup_path")}
@@ -456,13 +480,15 @@ export function UnifiedSetupWizard({
             saving={savingStep}
           />
         ) : null}
-        {step === "multi_user_exit" ? (
+        {activeStep === "multi_user_exit" ? (
           <MultiUserExitPanel
             metadata={metadata}
-            onBack={() => setStep("setup_path")}
+            onBack={isMultiUserServer ? undefined : () => setStep("setup_path")}
+            onSignIn={isMultiUserServer ? handleSignIn : undefined}
+            loginPending={loginPending}
           />
         ) : null}
-        {step === "provider_setup" ? (
+        {activeStep === "provider_setup" ? (
           <ProviderSetupStep
             providers={providerCatalog}
             initialSelection={providerSelection}
@@ -484,14 +510,14 @@ export function UnifiedSetupWizard({
             onBack={() => setStep("privacy_security")}
           />
         ) : null}
-        {step === "ingest_defaults" ? (
+        {activeStep === "ingest_defaults" ? (
           <IngestDefaultsStep
             saveIngestDefaults={saveIngestAndPublish}
             onContinue={() => setStep("audio_defaults")}
             onBack={() => setStep("provider_setup")}
           />
         ) : null}
-        {step === "audio_defaults" ? (
+        {activeStep === "audio_defaults" ? (
           <AudioSetupStep
             recommendations={audioRecommendations}
             saveAudioDefaults={saveAudioAndPublish}
@@ -499,14 +525,14 @@ export function UnifiedSetupWizard({
             onBack={() => setStep("ingest_defaults")}
           />
         ) : null}
-        {step === "optional_advanced" ? (
+        {activeStep === "optional_advanced" ? (
           <OptionalAdvancedStep
             saveOptionalAdvanced={saveAdvancedAndPublish}
             onContinue={() => setStep("mcp_tools")}
             onBack={() => setStep("audio_defaults")}
           />
         ) : null}
-        {step === "mcp_tools" ? (
+        {activeStep === "mcp_tools" ? (
           <McpToolsStep
             catalog={mcpToolsCatalog}
             initialStepData={
@@ -540,7 +566,7 @@ export function UnifiedSetupWizard({
             }}
           />
         ) : null}
-        {step === "first_chat" && providerSelection ? (
+        {activeStep === "first_chat" && providerSelection ? (
           <FirstChatStep
             provider={providerSelection.provider}
             model={providerSelection.model}

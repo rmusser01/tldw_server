@@ -166,13 +166,16 @@ vi.mock("@/components/PersonaGarden/FirstRunGate", () => ({
   FirstRunGate: ({
     children,
     bypass,
+    allowCompletedSetup,
     onStartSetup
   }: {
     children: React.ReactNode
     bypass?: boolean
+    allowCompletedSetup?: boolean
     onStartSetup: () => void
   }) => (
-    <div data-testid="first-run-gate" data-bypass={String(Boolean(bypass))}>
+    <div data-testid="first-run-gate" data-bypass={String(Boolean(bypass))}
+      data-allow-completed-setup={String(Boolean(allowCompletedSetup))}>
       <button
         type="button"
         data-testid="first-run-gate-start"
@@ -328,6 +331,13 @@ describe("App layout routing", () => {
       "data-bypass",
       "true"
     )
+  })
+
+  it.each(["/knowledge", "/chat"])("allows completed unified setup on source destination %s", async (path) => {
+    renderApp(path)
+    const gate = await screen.findByTestId("first-run-gate")
+    expect(gate).toHaveAttribute("data-allow-completed-setup", "true")
+    expect(gate).toHaveAttribute("data-bypass", "false")
   })
 
   it("bypasses the generic first-run splash for character-chat route intent", async () => {

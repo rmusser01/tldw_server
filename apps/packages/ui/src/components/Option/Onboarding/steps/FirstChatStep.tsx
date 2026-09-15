@@ -1,4 +1,6 @@
 import React from "react";
+import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope";
+import { useMilestoneStore } from "@/store/milestones";
 import { MessageCircle } from "lucide-react";
 
 import { getDesignSystemState } from "@/design-system";
@@ -34,6 +36,7 @@ const FIRST_CHAT_RETRYING_STATE = getDesignSystemState("retrying");
 type FirstChatRecoveryCategory =
   | "auth_failed"
   | "quota_or_rate_limit"
+  | "timeout"
   | "endpoint_unreachable"
   | "unsupported_api_shape"
   | "model_unavailable"
@@ -55,8 +58,8 @@ const FIRST_CHAT_CATEGORY_ALIASES: Record<string, FirstChatRecoveryCategory> = {
   quota_exceeded: "quota_or_rate_limit",
   connection_error: "endpoint_unreachable",
   network_error: "endpoint_unreachable",
-  timeout: "endpoint_unreachable",
-  timeout_error: "endpoint_unreachable",
+  timeout: "timeout",
+  timeout_error: "timeout",
   local_provider_unreachable: "endpoint_unreachable",
   endpoint_unreachable: "endpoint_unreachable",
   bad_request: "unsupported_api_shape",
@@ -94,6 +97,11 @@ const RECOVERY_COPY: Record<
     title: "Provider limit reached",
     guidance:
       "Retry later if this is temporary, or switch provider to keep setup moving.",
+  },
+  timeout: {
+    title: "The model took too long to respond",
+    guidance:
+      "A local model may need time to load. Check that it is running, then retry or choose another model.",
   },
   endpoint_unreachable: {
     title: "Endpoint could not be reached",
@@ -159,6 +167,7 @@ export function FirstChatStep({
   onCheckEndpoint,
   backLabel = "Back to providers",
 }: FirstChatStepProps) {
+  const homeScope = useHomeMilestoneScope();
   const [prompt, setPrompt] = React.useState(DEFAULT_FIRST_PROMPT);
   const [response, setResponse] =
     React.useState<FirstChatVerifyResponse | null>(null);
@@ -173,6 +182,7 @@ export function FirstChatStep({
   );
 
   const handleSend = async () => {
+    const requestOwnerScope = homeScope;
     setRunning(true);
     setResponse(null);
     setVerificationError(null);
@@ -187,9 +197,13 @@ export function FirstChatStep({
           prompt,
         });
       } catch (err) {
-        setRequestFailureCategory("unknown");
+        const name = err && typeof err === "object" && "name" in err ? err.name : null;
+        const timedOut = name === "AbortError" || name === "TimeoutError";
+        setRequestFailureCategory(timedOut ? "timeout" : "unknown");
         setVerificationError(
-          err instanceof Error
+          timedOut
+            ? "First-chat verification reached its time limit."
+            : err instanceof Error
             ? err.message
             : "First chat request failed. Retry, edit provider, or skip setup.",
         );
@@ -203,6 +217,9 @@ export function FirstChatStep({
           verification.message || "First chat did not complete.",
         );
         return;
+      }
+      if (requestOwnerScope) {
+        useMilestoneStore.getState().markScopedMilestone(requestOwnerScope, "first_chat");
       }
       try {
         await complete({

@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+
+import { useMilestoneStore } from "@/store/milestones"
+import { DISCUSS_MEDIA_PROMPT_SETTING } from "@/services/settings/ui-settings"
+const handoff = vi.hoisted(() => ({ scope: "server-a:alice" as string | null, get: vi.fn(), clear: vi.fn(), setRagMediaIds: vi.fn() }))
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => handoff.scope }))
 
 const onSubmitMock = vi.hoisted(() =>
   vi.fn(async (_payload: unknown) => ({ status: "submitted" as const }))
@@ -74,6 +79,8 @@ const createMessageOptionState = () => ({
   selectedKnowledge: null,
   ragMediaIds: []
 })
+
+vi.mock("@/components/Chat/composer/PromptAssistComposerAction", () => ({ PromptAssistComposerAction: () => null }))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -262,7 +269,7 @@ vi.mock("~/hooks/useMessageOption", () => ({
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: (selector: (state: any) => unknown) =>
     selector({
-      setRagMediaIds: vi.fn(),
+      setRagMediaIds: handoff.setRagMediaIds,
       setRagPinnedResults: vi.fn()
     })
 }))
@@ -497,8 +504,8 @@ vi.mock("@/services/settings/registry", async () => {
 
   return {
     ...actual,
-    clearSetting: vi.fn(),
-    getSetting: vi.fn(async () => undefined)
+    clearSetting: handoff.clear,
+    getSetting: handoff.get
   }
 })
 
@@ -782,6 +789,8 @@ vi.mock("../hooks", async () => {
 
       return {
         form,
+        beginPromptAssistReset: vi.fn(() => 1),
+        markPromptAssistAttemptSaved: vi.fn(),
         typing: false,
         setMessageValue: (value: string) =>
           setValues((prev) => ({ ...prev, message: value })),
@@ -1037,8 +1046,76 @@ import { PlaygroundForm } from "../PlaygroundForm"
 
 describe("PlaygroundForm OpenUI mode", () => {
   beforeEach(() => {
-    onSubmitMock.mockClear()
+    onSubmitMock.mockReset().mockResolvedValue({ status: "submitted" })
+    handoff.scope = "server-a:alice"
+    handoff.get.mockReset().mockResolvedValue(undefined)
+    handoff.clear.mockReset().mockResolvedValue(undefined)
+    handoff.setRagMediaIds.mockReset()
+    useMilestoneStore.getState().resetMilestones()
     messageOptionState.value = createMessageOptionState()
+  })
+
+  it("consumes legacy unowned handoffs when token-derived identity is unavailable", async () => {
+    handoff.scope = null
+    handoff.get.mockImplementation(async (setting) => setting === DISCUSS_MEDIA_PROMPT_SETTING ? { mediaId: "42", title: "Legacy review", content: "Discuss", mode: "rag_media" } : undefined)
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Legacy review\n\nDiscuss"))
+    expect(handoff.setRagMediaIds).toHaveBeenCalledWith([42])
+    expect(handoff.clear).toHaveBeenCalledWith(DISCUSS_MEDIA_PROMPT_SETTING)
+  })
+
+  it("waits for a resolved identity before applying or clearing an owned handoff", async () => {
+    handoff.scope = null
+    handoff.get.mockImplementation(async (setting) => setting === DISCUSS_MEDIA_PROMPT_SETTING ? { ownerScope: "server-a:alice", mediaId: "42", title: "Owned source", content: "Discuss", mode: "rag_media" } : undefined)
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await act(async () => {})
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("")
+    expect(handoff.setRagMediaIds).not.toHaveBeenCalled()
+    expect(handoff.clear).not.toHaveBeenCalledWith(DISCUSS_MEDIA_PROMPT_SETTING)
+    handoff.scope = "server-a:alice"
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Owned source\n\nDiscuss"))
+    expect(handoff.clear).toHaveBeenCalledWith(DISCUSS_MEDIA_PROMPT_SETTING)
+  })
+
+  it.each(["server-a:alice", "server-a:bob"])("only applies a saved source owned by %s when identity matches", async (ownerScope) => {
+    handoff.get.mockImplementation(async (setting) => setting === DISCUSS_MEDIA_PROMPT_SETTING ? { ownerScope, mediaId: "42", title: "Private source", content: "Summarize", mode: "rag_media" } : undefined)
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await waitFor(() => expect(handoff.clear).toHaveBeenCalledWith(DISCUSS_MEDIA_PROMPT_SETTING))
+    if (ownerScope === handoff.scope) {
+      expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Private source\n\nSummarize")
+      expect(handoff.setRagMediaIds).toHaveBeenCalledWith([42])
+    } else {
+      expect(screen.getByTestId("composer-textarea")).toHaveValue("")
+      expect(handoff.setRagMediaIds).not.toHaveBeenCalled()
+    }
+  })
+
+  it("does not apply a saved source after identity changes while storage resolves", async () => {
+    let resolve!: (value: unknown) => void
+    handoff.get.mockImplementation((setting) => setting === DISCUSS_MEDIA_PROMPT_SETTING ? new Promise(done => { resolve = done }) : Promise.resolve(undefined))
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await waitFor(() => expect(resolve).toBeTypeOf("function"))
+    const firstResolve = resolve
+    handoff.scope = "server-a:bob"
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await act(async () => { firstResolve({ ownerScope: "server-a:alice", mediaId: "42", title: "Private source", content: "Summarize" }) })
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("")
+  })
+
+  it.each(["submitted", "failed", "skipped"])("records normal Chat milestone only for %s and its original owner", async (status) => {
+    let resolve!: (value: unknown) => void
+    onSubmitMock.mockImplementation(() => new Promise(done => { resolve = done }) as never)
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await user.type(screen.getByTestId("composer-textarea"), "Hello")
+    await user.click(screen.getAllByRole("button", { name: "Send" })[0])
+    await waitFor(() => expect(resolve).toBeTypeOf("function"))
+    handoff.scope = "server-a:bob"
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await act(async () => { resolve({ status, errorMessage: "Failed", reason: "Skipped" }) })
+    expect(useMilestoneStore.getState().scopedMilestones["server-a:alice"]?.first_chat != null).toBe(status === "submitted")
+    expect(useMilestoneStore.getState().scopedMilestones["server-a:bob"]?.first_chat).toBeUndefined()
   })
 
   it("sends the next prompt with OpenUI request overrides", async () => {

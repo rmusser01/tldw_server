@@ -406,8 +406,20 @@ def _is_unsafe_public_step_data_value(value: object) -> bool:
     )
 
 
-def _allows_path_like_first_run_step_value(step: str, key: object) -> bool:
-    return step == "ingest_defaults" and key == "allowed_local_roots"
+def _is_local_setup_provider(provider: object) -> bool:
+    entry = get_setup_provider_entry(provider) if isinstance(provider, str) else None
+    return entry is not None and entry.provider_type == SetupProviderType.LOCAL_ENDPOINT
+
+
+def _allows_path_like_first_run_step_value(step: str, key: object, value: object, data: dict[str, Any]) -> bool:
+    # Local inference servers can use a filesystem-shaped string as their model
+    # ID. It is opaque metadata here, not permission to read that filesystem path.
+    return (step == "ingest_defaults" and key == "allowed_local_roots") or (
+        step == "providers"
+        and key == "default_model"
+        and isinstance(value, str)
+        and _is_local_setup_provider(data.get("default_provider"))
+    )
 
 
 def _is_optional_advanced_path_value_key(key: object) -> bool:
@@ -515,7 +527,7 @@ def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> di
     if not all(
         _is_public_first_run_step_value(
             value,
-            allow_path_like=_allows_path_like_first_run_step_value(step, key),
+            allow_path_like=_allows_path_like_first_run_step_value(step, key, value, data),
             path_like_child_key=_path_like_child_key_predicate(step, key),
         )
         for key, value in data.items()
@@ -540,16 +552,13 @@ def _public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, An
             continue
         if step == "ingest_defaults" and key == "allowed_local_roots":
             continue
-        if (
-            key in _FIRST_RUN_NON_SECRET_BOOLEAN_STEP_DATA_KEYS.get(step, frozenset())
-            and not isinstance(value, bool)
-        ):
+        if key in _FIRST_RUN_NON_SECRET_BOOLEAN_STEP_DATA_KEYS.get(step, frozenset()) and not isinstance(value, bool):
             continue
         if _is_unsafe_public_step_data_key(key) and not _is_explicitly_allowed_unsafe_named_step_key(step, key):
             continue
         if _is_public_first_run_step_value(
             value,
-            allow_path_like=_allows_path_like_first_run_step_value(step, key),
+            allow_path_like=_allows_path_like_first_run_step_value(step, key, value, data),
             path_like_child_key=_path_like_child_key_predicate(step, key),
         ):
             public_data[key] = value
@@ -574,16 +583,16 @@ def _safe_first_run_skip_reason(value: object) -> str | None:
     return value if isinstance(value, str) and _is_public_first_run_step_value(value) else None
 
 
-def _safe_public_first_chat_metadata_value(value: object) -> str | None:
+def _safe_public_first_chat_metadata_value(value: object, *, allow_path_like: bool = False) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
-    return value if not _is_unsafe_public_step_data_value(value) else None
+    return value if _is_public_first_run_step_value(value, allow_path_like=allow_path_like) else None
 
 
 def _require_safe_first_chat_request_metadata(*, provider: str, model: str) -> None:
     if (
         _safe_public_first_chat_metadata_value(provider) is None
-        or _safe_public_first_chat_metadata_value(model) is None
+        or _safe_public_first_chat_metadata_value(model, allow_path_like=_is_local_setup_provider(provider)) is None
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -596,7 +605,9 @@ def _public_first_chat_payload(value: object) -> dict[str, Any]:
     return {
         "completed": payload.get("completed") is True,
         "provider": _safe_public_first_chat_metadata_value(payload.get("provider")),
-        "model": _safe_public_first_chat_metadata_value(payload.get("model")),
+        "model": _safe_public_first_chat_metadata_value(
+            payload.get("model"), allow_path_like=_is_local_setup_provider(payload.get("provider"))
+        ),
         "response_id": _safe_public_first_chat_metadata_value(payload.get("response_id")),
         "completed_at": payload.get("completed_at"),
     }
@@ -1072,9 +1083,7 @@ def _mcp_tools_status_response(data: dict[str, Any], *, status_value: str) -> Mc
         selected_addon_ids=_safe_str_list(data.get("selected_addon_ids")),
         effective_tool_count=_safe_int_or_none(data.get("effective_tool_count")),
         validated_at=str(data["validated_at"]) if data.get("validated_at") is not None else None,
-        validation_message=(
-            str(data["validation_message"]) if data.get("validation_message") is not None else None
-        ),
+        validation_message=(str(data["validation_message"]) if data.get("validation_message") is not None else None),
         last_validation_run_id=(
             str(data["last_validation_run_id"]) if data.get("last_validation_run_id") is not None else None
         ),
@@ -1409,9 +1418,7 @@ async def validate_first_run_mcp_tools(
 
     validation_payload = _safe_mcp_tools_step_payload(result.step_payload)
     try:
-        updated = await _run_first_run_store_call(
-            lambda store: store.update_step("mcp_tools", validation_payload)
-        )
+        updated = await _run_first_run_store_call(lambda store: store.update_step("mcp_tools", validation_payload))
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return _mcp_tools_status_response(

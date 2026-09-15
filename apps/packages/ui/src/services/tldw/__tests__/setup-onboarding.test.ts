@@ -25,6 +25,19 @@ describe("setup onboarding API domain", () => {
     });
   });
 
+  it("gives first-chat verification time for cold local inference", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({ status: "ready" });
+
+    await setupOnboardingMethods.verifyFirstRunChat({
+      provider: "llamacpp", model: "local.gguf", prompt: "Hello"
+    });
+
+    const request = vi.mocked(bgRequest).mock.calls[0][0];
+    expect(request.path).toBe("/api/v1/setup/first-run/first-chat");
+    expect(request.noAuth).toBe(true);
+    expect(request.timeoutMs).toBeGreaterThanOrEqual(120_000);
+  });
+
   it("fetches setup metadata for auth and setup path decisions", async () => {
     vi.mocked(bgRequest).mockResolvedValueOnce({
       auth_mode: "single_user",

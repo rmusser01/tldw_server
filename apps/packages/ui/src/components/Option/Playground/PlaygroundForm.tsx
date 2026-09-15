@@ -36,6 +36,8 @@ import {
 // TldwButton moved to extracted sub-components
 import { useAntdNotification } from "@/hooks/useAntdNotification";
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog";
+import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope";
+import { useMilestoneStore } from "@/store/milestones";
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig";
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference";
 import {
@@ -756,6 +758,9 @@ export const PlaygroundForm = ({
     config: canonicalConnectionConfig,
     loading: canonicalConnectionLoading,
   } = useCanonicalConnectionConfig();
+  const homeScope = useHomeMilestoneScope();
+  const homeScopeRef = React.useRef(homeScope);
+  homeScopeRef.current = homeScope;
   const promptAssistBackendKey = React.useMemo(
     () =>
       canonicalConnectionLoading || !canonicalConnectionConfig
@@ -2470,7 +2475,7 @@ export const PlaygroundForm = ({
       },
     ) => {
       const payload = normalizeMediaChatHandoffPayload(rawPayload);
-      if (!payload) {
+      if (!payload || (payload.ownerScope && payload.ownerScope !== homeScopeRef.current)) {
         if (options?.clearAfterUse) {
           void clearSetting(DISCUSS_MEDIA_PROMPT_SETTING);
         }
@@ -2500,16 +2505,20 @@ export const PlaygroundForm = ({
 
   // Seed composer when a media item requests discussion (e.g., from Quick ingest or Review page)
   React.useEffect(() => {
+    const requestOwnerScope = homeScope;
     let cancelled = false;
     void (async () => {
       const payload = await getSetting(DISCUSS_MEDIA_PROMPT_SETTING);
-      if (cancelled || !payload) return;
+      if (cancelled || homeScopeRef.current !== requestOwnerScope || !payload) return;
+      // Legacy Review handoffs may have no token-derived identity (cookie auth).
+      // Owned Home handoffs wait for identity resolution before validation.
+      if (payload.ownerScope && !requestOwnerScope) return;
       applyDiscussMediaPayload(payload, { clearAfterUse: true });
     })();
     return () => {
       cancelled = true;
     };
-  }, [applyDiscussMediaPayload]);
+  }, [applyDiscussMediaPayload, homeScope]);
 
   React.useEffect(() => {
     const handler = (event: Event) => {
@@ -2949,10 +2958,14 @@ export const PlaygroundForm = ({
     mutationFn: onSubmit,
     onMutate: () => ({
       errorKeyToDismiss: chatErrorBanner?.key ?? null,
+      ownerScope: homeScope,
     }),
     onSuccess: (data, _variables, context) => {
       const result = normalizeChatSubmitResult(data);
       if (isChatSubmitSuccess(result)) {
+        if (context?.ownerScope) {
+          useMilestoneStore.getState().markScopedMilestone(context.ownerScope, "first_chat");
+        }
         dismissChatErrorAfterSuccessfulSubmit(context?.errorKeyToDismiss ?? null);
         void trackOnboardingChatSubmitSuccess(
           typeof window !== "undefined" ? window.location.pathname : "/chat",

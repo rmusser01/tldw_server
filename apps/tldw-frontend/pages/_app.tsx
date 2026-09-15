@@ -450,6 +450,7 @@ export default function App({ Component, pageProps }: AppProps) {
   ) : (
     <FirstRunGate
       onStartSetup={handleStartSetup}
+      allowCompletedSetup={routePath === "/knowledge" || routePath === "/chat"}
       bypass={shouldBypassFirstRunOverlay}>
       {layoutContent}
     </FirstRunGate>
