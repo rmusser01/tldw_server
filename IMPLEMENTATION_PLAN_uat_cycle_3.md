@@ -1,0 +1,138 @@
+# UAT cycle 3 implementation plan
+
+> For agentic workers: execute bounded tasks with systematic-debugging and test-driven-development, use dispatching-parallel-agents only for independent file ownership, and obtain independent review before integration.
+
+**Goal:** Repair all findings from the frozen cycle3 fresh single/multi UAT, then repeat both full workflow matrices.
+**Architecture:** Preserve the current shared UI/API/store boundaries. Establish ownership before asynchronous work, reconcile saved state without dropping drafts, and report confirmed processing/status results.
+**Tech stack:** Next.js, shared React/Zustand/Dexie, Vitest/Playwright, FastAPI/pytest/SQLite and real llama.cpp.
+**Spec:** [Cycle3 repair design](Docs/Design/2026-09-15-uat-cycle-3-repairs.md).
+
+## Global constraints
+
+- Product remains frozen at `d40e17dc81` until both current matrices have actual outcomes or explicit blocks. No application/test edits during that run.
+- Existing TASK-13260 covers UAT/evidence; its repair children cover the units below. Update their notes, verification and status through Backlog MCP or CLI.
+- Preserve role/ownership/source classification and remote restrictions. No mocked response, skipped step or seeded artifact is a live acceptance pass.
+- Reuse current dependencies and test harnesses. Use the project virtual environment before Python/Bandit. Never expose runtime credentials.
+- Commit reviewed, passing units with their Backlog records. Do not stage unrelated work or delete another plan/cache/profile.
+
+## Stage 1: Finish and review frozen UAT
+**Goal:** Complete both workflow matrices and retain auditable evidence.
+**Success criteria:** Every named journey/shared workflow has a result; all findings are tracked with expected/actual behavior and evidence limits.
+**Tests:** Actual UI workflows, real provider requests, independent owned/foreign API controls, evidence hash/JSON/credential checks.
+**Status:** In Progress
+
+- [x] Complete single-user execution and preserve144 captures through09:26:30UTC; initially record20new findings and reopened055. Independent evidence review additionally confirms076session accounting; retain its later read separately.
+- [x] Start fresh multi-user API18201/WebUI18281/browser; retain the existing documented admin bootstrap.
+- [ ] Complete admin/Alice/Bob UI workflows, public/confidential QA controls, cross-account metadata/content/draft isolation and offline two-tab recovery.
+- [ ] Reconcile the combined tracker and retained multi evidence, independently review claims, and commit the frozen-run checkpoint.
+- [ ] Incorporate multi-user-only findings into the repair tasks before beginning Stage2.
+
+## Stage 2: Repair private transfers and Chat ownership
+**Goal:** Protect Notes generation content and make Chat selection/history reliable.
+**Success criteria:** No note plaintext URL; one canonical saved Chat; explicit character selection and all persisted replies survive reload without losing drafts or crossing accounts.
+**Tests:** Real interacting hooks/stores, deferred async boundaries and old Dexie cache round trips.
+**Status:** Not Started
+
+### TASK-13260.13 — UAT064
+
+**Files:** `apps/packages/ui/src/services/tldw/flashcards-generate-handoff.ts`, NotesManager generation action, Flashcards page/GeneratePanel consumers, existing authority/logout cleanup; adjacent handoff and Notes/Flashcards integration suites.
+
+- [ ] Add regressions for exact unsaved source transfer, URL privacy, expiry/consume/storage failure and A→B→A with delayed generation/save; observe the original plaintext-route failure.
+- [ ] Implement the account-bound opaque Notes transfer and consumer invalidation from the design. Preserve other platform callers explicitly.
+- [ ] Run the existing handoff suite and new interacting consumer/authority tests; review browser URLs, provenance and actual intended-account generation in live targeted UAT.
+
+### TASK-13260.15 — UAT067/068 selection portion, then TASK-13260.14 — UAT062
+
+**Files:** `useCharacterGreeting.ts`, `useSelectedAssistant.ts`, `useCharacterData.tsx`, `hooks/chat/useChatActions.ts`, `hooks/chat/useServerChatLoader.ts`, `components/Option/Playground/hooks/usePlaygroundPersistence.tsx`; adjacent assistant, greeting, persona-integration and persistence tests.
+
+- [ ] Build the actual picker/canonical hook/greeting/store regression with deferred legacy/profile hydration; reproduce replacement reverting and unmounted Edit form warning.
+- [ ] Remove competing legacy selection hydration, guard cleared/replaced/account-changed loads and limit Edit form writes to its mounted lifecycle.
+- [ ] Add a combined normal pipeline/autosave regression with no queue, a queued second turn and delayed linked history; reproduce the duplicate conversation and mode change.
+- [ ] Extend neutral saved-chat bootstrap, carry established IDs into inference/persistence, and recheck autosave ownership after awaited work.
+- [ ] Verify temporary promotion, explicit persona/character, failed/aborted creation and delayed A→B results. Review and commit selection and canonical-creation changes separately.
+
+### TASK-13260.15 — UAT070 mirror portion
+
+**Files:** `hooks/chat/useServerChatLoader.ts`, existing server-history linking/Dexie and session persistence utilities; `hooks/__tests__/useServerChatLoader.test.ts`, `usePlaygroundSessionPersistence.test.tsx`, and an adjacent integrated round-trip suite.
+
+- [ ] Reproduce the exact pre-fix greeting/user mirror lacking serverMessageId with a fetched third reply, using real formatters/Dexie/session restoration.
+- [ ] Preserve server IDs and reconcile the owned existing mirror while retaining genuine unsynced/streaming/newer local rows.
+- [ ] Exercise concurrent bootstrap/loader mapping, account changes during transactions and repeated reload. Assert rows are not moved to a competing linked history. Use the existing browser harness for real Dexie; the named mocked Vitest fixtures alone do not prove this round trip.
+- [ ] Independently review and perform the real tracked Chat→Note→backlink→settled reload sequence before committing.
+
+## Stage 3: Repair ingest and Media feedback/recovery
+**Goal:** Make progress, extraction errors, analysis and recovery controls accurate and usable.
+**Success criteria:** Required provider validation precedes Ready; no invented progress/estimate; source/analysis presentation is consistent; last-item Trash and valid reading-progress persistence work.
+**Tests:** Wizard transition/job-state integration, scraper error boundary, actual Media empty/deletion/Undo controls, rendering and progress identity tests.
+**Status:** Not Started
+
+### TASK-13260.16 — UAT056/057/061/065
+
+**Files:** `components/Common/QuickIngestWizardModal.tsx`, `QuickIngest/{ReviewStep,WizardConfigureStep,WizardResultsStep,timeEstimation}`, extraction-error propagation in `enhanced_web_scraping_service.py`; existing wizard integration/time-estimation/results and backend scraping tests.
+
+- [ ] Reproduce blank analysis provider advancing to Ready; unknown inference cost; server20% versus synthetic UI progress; lost denial/empty/timeout error distinctions.
+- [ ] Validate Configure transitions, use confirmed or indeterminate progress and preserve safe structured failure categories.
+- [ ] Verify analysis-disabled presets, terminal partial/failure/success, cancellation and unavailable progress. Run touched backend tests/Bandit and frontend lint/regressions.
+- [ ] Review and exercise real small-source analysis plus the exact Wikipedia attempt without bypassing its refusal.
+
+### TASK-13260.17 — UAT060/066/071/072/073
+
+**Files:** `components/Media/ContentViewer.tsx`, Knowledge source card/preview type normalization, `components/Review/ViewMediaPage.tsx`, `hooks/useUndoNotification.tsx`, `components/Media/hooks/useContentEditState.tsx`, `hooks/useMediaReadingProgress.ts`; associated behavior suites.
+
+- [ ] Reproduce Markdown presented literally, mismatched missing source type, inaccessible Trash after last deletion, actual AntD warnings and invalid zoom1 payload.
+- [ ] Reuse safe Markdown/type fallback, expose Trash in the empty return, use context notifications/actions and percentage zoom100.
+- [ ] Verify original copy/edit text, unsafe rendering controls, actual App-context Undo once/dismiss/failure, selection cleanup old/new IDs and restored reading position.
+- [ ] Independently review and run targeted Media analysis/reload/delete/Trash/restore UI controls with API corroboration.
+
+## Stage 4: Repair Notes, Study and setup presentation
+**Goal:** Keep core route status, navigation and study counts useful and truthful.
+**Success criteria:** Saved Notes have consistent announcements and accessible results; eligibility counts match the queue; Manage emits no deprecated List warning; route/setup guidance is accurate.
+**Tests:** Notes state/layout, real Manage controls, dashboard mixed-state clock fixtures, route/auth titles and prerequisite state branches.
+**Status:** Not Started
+
+### TASK-13260.18 — UAT063/069
+
+**Files:** Notes `hooks/useNotesEditorState.tsx`, `NotesSidebar.tsx`, `NotesListPanel` and related layout helpers/tests.
+- [ ] Reproduce a loaded versioned Note announcing no save status and a zero-height list with expanded controls at1280×720.
+- [ ] Correct successful authority-scoped hydration status and bound/scroll controls with reserved results space.
+- [ ] Verify real pointer/keyboard use with five notes/three recents, resize/reload/mobile, plus new/dirty/offline/stale-account status protections; review and commit.
+
+### TASK-13260.19 — UAT055/074
+
+**Files:** `components/Flashcards/components/DeckStudyDashboard.tsx`, `tabs/ManageTab.tsx` and existing dashboard/ReviewTab/Manage tests.
+- [ ] Reproduce five expired learning cards displaying ten ready and actual Manage List deprecations.
+- [ ] Use `due + new` and native active/pending-deletion lists preserving all controls/states.
+- [ ] Verify future/mixed/due-time states, row selection/edit/keyboard/pagination/Undo and actual queue agreement; review and live-check Study/Manage.
+
+### TASK-13260.20 — UAT058/059/075
+
+**Files:** tested Next page wrappers, `components/Option/CompanionHome/CompanionHomePage.tsx`, `components/Common/ServerOverviewHint.tsx`, relevant locale targets and associated route/Home tests.
+- [ ] Verify empty titles, Reading Queue prerequisite classification and both effective setup-guide URL keys against the retained evidence.
+- [ ] Apply existing title ownership, prerequisite ordering and a verified maintained server documentation target.
+- [ ] Verify route changes/logout cannot retain Chat metadata; capability-disabled/profile-disabled/fetch-failure/empty-success branches; localization overrides and actual guide navigation. Review and commit.
+
+### TASK-13260.21 — UAT076
+
+**Files:** `tldw_Server_API/app/api/v1/schemas/flashcards.py`, `endpoints/flashcards.py`, `core/DB_Management/ChaChaNotes_DB.py`; frontend `services/flashcards.ts`, `useReviewFlashcardMutation` and `tabs/ReviewTab.tsx`; backend `tests/StudySuggestions/test_flashcard_review_sessions.py` and frontend `tabs/__tests__/ReviewTab.study-suggestions.test.tsx`.
+- [ ] Reproduce the exact mixed seven-card global run split into two server sessions using real request/schema/database behavior and nonconstant returned session IDs in the UI test.
+- [ ] Add optional explicit scope/session context, validate and retain one acknowledged run ID, support mixed cards only in validated global scope, and end exactly that session.
+- [ ] Verify legacy requests, wrong/foreign/inactive sessions, no-write failure, unrelated active sessions, pending account/scope changes, transient queue gaps, practice-only Cram and Undo. Run backend tests/Bandit and frontend regressions; review and live-check a mixed-deck session and reload rollup.
+
+### TASK-13260.22 — UAT077 Provider Keys loading
+
+**Files:** `components/Option/Settings/ProviderKeysSettings.tsx`, its actual-i18n behavior test, static related PersonaGarden Scopes/Policies/Commands/Connections label callers, `i18n/icu-format.ts` and `i18n/__tests__/icu-format.test.ts`.
+- [ ] Reproduce the object-valued `common:loading` label with real English resources and ICU; observe the route exception before edits.
+- [ ] Use scalar loading titles and verify pending/empty/success/403 states without a crash. Preserve the confirmed BYOK-disabled guidance and permission boundary; test static related PersonaGarden loading/test/delete states separately.
+- [ ] Guard only string placeholder transformation, then delegate all other input unchanged to upstream ICU; verify syntax-tree arrays and custom object parse-error handling alongside repeated interpolation/plural tests.
+- [ ] Review and run the same fresh-admin visible Provider Keys route; record any separately encountered issue before expanding scope.
+
+## Stage 5: Verify integration and repeat fresh UAT
+**Goal:** Establish complete acceptance on the repaired application.
+**Success criteria:** Every required single/multi workflow completes with no encountered product issue; explicit blocks remain visible and cannot qualify as success.
+**Tests:** Combined touched frontend/backend regressions, scoped lint/Bandit, TypeScript baseline comparison, independent review, targeted live controls and fresh full workflow matrices.
+**Status:** Not Started
+
+- [ ] Resolve independent review findings and run combined relevant checks once all changed interfaces settle; record baseline failures separately.
+- [ ] Keep the tracker current for each repaired, verified or blocked finding, with commit and evidence links.
+- [ ] Freeze the reviewed product; create new empty configuration/data/browser profiles and run the authoritative named frontend journeys/shared workflows in both modes with real inference.
+- [ ] Repeat review/fix/UAT for new findings. Close the active goal and remove only this plan when a complete issue-free pass actually exists.

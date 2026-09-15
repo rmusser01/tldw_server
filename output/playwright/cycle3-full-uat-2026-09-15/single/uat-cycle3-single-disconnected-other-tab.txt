@@ -1,0 +1,86 @@
+### Open tabs
+- 0: (current) [](http://127.0.0.1:18280/knowledge)
+- 1: [](http://127.0.0.1:18280/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18280/knowledge
+### Snapshot
+```yaml
+- generic [active] [ref=f8e1]:
+  - generic [ref=f8e4]:
+    - link "Skip to main content" [ref=f8e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f8e6]:
+      - button "Expand sidebar" [ref=f8e7] [cursor=pointer]
+      - button "New Chat" [ref=f8e11] [cursor=pointer]
+      - generic [ref=f8e14]:
+        - button "Quick Ingest" [ref=f8e15] [cursor=pointer]
+        - button "Chat" [ref=f8e19] [cursor=pointer]
+        - button "Prompts" [ref=f8e22] [cursor=pointer]
+        - button "Characters" [ref=f8e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f8e31] [cursor=pointer]
+        - button "World Books" [ref=f8e35] [cursor=pointer]
+        - button "Notes" [ref=f8e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f8e42] [cursor=pointer]
+        - button "Media" [ref=f8e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f8e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f8e59] [cursor=pointer]
+        - button "Kanban" [ref=f8e65] [cursor=pointer]
+        - button "Watchlists" [ref=f8e67] [cursor=pointer]
+      - generic [ref=f8e72]:
+        - button "Open Notes Dock" [ref=f8e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f8e78] [cursor=pointer]
+        - button "Settings" [ref=f8e81] [cursor=pointer]
+    - main [ref=f8e85]:
+      - generic [ref=f8e86]:
+        - generic [ref=f8e89]:
+          - generic [ref=f8e90]:
+            - button "Expand sidebar" [ref=f8e91] [cursor=pointer]
+            - generic [ref=f8e93]:
+              - img "tldw Assistant" [ref=f8e94]
+              - generic [ref=f8e95]: tldw Assistant
+              - button "Companion Home" [ref=f8e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f8e100] [cursor=pointer]
+          - generic [ref=f8e103]:
+            - button "Search - Open command palette" [ref=f8e104] [cursor=pointer]:
+              - generic [ref=f8e108]: Search
+              - generic [ref=f8e109]: ⌘K
+            - button "Open settings" [ref=f8e110] [cursor=pointer]
+            - generic [ref=f8e122]:
+              - button "Notifications, sign-in required" [ref=f8e123] [cursor=pointer]
+              - status [ref=f8e126]: Notifications require sign in
+            - button "Switch to light theme" [ref=f8e127] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f8e134] [cursor=pointer]:
+              - generic [ref=f8e135]: "?"
+        - region [ref=f8e139]:
+          - heading "Add your credentials to use Knowledge QA" [level=2] [ref=f8e147]
+          - paragraph [ref=f8e148]: Your server URL is saved, but Knowledge QA needs valid credentials before it can load.
+          - paragraph [ref=f8e149]: "Configured server: http://127.0.0.1:18200"
+          - generic [ref=f8e150]:
+            - generic [ref=f8e151]:
+              - generic [ref=f8e152]:
+                - generic [ref=f8e153]: Server URL
+                - generic [ref=f8e158]: Ready
+              - paragraph [ref=f8e159]: Knowledge QA will search against the configured tldw server.
+            - generic [ref=f8e160]:
+              - generic [ref=f8e161]:
+                - generic [ref=f8e162]: Credentials
+                - generic [ref=f8e166]: Missing
+              - paragraph [ref=f8e167]: Add the API key or login token for this tldw server.
+            - generic [ref=f8e168]:
+              - generic [ref=f8e169]:
+                - generic [ref=f8e170]: Browser access
+                - generic [ref=f8e175]: Ready
+              - paragraph [ref=f8e176]: Browser requests can target the configured tldw server.
+            - generic [ref=f8e177]:
+              - generic [ref=f8e178]:
+                - generic [ref=f8e179]: Backend reachability
+                - generic [ref=f8e190]: Waiting
+              - paragraph [ref=f8e191]: Waiting for credentials before checking backend reachability.
+          - generic [ref=f8e192]:
+            - button "Update credentials" [ref=f8e193] [cursor=pointer]
+            - button "Request host access" [ref=f8e194] [cursor=pointer]
+            - button "Server settings" [ref=f8e198] [cursor=pointer]
+            - button "Health & diagnostics" [ref=f8e199] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f8e205] [cursor=pointer]
+  - alert [ref=f8e209]
+```

@@ -1,0 +1,5 @@
+Project Indigo is a fictional archive used for acceptance testing.
+The archive opens on 5 March 2027.
+Rowan Vale coordinates the archive.
+Its synthetic catalog token is BLUEBELL.
+This fixture contains no actual credentials.

@@ -1,0 +1,141 @@
+### Page
+- Page URL: http://127.0.0.1:18280/knowledge
+### Snapshot
+```yaml
+- generic [ref=f7e159]:
+  - link "Skip to search" [ref=f7e160] [cursor=pointer]:
+    - /url: "#knowledge-search-input"
+  - main [ref=f7e161]:
+    - generic [ref=f7e162]:
+      - generic [ref=f7e164]:
+        - generic [ref=f7e165]:
+          - 'button "Open source scope and saved profiles. Sources: 4 selected. Specific: 1 doc" [ref=f7e367] [cursor=pointer]':
+            - text: "Sources: 4 selected"
+            - generic [ref=f7e368]: "• Specific: 1 doc"
+          - button "Custom" [ref=f7e369] [cursor=pointer]
+          - button "Web fallback is currently disabled. Click to toggle." [ref=f7e176] [cursor=pointer]: Web
+          - button "Choose answer model" [ref=f7e181] [cursor=pointer]:
+            - generic [ref=f7e185]: "AI: Server default"
+          - button "Refresh source health" [ref=f7e188] [cursor=pointer]: "Sources ready: 6 of 8"
+          - button "Open Knowledge QA settings" [ref=f7e189] [cursor=pointer]
+        - generic [ref=f7e235]:
+          - paragraph [ref=f7e236]: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
+          - generic [ref=f7e237]:
+            - textbox "Search your knowledge base" [ref=f7e238]:
+              - /placeholder: When was topic X first mentioned in my sources?
+              - text: When does Project Aster garden open, and who coordinates it? Cite the source.
+            - button "Clear search" [ref=f7e372] [cursor=pointer]
+            - button "Ask" [ref=f7e416] [cursor=pointer]
+          - generic [ref=f7e241]:
+            - generic [ref=f7e242]: Press / to focus, Cmd+K for new search
+            - button "New search" [ref=f7e417] [cursor=pointer]
+      - generic [ref=f7e384]:
+        - button "Export" [ref=f7e419] [cursor=pointer]
+        - generic [ref=f7e385]:
+          - generic [ref=f7e386]: Search complete. 1 source found.
+          - generic [ref=f7e392]:
+            - generic [ref=f7e393]:
+              - generic [ref=f7e423]:
+                - generic [ref=f7e427]: AI Answer
+                - generic [ref=f7e428]: "Answer status: Cited answer"
+                - generic [ref=f7e429]: 1 citation
+              - generic [ref=f7e396]:
+                - generic [ref=f7e430]:
+                  - button "Summarize" [ref=f7e431] [cursor=pointer]
+                  - button "Show more" [ref=f7e432] [cursor=pointer]
+                - generic [ref=f7e433]:
+                  - button "Copy answer" [ref=f7e434] [cursor=pointer]
+                  - button "Continue in editor" [ref=f7e435] [cursor=pointer]
+              - note "Answer trust summary" [ref=f7e436]:
+                - generic [ref=f7e437]: Searched Documents & Media, Notes, Characters, and Chats. 1 source returned, 1 cited.
+                - generic [ref=f7e438]: Web fallback disabled.
+                - generic [ref=f7e439]: "AI model: Server default."
+                - generic [ref=f7e440]: Selected sources look ready.
+                - generic [ref=f7e441]: "Trust: Cited answer."
+            - generic [ref=f7e443]:
+              - paragraph [ref=f7e444]: This answer includes inline citation buttons. Press Tab to move between citation controls and source links.
+              - paragraph [ref=f7e573]:
+                - text: Project Aster garden opens on 18 December 2026, and it is coordinated by Mira Chen
+                - button "Jump to source 1" [ref=f7e574] [cursor=pointer]: "[1]"
+                - text: .
+            - generic [ref=f7e448]:
+              - generic [ref=f7e449]:
+                - generic [ref=f7e450]: "Sources:"
+                - button "Jump to source 1" [ref=f7e451] [cursor=pointer]: "[1]"
+              - generic [ref=f7e452]:
+                - generic [ref=f7e453]: Was this answer helpful?
+                - button "Helpful" [ref=f7e454] [cursor=pointer]
+                - button "Needs work" [ref=f7e457] [cursor=pointer]
+          - generic [ref=f7e400]:
+            - generic [ref=f7e401]:
+              - generic [ref=f7e402]:
+                - textbox "Ask a follow-up question" [ref=f7e403]:
+                  - /placeholder: Ask a follow-up question...
+                - button "Submit follow-up question" [disabled] [ref=f7e404]
+              - button "Start new topic" [ref=f7e407] [cursor=pointer]:
+                - generic [ref=f7e409]: New Topic
+            - paragraph [ref=f7e410]: Follow-up questions maintain context. Click "New Topic" to start fresh.
+    - complementary "Evidence panel" [ref=f7e462]:
+      - generic [ref=f7e463]:
+        - generic [ref=f7e464]: Evidence updated. 1 source and 1 citation.
+        - generic [ref=f7e465]:
+          - heading "Evidence" [level=2] [ref=f7e466]
+          - generic [ref=f7e467]: 1 sources • 1 citations
+          - button "Close evidence panel" [ref=f7e468] [cursor=pointer]
+        - generic [ref=f7e473]:
+          - button "Sources" [pressed] [ref=f7e474] [cursor=pointer]
+          - button "Details" [ref=f7e478] [cursor=pointer]
+        - generic [ref=f7e481]:
+          - paragraph [ref=f7e482]: Use each source card to inspect excerpts, unavailable reasons, citations, and supported source links.
+          - generic [ref=f7e483]:
+            - heading "Sources (1)" [level=3] [ref=f7e489]
+            - button "Show filters" [ref=f7e490] [cursor=pointer]
+            - generic [ref=f7e491]:
+              - generic [ref=f7e492]: Showing 1 of 1 sources
+              - generic [ref=f7e493]:
+                - generic [ref=f7e494]: "Jump: 1-9 • Tab cycles"
+                - button "Open source keyboard shortcuts" [ref=f7e495] [cursor=pointer]: "?"
+            - list "Retrieved sources" [ref=f7e498]:
+              - listitem "Source 1. Cited in answer. Press Enter to jump to citation 1." [ref=f7e499] [cursor=pointer]:
+                - generic [ref=f7e500]:
+                  - generic [ref=f7e501]: "1"
+                  - generic [ref=f7e507]:
+                    - generic [ref=f7e508]:
+                      - heading "pasted-text" [level=4] [ref=f7e509]
+                      - generic [ref=f7e510]: Relevance not measured
+                    - generic [ref=f7e511]: Document
+                    - button "Jump to citation 1 in answer" [ref=f7e514]: Cited
+                    - generic [ref=f7e518]:
+                      - generic [ref=f7e519]: "Used in answer:"
+                      - 'button "Jump to citation 1 in answer sentence 1: Project Aster garden opens on 18 December 2026, and it is coordinated by Mira Chen [1]." [ref=f7e520]': S1
+                - generic [ref=f7e521]:
+                  - paragraph [ref=f7e522]:
+                    - text: pasted-text
+                    - mark [ref=f7e523]: Project
+                    - mark [ref=f7e524]: Aster
+                    - text: is a fictional community
+                    - mark [ref=f7e525]: garden
+                    - text: used for acceptance testing. The
+                    - mark [ref=f7e526]: garden
+                    - text: opens on 18 December 2026. Mira Chen
+                    - mark [ref=f7e527]: coordinates
+                    - text: the
+                    - mark [ref=f7e528]: garden
+                    - text: . The
+                    - mark [ref=f7e529]: garden
+                    - text: has seven...
+                  - button "Show more" [ref=f7e530]
+                - generic [ref=f7e532]:
+                  - button "View source 1" [ref=f7e533]: View
+                  - button "Copy citation for source 1" [ref=f7e537]: Copy citation
+                  - button "More actions for source 1" [ref=f7e539]
+                - generic [ref=f7e544]:
+                  - button "Yes" [ref=f7e545]
+                  - button "No" [ref=f7e548]
+  - generic [ref=f7e243]:
+    - button "Switch to detailed view" [ref=f7e244] [cursor=pointer]
+    - link "Help & Documentation" [ref=f7e248] [cursor=pointer]:
+      - /url: https://github.com/rmusser01/tldw_server2#readme
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T08-19-00-318Z.log#L26-L27

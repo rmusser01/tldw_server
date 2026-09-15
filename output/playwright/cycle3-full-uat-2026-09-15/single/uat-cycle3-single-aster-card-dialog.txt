@@ -1,0 +1,215 @@
+### Open tabs
+- 0: [](http://127.0.0.1:18280/knowledge)
+- 1: (current) [How many raised beds does Project Aster have?](http://127.0.0.1:18280/chat?mode=character&characterId=4)
+### Page
+- Page URL: http://127.0.0.1:18280/chat?mode=character&characterId=4
+- Page Title: How many raised beds does Project Aster have?
+- Console: 1 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [ref=f3e11]:
+  - generic [ref=f3e12]:
+    - generic [ref=f3e14]:
+      - link "Skip to main content" [ref=f3e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f3e16]:
+        - button "Expand sidebar" [ref=f3e17] [cursor=pointer]
+        - button "New Chat" [ref=f3e21] [cursor=pointer]
+        - generic [ref=f3e24]:
+          - button "Quick Ingest" [ref=f3e25] [cursor=pointer]
+          - button "Chat" [ref=f3e29] [cursor=pointer]
+          - button "Prompts" [ref=f3e32] [cursor=pointer]
+          - button "Characters" [ref=f3e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f3e41] [cursor=pointer]
+          - button "World Books" [ref=f3e45] [cursor=pointer]
+          - button "Notes" [ref=f3e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=f3e52] [cursor=pointer]
+          - button "Media" [ref=f3e60] [cursor=pointer]
+          - button "Document Workspace" [ref=f3e63] [cursor=pointer]
+          - button "Research Workspace" [ref=f3e69] [cursor=pointer]
+          - button "Kanban" [ref=f3e75] [cursor=pointer]
+          - button "Watchlists" [ref=f3e77] [cursor=pointer]
+        - generic [ref=f3e82]:
+          - button "Open Notes Dock" [ref=f3e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f3e88] [cursor=pointer]
+          - button "Settings" [ref=f3e91] [cursor=pointer]
+      - main [ref=f3e95]:
+        - generic [ref=f3e96]:
+          - generic [ref=f3e99]:
+            - generic [ref=f3e100]:
+              - button "Expand sidebar" [ref=f3e101] [cursor=pointer]
+              - generic [ref=f3e103]:
+                - img "tldw Assistant" [ref=f3e104]
+                - generic [ref=f3e105]: tldw Assistant
+                - button "Companion Home" [ref=f3e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=f3e110] [cursor=pointer]
+              - button "Untitled" [ref=f3e1029] [cursor=pointer]
+              - generic [ref=f3e741]:
+                - generic "Saved chat. History is persisted." [ref=f3e742]: Saved
+                - generic "Character mode is active." [ref=f3e743]: "Character: Cycle3 Aster Guide"
+            - generic [ref=f3e113]:
+              - button "Search - Open command palette" [ref=f3e114] [cursor=pointer]:
+                - generic [ref=f3e118]: Search
+                - generic [ref=f3e119]: ⌘K
+              - button "New saved chat" [ref=f3e749] [cursor=pointer]
+              - button "Temporary chat (not saved)" [ref=f3e753] [cursor=pointer]: Temp
+              - button "Character chat" [ref=f3e754] [cursor=pointer]: Character
+              - button "Share conversation" [ref=f3e755] [cursor=pointer]
+              - button "Open settings" [ref=f3e120] [cursor=pointer]
+              - generic [ref=f3e132]:
+                - button "Notifications, 0 unread" [ref=f3e133] [cursor=pointer]
+                - status [ref=f3e137]: Notifications are active
+              - button "Switch to light theme" [ref=f3e138] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f3e145] [cursor=pointer]:
+                - generic [ref=f3e146]: "?"
+          - generic [ref=f3e147]:
+            - heading "Chat" [level=1] [ref=f3e762]
+            - generic [ref=f3e765]:
+              - paragraph [ref=f3e766]: Cockpit rails hidden. Chat and composer remain active.
+              - generic [ref=f3e767]:
+                - main [ref=f3e768]:
+                  - generic [ref=f3e769]:
+                    - generic [ref=f3e771]:
+                      - generic [ref=f3e772]:
+                        - generic [ref=f3e773]:
+                          - text: Character Chat
+                          - generic [ref=f3e774]: Cycle3 Aster Guide
+                        - generic [ref=f3e775]: Conversation timeline
+                      - generic [ref=f3e776]:
+                        - button "Switch to light theme" [ref=f3e777] [cursor=pointer]
+                        - button "Enter focus chat" [ref=f3e784] [cursor=pointer]:
+                          - generic [ref=f3e790]: Focus
+                        - button "Shortcuts" [ref=f3e791] [cursor=pointer]
+                        - button "Artifacts panel closed" [disabled] [ref=f3e795]
+                    - log "Chat messages" [ref=f3e797]:
+                      - generic [ref=f3e799]:
+                        - article "Assistant message 1 of 3" [ref=f3e1030]:
+                          - generic [ref=f3e840]:
+                            - generic [ref=f3e842]:
+                              - generic [ref=f3e843]: Cycle3 Aster Guide
+                              - generic [ref=f3e844]: • 1:40 AM
+                              - generic [ref=f3e845]: greeting
+                            - paragraph [ref=f3e1226]: Hello, I can help with Project Aster garden facts.
+                            - generic [ref=f3e1032]:
+                              - generic [ref=f3e1033]:
+                                - generic [ref=f3e1034]: Was this helpful?
+                                - generic [ref=f3e1035]:
+                                  - button "Helpful" [ref=f3e1036] [cursor=pointer]
+                                  - button "Not helpful" [ref=f3e1039] [cursor=pointer]
+                                  - button "More feedback" [ref=f3e1042] [cursor=pointer]
+                              - button "More actions" [ref=f3e1048] [cursor=pointer]: •••
+                        - article "User message 2 of 3" [ref=f3e1049]:
+                          - generic [ref=f3e1052]:
+                            - generic [ref=f3e1054]:
+                              - generic [ref=f3e1055]: You
+                              - generic [ref=f3e1056]: • 1:40 AM
+                            - paragraph [ref=f3e1058]: How many raised beds does Project Aster have?
+                            - button "More actions" [ref=f3e1061] [cursor=pointer]: •••
+                        - article "Assistant message 3 of 3" [ref=f3e1065]:
+                          - generic [ref=f3e1071]:
+                            - generic [ref=f3e1073]:
+                              - generic [ref=f3e1074]: Cycle3 Aster Guide
+                              - generic [ref=f3e1075]: • 1:40 AM
+                            - generic [ref=f3e1076]:
+                              - button "collapsed Model’s reasoning (optional) 2s" [ref=f3e1079] [cursor=pointer]:
+                                - img "collapsed" [ref=f3e1081]
+                                - generic [ref=f3e1085]:
+                                  - generic [ref=f3e1086]: Model’s reasoning (optional)
+                                  - generic [ref=f3e1087]: 2s
+                              - paragraph [ref=f3e1227]: Project Aster has seven raised beds.
+                            - generic [ref=f3e1090]:
+                              - generic [ref=f3e1091]:
+                                - generic [ref=f3e1092]: Was this helpful?
+                                - generic [ref=f3e1093]:
+                                  - button "Helpful" [ref=f3e1094] [cursor=pointer]
+                                  - button "Not helpful" [ref=f3e1097] [cursor=pointer]
+                                  - button "More feedback" [ref=f3e1100] [cursor=pointer]
+                              - button "More actions" [ref=f3e1106] [cursor=pointer]: •••
+                    - generic [ref=f3e872]:
+                      - generic [ref=f3e873]: Composer
+                      - generic [ref=f3e881]:
+                        - button [aria-hidden] [ref=f3e882]
+                        - button [aria-hidden] [ref=f3e883]
+                        - generic [ref=f3e884]:
+                          - generic [ref=f3e886]:
+                            - button "Hide composer options" [expanded] [ref=f3e887] [cursor=pointer]
+                            - textbox "Type a message... (/ commands, @ mentions)" [ref=f3e892]
+                            - generic [ref=f3e893]:
+                              - button "Improve prompt" [ref=f3e896] [cursor=pointer]
+                              - generic [ref=f3e901]:
+                                - button "Send message" [ref=f3e902] [cursor=pointer]:
+                                  - generic [ref=f3e903]: Send
+                                - button "Open message delivery options" [ref=f3e908] [cursor=pointer]
+                          - generic [ref=f3e913]:
+                            - generic [ref=f3e915]:
+                              - group "Mode and context controls" [ref=f3e916]:
+                                - button "Modes" [ref=f3e917] [cursor=pointer]
+                                - 'button "MCP tools: None, Not checked yet" [ref=f3e924] [cursor=pointer]':
+                                  - generic [ref=f3e925]:
+                                    - generic [ref=f3e926]: MCP
+                                    - generic [ref=f3e927]: None
+                                - button "Search & Context" [ref=f3e930] [cursor=pointer]
+                                - button "Select a Prompt" [ref=f3e935] [cursor=pointer]:
+                                  - generic [ref=f3e938]: Prompt
+                                - button "Cycle3 Aster Guide" [ref=f3e939] [cursor=pointer]
+                                - button "Role-play setup" [ref=f3e944] [cursor=pointer]
+                                - button "Buddy & Persona" [ref=f3e951] [cursor=pointer]
+                              - group "Run input controls" [ref=f3e957]:
+                                - button "OpenUI" [ref=f3e958] [cursor=pointer]
+                                - button "Start dictation" [ref=f3e964] [cursor=pointer]
+                                - generic [ref=f3e968]:
+                                  - button "Attach image" [ref=f3e970] [cursor=pointer]
+                                  - button "More attachments" [ref=f3e974] [cursor=pointer]
+                                - button "More tools" [ref=f3e977] [cursor=pointer]
+                                - button "Current Chat Model Settings" [ref=f3e980] [cursor=pointer]:
+                                  - generic [ref=f3e984]: Chat Settings
+                            - generic "Active context" [ref=f3e985]:
+                              - button "LLaMa.cpp / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf" [ref=f3e987] [cursor=pointer]:
+                                - generic "Provider status" [ref=f3e991]: Healthy
+                              - button "Character Cycle3 Aster Guide" [ref=f3e992] [cursor=pointer]:
+                                - generic [ref=f3e993]: Character
+                                - generic [ref=f3e994]: Cycle3 Aster Guide
+                              - 'generic "Character context: Included" [ref=f3e995]':
+                                - generic [ref=f3e996]: Character context
+                                - generic [ref=f3e997]: Included
+                              - button "Chat 3 messages" [ref=f3e1110] [cursor=pointer]:
+                                - generic [ref=f3e999]: Chat
+                                - generic [ref=f3e1000]: 3 messages
+                              - button "Configure context window size" [ref=f3e1002] [cursor=pointer]:
+                                - generic [ref=f3e1003]: 84 + ~0 = 84 tokens
+                              - button "Saved" [ref=f3e1005] [cursor=pointer]
+                              - button "Advanced controls" [ref=f3e1007] [cursor=pointer]
+                          - status [ref=f3e1011]:
+                            - generic [ref=f3e1012]: Add expression images for Cycle3 Aster Guide.
+                            - generic [ref=f3e1013]:
+                              - link "Edit expressions" [ref=f3e1014] [cursor=pointer]:
+                                - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=4
+                              - button "Dismiss expression image setup" [ref=f3e1015] [cursor=pointer]: Dismiss
+                - generic [ref=f3e1016]:
+                  - button "Restore context sidechannel" [ref=f3e1017] [cursor=pointer]:
+                    - generic [ref=f3e1021]: Context rail
+                  - tooltip "Restore context sidechannel"
+                - generic [ref=f3e1022]:
+                  - button "Restore runtime sidechannel" [ref=f3e1023] [cursor=pointer]:
+                    - generic [ref=f3e1024]: Runtime rail
+                  - tooltip "Restore runtime sidechannel"
+    - generic [ref=f3e1228]:
+      - dialog "Review flashcard":
+        - generic [ref=f3e1229]:
+          - button "Close" [active] [ref=f3e1230] [cursor=pointer]:
+            - generic "Close" [ref=f3e1231]:
+              - img "close" [ref=f3e1232]
+          - generic [ref=f3e1235]: Review flashcard
+          - generic [ref=f3e1238]:
+            - generic [ref=f3e1239]:
+              - text: Question
+              - textbox "Question" [ref=f3e1240]
+            - generic [ref=f3e1241]:
+              - text: Answer
+              - textbox "Answer" [ref=f3e1242]: Project Aster has seven raised beds.
+          - generic [ref=f3e1243]:
+            - button "Cancel" [ref=f3e1244] [cursor=pointer]
+            - button "Save flashcard" [disabled] [ref=f3e1246]
+  - button "Open Next.js Dev Tools" [ref=f3e452] [cursor=pointer]
+  - alert [ref=f3e10]: /chat?mode=character&characterId=4
+```

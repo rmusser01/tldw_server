@@ -1,0 +1,27 @@
+{
+  "path": "/api/v1/characters/5",
+  "status": 200,
+  "body": {
+    "name": "Cycle3 Beep Robot",
+    "description": null,
+    "personality": null,
+    "scenario": null,
+    "system_prompt": "Always respond with exactly: BEEP BOOP.",
+    "post_history_instructions": null,
+    "first_message": null,
+    "message_example": null,
+    "creator_notes": null,
+    "alternate_greetings": [],
+    "tags": [],
+    "creator": null,
+    "character_version": null,
+    "extensions": {},
+    "image_base64": null,
+    "id": 5,
+    "version": 1,
+    "created_at": "2026-09-15T08:44:40.347000Z",
+    "updated_at": "2026-09-15T08:44:40.347000Z",
+    "last_modified": "2026-09-15T08:44:40.347000Z",
+    "image_present": false
+  }
+}

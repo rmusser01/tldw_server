@@ -1,0 +1,53 @@
+### Open tabs
+- 0: [](http://127.0.0.1:18280/knowledge)
+- 1: (current) [](http://127.0.0.1:18280/media?id=1)
+### Page
+- Page URL: http://127.0.0.1:18280/media?id=1
+### Snapshot
+```yaml
+- generic [ref=f16e594]:
+  - dialog "Quick Ingest":
+    - generic [ref=f16e595]:
+      - button "Close" [ref=f16e596] [cursor=pointer]:
+        - generic "Close" [ref=f16e597]:
+          - img "close" [ref=f16e598]
+      - generic [ref=f16e601]: Quick Ingest
+      - generic [ref=f16e603]:
+        - navigation "Ingest wizard progress" [ref=f16e604]:
+          - list [ref=f16e605]:
+            - listitem [ref=f16e606]:
+              - 'button "Step 1: Add (completed)" [ref=f16e706] [cursor=pointer]':
+                - generic [ref=f16e611]: Add
+                - generic [ref=f16e709]: 1 items
+            - listitem [ref=f16e613]:
+              - 'button "Step 2: Configure (completed)" [ref=f16e804] [cursor=pointer]':
+                - generic [ref=f16e618]: Configure
+                - generic [ref=f16e807]: Custom
+            - listitem [ref=f16e620]:
+              - 'button "Step 3: Review (completed)" [ref=f16e829] [cursor=pointer]':
+                - generic [ref=f16e625]: Review
+                - generic [ref=f16e832]: Reviewed
+            - listitem [ref=f16e627]:
+              - 'button "Step 4: Processing (completed)" [ref=f16e833] [cursor=pointer]':
+                - generic [ref=f16e632]: Processing
+            - listitem [ref=f16e634]:
+              - 'button "Step 5: Results (current)" [disabled] [ref=f16e836]':
+                - generic [ref=f16e639]: Results
+        - generic [ref=f16e837]:
+          - generic [ref=f16e838]:
+            - region "Completed items" [ref=f16e839]:
+              - heading "Succeeded (1)" [level=3] [ref=f16e840]
+              - generic [ref=f16e844]:
+                - generic "uat-cycle3-single-confidential-source.txt" [ref=f16e847]
+                - button "Open uat-cycle3-single-confidential-source.txt in Media" [ref=f16e849] [cursor=pointer]: Open in Media
+            - generic [ref=f16e854]:
+              - paragraph [ref=f16e855]: What's next?
+              - generic [ref=f16e856]:
+                - button "Search your ingested content in Knowledge QA" [ref=f16e857] [cursor=pointer]: Search in Knowledge
+                - button "Open document in Document Workspace" [ref=f16e861] [cursor=pointer]: Open in Workspace
+          - generic [ref=f16e864]:
+            - paragraph [ref=f16e865]: "Total: 1 succeeded, 0 failed · 2s elapsed"
+            - generic [ref=f16e866]:
+              - button "Start a new ingest" [ref=f16e867] [cursor=pointer]: Ingest More
+              - button "Close the ingest wizard" [ref=f16e868] [cursor=pointer]: Done
+```

@@ -1,0 +1,190 @@
+### Open tabs
+- 0: [](http://127.0.0.1:18280/knowledge)
+- 1: (current) [](http://127.0.0.1:18280/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18280/settings/tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f19e1]:
+  - generic [ref=f19e347]:
+    - complementary [ref=f19e348]:
+      - navigation "Settings navigation" [ref=f19e349]:
+        - button "Switch to Sidebar" [ref=f19e351] [cursor=pointer]
+        - generic [ref=f19e352]:
+          - generic [ref=f19e353]: Filter settings
+          - textbox "Filter settings" [ref=f19e354]:
+            - /placeholder: Find a setting
+        - generic [ref=f19e355]:
+          - generic [ref=f19e356]:
+            - generic [ref=f19e357]: Setup & Recovery
+            - list [ref=f19e359]:
+              - listitem [ref=f19e360]:
+                - link "Setup & Recovery" [ref=f19e361] [cursor=pointer]:
+                  - /url: /settings
+              - listitem [ref=f19e369]:
+                - link "tldw Server" [ref=f19e370] [cursor=pointer]:
+                  - /url: /settings/tldw
+              - listitem [ref=f19e376]:
+                - link "Provider Keys" [ref=f19e377] [cursor=pointer]:
+                  - /url: /settings/provider-keys
+              - listitem [ref=f19e382]:
+                - link "Manage Models" [ref=f19e383] [cursor=pointer]:
+                  - /url: /settings/model
+              - listitem [ref=f19e397]:
+                - link "Health & Diagnostics" [ref=f19e398] [cursor=pointer]:
+                  - /url: /settings/health
+          - generic [ref=f19e402]:
+            - generic [ref=f19e403]: Preferences & Workflow
+            - list [ref=f19e405]:
+              - listitem [ref=f19e406]:
+                - link "Preferences" [ref=f19e407] [cursor=pointer]:
+                  - /url: /settings/preferences
+              - listitem [ref=f19e410]:
+                - link "Chat" [ref=f19e411] [cursor=pointer]:
+                  - /url: /settings/chat
+              - listitem [ref=f19e415]:
+                - link "Chat Macros" [ref=f19e416] [cursor=pointer]:
+                  - /url: /settings/chat-macros
+              - listitem [ref=f19e425]:
+                - link "UI customization" [ref=f19e426] [cursor=pointer]:
+                  - /url: /settings/ui
+              - listitem [ref=f19e429]:
+                - link "Splash screens" [ref=f19e430] [cursor=pointer]:
+                  - /url: /settings/splash
+              - listitem [ref=f19e435]:
+                - link "Quick Ingest" [ref=f19e436] [cursor=pointer]:
+                  - /url: /settings/quick-ingest
+              - listitem [ref=f19e441]:
+                - link "Speech" [ref=f19e442] [cursor=pointer]:
+                  - /url: /settings/speech
+              - listitem [ref=f19e447]:
+                - link "Image Generation" [ref=f19e448] [cursor=pointer]:
+                  - /url: /settings/image-generation
+              - listitem [ref=f19e454]:
+                - link "Knowledge QA" [ref=f19e455] [cursor=pointer]:
+                  - /url: /settings/knowledge
+              - listitem [ref=f19e459]:
+                - link "RAG Settings" [ref=f19e460] [cursor=pointer]:
+                  - /url: /settings/rag
+              - listitem [ref=f19e469]:
+                - link "Workflow prompts" [ref=f19e470] [cursor=pointer]:
+                  - /url: /settings/prompt
+              - listitem [ref=f19e474]:
+                - link "Prompt Studio" [ref=f19e475] [cursor=pointer]:
+                  - /url: /settings/prompt-studio
+                - generic [ref=f19e481]: Beta
+              - listitem [ref=f19e482]:
+                - link "Chatbooks settings" [ref=f19e483] [cursor=pointer]:
+                  - /url: /settings/chatbooks
+              - listitem [ref=f19e487]:
+                - link "Characters" [ref=f19e488] [cursor=pointer]:
+                  - /url: /settings/characters
+              - listitem [ref=f19e492]:
+                - link "World Books" [ref=f19e493] [cursor=pointer]:
+                  - /url: /settings/world-books
+              - listitem [ref=f19e497]:
+                - link "Chat Dictionaries" [ref=f19e498] [cursor=pointer]:
+                  - /url: /settings/chat-dictionaries
+          - generic [ref=f19e503]:
+            - generic [ref=f19e504]: Data & Administration
+            - list [ref=f19e506]:
+              - listitem [ref=f19e507]:
+                - link "Data Management" [ref=f19e508] [cursor=pointer]:
+                  - /url: /settings/data
+              - listitem [ref=f19e514]:
+                - link "Manage Share" [ref=f19e515] [cursor=pointer]:
+                  - /url: /settings/share
+              - listitem [ref=f19e520]:
+                - link "Evaluations" [ref=f19e521] [cursor=pointer]:
+                  - /url: /settings/evaluations
+              - listitem [ref=f19e525]:
+                - link "Moderation Review" [ref=f19e526] [cursor=pointer]:
+                  - /url: /moderation
+              - listitem [ref=f19e531]:
+                - link "Content Rules" [ref=f19e532] [cursor=pointer]:
+                  - /url: /moderation/rules
+              - listitem [ref=f19e537]:
+                - link "MCP Hub" [ref=f19e538] [cursor=pointer]:
+                  - /url: /settings/mcp-hub
+              - listitem [ref=f19e543]:
+                - link "About" [ref=f19e544] [cursor=pointer]:
+                  - /url: /settings/about
+        - button "Hide beta badges" [ref=f19e549] [cursor=pointer]
+    - region [ref=f19e550]:
+      - button "Close" [ref=f19e552] [cursor=pointer]
+      - generic [ref=f19e557]:
+        - heading "tldw Server" [level=1] [ref=f19e558]
+        - paragraph [ref=f19e560]: Current section:tldw Server
+        - generic [ref=f19e563]:
+          - generic [ref=f19e564]:
+            - heading "About tldw server integration" [level=3] [ref=f19e565]
+            - paragraph [ref=f19e566]: Connect to tldw server for chat, knowledge search, and media.
+            - generic [ref=f19e567]:
+              - paragraph [ref=f19e568]: What your tldw server provides
+              - list [ref=f19e569]:
+                - listitem [ref=f19e570]: Powers chat, multi-turn memory, and server-backed history.
+                - listitem [ref=f19e571]: Enables Knowledge search & RAG so chats can reference your own documents.
+                - listitem [ref=f19e572]: Handles media ingest, transcription, and metrics so you can review calls and videos.
+              - button "View server setup guide" [ref=f19e573] [cursor=pointer]
+          - generic [ref=f19e574]:
+            - generic [ref=f19e575]: Server:http://127.0.0.1:18200
+            - generic [ref=f19e576]:
+              - link [ref=f19e578] [cursor=pointer]:
+                - /url: /settings/health
+                - button "Health" [ref=f19e579]
+              - button "Recheck" [ref=f19e582] [cursor=pointer]
+          - generic [ref=f19e584]:
+            - tablist [ref=f19e585]:
+              - generic [ref=f19e587]:
+                - tab "Connection" [selected] [ref=f19e589] [cursor=pointer]
+                - tab "Timeouts" [ref=f19e591] [cursor=pointer]
+            - generic:
+              - generic:
+                - tabpanel "Connection"
+          - heading "tldw Server Configuration" [level=2] [ref=f19e592]
+          - generic [ref=f19e593]:
+            - generic [ref=f19e595]:
+              - generic "Server URL" [ref=f19e597]: "* Server URL"
+              - generic [ref=f19e598]:
+                - textbox "* Server URL" [ref=f19e601]:
+                  - /placeholder: http://127.0.0.1:8000
+                  - text: http://127.0.0.1:18200
+                - generic [ref=f19e602]: "The URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000"
+            - generic [ref=f19e605]:
+              - generic "Authentication Mode" [ref=f19e607]: "* Authentication Mode"
+              - radiogroup "segmented control" [ref=f19e611]:
+                - generic [ref=f19e612]:
+                  - generic [ref=f19e613] [cursor=pointer]:
+                    - radio "Single User (API Key)" [checked]
+                    - generic "Single User (API Key)" [ref=f19e614]
+                  - generic [ref=f19e615] [cursor=pointer]:
+                    - radio "Multi User (Login)"
+                    - generic "Multi User (Login)" [ref=f19e616]
+            - generic [ref=f19e618]:
+              - generic "API Key" [ref=f19e620]: "* API Key"
+              - generic [ref=f19e621]:
+                - generic [ref=f19e624]:
+                  - textbox "* API Key" [ref=f19e625]:
+                    - /placeholder: "Enter your API key (default demo key: THIS-IS-A-SECURE-KEY-123-REPLACE-ME for local single-user setups)"
+                    - text: [REDACTED]
+                  - img "eye-invisible" [ref=f19e627] [cursor=pointer]
+                - generic [ref=f19e631]: Your tldw_server API key for authentication. For local single-user demos, you can use the default key THIS-IS-A-SECURE-KEY-123-REPLACE-ME unless you have changed it on the server.
+            - generic [ref=f19e638] [cursor=pointer]:
+              - checkbox "Remember on this device" [checked] [ref=f19e640]
+              - generic [ref=f19e642]: Remember on this device
+            - paragraph [ref=f19e643]: Stores this API key in this browser until you disconnect or clear browser data. Turn this off on a shared device.
+            - button "Disconnect" [ref=f19e644] [cursor=pointer]
+            - generic [ref=f19e646]:
+              - generic [ref=f19e648]:
+                - button "Save" [ref=f19e650] [cursor=pointer]
+                - button "Test Connection" [ref=f19e653] [cursor=pointer]
+              - generic [ref=f19e657]:
+                - generic [ref=f19e658]: Checks
+                - generic [ref=f19e659]: "Core: not checked yet"
+                - generic [ref=f19e660]: "RAG: not checked yet"
+            - button "collapsed Advanced Timeouts" [ref=f19e664] [cursor=pointer]:
+              - img "collapsed" [ref=f19e666]
+              - generic [ref=f19e669]: Advanced Timeouts
+  - button "Open Next.js Dev Tools" [ref=f19e339] [cursor=pointer]
+  - alert [ref=f19e343]: /settings/tldw
+```

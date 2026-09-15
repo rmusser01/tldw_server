@@ -1,0 +1,166 @@
+### Open tabs
+- 0: [](http://127.0.0.1:18280/knowledge)
+- 1: (current) [](http://127.0.0.1:18280/chat?mode=character&characterId=5)
+### Page
+- Page URL: http://127.0.0.1:18280/chat?mode=character&characterId=5
+### Snapshot
+```yaml
+- generic [ref=f9e1]:
+  - generic [ref=f9e4]:
+    - link "Skip to main content" [ref=f9e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f9e6]:
+      - button "Expand sidebar" [ref=f9e7] [cursor=pointer]
+      - button "New Chat" [ref=f9e11] [cursor=pointer]
+      - generic [ref=f9e14]:
+        - button "Quick Ingest" [ref=f9e15] [cursor=pointer]
+        - button "Chat" [ref=f9e19] [cursor=pointer]
+        - button "Prompts" [ref=f9e22] [cursor=pointer]
+        - button "Characters" [ref=f9e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f9e31] [cursor=pointer]
+        - button "World Books" [ref=f9e35] [cursor=pointer]
+        - button "Notes" [ref=f9e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f9e42] [cursor=pointer]
+        - button "Media" [ref=f9e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f9e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f9e59] [cursor=pointer]
+        - button "Kanban" [ref=f9e65] [cursor=pointer]
+        - button "Watchlists" [ref=f9e67] [cursor=pointer]
+      - generic [ref=f9e72]:
+        - button "Open Notes Dock" [ref=f9e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f9e78] [cursor=pointer]
+        - button "Settings" [ref=f9e81] [cursor=pointer]
+    - main [ref=f9e85]:
+      - generic [ref=f9e86]:
+        - generic [ref=f9e89]:
+          - generic [ref=f9e90]:
+            - button "Expand sidebar" [ref=f9e91] [cursor=pointer]
+            - generic [ref=f9e93]:
+              - img "tldw Assistant" [ref=f9e94]
+              - generic [ref=f9e95]: tldw Assistant
+              - button "Companion Home" [ref=f9e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f9e100] [cursor=pointer]
+            - generic [ref=f9e103]:
+              - generic "Saved chat. History is persisted." [ref=f9e104]: Saved
+              - generic "Character mode is active." [ref=f9e105]: "Character: Cycle3 Beep Robot"
+          - generic [ref=f9e111]:
+            - button "Search - Open command palette" [ref=f9e112] [cursor=pointer]:
+              - generic [ref=f9e116]: Search
+              - generic [ref=f9e117]: ⌘K
+            - button "New saved chat" [ref=f9e118] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f9e122] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f9e123] [cursor=pointer]: Character
+            - button "Share conversation" [disabled] [ref=f9e124]
+            - button "Open settings" [ref=f9e131] [cursor=pointer]
+            - generic [ref=f9e143]:
+              - button "Notifications, 0 unread" [ref=f9e144] [cursor=pointer]
+              - status [ref=f9e148]: Notifications are active
+            - button "Switch to light theme" [ref=f9e149] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f9e156] [cursor=pointer]:
+              - generic [ref=f9e157]: "?"
+        - generic [ref=f9e158]:
+          - heading "Chat" [level=1] [ref=f9e159]
+          - generic [ref=f9e162]:
+            - paragraph [ref=f9e163]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f9e164]:
+              - main [ref=f9e165]:
+                - generic [ref=f9e166]:
+                  - generic [ref=f9e168]:
+                    - generic [ref=f9e169]:
+                      - generic [ref=f9e170]:
+                        - text: Character Chat
+                        - generic [ref=f9e171]: Cycle3 Beep Robot
+                      - generic [ref=f9e172]: Conversation timeline
+                    - generic [ref=f9e173]:
+                      - button "Switch to light theme" [ref=f9e174] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f9e181] [cursor=pointer]:
+                        - generic [ref=f9e187]: Focus
+                      - button "Shortcuts" [ref=f9e188] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f9e192]
+                  - log "Chat messages" [ref=f9e194]:
+                    - generic [ref=f9e200]:
+                      - heading "Start a new chat" [level=2] [ref=f9e205]
+                      - paragraph [ref=f9e206]: Experiment with different models, prompts, and knowledge sources here.
+                      - generic [ref=f9e207]:
+                        - button "Start chatting" [ref=f9e208] [cursor=pointer]
+                        - button "Quick Ingest" [ref=f9e209] [cursor=pointer]
+                      - generic [ref=f9e210]:
+                        - generic [ref=f9e212]:
+                          - generic [ref=f9e213]:
+                            - paragraph [ref=f9e214]: Chat modes
+                            - paragraph [ref=f9e215]: Use a different starting point when the conversation needs structure.
+                          - button "Explore chat modes" [ref=f9e216] [cursor=pointer]
+                        - generic [ref=f9e218]:
+                          - generic [ref=f9e219]:
+                            - generic [ref=f9e220]: Type / for commands like /search or /web
+                            - generic [ref=f9e221]: Set a system prompt to customize AI behavior
+                          - button "Take a quick tour" [ref=f9e222] [cursor=pointer]
+                  - generic [ref=f9e226]:
+                    - generic [ref=f9e227]: Composer
+                    - button "Scroll to latest messages" [ref=f9e229] [cursor=pointer]
+                    - generic [ref=f9e238]:
+                      - button [aria-hidden] [ref=f9e239]
+                      - button [aria-hidden] [ref=f9e240]
+                      - generic [ref=f9e241]:
+                        - generic [ref=f9e243]:
+                          - button "Hide composer options" [expanded] [ref=f9e244] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f9e249]
+                          - generic [ref=f9e250]:
+                            - button "Improve prompt" [ref=f9e253] [cursor=pointer]
+                            - generic [ref=f9e258]:
+                              - button "Send message" [ref=f9e259] [cursor=pointer]:
+                                - generic [ref=f9e260]: Send
+                              - button "Open message delivery options" [ref=f9e265] [cursor=pointer]
+                        - generic [ref=f9e270]:
+                          - generic [ref=f9e272]:
+                            - group "Mode and context controls" [ref=f9e273]:
+                              - button "Modes" [ref=f9e274] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f9e281] [cursor=pointer]':
+                                - generic [ref=f9e282]:
+                                  - generic [ref=f9e283]: MCP
+                                  - generic [ref=f9e284]: None
+                              - button "Search & Context" [ref=f9e287] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f9e292] [cursor=pointer]:
+                                - generic [ref=f9e295]: Prompt
+                              - button "Cycle3 Beep Robot" [ref=f9e296] [cursor=pointer]
+                              - button "Role-play setup" [ref=f9e301] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f9e308] [cursor=pointer]
+                            - group "Run input controls" [ref=f9e314]:
+                              - button "OpenUI" [ref=f9e315] [cursor=pointer]
+                              - button "Start dictation" [ref=f9e321] [cursor=pointer]
+                              - generic [ref=f9e325]:
+                                - button "Attach image" [ref=f9e327] [cursor=pointer]
+                                - button "More attachments" [ref=f9e331] [cursor=pointer]
+                              - button "More tools" [ref=f9e334] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f9e337] [cursor=pointer]:
+                                - generic [ref=f9e341]: Chat Settings
+                          - generic "Active context" [ref=f9e342]:
+                            - button "LLaMa.cpp / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf" [ref=f9e344] [cursor=pointer]:
+                              - generic "Provider status" [ref=f9e348]: Healthy
+                            - button "Character Cycle3 Beep Robot" [ref=f9e349] [cursor=pointer]:
+                              - generic [ref=f9e350]: Character
+                              - generic [ref=f9e351]: Cycle3 Beep Robot
+                            - 'generic "Character context: Included" [ref=f9e352]':
+                              - generic [ref=f9e353]: Character context
+                              - generic [ref=f9e354]: Included
+                            - button "Configure context window size" [ref=f9e356] [cursor=pointer]:
+                              - generic [ref=f9e357]: 0 + ~0 = 0 tokens
+                            - button "Saved" [ref=f9e359] [cursor=pointer]
+                            - button "Advanced controls" [ref=f9e361] [cursor=pointer]
+                        - status [ref=f9e365]:
+                          - generic [ref=f9e366]: Add expression images for Cycle3 Beep Robot.
+                          - generic [ref=f9e367]:
+                            - link "Edit expressions" [ref=f9e368] [cursor=pointer]:
+                              - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=5
+                            - button "Dismiss expression image setup" [ref=f9e369] [cursor=pointer]: Dismiss
+              - generic [ref=f9e370]:
+                - button "Restore context sidechannel" [ref=f9e371] [cursor=pointer]:
+                  - generic [ref=f9e375]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f9e376]:
+                - button "Restore runtime sidechannel" [ref=f9e377] [cursor=pointer]:
+                  - generic [ref=f9e378]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f9e387] [cursor=pointer]
+  - alert [ref=f9e391]
+```

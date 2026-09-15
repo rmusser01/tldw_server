@@ -1,0 +1,6 @@
+### Result
+Total messages: 4 (Errors: 2, Warnings: 0)
+Returning 2 messages for level "error"
+
+[ERROR] Warning: [antd: Notification] `btn` is deprecated. Please use `actions` instead. @ http://127.0.0.1:18280/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1920
+[ERROR] Warning: [antd: message] Static function can not consume context like dynamic theme. Please use 'App' component instead. @ http://127.0.0.1:18280/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1920

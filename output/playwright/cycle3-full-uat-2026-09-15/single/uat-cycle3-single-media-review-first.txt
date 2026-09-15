@@ -1,0 +1,180 @@
+### Open tabs
+- 0: [](http://127.0.0.1:18280/knowledge)
+- 1: (current) [](http://127.0.0.1:18280/media-multi)
+### Page
+- Page URL: http://127.0.0.1:18280/media-multi
+### Snapshot
+```yaml
+- generic [active] [ref=f12e1]:
+  - generic [ref=f12e4]:
+    - link "Skip to main content" [ref=f12e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f12e6]:
+      - button "Expand sidebar" [ref=f12e7] [cursor=pointer]
+      - button "New Chat" [ref=f12e11] [cursor=pointer]
+      - generic [ref=f12e14]:
+        - button "Quick Ingest" [ref=f12e15] [cursor=pointer]
+        - button "Chat" [ref=f12e19] [cursor=pointer]
+        - button "Prompts" [ref=f12e22] [cursor=pointer]
+        - button "Characters" [ref=f12e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f12e31] [cursor=pointer]
+        - button "World Books" [ref=f12e35] [cursor=pointer]
+        - button "Notes" [ref=f12e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f12e42] [cursor=pointer]
+        - button "Media" [ref=f12e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f12e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f12e59] [cursor=pointer]
+        - button "Kanban" [ref=f12e65] [cursor=pointer]
+        - button "Watchlists" [ref=f12e67] [cursor=pointer]
+      - generic [ref=f12e72]:
+        - button "Open Notes Dock" [ref=f12e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f12e78] [cursor=pointer]
+        - button "Settings" [ref=f12e81] [cursor=pointer]
+    - main [ref=f12e85]:
+      - generic [ref=f12e86]:
+        - generic [ref=f12e89]:
+          - generic [ref=f12e90]:
+            - button "Expand sidebar" [ref=f12e91] [cursor=pointer]
+            - generic [ref=f12e93]:
+              - img "tldw Assistant" [ref=f12e94]
+              - generic [ref=f12e95]: tldw Assistant
+              - button "Companion Home" [ref=f12e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f12e100] [cursor=pointer]
+          - generic [ref=f12e103]:
+            - button "Search - Open command palette" [ref=f12e104] [cursor=pointer]:
+              - generic [ref=f12e108]: Search
+              - generic [ref=f12e109]: ⌘K
+            - button "Open settings" [ref=f12e110] [cursor=pointer]
+            - generic [ref=f12e122]:
+              - button "Notifications, 0 unread" [ref=f12e123] [cursor=pointer]
+              - status [ref=f12e127]: Notifications are active
+            - button "Switch to light theme" [ref=f12e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f12e135] [cursor=pointer]:
+              - generic [ref=f12e136]: "?"
+        - generic [ref=f12e569]:
+          - status [ref=f12e570]: 0 items selected, 30 remaining
+          - generic [ref=f12e572]:
+            - generic [ref=f12e574]:
+              - generic [ref=f12e575]:
+                - textbox "Search media (title/content)" [ref=f12e576]
+                - generic [ref=f12e577]:
+                  - button "Search" [ref=f12e578] [cursor=pointer]
+                  - button "Clear" [ref=f12e580] [cursor=pointer]
+              - generic [ref=f12e582]:
+                - generic [ref=f12e583]:
+                  - generic [ref=f12e584]:
+                    - generic: Media types
+                    - combobox "Media types" [ref=f12e586]
+                  - img "down" [ref=f12e588]
+                - generic [ref=f12e591] [cursor=pointer]:
+                  - generic [ref=f12e592]:
+                    - generic "Relevance" [ref=f12e593]
+                    - combobox "Sort" [ref=f12e594]
+                  - img "down" [ref=f12e596]
+                - group "Date range" [ref=f12e599]:
+                  - textbox "Start date" [ref=f12e601]
+                  - generic [ref=f12e602]: to
+                  - textbox "End date" [ref=f12e603]
+                - generic [ref=f12e604]:
+                  - generic [ref=f12e605]:
+                    - generic: Keywords
+                    - combobox "Keywords" [ref=f12e607]
+                  - img "down" [ref=f12e609]
+                - generic [ref=f12e612]:
+                  - generic [ref=f12e613] [cursor=pointer]:
+                    - checkbox "Search full content (slower)" [ref=f12e615]
+                    - generic [ref=f12e617]: Search full content (slower)
+                  - generic [ref=f12e618]: Scans current page results.
+            - separator "Resize filter panel" [ref=f12e619]
+            - generic [ref=f12e622]:
+              - generic [ref=f12e623]:
+                - generic [ref=f12e625]: 0 / 30
+                - generic [ref=f12e626]: "Selection status: Safe"
+              - generic [ref=f12e627]:
+                - generic [ref=f12e628]:
+                  - heading "Results (1)" [level=2] [ref=f12e629]
+                  - generic [ref=f12e630]: Click to stack, Shift+click for range
+                - button "pasted-text document 9/15/2026, 1:00:14 AM" [ref=f12e634] [cursor=pointer]:
+                  - generic [ref=f12e635]:
+                    - checkbox [ref=f12e639]
+                    - generic [ref=f12e641]:
+                      - generic [ref=f12e642]: pasted-text
+                      - generic [ref=f12e643]:
+                        - generic [ref=f12e644]: document
+                        - generic [ref=f12e645]: 9/15/2026, 1:00:14 AM
+                - generic [ref=f12e646]:
+                  - generic [ref=f12e647]: Use pagination or open all visible items
+                  - list [ref=f12e648]:
+                    - listitem "Previous Page" [ref=f12e649]:
+                      - button [disabled] [ref=f12e650]:
+                        - img "left" [ref=f12e651]
+                    - listitem "1" [ref=f12e654] [cursor=pointer]
+                    - listitem "Next Page" [ref=f12e656]:
+                      - button [disabled] [ref=f12e657]:
+                        - img "right" [ref=f12e658]
+            - separator "Resize results panel" [ref=f12e661]
+            - generic [ref=f12e664]:
+              - generic [ref=f12e665]:
+                - generic [ref=f12e667]:
+                  - generic [ref=f12e668]:
+                    - generic [ref=f12e669]: Viewer
+                    - generic [ref=f12e670]: 0 open
+                  - radiogroup [ref=f12e672]:
+                    - generic [ref=f12e673] [cursor=pointer]:
+                      - generic [ref=f12e674]:
+                        - radio "Compare" [checked]
+                      - generic [ref=f12e675]: Compare
+                    - generic [ref=f12e681] [cursor=pointer]:
+                      - generic [ref=f12e682]:
+                        - radio "Focus"
+                      - generic [ref=f12e683]: Focus
+                    - generic [ref=f12e690] [cursor=pointer]:
+                      - generic [ref=f12e691]:
+                        - radio "Stack"
+                      - generic [ref=f12e692]: Stack
+                  - radiogroup [ref=f12e696]:
+                    - generic [ref=f12e697] [cursor=pointer]:
+                      - generic [ref=f12e698]:
+                        - radio "Vertical" [checked]
+                      - text: Vertical
+                    - generic [ref=f12e699] [cursor=pointer]:
+                      - generic [ref=f12e700]:
+                        - radio "Horizontal"
+                      - text: Horizontal
+                  - button "Options" [ref=f12e701] [cursor=pointer]
+                - generic [ref=f12e709]:
+                  - generic [ref=f12e710]:
+                    - button "Prev" [disabled] [ref=f12e711]
+                    - generic [ref=f12e712]: No item selected
+                    - button "Next" [disabled] [ref=f12e713]
+                  - generic [ref=f12e714]:
+                    - button "Expand/Collapse" [ref=f12e715] [cursor=pointer]
+                    - button "Multi-Item Review keyboard shortcuts" [ref=f12e724] [cursor=pointer]:
+                      - generic [ref=f12e725]: "?"
+              - generic [ref=f12e729]:
+                - 'heading "Quick Guide: Multi-Item Review" [level=3] [ref=f12e733]'
+                - list [ref=f12e734]:
+                  - listitem [ref=f12e735]:
+                    - generic [ref=f12e736]: "1."
+                    - generic [ref=f12e737]:
+                      - strong [ref=f12e738]: Select items
+                      - text: — Click items in the left panel to add them to your viewer.
+                  - listitem [ref=f12e739]:
+                    - generic [ref=f12e740]: "2."
+                    - generic [ref=f12e741]:
+                      - strong [ref=f12e742]: Choose a view
+                      - text: — Use "Compare" for side-by-side, "Focus" for one at a time, or "Stack" to see all.
+                  - listitem [ref=f12e743]:
+                    - generic [ref=f12e744]: "3."
+                    - generic [ref=f12e745]:
+                      - strong [ref=f12e746]: Navigate
+                      - text: — Use Prev/Next buttons or keyboard (Tab + Enter) to move through items.
+                - button "Got it" [ref=f12e747] [cursor=pointer]
+          - generic [ref=f12e749]:
+            - generic [ref=f12e750]: No selection
+            - generic [ref=f12e752]: "? for shortcuts"
+  - button "Open Next.js Dev Tools" [ref=f12e506] [cursor=pointer]
+  - alert [ref=f12e510]: /media-multi
+```
+### Events
+- New console entries: ../../../../../private/tmp/.playwright-cli/console-2026-09-15T08-53-49-131Z.log#L6

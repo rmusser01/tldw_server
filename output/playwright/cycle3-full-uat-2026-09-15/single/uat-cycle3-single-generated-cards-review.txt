@@ -1,0 +1,130 @@
+### Page
+- Page URL: http://127.0.0.1:18280/flashcards?tab=importExport&generate=1&generate_text=The+mitochondria+is+the+powerhouse+of+the+cell.%0A%0ADNA+stands+for+deoxyribonucleic+acid.%0A%0APhotosynthesis+converts+light+energy+into+chemical+energy.%0A%0AThe+human+body+has+206+bones.%0A%0AWater+boils+at+100+degrees+Celsius+at+sea+level.&generate_source_type=note&generate_source_id=7d92dc41-0c91-469c-a246-1b414c76485d&generate_source_title=Cycle3+Biology+Study+Facts
+### Snapshot
+```yaml
+- generic [ref=f5e632]:
+  - generic [ref=f5e633]: Generate Flashcards
+  - generic [ref=f5e637]:
+    - generic [ref=f5e638]: Generate cards from pasted text, review/edit them, then save to a deck.
+    - status [ref=f5e639]:
+      - generic [ref=f5e643]:
+        - paragraph [ref=f5e644]: Source context attached
+        - generic [ref=f5e645]: Cards saved from this draft will be linked to note Cycle3 Biology Study Facts.
+    - textbox "Paste transcript, notes, or study material..." [ref=f5e646]: The mitochondria is the powerhouse of the cell. DNA stands for deoxyribonucleic acid. Photosynthesis converts light energy into chemical energy. The human body has 206 bones. Water boils at 100 degrees Celsius at sea level.
+    - generic [ref=f5e647]: "Tip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph."
+    - generic [ref=f5e648]:
+      - generic [ref=f5e649]:
+        - switch "Advanced mix" [ref=f5e650] [cursor=pointer]
+        - generic [ref=f5e653]: Advanced mix
+      - generic [ref=f5e655]:
+        - generic "Number of cards" [ref=f5e657]: "Number of cards :"
+        - spinbutton [ref=f5e661]: "5"
+      - generic [ref=f5e663]:
+        - generic "Card type" [ref=f5e665]: "Card type :"
+        - generic [ref=f5e669] [cursor=pointer]:
+          - generic [ref=f5e670]:
+            - generic "Basic" [ref=f5e671]
+            - combobox [ref=f5e672]
+          - img "down" [ref=f5e674]
+      - generic [ref=f5e678]:
+        - generic "Difficulty" [ref=f5e680]: "Difficulty :"
+        - generic [ref=f5e684] [cursor=pointer]:
+          - generic [ref=f5e685]:
+            - generic "Mixed" [ref=f5e686]
+            - combobox [ref=f5e687]
+          - img "down" [ref=f5e689]
+      - generic [ref=f5e693]:
+        - generic "Deck" [ref=f5e695]: "Deck :"
+        - generic [ref=f5e699] [cursor=pointer]:
+          - generic [ref=f5e700]:
+            - generic "Create new deck" [ref=f5e701]
+            - combobox [ref=f5e702]
+          - img "down" [ref=f5e704]
+          - img "close-circle" [ref=f5e708]
+      - generic [ref=f5e711]:
+        - generic [ref=f5e712]:
+          - strong [ref=f5e714]: New deck name
+          - textbox "New deck name" [ref=f5e715]: Cycle3 Biology Cards
+        - generic [ref=f5e716]:
+          - strong [ref=f5e718]: Review prompt side
+          - generic [ref=f5e719] [cursor=pointer]:
+            - generic [ref=f5e720]:
+              - generic "Front first" [ref=f5e721]
+              - combobox "Review prompt side" [ref=f5e722]
+            - img "down" [ref=f5e724]
+        - generic [ref=f5e727]:
+          - generic [ref=f5e728]:
+            - strong [ref=f5e730]: Scheduler type
+            - generic [ref=f5e731] [cursor=pointer]:
+              - generic [ref=f5e732]:
+                - generic "SM-2+" [ref=f5e733]
+                - combobox "Scheduler type SM-2+ down" [ref=f5e734]
+              - img "down" [ref=f5e736]
+          - generic [ref=f5e739]:
+            - strong [ref=f5e741]: Presets
+            - generic [ref=f5e742]:
+              - button "Default" [ref=f5e743] [cursor=pointer]
+              - button "Fast acquisition" [ref=f5e745] [cursor=pointer]
+              - button "Conservative review" [ref=f5e747] [cursor=pointer]
+              - button "Reset to defaults" [ref=f5e749] [cursor=pointer]
+          - generic [ref=f5e751]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+          - button "Customize scheduler" [ref=f5e753] [cursor=pointer]
+      - generic [ref=f5e756]:
+        - generic "Provider (optional)" [ref=f5e758]: "Provider (optional) :"
+        - textbox [ref=f5e762]
+      - generic [ref=f5e764]:
+        - generic "Model (optional)" [ref=f5e766]: "Model (optional) :"
+        - textbox [ref=f5e770]
+    - generic [ref=f5e772]:
+      - generic "Focus topics (comma-separated)" [ref=f5e774]: "Focus topics (comma-separated) :"
+      - textbox "exam 1, chapter 3, formulas" [ref=f5e778]
+    - button "Generate cards" [active] [ref=f5e897] [cursor=pointer]
+    - generic [ref=f5e898]:
+      - strong [ref=f5e900]: Generated cards (editable before save)
+      - generic [ref=f5e901]:
+        - generic [ref=f5e903]:
+          - generic [ref=f5e904]: Card 1
+          - button "Remove" [ref=f5e906] [cursor=pointer]
+        - generic [ref=f5e909]:
+          - generic [ref=f5e910]: Basic
+          - textbox [ref=f5e912]: What is the mitochondria described as?
+          - textbox [ref=f5e914]: The mitochondria is the powerhouse of the cell.
+          - textbox "tag-1, tag-2" [ref=f5e916]: mitochondria, cell
+      - generic [ref=f5e917]:
+        - generic [ref=f5e919]:
+          - generic [ref=f5e920]: Card 2
+          - button "Remove" [ref=f5e922] [cursor=pointer]
+        - generic [ref=f5e925]:
+          - generic [ref=f5e926]: Basic
+          - textbox [ref=f5e928]: What does DNA stand for?
+          - textbox [ref=f5e930]: DNA stands for deoxyribonucleic acid.
+          - textbox "tag-1, tag-2" [ref=f5e932]: DNA, abbreviation
+      - generic [ref=f5e933]:
+        - generic [ref=f5e935]:
+          - generic [ref=f5e936]: Card 3
+          - button "Remove" [ref=f5e938] [cursor=pointer]
+        - generic [ref=f5e941]:
+          - generic [ref=f5e942]: Basic
+          - textbox [ref=f5e944]: What does photosynthesis convert?
+          - textbox [ref=f5e946]: Photosynthesis converts light energy into chemical energy.
+          - textbox "tag-1, tag-2" [ref=f5e948]: photosynthesis, energy
+      - generic [ref=f5e949]:
+        - generic [ref=f5e951]:
+          - generic [ref=f5e952]: Card 4
+          - button "Remove" [ref=f5e954] [cursor=pointer]
+        - generic [ref=f5e957]:
+          - generic [ref=f5e958]: Basic
+          - textbox [ref=f5e960]: How many bones does the human body have?
+          - textbox [ref=f5e962]: The human body has 206 bones.
+          - textbox "tag-1, tag-2" [ref=f5e964]: human body, bones
+      - generic [ref=f5e965]:
+        - generic [ref=f5e967]:
+          - generic [ref=f5e968]: Card 5
+          - button "Remove" [ref=f5e970] [cursor=pointer]
+        - generic [ref=f5e973]:
+          - generic [ref=f5e974]: Basic
+          - textbox [ref=f5e976]: At what temperature does water boil at sea level?
+          - textbox [ref=f5e978]: Water boils at 100 degrees Celsius at sea level.
+          - textbox "tag-1, tag-2" [ref=f5e980]: water, boiling point, sea level
+      - button "Save generated cards" [ref=f5e981] [cursor=pointer]
+```

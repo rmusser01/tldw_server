@@ -2,7 +2,7 @@
 
 ## Run status
 
-- Status: **Full workflow UAT completed with failures after the 19-finding repair pass.** Both modes were exercised on `68863b90b7`; **26 new findings (UAT-020–045): six P1, fourteen P2, six P3**. Blocked steps and workarounds are retained in the [rerun matrix](#full-workflow-rerun--2026-09-15-utc). This is not release sign-off. Initial failures and repair verification remain historical evidence.
+- Current status: **Cycle3 UAT is running on `d40e17dc81`. Single-user execution is complete with failures; fresh multi-user execution is in progress.** The current pass records22new findings UAT056–077 plus reopened055 Manage scope: nineP2 and fourteenP3. Current coverage is in the [cycle3 matrix](#cycle-3-full-fresh-uat--started-2026-09-15t0743z). Earlier runs and repairs below remain historical evidence. This is not release sign-off.
 - Requested scope: fresh single-user and multi-user setup, then core workflow loops A, B, and C; record every observed bug, failure, and UX issue.
 - Backlog record: `backlog/tasks/task-13260 - Run-fresh-single-user-and-multi-user-UAT-across-core-workflow-loops.md` (see ENV-003).
 - Initial checkout: `codex/email-offline-validation-13250`, commit `54ecc7e7735fc082b711d922a27e97ee9999e5ae`. Repairs are on `codex/fresh-install-uat-fixes`.
@@ -131,15 +131,15 @@ Validation follow-up: the broader UAT048 login regression run passed58tests and 
 | --- | --- | --- |
 | Fresh setup, provider discovery, real first Chat | PASS: blank-model discovery, selected-model validation/save, real first response200; manual key UI recovery succeeds | Pending |
 | Normal saved Chat, second turn, reload/persistence | FAIL062: both real replies persist, but first turn is duplicated in another conversation and mode switches to Character | Pending |
-| Public file ingest → content search → Chat/QA with citations | Pending | Pending |
-| Exact Wikipedia URL → search → grounded Chat | Pending | Pending |
+| Public file ingest → content search → Chat/QA with citations | Functional PASS: exact Aster content, real answers, one mapped citation and correct Media source; ingest/Chat UX findings remain | Pending |
+| Exact Wikipedia URL → search → grounded Chat | BLOCKED: remote extraction fails, zero articles stored; failure is honestly counted, but generic error065 obscures the reason | Pending |
 | Notes → generated Flashcards → save/review/reload | Functional PASS: exact five facts generate5grounded cards, all saved/linked/reviewed and persisted; UX/privacy055/058/063/064 remain | Pending |
-| Create/save/back/apply Prompt → actual request and real answer | Pending | Pending |
-| Tracked character Chat, context replacement, saved history | Pending | Pending |
-| Chat → Note/backlink and reviewed Flashcard → study | Pending | Pending |
-| Media analysis → Review → re-analysis → reload | Pending | Pending |
-| Permission-aware delete → Trash date → restore | Pending | Pending |
-| Auth/disconnect/offline logout/reconnect | Pending | Pending |
+| Create/save/back/apply Prompt → actual request and real answer | Application PASS: synced pirate prompt, clean Back, exact system payload and real pirate answer/reload;062 recurs, output uses Arrr casing | Pending |
+| Tracked character Chat, context replacement, saved history | FAIL068/070: direct Aster/Robot entry and real replies work, but replacement reverts and settled reload hides a persisted final answer | Pending |
+| Chat → Note/backlink and reviewed Flashcard → study | Artifacts/pairs/scheduling PASS for normal and deliberate characters, all7cards studied; completed-session accounting FAIL076 | Pending |
+| Media analysis → Review → re-analysis → reload | Functional PASS: original grounded analysis in Review; distinct correct second analysis survives reload/restore; Markdown presentation060 remains | Pending |
+| Permission-aware delete → Trash date → restore | Functional recovery PASS through direct Trash route: truthful date, cleared selection, preserved content/analysis; last-item navigation071 and console072 fail | Pending |
+| Auth/disconnect/offline logout/reconnect | PASS: manual-key disconnect clears two tabs and stops private polling; invalid-key guidance, re-entry, offline disconnect and recovery succeed | Pending |
 | Admin creates Alice/Bob; owned/foreign API and browser isolation | N/A | Pending |
 
 ### Cycle 3 observations
@@ -201,7 +201,7 @@ UAT-058 scope follow-up: fresh navigation to `/flashcards` also has an empty doc
 
 #### UAT-063 — P3: Loaded saved Note has conflicting save status
 
-- Open the newly Chat-derived note from its server-loaded Notes list. Header status says No server save status yet, while the footer correctly says Version1 / Last saved and Origin: Saved from Chat. The user has made no edits.
+- Open the newly Chat-derived note from its server-loaded Notes list. The accessibility status says No server save status yet, while the footer correctly says Version1 / Last saved and Origin: Saved from Chat. The user has made no edits. Read-only inspection confirms this status is an sr-only live region; it is an accessibility inconsistency, not a visually painted header warning.
 - Expected: distinguish a saved, loaded note from a new unsaved draft and display consistent status. The artifact exists on the server; no persistence failure is claimed.
 - Status: open. Evidence: `/private/tmp/uat-cycle3-single-note-open.txt`, note `5724dbeb-4613-463f-8fbc-895e1f114ebe`.
 
@@ -216,6 +216,129 @@ Study follow-up: Show Answer displays the correct pair. Good persists repetition
 - Status: open. Evidence: Notes-to-generation navigation snapshot `/private/tmp/.playwright-cli/page-2026-09-15T08-13-58-922Z.yml`, biology note `7d92dc41-0c91-469c-a246-1b414c76485d`.
 
 Single Notes→Flashcards result: exact five-fact Note saves/reloads. Generate uses blank optional provider/model inputs and real server defaults; request434 returns5correct cards with grounded verdict, verified5/refuted0/unverified0, and actual source snippets. No draft editing or verification bypass was needed. All five save to Cycle3 Biology Cards with the original Note source ID. Their Study Show Answer/Good actions finish successfully; independent server reads show each repetitions1/version3 and a10minute due interval. Reloaded Study retains the completed session. Evidence: `/private/tmp/uat-cycle3-single-generated-cards.json`, `/private/tmp/uat-cycle3-single-generated-cards-review.txt`, `/private/tmp/uat-cycle3-single-all-cards-saved-server.json`, `/private/tmp/uat-cycle3-single-all-cards-reviewed-server.json`, `/private/tmp/uat-cycle3-single-biology-study-reloaded.txt`. The action harness read each front/back but did not print its collected text; persisted pairs and the separately inspected generation draft supply the content evidence. This is functional success with recorded route/status/privacy issues, not issue-free acceptance.
+
+Single Knowledge QA control: default AI setting (Server default), one selected source (Media1), and question “When does Project Aster garden open, and who coordinates it? Cite the source.” produce the correct18December2026/MiraChen answer with one mapped citation. The citation jumps to its source; View source preview shows the exact original excerpt and chunk `late_chunk:1:0`. Open in Media opens a new tab at `/media?id=1` containing that source and its saved analysis. Relevance is truthfully not measured. Evidence: `/private/tmp/uat-cycle3-single-qa-stream.txt`, `/private/tmp/uat-cycle3-single-qa-cited-answer.txt/.png` (PNG inspected), `/private/tmp/uat-cycle3-single-qa-source-preview.txt`, `/private/tmp/uat-cycle3-single-qa-open-media-confirmed.txt`. Confidential-content negative control remains pending. Knowledge and Media also have empty document titles, expanding058.
+
+#### UAT-065 — P3: Failed URL extraction loses its useful error context
+
+- Single-user exact Wikipedia journey URL, Quick preset, analysis/chunking off. The result correctly reports0succeeded/1failed and creates no article. This verifies the false-success portion of044 is repaired for this run.
+- Actual visible explanation: “An unexpected error occurred. Try again or check the server logs.” and Error · Retryable. Response381 says `Failed to extract: https://en.wikipedia.org/wiki/Playwright_(software)`, with `stored_articles:0` and empty media_ids. Runtime retrieval logs show Wikimedia robots requests receiving403. No bypass was attempted.
+- Expected: explain that source retrieval/extraction failed, preserve a safe useful reason when known, and avoid unsupported retry guidance. The remote block itself is external; article search/grounded Chat remains explicitly blocked.
+- Status: open; diagnosis pending. Evidence: `/private/tmp/uat-cycle3-single-wikipedia-failed.txt`, `/private/tmp/uat-cycle3-single-wikipedia-response.txt`, `/private/tmp/uat-cycle3-single-wikipedia-requests.txt`.
+
+UAT-065 read-only diagnosis: ingest transport retains `errors[0]`, but the results component renders only the classifier's generic message. “Failed to extract” matches no known category, so UNKNOWN also labels it retryable. The scraping service separately reduces extraction failures to the URL, losing the specific cause/code. Preserve safe structured extraction information and give an honest failure category; do not weaken retrieval controls.
+
+#### UAT-066 — P3: Citation preview changes the source type from Document to Other
+
+- Open the Aster answer's Document source card, then View source preview. The same source is labeled Other in the preview, despite the exact content and Media link being correct.
+- Read-only diagnosis: SourceCard defaults missing sourceType to media_db, while SourceViewerModal has no equivalent fallback. This is inconsistent source labeling, not evidence loss or a wrong-source claim.
+- Expected: both views use the same normalized source type. Status: open. Evidence: `/private/tmp/uat-cycle3-single-qa-cited-answer.txt`, `/private/tmp/uat-cycle3-single-qa-source-preview.txt`.
+
+Single Prompt control: created `Cycle3 Pirate Prompt` (`pa_ac8a-8cb1-480-4cb8`) with the journey's exact system instruction. Save→Back returns one Synced row without a false dirty warning. Use in chat→Use as System Instruction preserves the prompt. After starting a new saved conversation and explicitly choosing General chat, the pre-send view says Standard chat/Saved/Custom prompt. Request459 sends the exact pirate system instruction plus “Tell me about the weather today.” to the real configured model. Its answer begins “Arrr, matey!” and requests a location instead of inventing weather; it persists through reload. The model uses title-case Arrr, so literal uppercase ARRR is not claimed. Evidence: `/private/tmp/uat-cycle3-single-prompt-saved-back.txt`, `/private/tmp/uat-cycle3-single-pirate-before-send.txt`, `/private/tmp/uat-cycle3-single-pirate-request.json`, `/private/tmp/uat-cycle3-single-pirate-answer.txt`, `/private/tmp/uat-cycle3-single-pirate-reloaded.txt`.
+
+UAT-062 independent control: this new first turn has no queued second request. It still creates canonical conversation `232de83b-7e3c-45a9-bd6c-0cb77718b03e` (system/user/assistant) and extra `2178b118-a9a7-4bb7-afa9-301e5279ef0d` (duplicate user/assistant), then silently displays Helpful AI Assistant Character mode. Independent authenticated GETs confirm both copies. Thus queuing is unnecessary to trigger062. Evidence: `/private/tmp/uat-cycle3-single-pirate-requests.txt`, `/private/tmp/uat-cycle3-single-pirate-original-server.json`, `/private/tmp/uat-cycle3-single-pirate-duplicate-server.json`.
+
+#### UAT-067 — P3: New character opens with a disconnected-form console error
+
+- Navigate to Characters→New character. Console emits: “Instance created by useForm is not connected to any Form element. Forget to pass form prop?”
+- The form remains usable and successfully creates Cycle3 Aster Guide. Expected: normal creation without a lifecycle/form wiring error. Root cause not yet diagnosed; no save failure is inferred.
+- Status: open. Evidence: `/private/tmp/uat-cycle3-single-character-console.txt`, `/private/tmp/uat-cycle3-single-character-created.txt`.
+
+Single tracked control: UI-created Cycle3 Aster Guide (character4) opens a fresh saved tracked conversation `e004e361-604c-4a6a-85ce-019bc75fdeea`. Request324 uses complete-v2 with character context and the real model; answer is “Project Aster has seven raised beds.” Save to Notes375 and reviewed Flashcard400 both return201, linked to reply `pa_ec2a-b676-39f-15e0`. Note `080ce690-1d8f-4920-86b9-bc90bcc4f7ba` contains only that visible answer, reports Saved from Chat, and its Open conversation action restores the correct character/history; reload retains the factual answer. Card `eae2875e-e170-4e34-aed3-6df4579d007a` requires a question and has the correct nonblank answer; study control pending. Evidence: `/private/tmp/uat-cycle3-single-aster-character-request.json`, `/private/tmp/uat-cycle3-single-aster-character-answer.txt`, `/private/tmp/uat-cycle3-single-aster-note-open.txt`, `/private/tmp/uat-cycle3-single-aster-backlink.txt`, `/private/tmp/uat-cycle3-single-aster-tracked-reloaded.txt`, `/private/tmp/uat-cycle3-single-aster-card-dialog.txt`.
+
+#### UAT-068 — P2: Character picker reverts a replacement to the previous character
+
+- With saved Aster Guide character4 active, create Cycle3 Beep Robot through the UI using the exact journey instruction “Always respond with exactly: BEEP BOOP.” Return to Chat, open its current-character selector, and choose the visible Cycle3 Beep Robot option.
+- Actual: conversation content clears, but the settled view shows Aster Guide and its greeting again. The next “Hello, who are you?” creates `ff6e44a4-803d-45dc-9d85-d8b881a71ae1` with `character_id:4`; its real answer is “I am the Cycle3 Aster Guide for Project Aster.” The selected robot was not applied. The original Aster conversation remains on the server; no history deletion is claimed.
+- Expected: selecting the robot establishes its identity/context and a distinct robot conversation; UI selection cannot be overwritten by stale identity hydration. This is a fresh failure at the character replacement boundary addressed by032; root cause under read-only investigation.
+- Status: open. Evidence: `/private/tmp/uat-cycle3-single-character-switch-picker.txt`, `/private/tmp/uat-cycle3-single-robot-created.json`, `/private/tmp/uat-cycle3-single-robot-before.txt`, `/private/tmp/uat-cycle3-single-wrong-character-create.json`, `/private/tmp/uat-cycle3-single-wrong-character-answer.txt`.
+
+UAT-068 direct-entry control: Characters→Chat as Cycle3 Beep Robot correctly selects character5 and creates `ff85f37d-2c47-4467-af8b-db3fc305729b`. Real complete-v2 returns “BEEP BOOP” (no final period); the requested character behavior is present. This does not pass the failed in-chat replacement. Read-only trace identifies a competing legacy selectedCharacter reconciliation in useCharacterGreeting that can overwrite the canonical picker selection during asynchronous mirroring. Evidence: `/private/tmp/uat-cycle3-single-robot-direct-before.txt`, `/private/tmp/uat-cycle3-single-robot-direct-answer.txt`, `/private/tmp/uat-cycle3-single-robot-direct-requests.txt`.
+
+#### UAT-069 — P2: Notes controls shrink the results list to zero height
+
+- At1280×720 with5notes and3recent notes, reopen Notes while Views/Filters are expanded (the default state used in this run). The visible sidebar contains only controls and Recent Notes. Clicking an existing full-list note times out because those controls intercept its pointer position.
+- Visual inspection confirms the layout; DOM measurement gives the `flex-1 overflow-y-auto` result ancestor height0, while note rows remain below/behind the header. Window scrolling does not expose a usable list.
+- Expected: the note list retains usable space or the whole sidebar scrolls at normal laptop window heights. Collapsing both Views and Filters restores the list; the same note then opens normally. No force-click, viewport enlargement or data loss is involved.
+- Status: open. Evidence: `/private/tmp/uat-cycle3-single-note-pointer-block.txt/.png`, `/private/tmp/uat-cycle3-single-note-list-top.png` (both PNGs inspected). Root cause under read-only investigation.
+
+#### UAT-070 — P2: Reload hides the tracked character's persisted final answer
+
+- Reopen Aster conversation `e004e361-604c-4a6a-85ce-019bc75fdeea` via the Note backlink after the Robot control. Explicitly wait for the visible seven-beds answer: succeeds. Reload, then wait for that same visible answer for30seconds: times out.
+- Settled timeline contains only the greeting and user question. Actual reload GET1948 returns all3messages, including final reply `pa_ec2a-b676-39f-15e0` with sender Cycle3 Aster Guide, speaker_character_id4 and the correct answer after its reasoning block. Thus server persistence succeeds; frontend hydration drops the final visible reply.
+- Expected: reload restores all saved turns, normalizes tracked speaker identity and keeps model reasoning separate from the visible answer. Status: open; read-only diagnosis pending.
+- Evidence: `/private/tmp/uat-cycle3-single-aster-reload-settled-failure.txt`, `/private/tmp/uat-cycle3-single-aster-reload-settled-requests.txt`, `/private/tmp/uat-cycle3-single-aster-reload-response.json`. Earlier immediate reload snapshots were inconclusive; this settled control supersedes the preliminary reload-success statement above. The earlier backlink response body was evicted from the browser capture and is not counted as retained evidence.
+
+UAT-070 causal confirmation: bounded read-only IndexedDB inspection finds active local history `pa_0176-43d1-093-c548` with exactly the server's greeting/user IDs, both lacking serverMessageId; the assistant is absent. The server loader omits serverMessageId when mirroring, then classifies the restored cache as unsynced and preserves it instead of the fetched complete timeline. Existing matching mirrors need safe reconciliation; genuinely unsynced content must remain protected. Evidence: `/private/tmp/uat-cycle3-single-aster-local-mirror.txt` emits only IDs, roles and content lengths.
+
+Single Media cycle: Review content search Aster finds media1 and displays its complete first analysis. Inspector Generate uses the already selected exact local Qwen model and a new source-grounded instruction. Result “ASTER_ANALYSIS_TWO. Project Aster opens on18December2026, is coordinated byMiraChen, and has seven raised beds.” survives an explicit settled reload. Delete confirmation truthfully promises Trash recovery, and success clears `?id=1` plus the inspector. Direct Trash route shows Deleted: Sep15,2026,1:59AM. Restore removes the item from Trash; reopening media1 retains exact original content and the second analysis. Original analysis also displays raw Markdown in Review, expanding060. Evidence: `/private/tmp/uat-cycle3-single-review-original-analysis.txt`, `/private/tmp/uat-cycle3-single-analysis-reloaded.txt`, `/private/tmp/uat-cycle3-single-delete-confirmation.txt`, `/private/tmp/uat-cycle3-single-media-deleted.txt`, `/private/tmp/uat-cycle3-single-trash-actual.txt`, `/private/tmp/uat-cycle3-single-media-restored.txt`.
+
+Harness/approval note: the second-analysis request was initially rejected by automatic approval review because its model destination was considered unspecified. Read-only runtime configuration confirmed the exact selected model maps to local llama.cpp9099 and the source is our synthetic260B fixture. The retry explicitly stated that evidence and was approved; no model rerouting or approval bypass occurred.
+
+#### UAT-071 — P2: Deleting the last Media item hides the Trash entry
+
+- Delete the only active source. Media shows the first-ingest empty screen without its usual Trash button. The temporary Undo toast works as an available immediate action, but normal Trash navigation disappears when the toast expires.
+- Expected: recovery remains discoverable when there are no active media items, especially immediately after deletion. Direct `/media-trash` navigation works and restores the item; that independent control does not pass the missing UI entry.
+- Status: open. Evidence: `/private/tmp/uat-cycle3-single-media-deleted.txt`, `/private/tmp/uat-cycle3-single-trash-date.txt` (this latter capture is still the empty Media route, not Trash), `/private/tmp/uat-cycle3-single-trash-actual.txt`.
+
+#### UAT-072 — P3: Media deletion emits deprecated/context-free notification errors
+
+- Successful deletion emits two console errors: AntD Notification `btn` is deprecated in favor of `actions`; static message functions cannot consume dynamic theme context and should use App context.
+- Expected: the normal deletion/Undo flow uses supported context-backed notifications without console errors. Delete/restore succeeds; no toast-action failure is inferred.
+- Status: open. Evidence: `/private/tmp/uat-cycle3-single-delete-console.txt`. This is the Media notification path; the earlier Prompt-specific046 repair is not claimed regressed.
+
+Single security negative control: UI-uploaded synthetic Indigo source stores as media2 with chunking enabled and analysis disabled. It includes the classification-trigger word token but no real credentials. With only media2 selected, default Knowledge QA reports “Security settings excluded all retrieved sources,” returns no contexts/citations/answer and exposes no source excerpt. The earlier public Aster positive control passed. No ACL/classifier changes or override were used. Evidence: `/private/tmp/uat-cycle3-single-confidential-source.txt`, `/private/tmp/uat-cycle3-single-confidential-ingest-result.txt`, `/private/tmp/uat-cycle3-single-confidential-media.txt`, `/private/tmp/uat-cycle3-single-confidential-qa-result.txt`, `/private/tmp/uat-cycle3-single-confidential-qa-stream.txt`.
+
+Single tracked-card study: all7available cards display correct reviewed question/answer pairs, including “How many raised beds does Project Aster have?” / “Project Aster has seven raised beds.” Good persists the tracked card's repetitions1/version2, last_reviewed09:08:49.202Z and due09:18:49.202Z. Completed session survives reload. Evidence: `/private/tmp/uat-cycle3-single-seven-card-review.txt` (returned visible pairs, unlike the earlier console.log-only harness), `/private/tmp/uat-cycle3-single-tracked-study-reloaded.txt`, `/private/tmp/uat-cycle3-single-after-tracked-study-server.json`.
+
+#### UAT-073 — P2: Media reading-progress saves send invalid zoom units
+
+- While switching restored Media1 to the newly ingested Media2, the old item's progress flush returns422: “Input should be greater than or equal to25.” The automatic PUT fails and logs a warning; it is not a wrong-item-routing claim.
+- Read-only diagnosis: useMediaReadingProgress always sends zoom_level1, while the API requires percentage units25–400 (default100). Preserve backend validation and use matching client units.
+- Status: open. Original request body was not retained after navigation; the producer/schema mismatch independently explains the captured validation error. Console evidence: `/private/tmp/.playwright-cli/console-2026-09-15T09-00-19-405Z.log`, lines6–7.
+
+#### UAT-074 — P3: Deck dashboard double-counts due learning cards
+
+- After the first learning interval expires, Biology deck displays Total5, Due5, Learning5, New0, but its action says Review10ready. The actual all-deck queue has7cards (six learning plus one new) and reviews each once.
+- Read-only diagnosis: dashboard adds analytics due+learning+new, but analytics due already includes expired learning cards. Correct eligible count for this contract is due+new; future learning cards are not ready. Preserve the descriptive Learning count and backend queue semantics.
+- Status: open. Evidence: `/private/tmp/uat-cycle3-single-tracked-study-start.txt`, `/private/tmp/uat-cycle3-single-before-tracked-study-server.json`, `/private/tmp/uat-cycle3-single-seven-card-review.txt`.
+
+Execution observations: the file-chooser harness registered the synthetic Indigo file twice before its CLI modal was cleared; the duplicate was visibly marked Already queued and removed before processing, leaving one source. The development-server badge intercepted the compact sidebar Settings button; the visible header Open settings worked. These are retained execution constraints, not inferred production failures.
+
+Disk recovery checkpoint09:12–09:15UTC: host exhaustion (116MiB free) prevented the first attempted disconnect from executing. Only the verified single-UAT frontend18280 was stopped; its4.7GiB generated `.next-live-tier-cycle3-single-20260915` cache was removed and rebuilt. Existing runtime data, browser profile and evidence were preserved; API8000 and model9099 were untouched. Replacement frontend listener PID27711 (launcher27709), exec session99987. Browser reload settled after an HMR/navigation interruption. Subsequent actual UI Disconnect clears the key; the other Knowledge tab shows the credential-needed gate and no Aster answer. Passive polling/re-entry checks continue.
+
+Single-user completion checkpoint2026-09-15T09:27Z: all named single-user workflows have an observed outcome or explicit dependency block. This is completed execution with open product findings, not acceptance. Default public Aster QA and confidential Indigo exclusion both pass. The final seven-card Study control records every visible question/answer and persists the tracked-derived card's first review. Reload shows a completed session, but evidence review found its count is2rather than7; UAT076 below records the confirmed split. Exact Wikipedia article retrieval remains externally blocked.
+
+Auth recovery evidence: actual Disconnect clears Settings and the other Knowledge tab; private polling remains stopped for98.31seconds in Settings and62.97seconds in Knowledge. An invalid key produces clear HTTP401 guidance; entering the actual isolated key restores Core reachable / RAG healthy. Reload retains the key while its immediate health status correctly says not checked yet. Offline Disconnect leaves both tabs on the local credential gate without prior answer content or a browser error; reconnect and key entry restore access and fresh healthy checks. Opening the visible header Show keyboard shortcuts control loads the actual Keyboard Shortcuts dialog. Evidence: retained `disconnected-requests-*`, `disconnected-other-*`, `offline-*` and `help-loaded.txt` captures in the cycle3 single-user evidence directory. This manual-key control does not claim offline JWT revocation.
+
+#### UAT-075 — P3: Server setup guide opens the moved browser-extension repository
+
+- Mode / step: Settings → tldw Server → View server setup guide.
+- Actual: a new tab opens `https://github.com/rmusser01/tldw_browser_assistant`. Its README identifies the moved browser extension, requires an already running server, and describes extension development/configuration rather than server installation.
+- Expected: the labeled server setup action opens maintained server setup documentation. No broken network request is claimed; the destination loads successfully.
+- Status: open. Evidence: `/private/tmp/uat-cycle3-single-setup-guide-destination.txt`; the `serverDocsUrl` translation also points to this extension root. This external documentation link is separate from the successfully loaded in-app keyboard Help dialog.
+
+#### UAT-076 — P2: One all-decks Study run is split into incomplete server sessions
+
+- Mode / step: single-user Study → all decks; continuously reveal and rate all7available cards Good, then reload Recent study sessions.
+- Expected: the completed run accounts for all7reviews in its selected all-decks scope and leaves none of its component reviews in an active session.
+- Actual: all7visible question/answer pairs and individual scheduling updates are verified, but the completed All decks entry says2cards reviewed. Independent GET200 of review sessions confirms session3 (`due:global`) completed with2cards and session4 (`due:deck:1`) still active with5cards. Both were created/updated during the same09:08:48–49UTC seven-card UI run. The earlier five-card Biology session2 is separately completed at08:17:58UTC.
+- Read-only trace: `/flashcards/review` chooses a session from each card's deck, while ReviewTab remembers the last returned session ID and ends that one. Correct per-card schedules do not establish correct run/session accounting.
+- Status: open; no session records were modified during investigation. Evidence: retained `uat-cycle3-single-seven-card-review.txt`, `uat-cycle3-single-tracked-study-reloaded.txt` and the independent read `/private/tmp/uat-cycle3-single-reviewed-sessions-server.json`. Original per-review wire bodies are not claimed retained by this new GET.
+
+#### UAT-077 — P2: Provider Keys loading crashes on an object-valued translation
+
+- Mode / step: fresh multi-user admin, authenticated through normal Settings login → Provider Keys.
+- Expected: the route remains usable while loading, then displays available keys or an actionable permission/configuration result.
+- Actual: the route error boundary and Next development overlay report `TypeError: res.replace is not a function`. The stack identifies `ProviderKeysSettings.tsx:285` and `i18n/icu-format.ts:31`. Requests for profile preferences, OAuth status and user provider keys also return403; their policy reasons remain separate from the rendering defect.
+- Read-only cause: the loading branch calls `t("common:loading", "Loading...")`, but English `common.loading` is an object containing title/description/content. The ICU adapter calls `.replace` on that object. The observed stack is from loading text, not proof that the403 response itself caused the exception.
+- Status: open, frozen cycle3. Evidence: `/private/tmp/uat-cycle3-multi-provider-keys-settled.txt` and `/private/tmp/uat-cycle3-multi-provider-keys-console.txt`. No permission was changed and no provider key was submitted.
+
+UAT077 follow-up: the key-list403 explicitly says BYOK is disabled in this deployment, so that response is an expected configuration result and must retain accurate guidance. Read-only review found six additional object-valued `common:loading` calls in PersonaGarden Scopes/Policies/Commands/Connections; these are static related findings, not exercised UAT passes/failures. The shared ICU adapter should transform strings only, then preserve upstream handling for object/error-handler and syntax-tree inputs; that compatibility guard does not replace correcting scalar label callers.
+
+Runtime transition09:28UTC: after completing single-user checks, stopped only verified frontend parent27709/listener27711, confirmed port18280 was closed, and removed its1.2GiB regenerated build cache to make room for sequential multi-user UAT. Single-user API18200, runtime data, browser profiles and evidence remain available. Application revision stays frozen at `d40e17dc81`. Fresh multi API18201/WebUI18281 and a new browser are now running; normal admin Settings login succeeds, with Core reachable / RAG healthy. Full multi-user workflows remain in progress.
+
+Repair planning: [cycle3 design](../Design/2026-09-15-uat-cycle-3-repairs.md) and [implementation plan](../../IMPLEMENTATION_PLAN_uat_cycle_3.md) split known issues into reviewable Backlog units. These are preparation only; product/test code remains unchanged during both-mode UAT.
 
 ## Initial-run coverage (before repairs)
 
