@@ -103,6 +103,76 @@ triage issue.
 
 ## Latest Evidence
 
+### 2026-09-14: PR #2964 review-fix real workflow verification
+
+- Repeated all six cases with the rebuilt, ad-hoc-signed helper after mapping
+  bridge-detected exec-response version errors to `guest_protocol_mismatch`.
+  The protocol drill now uses public reconciliation instead of a redundant
+  private orchestrator assertion; its platform gates reference tracker #1442.
+- Accepted packet: `~/Library/Logs/tldw/vz-protocol-workflow-20260914-qodo-r1/`.
+  `receipt.json` SHA-256:
+  `c8b02771cf643b1dcbd42ca35d58c32a8ba8864067c46be34217759658b1e3a3`.
+  The exact signed executable is retained as `helper-used`, SHA-256:
+  `049ab407cf4e0cb9b858f1b877d9f1df5bdb2c90c048230c2ff16eee9f486638`.
+- All three positive cases passed, without skips/errors; all three negative
+  controls produced their intended failure after real exit-zero execution.
+  The protocol-positive guest sent version `999`, rejected in 2.184 seconds
+  before exec. Both healthy commands completed in replacement VM
+  `f49e3d89-78b0-450f-8d5c-94de325690ec`. The protocol-negative guest sent
+  version `1` and completed `protocol-drill-first` with validation still enabled.
+- Public reconciliation reported zero persisted controls and live VMs after
+  rejection and final cleanup. The final receipt reports `ok=true`, no errors,
+  empty VM inventory, closed allocated disks, stopped helper, absent socket/PID,
+  removed runtime directory, and unchanged canonical/all fault-source hashes.
+- Verification: **358 focused Python tests passed, 3 explicit host-gated skips**,
+  **95 Swift tests passed**, and the normal Go agent suite passed. The new
+  exec-response regression failed before the fix and passed afterward, with
+  request-ID/malformed-response controls. Ruff, Black, scoped Bandit (excluding
+  test assertions), and diff checks passed; independent review found no issues.
+  Later exec-response mismatch classification is covered by Swift server/bridge
+  tests, not live fault injection. The full server suite and reboot drill were
+  not run; the existing broader residual gaps remain unchanged.
+
+### 2026-09-14: Real guest protocol mismatch and recovery (TASK-13243.6)
+
+- Ran the checked-in `vz-failure-drill.py` on the same Apple Silicon host and
+  canonical Debian arm64 bundle, with a rebuilt, ad-hoc-signed Swift helper.
+  The helper now reports `guest_protocol_mismatch` for a rejected guest wire
+  version; no production fault flags, shared-helper changes or host reboot.
+- Accepted packet: `~/Library/Logs/tldw/vz-protocol-workflow-20260914-r1/`.
+  `receipt.json` SHA-256:
+  `e2bf4d6feda62bc6c10d088411df3e68b67ee4d20d4181dfe855b87779f56486`.
+  Receipt input hashes identify the exact scripts, fixtures and agent sources.
+  `helper-used` retains the exact signed executable after the run, matching
+  receipt helper SHA-256
+  `9842e41ac810fa4e72bc6246f9e31c0c455246c9f2d260258d63304e1dcd75e8`.
+- All six cases accepted: three positive tests passed without skips/errors;
+  three negative controls produced their intended assertion failures backed
+  by completed, exit-zero, exact-output guest execution. Existing capability
+  and readiness drills were rerun, not inferred from earlier packets.
+- The protocol-positive guest proved nonce-correlated version `999` in VM
+  `eca2b3d2-e137-48c5-8689-8c5deb7e836b`. Create rejected it in 4.068 seconds
+  with `guest_protocol_mismatch: protocolMismatch`; no exec reached that VM
+  and no reusable control/VM state remained. Healthy recovery printed
+  `protocol-drill-first` and `protocol-drill-reuse`, both exit zero, in the
+  same replacement VM `a84cc8e2-16f8-4a0a-9ec7-43f655245fa0`.
+- The protocol-negative guest sent supported version `1`, with the real helper
+  gate still enabled. VM `04815412-7310-4827-b6fe-4c52432ee5c5` executed
+  `protocol-drill-first` successfully before the intended rejection assertion
+  failed. `guest-protocol.json` and per-case `result.json` retain that proof.
+- Final cleanup: VM inventory empty, all allocated disk handles closed,
+  helper stopped, socket/PID absent, short runtime directory removed.
+  Canonical and all three fault-source hashes unchanged; receipt `ok=true`
+  and `errors=[]`. Evidence and image-store clones are deliberately retained.
+- Verification: **358 focused Python tests passed, 3 explicit host-gated skips**;
+  all **94 Swift tests** and the normal Go agent suite passed. New workflow,
+  diagnostic and proof-validation regressions were observed RED then GREEN.
+  Ruff/Black, diff checks and scoped Bandit passed (test assertions excluded).
+  An initial restricted test run could not invoke `ps`; the authorized rerun
+  passed without weakening cleanup tests. Independent review found no
+  actionable issues. The full server suite was not run. Host reboot,
+  missing-agent, early boot hangs and other deferred fault classes remain open.
+
 ### 2026-09-14: PR #2962 review-fix real workflow verification
 
 - Repeated the checked-in operator command on the same Apple Silicon host,
@@ -1205,7 +1275,7 @@ triage issue.
 | Launchd-drill evidence | Recorded real VM smoke on 2026-09-13 (3 tests, no skips), plus a separate live-session restart test (1 passed, no skips/errors) proving changed helper generation, stale-VM replacement, replacement reuse, and cleanup. The latter exposed and fixed guest capped-output loss before acceptance. Durable artifacts and failed attempts are recorded above. | Repeat both bounded drills when helper lifecycle, signing, guest transport, or image preparation changes. Keep launchd validation explicitly operator-requested; host reboot remains separate. |
 | Host reboot recovery | Manual `host-reboot-drill pre/post` procedure only and out of scheduled CI. | Record results when a maintainer explicitly runs the reboot drill on a prepared host that can tolerate disruptive reboot testing and preserve logs. |
 | Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver and guest-readiness failure cleanup. Manual real acknowledged-handshake readiness withholding, timeout cleanup, and healthy session reuse passed twice on 2026-09-13 with a normal-ready negative control. The default smoke still does not inject faults. | Repeat the opt-in readiness drill when the handshake or lifecycle changes. Kernel boot hangs and missing-agent live injection remain separate; preserve stable reasons and artifact pointers rather than exposing raw serial logs. |
-| Guest-agent mismatch | Manual real missing-`exec` capability rejection, cleanup, and subsequent healthy session reuse passed locally on 2026-09-13. A negative control proved the test detects execution when the runner gate is bypassed. Not part of default smoke. | Repeat this explicitly opted-in test when the guest handshake or runner admission changes. Protocol-version mismatch, missing-agent, and workspace-mismatch live injection remain separate evidence cases under the lifecycle-drill contract. |
+| Guest-agent mismatch | Manual missing-`exec` capability rejection passed on 2026-09-13. The checked-in six-case workflow on 2026-09-14 additionally proved guest wire protocol-version rejection, cleanup, healthy recovery and session reuse; its negative control kept the helper gate enabled and changed only the injected version. Not part of default smoke. | Repeat the opted-in workflow when the guest handshake or runner admission changes. Missing-agent and workspace-mismatch live injection remain separate evidence cases under the lifecycle-drill contract. |
 | Stale socket handling | Manual stale-socket prepared-host evidence was recorded locally on 2026-07-03 with controlled inactive socket recovery, helper start/status verification, and explicit stop cleanup passing. | Repeat when helper socket-safety behavior or the operator drill command changes; keep it manual-only and out of PR/push/scheduled destructive triggers. |
 | Direct-bundle smoke mutability | Closed for the default smoke path by the 2026-06-16 disposable-clone evidence and repeated on 2026-06-20 after host reboot: source bundle hashes stayed identical before/after while the disposable run bundle rootfs hash changed after execution. | Repeat periodically when the smoke wrapper, image-store materializer, or helper VM write path changes. |
 
