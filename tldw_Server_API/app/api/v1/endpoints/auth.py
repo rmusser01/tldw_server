@@ -28,6 +28,7 @@ from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RateLimiter,
+    _authnz_busy_http_exception,
     check_auth_rate_limit,
     get_auth_principal,
     get_db_transaction,
@@ -77,10 +78,14 @@ from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, is_postgres_backend
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
     DatabaseError,
+    DatabaseLockError,
     DuplicateOrganizationError,
     DuplicateUserError,
     InvalidRegistrationCodeError,
+    InvalidSessionError,
     InvalidTokenError,
     RegistrationError,
     SessionError,
@@ -114,6 +119,7 @@ from tldw_Server_API.app.core.AuthNZ.single_user_session import (
     validate_single_user_session,
 )
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import get_authnz_transaction_policy
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor, RGRequest
 from tldw_Server_API.app.core.Resource_Governance.policy_loader import default_policy_loader
@@ -1347,6 +1353,8 @@ async def delete_single_user_cookie_session(
 async def _build_scope_claims(user_id: int) -> dict[str, Any]:
     try:
         memberships = await list_memberships_for_user(int(user_id))
+    except asyncio.CancelledError:
+        raise
     except _AUTH_NONCRITICAL_EXCEPTIONS:
         return {}
 
@@ -2287,7 +2295,7 @@ async def refresh_token(
     http_request: Request,
     jwt_service: JWTService = Depends(get_jwt_service_dep),
     session_manager: SessionManager = Depends(get_session_manager_dep),
-    db=Depends(get_db_transaction),
+    db=Depends(get_login_db_connection),
     settings: Settings = Depends(get_settings)
 ) -> TokenResponse:
     """
@@ -2353,7 +2361,9 @@ async def refresh_token(
                 raise
 
             # Check if token is blacklisted
-            if await session_manager.is_token_blacklisted(payload.refresh_token, token_payload.get("jti")):
+            if await session_manager.is_token_blacklisted(
+                payload.refresh_token, token_payload.get("jti"), strict=True
+            ):
                 if _is_test_mode():
                     try:
                         response.headers["X-TLDW-Refresh-Stage"] = "blacklist"
@@ -2453,7 +2463,7 @@ async def refresh_token(
                     new_access_token=new_access_token,
                     new_refresh_token=(new_refresh_token if new_refresh_token != payload.refresh_token else None)
                 )
-            except _AUTH_NONCRITICAL_EXCEPTIONS as _sess_e:
+            except (InvalidSessionError, SessionRevokedException) as _sess_e:
                 # Treat missing/invalid session mapping as invalid token usage
                 if _is_test_mode():
                     try:
@@ -2483,6 +2493,8 @@ async def refresh_token(
                         revoked_by=None,
                         ip_address=(_auth_request_client_ip(http_request) if http_request else None),
                     )
+            except asyncio.CancelledError:
+                raise
             except _AUTH_NONCRITICAL_EXCEPTIONS as _bl_e:
                 with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
                     logger.debug(f"Refresh: blacklist prior token best-effort failed: {_bl_e}")
@@ -2505,6 +2517,14 @@ async def refresh_token(
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         )
 
+    except asyncio.CancelledError:
+        raise
+    except (DatabaseLockError, ConnectionPoolExhaustedError, DatabaseConcurrencyConflict) as e:
+        log_counter("auth_refresh_database_busy")
+        log_histogram("auth_refresh_duration", time.perf_counter() - start_time)
+        raise _authnz_busy_http_exception(
+            get_authnz_transaction_policy().busy_retry_after_seconds
+        ) from e
     except (TokenExpiredError, InvalidTokenError) as e:
         logger.warning(f"Token refresh failed: {e}")
         log_counter("auth_refresh_token_error", labels={"type": type(e).__name__})
