@@ -12,6 +12,111 @@
 - Workflow source: frontend E2E/UAT and shared integration tests, as clarified by the user. Exact named journeys and coverage limitations are recorded below; no literal A/B/C loop mapping was found.
 - AI provider: existing llama.cpp on port 9099; `/v1/models` verified with model `../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf`. No mock response counts as real model acceptance.
 
+## Cycle 2 repair status — 2026-09-15 UTC
+
+The user requested an ongoing UAT → review → fix loop until a complete fresh single/multi run encounters no issues. Repairs for UAT-020–045 are in progress under TASK-13260.5–.11 and `IMPLEMENTATION_PLAN_uat_cycle_2.md`. The findings below remain open pending integrated review and real-runtime verification; targeted tests do not replace the next full run.
+
+Targeted follow-up found ten additional issues046–055 (twoP1, sixP2, twoP3). All except048 now have targeted live verification;048 multi-user offline logout is being retested. Recent committed fixes include052 `26f35ae81d` and055 `2651047438`. Parent verification after the follow-ups:166shared and145web tests pass. Final TypeScript check retains the same90 baseline diagnostic signatures with none added/removed; it does not pass outright. [Retained targeted evidence](../../output/playwright/cycle2-repair-verification-2026-09-15/README.md) is credential-scanned and hash-indexed. Full fresh acceptance remains pending.
+
+- **Notes/account state:** Recent history, pinned IDs and offline drafts use verified server/account storage scopes. Notes/login titles and manual-key Disconnect are repaired. Review found offline transport and delayed A→B→A detail races; guarded transport, expected-user API checks, cancellation and stale-result handling now cover them. Final checks: 105 Notes/policy/worker tests, 52 web transport tests and 58 backend tests passed. Live account-switch verification remains pending.
+- **Chat:** Repairs address neutral sampling rejection before provider dispatch, first-turn Saved persistence, retained server message/conversation linkage on failure, and explicit character context replacement. Agent verification: 69 backend and 152 frontend tests; independent parent repeats: 69 backend and 140 frontend tests. Production diff reviewed without remaining findings.
+- **Flashcards:** Repairs verify contextual question/answer claims, retain semantic checking for quoted questions, constrain generated facts to source, show concise verification failures, save visible Chat content, require a reviewed question/answer pair, and show truthful initial Study state. Independent review found and repaired a late-save overwrite of an edited card draft; 43 UI and 16 backend review tests passed. Shared E2E helper is being aligned with the required card review dialog.
+- **Media/retrieval:** Repairs cover ingestion error classification, current model configuration, non-success URL response rejection, explicit skipped chunking, source/permalink/Chat navigation, permissions-aware delete, deleted-selection clearing and Trash dates. Verification: 95 backend and **144 unique frontend** tests; independent production review found no remaining issue. UAT-030 worker ownership is repaired for new ingestion and narrowly backfilled for existing null-owner worker rows. Tests preserve explicit owners and malformed labels; a private clone of the UAT database returned Alice's source to Alice and excluded Bob. Original runtime data was not changed by that clone check.
+- **Setup/QA defaults:** Readiness warnings explain required verification; local model discovery precedes selection. Blank template QA defaults inherit configured Chat; explicit overrides retain provider/model pairing. Review caught provenance loss when the real config loader merged an environment provider with another provider's model. Real-loader regression: two failed before repair; broader 280 configuration/generation tests passed after repair, alongside 7 readiness and 23 provider-step tests.
+- **Prompt editor:** Successful save establishes saved identity and a clean baseline; Back returns to the library. Review also repaired repeated keyboard saves and late success/rejection affecting another draft. All 87 Prompt tests passed; final independent review has no remaining findings.
+
+Combined parent verification: 60 backend boundary regressions passed; Bandit scanned all 24 touched production Python files with zero findings. Frontend typecheck reports the same 90 baseline diagnostics, with no added/removed diagnostic signatures; it is not a passing typecheck. ESLint across 68 touched frontend files reports five pre-existing `no-require-imports` errors in three Media test fixtures (all reproduced against HEAD), plus 1,554 warnings. Domain lint comparisons found no new production findings. Logs: `/private/tmp/uat-round2-parent-integration.log`, `/private/tmp/bandit_uat_round2_combined.json`, `/private/tmp/uat-round2-typecheck-final.log`, `/private/tmp/uat-round2-eslint-final.json`. Live checks and the complete fresh UAT rerun still remain.
+
+### Cycle 2 targeted live check follow-up
+
+- Repaired product revision: `a53aa33e58`; isolated APIs restarted on 18100/18101 and both `/health` returned 200. Single-user `/media/capabilities` returned 200 with `can_delete: true`.
+- Prompt create/save adopted a real saved identity (`pa_8d8f-a875-78f-2a1d`), changed URL from `?new=1` to `?edit=…`, displayed the saved title and success notification. Back verification was interrupted when Playwright CLI lost its browser sessions; this is a tooling interruption, not a passing navigation check.
+
+#### UAT-046 — P3: Prompt save emits a notification context warning
+
+- Mode / step: single-user; create and save a Prompt on `a53aa33e58`.
+- Expected: successful save displays the notification through the active application theme/context without a console error.
+- Actual: visible save succeeds, but the console records `Warning: [antd: notification] Static function can not consume context like dynamic theme. Please use 'App' component instead.`
+- Evidence: `/private/tmp/.playwright-cli/console-2026-09-15T05-58-03-961Z.log`, event at 47,806 ms; saved-editor snapshot `/private/tmp/.playwright-cli/page-2026-09-15T05-58-52-754Z.yml`.
+- Status: **targeted live pass** on `5576c93c23`: context-backed notification, 95 regression tests, and real browser save/back without the warning. Saved record `pa_d25c-b410-ae7-2a53`; Back returned to `/prompts` with one synced row and no false unsaved prompt. Full fresh UAT remains pending.
+
+#### UAT-047 — P2: Private polling continues after Disconnect
+
+- Mode / step: single-user, manual-key Settings → Disconnect on repaired build.
+- Expected: clear credentials and stop authenticated background polling until a verified reconnection.
+- Actual: the key clears and re-entry succeeds, but notifications unread-count continues every 30 seconds and triggers CORS preflight errors using credentials mode `include`; missing-key warnings repeat twice every five seconds while disconnected.
+- Evidence: `/private/tmp/.playwright-cli/console-2026-09-15T06-07-28-118Z.log`, errors at 30,392 ms and 60,388 ms; reconnect success snapshot `/private/tmp/.playwright-cli/page-2026-09-15T06-08-48-027Z.yml`.
+- Status: **targeted live pass** under TASK-13260.5. Notifications/Buddy require verified connection authority; stale checks cannot restore a disconnected/replaced account. 140 shared and 145 web regressions pass, independent review clear. Disconnect cleared the key; a 4m13s request comparison (2026-09-14 23:57:23 to 2026-09-15 00:01:36 Pacific) showed no new private polling, only public docs-info200. Normal UI key re-entry restored Core reachable/RAG healthy. Evidence: `/private/tmp/uat047-requests-start.txt`, `/private/tmp/uat047-requests-end.txt`, `/private/tmp/uat047-reconnected-final.txt` (redacted). Full fresh UAT remains pending.
+
+#### UAT-048 — P2: Offline logout produces a runtime error
+
+- Mode / step: multi-user Alice, queued offline Note draft, then Settings → Logout while offline.
+- Expected: clear the local session, preserve Alice's draft under Alice's storage scope, and recover sign-in cleanly when online again.
+- Actual: Settings shows a `Failed to fetch (POST /api/v1/auth/logout)` runtime error, with a separate uncached PageHelpModal chunk failure. The other Notes tab navigates to a browser error page. Credential/draft isolation checks continue after reconnect; these errors do not count as passing logout UX.
+- Evidence: `/private/tmp/uat-round2-offline-logout.txt` and the multi-user agent's saved snapshot.
+- Status: **partially repaired; cross-tab navigation still fails** under TASK-13260.5. Repair committed in `7dc8db2efb` preserves local logout and uses a bounded warning for unavailable remote revocation. The fresh targeted retest shows Settings Logout clearing the session and rendering Login Required/login form without a runtime overlay or optional Help chunk error. However, the newly active Notes tab (created07:24:46UTC and holding the new queued draft) automatically navigates to a browser error page while offline. This was part of the original finding and remains open; it is not dismissed as an expected offline limitation. Evidence: `/private/tmp/uat048-final-alice-offline-draft.txt`, `/private/tmp/uat048-final-offline-logout.txt`; redirect trace and account/draft recovery checks are in progress.
+
+#### UAT-049 — P2: Closed Help modal can break an offline app remount
+
+- Observed during the UAT-048 offline logout/recovery path; the user never opened Help.
+- Root-cause trace: app-shell hosts mount the lazy PageHelpModal even while closed. An offline remount requests its uncached chunk, then the load rejection reaches the route error boundary and shows `Something went wrong`.
+- Expected: a closed optional Help modal should not block the working app shell or offline draft/session recovery.
+- Evidence: `/private/tmp/uat-round2-offline-logout.txt`; source trace in `EventHosts.tsx`, `Layout.tsx` and shared entry hosts.
+- Status: **targeted loader pass** under TASK-13260.5. Closed hosts no longer import the body. Requested loading failure stays local; actual Turbopack rejection caching requires explicit Reload page, with an unsaved-edits confirmation. Unit red/green, 22 Help/shell regressions and independent review pass. Live `/setup` global Help-open event while offline shows the local notice and keeps the page usable; cancelling reload preserves the synthetic field. Reconnect → confirmed Reload page → reopen shows real Page Help (Tutorials/Shortcuts). Evidence: `/private/tmp/uat049-setup-help-result.txt`, `/private/tmp/uat049-cancel-keeps-draft.txt`, `/private/tmp/uat049-recovered-modal.txt`. This is a targeted loader check; multi-user offline logout and full fresh workflows remain separate.
+
+#### UAT-050 — P1: Normal saved Chat corrupts an advertised path-like model ID
+
+- Mode / step: single-user replacement browser, Media → Chat, first saved normal Chat turn using the server-advertised local model.
+- Expected: send the selected model identifier unchanged and receive the local model's answer.
+- Actual: browser POST `/api/v1/chat/completions` includes `model: ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf`, `api_provider: llama`, `save_to_db: true`. The API rejects it with 400 `model_not_available`, naming **`../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf`** (one parent segment lost). UI says `Stream completion failed`; the sidebar still labels the model healthy. The user message and error are persisted, but no answer is generated.
+- Evidence: `cycle2-single-recovery` request 299, exact request/response bodies; snapshot `/private/tmp/.playwright-cli/page-2026-09-15T06-15-54-912Z.yml`; console `/private/tmp/.playwright-cli/console-2026-09-15T06-12-34-327Z.log` at 149,886 ms.
+- Status: **targeted model-routing pass**, committed `1e628951be`. Provider-prefix parsing preserves opaque local paths/repository names and registered aliases; 87 backend regressions pass, Ruff/Bandit have zero findings, and independent review is clear. Exact-model Retry request 1381 returned 200 and the correct answer, "The garden opens on 18 December 2026 and is coordinated by Mira Chen." Reload retained that answer in browser state, but a subsequent server read disproved server persistence (UAT-052). Evidence: `/private/tmp/uat050-request-body.txt`, `/private/tmp/uat050-browser-after-retry.txt`, `/private/tmp/uat050-reloaded-answer.txt`. Separate stale error UX is UAT-051.
+
+#### UAT-051 — P2: Successful Chat retry leaves an active error banner after reload
+
+- Mode / step: single-user; retry UAT-050 successfully, then reload the saved conversation.
+- Expected: the current composer reflects the successful latest assistant reply; an earlier failed attempt may remain historical.
+- Actual: the persisted correct answer appears as assistant message 3, but the composer displays an active Error banner saying "Something went wrong while talking to your tldw server" with Retry chat actions. This describes the earlier failed message as a current failure after successful recovery.
+- Evidence: `/private/tmp/uat050-reloaded-answer.txt`, saved conversation `5536eadd-4be4-4eea-bce2-bc6f454e8990`; completion request 1381 returned 200. No new completion failure was observed.
+- Status: **targeted live pass**, committed `384d9010ad`: latest conversational attempt determines the active composer banner, historical failed bubbles remain intact. All 55 related regressions pass; lint has no errors/new warnings. Parent review and live reload confirm the old composer banner is absent (`/private/tmp/uat051-reloaded.txt`).
+
+#### UAT-052 — P1: Saved normal Chat answer forks into another conversation and lacks export actions
+
+- Mode / step: single-user normal saved Chat; successful UAT-050 Retry, reload, then open the assistant reply's More actions.
+- Expected: `save_to_db: true` persists the reply to its owned conversation and provides Note/Flashcard save actions after server message identity is established.
+- Actual: browser shows three messages including the successful answer and labels Chat Saved; server GET `/chats/5536eadd-4be4-4eea-bce2-bc6f454e8990/messages` returns only two (original user message and error). The reply was instead persisted in unexpected conversation `e4a86441-a45a-4d72-b0de-58bb39dac45f`, confirmed by independent GET200. More actions lacks Save to Notes/Flashcards because local state retains the original conversation and has no canonical reply identity.
+- Evidence: `/private/tmp/uat-chat-saved-messages.txt` (request1733), `/private/tmp/uat050-request-body.txt`, menu snapshot `/private/tmp/.playwright-cli/page-2026-09-15T06-34-36-470Z.yml`. Browser reload alone was insufficient persistence evidence; earlier wording is corrected above.
+- Root cause: backend resolves default character3 for the existing neutral conversation, then forks on character mismatch (`expected char:3, got char:None`, same owner1). The successful reply exists under the fork; local metadata still points to the original conversation. No data-loss claim is made. Additional evidence: `/private/tmp/uat052-forked-conversation.json`.
+- Status: **targeted live pass**, committed `26f35ae81d` under TASK-13260.12. Exact owned neutral conversation reuse, diagnostic filtering and narrowly matched failed-turn retries preserve owner/character boundaries. Server reply IDs reach the frontend save actions. 90 backend/76 frontend regressions pass; independent reviewer repeated 58 backend/52 combined frontend tests. Bandit0; lint no new findings. Live retry request199 returned200; independent GET of the original conversation contains its original system/user/error plus assistant `6aedba81-4546-41a6-98c4-c080f26a05ba`, with no duplicate user. Save to Notes263 and Flashcards395 both return201 with the original conversation/reply IDs. Note `d299e8d8-db3b-4c32-b7ea-f7a1188f54d5` contains the visible answer and reports Origin: Saved from Chat; its Open conversation action plus reload restores the original question/error/correct answer. Card `52f987ff-2d7a-4ddb-a202-ca977f8711d8` has the explicitly reviewed question and correct nonblank answer, independently read from the server. Evidence: `/private/tmp/uat052-original-server-after-retry.json`, `/private/tmp/uat052-note-server.json`, `/private/tmp/uat052-card-server.json`, `/private/tmp/uat052-note-open-final.txt`, `/private/tmp/uat052-linked-chat-reloaded.txt`; report `/private/tmp/uat052-repair-report-20260915T065632Z.md`. Full fresh UAT remains pending.
+
+#### UAT-053 — P2: Background Buddy polling opens a blocking offline error dialog
+
+- Mode / step: single-user Chat, set the browser offline while checking optional Help loading; no Buddy action requested.
+- Expected: the shell's offline state updates and optional background polling stops quietly; Help/draft interactions remain available.
+- Actual: an unsolicited modal "Can't reach your tldw server" blocks toolbar interaction and names `GET /api/v1/buddies/attachment?client_slot=default`. The page already reports offline and offers settings. Dismissing this unrelated background error is required before continuing the intended action.
+- Evidence: `/private/tmp/uat049-overlay-current.txt`; no user Buddy request preceded this modal.
+- Status: **targeted live pass** under TASK-13260.5. Passive Buddy reads suppress only the global unavailable event; failed reads still reject and explicit GET/DELETE controls still notify. 49 tests pass across the real service/client/proxy chain in web and extension modes; independent review clear, lint no new findings. After required Chat loading completed, a33second offline observation showed no blocking dialog; notifications reported reconnecting. Evidence: `/private/tmp/uat053-buddy-final.log`, `/private/tmp/uat054-settled-offline-start.txt`, `/private/tmp/uat053-settled-offline-final.txt`. Taking the browser offline during its initial settings load still reports that active request's failure; that is not a background-polling pass or suppression.
+
+Tooling/environment follow-up: a sandboxed Playwright CLI list operation removed nonpersistent session records after failing to connect to daemon sockets. Replacement persistent browser profiles were opened and authenticated through the UI; browser-state continuity from the lost sessions is not claimed. Restarting both isolated WebUIs resolved the development build graph's missing newly added Notes module; Notes returned HTTP 200 and the correct title. Old 18080/18081 UAT frontends were retired and only their untracked `.next-live-tier-fresh-*` caches removed for disk space; databases, configuration and evidence were preserved.
+
+#### UAT-054 — P2: Implicit Chat feedback opens a blocking offline error dialog
+
+- Mode / step: single-user saved Chat, reload then set browser offline; no feedback action requested.
+- Expected: automatic feedback fails quietly and the shell stays usable with honest offline status.
+- Actual: after36seconds a blocking "Can't reach your tldw server" dialog names `POST /api/v1/rag/feedback/implicit`. This is a separate automatic request from the Buddy reads repaired for UAT-053.
+- Evidence: `/private/tmp/uat053-offline-start.txt`, `/private/tmp/uat053-offline-end.txt`, observed2026-09-15T07:11:58Z.
+- Status: **targeted live pass** under TASK-13260.5. Implicit feedback suppresses only the global unavailable event; explicit feedback retains failures. 13 regressions pass, independent review clear, lint no new findings. Copying the real reply while offline triggered implicit POST458 with ERR_INTERNET_DISCONNECTED and no blocking modal; reconnect succeeds. Evidence: `/private/tmp/uat054-copy-offline.txt`, `/private/tmp/uat054-copy-requests.txt`. Expected browser network diagnostics from deliberate offline testing remain visible.
+
+Environment interruption (2026-09-15T07:06Z): simultaneous single/multi Next caches exhausted disk space. Evidence writes/npm and two research-run polls failed (HTTP500); backend log buffer reported OSError. Multi frontend80042/80047 was retired and only its generated cache removed. Disk space recovered; independent research-runs GET returned200 with runs:[] and continued UI polling recovered. No test database was removed. Evidence: `/private/tmp/uat-enospc-research-runs-recovered.json`. Remaining WebUI runs are sequential.
+
+#### UAT-055 — P3: Flashcards Study emits a deprecated List console error
+
+- Mode / step: single-user Flashcards → Study, existing recent study session and due queue.
+- Actual: console reports `Warning: [antd: List] The List component is deprecated. And will be removed in next major version.` Study remains usable.
+- Expected: current supported rendering without a console error from visiting Study.
+- Evidence: `/private/tmp/uat052-study-card.txt`, browser console on2026-09-15T07:13Z.
+- Status: **targeted live pass** under TASK-13260.6. RecentStudySessions uses a labeled native list with the same controls/content and state branches. 26 regressions pass; lint0; independent review clear. Fresh Flashcards navigation renders Recent study sessions and View completed session with0console errors/warnings. Evidence: `/private/tmp/uat055-study-fixed.txt`, `/private/tmp/uat055-recent-sessions-final-20260915T071600Z.log`.
+
 ## Initial-run coverage (before repairs)
 
 | Scenario | Single-user | Multi-user | Evidence / issue |

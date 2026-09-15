@@ -1,0 +1,115 @@
+{
+  "scope": "targeted repair checks, not full fresh UAT",
+  "files": [
+    {
+      "name": "uat047-requests-start.txt",
+      "sha256": "c3c5a28867db3f54d00a616bc6940d8167b42ec2043c12655eb6cfda1a37dbe2",
+      "bytes": 3742
+    },
+    {
+      "name": "uat047-requests-end.txt",
+      "sha256": "ae5643103618a13563e1cff5eccd34365194e7ac50a250c921da062204273253",
+      "bytes": 3996
+    },
+    {
+      "name": "uat047-reconnected-final.txt",
+      "sha256": "097d749eb8763cac5c0fcdc96232fa46230d14eff15ce9b8d8ea8690214fad65",
+      "bytes": 12536
+    },
+    {
+      "name": "uat049-setup-help-result.txt",
+      "sha256": "ab472db64d1e5352aa85d395bce7f51a8a4bf259e91b422b85277bcace3836de",
+      "bytes": 2086
+    },
+    {
+      "name": "uat049-cancel-keeps-draft.txt",
+      "sha256": "31999407074d3ce410818cf3c7673a1a39ded8557c86aefe748dc99f3243631a",
+      "bytes": 2110
+    },
+    {
+      "name": "uat049-recovered-modal.txt",
+      "sha256": "c7716c21c3d2c49b4c132097c11998a1501f6a59f4cce0288d55f5d8dfd78b6b",
+      "bytes": 4663
+    },
+    {
+      "name": "uat050-request-body.txt",
+      "sha256": "788dbdbcedccbe83eb89a5f600addf74d6ebb94cef5fc9c5708314b6892641e4",
+      "bytes": 512
+    },
+    {
+      "name": "uat051-reloaded.txt",
+      "sha256": "ba739818c12c77e5b80ae56b8195ed5159927b178ac8efb49caf9bf11349d4a8",
+      "bytes": 10980
+    },
+    {
+      "name": "uat052-original-server-after-retry.json",
+      "sha256": "ffeca8d72c8b1a1118579cbcefc65ca3e8777a671548c9e3d1de87bcdac5cc4a",
+      "bytes": 2639
+    },
+    {
+      "name": "uat052-note-server.json",
+      "sha256": "a7caa942e15cdd1f365ca7fed9d54a137090d690ae684465b6f6113ff390a516",
+      "bytes": 648
+    },
+    {
+      "name": "uat052-card-server.json",
+      "sha256": "96c9d3f466dde44a4af9f88f0b3360a8c9cada2c44ecefa4d5148af0a9482770",
+      "bytes": 1159
+    },
+    {
+      "name": "uat052-note-open-final.txt",
+      "sha256": "a086acc4803a82517f76e1e1075bec073b7b9534594c81ce528000876a51b8c4",
+      "bytes": 16856
+    },
+    {
+      "name": "uat052-linked-chat-reloaded.txt",
+      "sha256": "148657c0cf908ea138ac8e0e4c2120283361e1d3a7b15f301291f01feeb7ef21",
+      "bytes": 11818
+    },
+    {
+      "name": "uat052-new-card-question.txt",
+      "sha256": "da6ea1fb24288dc0d8faa8c610fa183184b2dea16f93cb99fad3d6bb39abc628",
+      "bytes": 9835
+    },
+    {
+      "name": "uat052-new-card-answer.txt",
+      "sha256": "01c701ef996da0a0e223502636ab3b96b74ca8c2e8ceb1722fe6d366bd75a4d3",
+      "bytes": 11476
+    },
+    {
+      "name": "uat052-study-progress-reloaded.txt",
+      "sha256": "e9fd15c521c94040eba0a5176c737010cef94e2617a69d9888efa1272819881e",
+      "bytes": 8305
+    },
+    {
+      "name": "uat052-card-after-review.json",
+      "sha256": "5317e29837bbef20677ea01f4503d6dbf941ccb38a9f1b6e1cdc109d00dc1b95",
+      "bytes": 1205
+    },
+    {
+      "name": "uat053-settled-offline-final.txt",
+      "sha256": "7654774d8cb78070c537be8ee1fddeb682877505ef158479751d3e8e26fe4e5c",
+      "bytes": 12793
+    },
+    {
+      "name": "uat054-copy-offline.txt",
+      "sha256": "08eb2dacedb7c57ef96d1ea6e4a9458708a3f71ee707f3fb57f08be8b96877fb",
+      "bytes": 12245
+    },
+    {
+      "name": "uat054-copy-requests.txt",
+      "sha256": "8d096a485226a100759fd512f9201b3abc6d620c534d819fea773b90fdc8bbad",
+      "bytes": 14863
+    },
+    {
+      "name": "uat055-study-fixed.txt",
+      "sha256": "2c838a43b01dd04bc5a1ee6c42f90d20b6614c9db71501f926863fb12d0a05a6",
+      "bytes": 8130
+    },
+    {
+      "name": "uat-enospc-research-runs-recovered.json",
+      "sha256": "461a886b165b7e88a74fd6dec3ed2d060fe0f2efbd09e47e41030a1ed5781457",
+      "bytes": 51
+    }
+  ]
+}

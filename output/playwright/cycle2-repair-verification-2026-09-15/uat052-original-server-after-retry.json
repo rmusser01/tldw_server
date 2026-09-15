@@ -1,0 +1,77 @@
+{
+  "status": 200,
+  "data": {
+    "messages": [
+      {
+        "id": "46e1fff1-5c0f-4324-8c68-d565a7236ef0",
+        "conversation_id": "5536eadd-4be4-4eea-bce2-bc6f454e8990",
+        "parent_message_id": null,
+        "sender": "system",
+        "content": "You are a helpful AI assistant.",
+        "timestamp": "2026-09-15T06:15:04.250000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": {
+          "sender_role": "system"
+        }
+      },
+      {
+        "id": "9bbf57fe-0d0d-4ef2-a74f-09f660e17c95",
+        "conversation_id": "5536eadd-4be4-4eea-bce2-bc6f454e8990",
+        "parent_message_id": null,
+        "sender": "user",
+        "content": "Project Aster opens its community garden on 18 December 2026. The garden coordinator is Mira Chen. It has seven raised beds. Based only on these facts, when does the garden open and who coordinates it? Answer in one sentence.",
+        "timestamp": "2026-09-15T06:15:04.465000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": null
+      },
+      {
+        "id": "f9dfebe7-13ee-4a92-a375-ed47254c1956",
+        "conversation_id": "5536eadd-4be4-4eea-bce2-bc6f454e8990",
+        "parent_message_id": null,
+        "sender": "assistant",
+        "content": "__tldw_error__:{\"summary\":\"Something went wrong while talking to your tldw server.\",\"hint\":\"Try again in a moment, or open Health & diagnostics to inspect server health.\",\"detail\":\"Stream completion failed\"}",
+        "timestamp": "2026-09-15T06:15:04.492000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": null
+      },
+      {
+        "id": "6aedba81-4546-41a6-98c4-c080f26a05ba",
+        "conversation_id": "5536eadd-4be4-4eea-bce2-bc6f454e8990",
+        "parent_message_id": null,
+        "sender": "assistant",
+        "content": "The garden opens on 18 December 2026 and is coordinated by Mira Chen.",
+        "timestamp": "2026-09-15T07:03:40.001000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": {
+          "sender_role": "assistant",
+          "sender_name": "Helpful_AI_Assistant"
+        }
+      }
+    ],
+    "total": 4,
+    "limit": 200,
+    "offset": 0,
+    "pagination": {
+      "mode": "offset",
+      "limit": 200,
+      "offset": 0,
+      "total": 4,
+      "has_more": false,
+      "next_offset": null
+    },
+    "has_more": false,
+    "next_offset": null
+  }
+}

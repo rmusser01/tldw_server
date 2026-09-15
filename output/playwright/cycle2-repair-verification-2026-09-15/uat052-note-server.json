@@ -1,0 +1,19 @@
+{
+  "status": 200,
+  "data": {
+    "title": "Snippet: Project Aster opens its community garden on 18 December 2026. The garden coor…",
+    "content": "The garden opens on 18 December 2026 and is coordinated by Mira Chen.",
+    "conversation_id": "5536eadd-4be4-4eea-bce2-bc6f454e8990",
+    "message_id": "6aedba81-4546-41a6-98c4-c080f26a05ba",
+    "id": "d299e8d8-db3b-4c32-b7ea-f7a1188f54d5",
+    "created_at": "2026-09-15T07:05:19.643000Z",
+    "last_modified": "2026-09-15T07:05:19.643000Z",
+    "version": 1,
+    "client_id": "1",
+    "deleted": false,
+    "studio": null,
+    "keywords": [],
+    "folders": [],
+    "keyword_sync": null
+  }
+}

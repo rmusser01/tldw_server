@@ -1,0 +1,177 @@
+### Page
+- Page URL: http://127.0.0.1:18180/chat
+### Snapshot
+```yaml
+- generic [ref=f20e20]:
+  - generic [ref=f20e23]:
+    - link "Skip to main content" [ref=f20e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f20e25]:
+      - button "Expand sidebar" [ref=f20e26] [cursor=pointer]
+      - button "New Chat" [ref=f20e30] [cursor=pointer]
+      - generic [ref=f20e33]:
+        - button "Quick Ingest" [ref=f20e34] [cursor=pointer]
+        - button "Chat" [ref=f20e38] [cursor=pointer]
+        - button "Prompts" [ref=f20e41] [cursor=pointer]
+        - button "Characters" [ref=f20e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f20e50] [cursor=pointer]
+        - button "World Books" [ref=f20e54] [cursor=pointer]
+        - button "Notes" [ref=f20e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f20e61] [cursor=pointer]
+        - button "Media" [ref=f20e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f20e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f20e78] [cursor=pointer]
+        - button "Kanban" [ref=f20e84] [cursor=pointer]
+        - button "Watchlists" [ref=f20e86] [cursor=pointer]
+      - generic [ref=f20e91]:
+        - button "Open Notes Dock" [ref=f20e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f20e97] [cursor=pointer]
+        - button "Settings" [ref=f20e100] [cursor=pointer]
+    - main [ref=f20e104]:
+      - generic [ref=f20e105]:
+        - generic [ref=f20e108]:
+          - generic [ref=f20e109]:
+            - button "Expand sidebar" [ref=f20e110] [cursor=pointer]
+            - generic [ref=f20e112]:
+              - img "tldw Assistant" [ref=f20e113]
+              - generic [ref=f20e114]: tldw Assistant
+              - button "Companion Home" [ref=f20e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f20e119] [cursor=pointer]
+            - button "Untitled" [ref=f20e123] [cursor=pointer]
+            - generic "Saved chat. History is persisted." [ref=f20e125]: Saved
+          - generic [ref=f20e126]:
+            - button "Search - Open command palette" [ref=f20e127] [cursor=pointer]:
+              - generic [ref=f20e131]: Search
+              - generic [ref=f20e132]: ⌘K
+            - button "New saved chat" [ref=f20e133] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f20e137] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f20e138] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f20e139] [cursor=pointer]
+            - button "Open settings" [ref=f20e146] [cursor=pointer]
+            - generic [ref=f20e158]:
+              - button "Notifications, 0 unread" [ref=f20e159] [cursor=pointer]
+              - status [ref=f20e163]: Notifications are active
+            - button "Switch to light theme" [ref=f20e164] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f20e171] [cursor=pointer]:
+              - generic [ref=f20e172]: "?"
+        - generic [ref=f20e173]:
+          - heading "Chat" [level=1] [ref=f20e174]
+          - generic [ref=f20e177]:
+            - paragraph [ref=f20e178]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f20e179]:
+              - main [ref=f20e180]:
+                - generic [ref=f20e181]:
+                  - generic [ref=f20e183]:
+                    - generic [ref=f20e184]:
+                      - generic [ref=f20e185]: Standard chat
+                      - generic [ref=f20e186]: Conversation timeline
+                    - generic [ref=f20e187]:
+                      - button "Switch to light theme" [ref=f20e188] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f20e195] [cursor=pointer]:
+                        - generic [ref=f20e201]: Focus
+                      - button "Shortcuts" [ref=f20e202] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f20e206]
+                  - log "Chat messages" [ref=f20e208]:
+                    - generic [ref=f20e210]:
+                      - article "User message 1 of 3" [ref=f20e211]:
+                        - generic [ref=f20e214]:
+                          - generic [ref=f20e216]:
+                            - generic [ref=f20e217]: You
+                            - generic [ref=f20e218]: • 11:15 PM
+                          - paragraph [ref=f20e220]: Project Aster opens its community garden on 18 December 2026. The garden coordinator is Mira Chen. It has seven raised beds. Based only on these facts, when does the garden open and who coordinates it? Answer in one sentence.
+                          - button "More actions" [ref=f20e223] [cursor=pointer]: •••
+                      - article "Assistant message 2 of 3" [ref=f20e227]:
+                        - generic [ref=f20e233]:
+                          - generic [ref=f20e235]:
+                            - generic [ref=f20e236]: tldw:../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf
+                            - generic [ref=f20e237]: • 11:15 PM
+                          - alert [ref=f20e239]:
+                            - paragraph [ref=f20e240]: Something went wrong while talking to your tldw server.
+                            - paragraph [ref=f20e241]: Try again in a moment, or open Health & diagnostics to inspect server health.
+                            - button "Show technical details" [ref=f20e242] [cursor=pointer]
+                            - generic [ref=f20e243]:
+                              - generic [ref=f20e244]: "Recommended next actions: Retry same model, Switch model, Try provider fallback, Continue from partial"
+                              - button "Retry same model" [ref=f20e245] [cursor=pointer]
+                              - button "Switch model" [ref=f20e246] [cursor=pointer]
+                              - button "Try provider fallback" [ref=f20e247] [cursor=pointer]
+                              - button "Continue from partial" [ref=f20e248] [cursor=pointer]
+                          - button "More actions" [ref=f20e251] [cursor=pointer]: •••
+                      - article "Assistant message 3 of 3" [ref=f20e252]:
+                        - generic [ref=f20e258]:
+                          - generic [ref=f20e260]:
+                            - generic [ref=f20e261]: tldw:../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf
+                            - generic [ref=f20e262]: • 12:03 AM
+                          - paragraph [ref=f20e265]: The garden opens on 18 December 2026 and is coordinated by Mira Chen.
+                          - generic [ref=f20e266]:
+                            - generic [ref=f20e267]:
+                              - generic [ref=f20e268]: Was this helpful?
+                              - generic [ref=f20e269]:
+                                - button "Helpful" [ref=f20e270] [cursor=pointer]
+                                - button "Not helpful" [ref=f20e273] [cursor=pointer]
+                                - button "More feedback" [ref=f20e276] [cursor=pointer]
+                            - generic [ref=f20e281]:
+                              - generic [ref=f20e282]:
+                                - button "Previous response" [ref=f20e283] [cursor=pointer]
+                                - generic [ref=f20e286]: 2 of 2
+                                - button "Next response" [disabled] [ref=f20e287]
+                              - button "More actions" [ref=f20e290] [cursor=pointer]: •••
+                  - generic [ref=f20e291]:
+                    - generic [ref=f20e292]: Composer
+                    - button "Scroll to latest messages" [ref=f20e294] [cursor=pointer]
+                    - generic [ref=f20e303]:
+                      - button [aria-hidden] [ref=f20e304]
+                      - button [aria-hidden] [ref=f20e305]
+                      - generic [ref=f20e306]:
+                        - generic [ref=f20e308]:
+                          - button "Hide composer options" [expanded] [ref=f20e309] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f20e314]
+                          - generic [ref=f20e315]:
+                            - button "Improve prompt" [ref=f20e318] [cursor=pointer]
+                            - generic [ref=f20e323]:
+                              - button "Send message" [ref=f20e324] [cursor=pointer]:
+                                - generic [ref=f20e325]: Send
+                              - button "Open message delivery options" [ref=f20e330] [cursor=pointer]
+                        - generic [ref=f20e335]:
+                          - generic [ref=f20e337]:
+                            - group "Mode and context controls" [ref=f20e338]:
+                              - button "Modes" [ref=f20e339] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f20e346] [cursor=pointer]':
+                                - generic [ref=f20e347]:
+                                  - generic [ref=f20e348]: MCP
+                                  - generic [ref=f20e349]: None
+                              - button "Search & Context" [ref=f20e352] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f20e357] [cursor=pointer]:
+                                - generic [ref=f20e360]: Prompt
+                              - button "Select character or persona" [ref=f20e361] [cursor=pointer]
+                              - button "Role-play setup" [ref=f20e366] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f20e373] [cursor=pointer]
+                            - group "Run input controls" [ref=f20e379]:
+                              - button "OpenUI" [ref=f20e380] [cursor=pointer]
+                              - button "Start dictation" [ref=f20e386] [cursor=pointer]
+                              - generic [ref=f20e390]:
+                                - button "Attach image" [ref=f20e392] [cursor=pointer]
+                                - button "More attachments" [ref=f20e396] [cursor=pointer]
+                              - button "More tools" [ref=f20e399] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f20e402] [cursor=pointer]:
+                                - generic [ref=f20e406]: Chat Settings
+                          - generic "Active context" [ref=f20e407]:
+                            - button "LLaMa.cpp / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf" [ref=f20e409] [cursor=pointer]:
+                              - generic "Provider status" [ref=f20e413]: Healthy
+                            - button "Chat 3 messages" [ref=f20e414] [cursor=pointer]:
+                              - generic [ref=f20e415]: Chat
+                              - generic [ref=f20e416]: 3 messages
+                            - button "Configure context window size" [ref=f20e418] [cursor=pointer]:
+                              - generic [ref=f20e419]: 126 + ~0 = 126 tokens
+                            - button "Saved" [ref=f20e421] [cursor=pointer]
+                            - button "Advanced controls" [ref=f20e423] [cursor=pointer]
+              - generic [ref=f20e427]:
+                - button "Restore context sidechannel" [ref=f20e428] [cursor=pointer]:
+                  - generic [ref=f20e432]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f20e433]:
+                - button "Restore runtime sidechannel" [ref=f20e434] [cursor=pointer]:
+                  - generic [ref=f20e435]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f20e15] [cursor=pointer]
+  - alert [ref=f20e19]
+```

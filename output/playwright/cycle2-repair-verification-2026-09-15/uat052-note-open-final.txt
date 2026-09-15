@@ -1,0 +1,249 @@
+### Page
+- Page URL: http://127.0.0.1:18180/notes
+- Page Title: Notes | tldw
+- Console: 2 errors, 2 warnings
+### Snapshot
+```yaml
+- generic [ref=f19e1]:
+  - generic [ref=f19e4]:
+    - link "Skip to main content" [ref=f19e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f19e6]:
+      - button "Expand sidebar" [ref=f19e7] [cursor=pointer]
+      - button "New Chat" [ref=f19e11] [cursor=pointer]
+      - generic [ref=f19e14]:
+        - button "Quick Ingest" [ref=f19e15] [cursor=pointer]
+        - button "Chat" [ref=f19e19] [cursor=pointer]
+        - button "Prompts" [ref=f19e22] [cursor=pointer]
+        - button "Characters" [ref=f19e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f19e31] [cursor=pointer]
+        - button "World Books" [ref=f19e35] [cursor=pointer]
+        - button "Notes" [ref=f19e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f19e42] [cursor=pointer]
+        - button "Media" [ref=f19e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f19e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f19e59] [cursor=pointer]
+        - button "Kanban" [ref=f19e65] [cursor=pointer]
+        - button "Watchlists" [ref=f19e67] [cursor=pointer]
+      - generic [ref=f19e72]:
+        - button "Open Notes Dock" [ref=f19e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f19e78] [cursor=pointer]
+        - button "Settings" [ref=f19e81] [cursor=pointer]
+    - main [ref=f19e85]:
+      - generic [ref=f19e86]:
+        - generic [ref=f19e89]:
+          - generic [ref=f19e90]:
+            - button "Expand sidebar" [ref=f19e91] [cursor=pointer]
+            - generic [ref=f19e93]:
+              - img "tldw Assistant" [ref=f19e94]
+              - generic [ref=f19e95]: tldw Assistant
+              - button "Companion Home" [ref=f19e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f19e100] [cursor=pointer]
+          - generic [ref=f19e107]:
+            - button "Search - Open command palette" [ref=f19e108] [cursor=pointer]:
+              - generic [ref=f19e112]: Search
+              - generic [ref=f19e113]: ⌘K
+            - button "Open settings" [ref=f19e127] [cursor=pointer]
+            - generic [ref=f19e139]:
+              - button "Notifications, 0 unread" [ref=f19e408] [cursor=pointer]
+              - status [ref=f19e143]: Notifications are active
+            - button "Switch to light theme" [ref=f19e144] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f19e151] [cursor=pointer]:
+              - generic [ref=f19e152]: "?"
+        - generic [ref=f19e676]:
+          - link "Skip to notes list" [ref=f19e677] [cursor=pointer]:
+            - /url: "#notes-list-region"
+          - link "Skip to editor" [ref=f19e678] [cursor=pointer]:
+            - /url: "#notes-editor-region"
+          - paragraph [ref=f19e679]: "Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs."
+          - region "Notes list" [ref=f19e680]:
+            - generic [ref=f19e681]:
+              - generic [ref=f19e682]:
+                - generic [ref=f19e683]:
+                  - generic [ref=f19e684]:
+                    - generic [ref=f19e685]: Notes
+                    - generic [ref=f19e686]: 5 total
+                  - button "New note" [ref=f19e687] [cursor=pointer]
+                - generic [ref=f19e690]:
+                  - generic [ref=f19e691]:
+                    - button "Views" [expanded] [ref=f19e693] [cursor=pointer]
+                    - generic [ref=f19e698]:
+                      - generic [ref=f19e699]:
+                        - button "Notes" [ref=f19e700] [cursor=pointer]
+                        - button "Trash" [ref=f19e702] [cursor=pointer]
+                      - generic [ref=f19e704]:
+                        - button "List" [ref=f19e705] [cursor=pointer]
+                        - button "Timeline" [ref=f19e707] [cursor=pointer]
+                        - button "Inbox" [ref=f19e709] [cursor=pointer]
+                        - button "Collection" [ref=f19e711] [cursor=pointer]
+                        - button "Graph" [ref=f19e713] [cursor=pointer]
+                      - generic [ref=f19e722]:
+                        - button "Organize" [ref=f19e723] [cursor=pointer]
+                        - button "Organize help" [ref=f19e729] [cursor=pointer]:
+                          - img "question-circle" [ref=f19e730]
+                  - generic [ref=f19e734]:
+                    - textbox "Search notes" [ref=f19e741]:
+                      - /placeholder: Search titles and contents
+                    - generic [ref=f19e743] [cursor=pointer]:
+                      - generic [ref=f19e744]:
+                        - generic "Date modified (newest first)" [ref=f19e745]
+                        - combobox "Sort notes" [ref=f19e746]
+                      - img "down" [ref=f19e748]
+                  - generic [ref=f19e751]:
+                    - button "Filters" [expanded] [ref=f19e753] [cursor=pointer]
+                    - generic [ref=f19e758]:
+                      - generic [ref=f19e759]:
+                        - button "Captured" [ref=f19e760] [cursor=pointer]
+                        - button "Search tips" [ref=f19e762] [cursor=pointer]
+                      - generic [ref=f19e764]:
+                        - generic [ref=f19e765]:
+                          - generic: Filter by tag
+                          - combobox "Filter by tag" [ref=f19e767]
+                        - img "down" [ref=f19e769]
+                      - generic [ref=f19e772]:
+                        - generic [ref=f19e773]:
+                          - button "Browse tags" [ref=f19e774] [cursor=pointer]
+                          - button "Tags help" [ref=f19e776] [cursor=pointer]:
+                            - img "question-circle" [ref=f19e777]
+                        - generic [ref=f19e781]: 12 available
+                      - generic [ref=f19e782]: For in-note search, use browser Ctrl/Cmd+F.
+                  - generic [ref=f19e1043]:
+                    - generic [ref=f19e1044]: Recent notes
+                    - 'button "Snippet: Project Aster opens its community garden on 18 December 2026. The garden coor…" [ref=f19e1046] [cursor=pointer]'
+              - generic [ref=f19e784]:
+                - generic [ref=f19e786]:
+                  - generic [ref=f19e787]: Results
+                  - generic [ref=f19e788]:
+                    - button "Import" [ref=f19e789] [cursor=pointer]
+                    - button "Sync folder" [ref=f19e791] [cursor=pointer]
+                    - button "Export" [ref=f19e794] [cursor=pointer]
+                - list "Notes" [ref=f19e797]:
+                  - listitem [ref=f19e798]:
+                    - generic [ref=f19e799]:
+                      - 'checkbox "Select note Snippet: Project Aster opens its community garden on 18 December 2026. The garden coor… for bulk actions" [ref=f19e800]'
+                      - 'button "Pin note Snippet: Project Aster opens its community garden on 18 December 2026. The garden coor…" [ref=f19e801] [cursor=pointer]'
+                      - 'button "Open note Snippet: Project Aster opens its community garden on 18 December 2026. The garden coor…" [ref=f19e804] [cursor=pointer]':
+                        - generic [ref=f19e805]:
+                          - generic [ref=f19e806]: "Snippet: Project Aster opens its community garden on 18 December 2026. The garde..."
+                          - generic [ref=f19e815]: The garden opens on 18 December 2026 and is coordinated by Mira Chen.
+                          - generic [ref=f19e816]: "Linked to conversation: Project Aster opens its community garden on 18 December 2026. The garden coor… · msg 6aedba81-4546-41a6-98c4-c080f26a05ba"
+                          - generic [ref=f19e817]: 9/15/2026, 12:09:20 AM
+                  - listitem [ref=f19e818]:
+                    - generic [ref=f19e819]:
+                      - 'checkbox "Select note Snippet: Project Aster opens its community garden on 18 December 2026. The garden coor… for bulk actions" [ref=f19e820]'
+                      - 'button "Pin note Snippet: Project Aster opens its community garden on 18 December 2026. The garden coor…" [ref=f19e821] [cursor=pointer]'
+                      - 'button "Open note Snippet: Project Aster opens its community garden on 18 December 2026. The garden coor…" [active] [ref=f19e824] [cursor=pointer]':
+                        - generic [ref=f19e825]:
+                          - generic [ref=f19e826]: "Snippet: Project Aster opens its community garden on 18 December 2026. The garde..."
+                          - generic [ref=f19e835]: The garden opens on 18 December 2026 and is coordinated by Mira Chen.
+                          - generic [ref=f19e836]: "Linked to conversation: Project Aster opens its community garden on 18 December 2026. The garden coor… · msg 6aedba81-4546-41a6-98c4-c080f26a05ba"
+                          - generic [ref=f19e837]: 9/15/2026, 12:05:19 AM
+                  - listitem [ref=f19e838]:
+                    - generic [ref=f19e839]:
+                      - 'checkbox "Select note Snippet: Aster UAT Guide Chat (20260915_043437) for bulk actions" [ref=f19e840]'
+                      - 'button "Pin note Snippet: Aster UAT Guide Chat (20260915_043437)" [ref=f19e841] [cursor=pointer]'
+                      - 'button "Open note Snippet: Aster UAT Guide Chat (20260915_043437)" [ref=f19e844] [cursor=pointer]':
+                        - generic [ref=f19e845]:
+                          - generic [ref=f19e846]: "Snippet: Aster UAT Guide Chat (20260915_043437)"
+                          - generic [ref=f19e855]: <think>The user is asking how many raised beds the garden has. In my previous message, I stated "The garden has seven raised beds." So the a...
+                          - generic [ref=f19e856]: "Linked to conversation: fff372d9-8bd3-42ce-b3df-af0d52c8b400 · msg pa_827e-876f-bf2-8bf5"
+                          - generic [ref=f19e857]: 9/14/2026, 9:42:07 PM
+                  - listitem [ref=f19e858]:
+                    - generic [ref=f19e859]:
+                      - 'checkbox "Select note Snippet: Aster UAT Guide Chat (20260915_043437) for bulk actions" [ref=f19e860]'
+                      - 'button "Pin note Snippet: Aster UAT Guide Chat (20260915_043437)" [ref=f19e861] [cursor=pointer]'
+                      - 'button "Open note Snippet: Aster UAT Guide Chat (20260915_043437)" [ref=f19e864] [cursor=pointer]':
+                        - generic [ref=f19e865]:
+                          - generic [ref=f19e866]: "Snippet: Aster UAT Guide Chat (20260915_043437)"
+                          - generic [ref=f19e875]: <think>The user is asking how many raised beds the garden has. In my previous message, I stated "The garden has seven raised beds." So the a...
+                          - generic [ref=f19e876]: "Linked to conversation: fff372d9-8bd3-42ce-b3df-af0d52c8b400 · msg pa_827e-876f-bf2-8bf5"
+                          - generic [ref=f19e877]: 9/14/2026, 9:41:02 PM
+                  - listitem [ref=f19e878]:
+                    - generic [ref=f19e879]:
+                      - checkbox "Select note Single biology study fulluat20260915 for bulk actions" [ref=f19e880]
+                      - button "Pin note Single biology study fulluat20260915" [ref=f19e881] [cursor=pointer]
+                      - button "Open note Single biology study fulluat20260915" [ref=f19e884] [cursor=pointer]:
+                        - generic [ref=f19e885]:
+                          - generic [ref=f19e886]: Single biology study fulluat20260915
+                          - generic [ref=f19e892]: The mitochondria is the powerhouse of the cell. DNA stands for deoxyribonucleic acid. Photosynthesis converts light energy into chemical ene...
+                          - generic [ref=f19e893]: 9/14/2026, 9:17:20 PM
+                - generic [ref=f19e895]:
+                  - generic [ref=f19e896]: Showing 1-5 of 5
+                  - list [ref=f19e897]:
+                    - listitem "Previous Page" [ref=f19e898]:
+                      - button [disabled] [ref=f19e899]:
+                        - img "left" [ref=f19e900]
+                    - listitem "1" [ref=f19e903] [cursor=pointer]
+                    - listitem "Next Page" [ref=f19e905]:
+                      - button [disabled] [ref=f19e906]:
+                        - img "right" [ref=f19e907]
+                    - listitem [ref=f19e910]:
+                      - generic [ref=f19e911]:
+                        - generic [ref=f19e912]:
+                          - generic "20 / page" [ref=f19e913]
+                          - combobox "Page Size" [ref=f19e914]
+                        - img "down" [ref=f19e916]
+          - button "Collapse sidebar" [ref=f19e919] [cursor=pointer]
+          - region "Note editor" [ref=f19e923]:
+            - generic [ref=f19e924]:
+              - generic [ref=f19e925]:
+                - generic [ref=f19e926]:
+                  - 'heading "Snippet: Project Aster opens its community garden on 18 December 2026. The garden coor…" [level=5] [ref=f19e1047]'
+                  - status [ref=f19e928]: No server save status yet
+                - generic [ref=f19e1048]: "Linked to conversation: Project Aster opens its community garden on 18 December 2026. The garden coor… · msg 6aedba81-4546-41a6-98c4-c080f26a05ba"
+              - generic [ref=f19e929]:
+                - button "Save note" [ref=f19e930] [cursor=pointer]:
+                  - generic [ref=f19e1054]: Save
+                - button "Save and start another note" [ref=f19e931] [cursor=pointer]:
+                  - generic [ref=f19e1059]: Save & new
+                - group "Editor mode" [ref=f19e932]:
+                  - button "Edit" [pressed] [ref=f19e933] [cursor=pointer]
+                  - button "Split" [ref=f19e938] [cursor=pointer]
+                  - button "Preview" [ref=f19e943] [cursor=pointer]
+                - button "Create study pack" [ref=f19e949] [cursor=pointer]
+                - button "More actions" [ref=f19e950] [cursor=pointer]
+            - generic [ref=f19e956]:
+              - generic [ref=f19e963]:
+                - textbox "Note title" [ref=f19e964]:
+                  - /placeholder: Title
+                  - text: "Snippet: Project Aster opens its community garden on 18 December 2026. The garden coor…"
+                - button "Generate title from content" [ref=f19e965] [cursor=pointer]:
+                  - generic [ref=f19e1065]: Generate title
+                - button "Keyboard shortcuts" [ref=f19e966] [cursor=pointer]
+              - generic [ref=f19e969]:
+                - generic [ref=f19e970]:
+                  - generic: Tags
+                  - combobox "Note tags" [ref=f19e972]
+                - img "down" [ref=f19e974]
+              - generic [ref=f19e1067]:
+                - button "Connections" [ref=f19e1068] [cursor=pointer]
+                - button "Connections help" [ref=f19e1074] [cursor=pointer]:
+                  - img "question-circle" [ref=f19e1075]
+              - generic [ref=f19e977]:
+                - group "Input mode" [ref=f19e978]:
+                  - button "Markdown" [ref=f19e979] [cursor=pointer]
+                  - button "WYSIWYG" [ref=f19e981] [cursor=pointer]
+                - generic [ref=f19e983]: Formatting
+                - button "Bold" [ref=f19e984] [cursor=pointer]
+                - button "Italic" [ref=f19e988] [cursor=pointer]
+                - button "Heading" [ref=f19e992] [cursor=pointer]
+                - button "List" [ref=f19e996] [cursor=pointer]
+                - button "Link" [ref=f19e999] [cursor=pointer]
+                - button "Attachment" [ref=f19e1004] [cursor=pointer]
+                - button "Code" [ref=f19e1008] [cursor=pointer]
+                - generic [ref=f19e1015]: Assist
+                - button "Summarize" [ref=f19e1016] [cursor=pointer]
+                - button "Expand outline" [ref=f19e1017] [cursor=pointer]
+                - button "Suggest tags" [ref=f19e1018] [cursor=pointer]
+              - generic [ref=f19e1020]:
+                - textbox "Note content" [ref=f19e1021]:
+                  - /placeholder: Write your note here... (Markdown supported)
+                  - text: The garden opens on 18 December 2026 and is coordinated by Mira Chen.
+                - generic [ref=f19e1022]: Markdown + LaTeX supported
+              - generic [ref=f19e1023]:
+                - text: 13 words · 69 chars · 1 min read
+                - generic [ref=f19e1024]: Version 1 · Last saved 9/15/2026, 12:05:19 AM
+                - generic [ref=f19e1025]: "Origin: Saved from Chat"
+  - button "Open Next.js Dev Tools" [ref=f19e403] [cursor=pointer]
+  - alert [ref=f19e407]: Notes | tldw
+```

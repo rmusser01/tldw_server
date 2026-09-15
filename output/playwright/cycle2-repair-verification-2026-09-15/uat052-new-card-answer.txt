@@ -1,0 +1,203 @@
+### Page
+- Page URL: http://127.0.0.1:18180/flashcards
+### Snapshot
+```yaml
+- generic [active] [ref=f24e20]:
+  - generic [ref=f24e23]:
+    - link "Skip to main content" [ref=f24e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f24e25]:
+      - button "Expand sidebar" [ref=f24e26] [cursor=pointer]
+      - button "New Chat" [ref=f24e30] [cursor=pointer]
+      - generic [ref=f24e33]:
+        - button "Quick Ingest" [ref=f24e34] [cursor=pointer]
+        - button "Chat" [ref=f24e38] [cursor=pointer]
+        - button "Prompts" [ref=f24e41] [cursor=pointer]
+        - button "Characters" [ref=f24e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f24e50] [cursor=pointer]
+        - button "World Books" [ref=f24e54] [cursor=pointer]
+        - button "Notes" [ref=f24e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f24e61] [cursor=pointer]
+        - button "Media" [ref=f24e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f24e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f24e78] [cursor=pointer]
+        - button "Kanban" [ref=f24e84] [cursor=pointer]
+        - button "Watchlists" [ref=f24e86] [cursor=pointer]
+      - generic [ref=f24e91]:
+        - button "Open Notes Dock" [ref=f24e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f24e97] [cursor=pointer]
+        - button "Settings" [ref=f24e100] [cursor=pointer]
+    - main [ref=f24e104]:
+      - generic [ref=f24e105]:
+        - generic [ref=f24e108]:
+          - generic [ref=f24e109]:
+            - button "Expand sidebar" [ref=f24e110] [cursor=pointer]
+            - generic [ref=f24e112]:
+              - img "tldw Assistant" [ref=f24e113]
+              - generic [ref=f24e114]: tldw Assistant
+              - button "Companion Home" [ref=f24e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f24e119] [cursor=pointer]
+          - generic [ref=f24e122]:
+            - button "Search - Open command palette" [ref=f24e123] [cursor=pointer]:
+              - generic [ref=f24e127]: Search
+              - generic [ref=f24e128]: ⌘K
+            - button "Open settings" [ref=f24e129] [cursor=pointer]
+            - generic [ref=f24e141]:
+              - button "Notifications, 0 unread" [ref=f24e142] [cursor=pointer]
+              - status [ref=f24e146]: Notifications are active
+            - button "Switch to light theme" [ref=f24e147] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f24e154] [cursor=pointer]:
+              - generic [ref=f24e155]: "?"
+        - generic [ref=f24e157]:
+          - generic [ref=f24e159]:
+            - generic [ref=f24e161]:
+              - generic [ref=f24e162]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f24e163]
+            - navigation "Flashcards modes" [ref=f24e164]:
+              - generic [ref=f24e165]: Study
+              - generic [ref=f24e166]: Manage
+              - generic [ref=f24e167]: Import / Export
+              - generic [ref=f24e168]: Templates
+              - generic [ref=f24e169]: Scheduler
+          - generic [ref=f24e172]:
+            - tablist [ref=f24e173]:
+              - generic [ref=f24e175]:
+                - tab "Study" [selected] [ref=f24e177] [cursor=pointer]
+                - tab "Manage" [ref=f24e179] [cursor=pointer]
+                - tab "Import / Export" [ref=f24e181] [cursor=pointer]
+                - tab "Templates" [ref=f24e183] [cursor=pointer]
+                - tab "Scheduler" [ref=f24e185] [cursor=pointer]
+              - generic [ref=f24e187]:
+                - button "Test with Quiz" [disabled] [ref=f24e189]
+                - button "Keyboard Shortcuts" [ref=f24e190] [cursor=pointer]
+            - tabpanel "Study" [ref=f24e197]:
+              - generic [ref=f24e198]:
+                - generic [ref=f24e199]:
+                  - generic [ref=f24e200] [cursor=pointer]:
+                    - generic [ref=f24e201]:
+                      - generic: Select deck
+                      - combobox [ref=f24e202]
+                    - img "down" [ref=f24e204]
+                  - radiogroup "segmented control" [ref=f24e207]:
+                    - generic [ref=f24e208]:
+                      - generic [ref=f24e209] [cursor=pointer]:
+                        - radio "Due only" [checked]
+                        - generic "Due only" [ref=f24e210]
+                      - generic [ref=f24e211] [cursor=pointer]:
+                        - radio "Cram"
+                        - generic "Cram" [ref=f24e212]
+                  - radiogroup "segmented control" [ref=f24e213]:
+                    - generic [ref=f24e214]:
+                      - generic [ref=f24e215] [cursor=pointer]:
+                        - radio "Front first" [checked]
+                        - generic "Front first" [ref=f24e216]
+                      - generic [ref=f24e217] [cursor=pointer]:
+                        - radio "Back first"
+                        - generic "Back first" [ref=f24e218]
+                - region [ref=f24e219]:
+                  - generic [ref=f24e220]:
+                    - generic [ref=f24e226]:
+                      - strong [ref=f24e228]: Source reviews
+                      - generic [ref=f24e229]: No source reviews due
+                    - button "Schedule" [ref=f24e230] [cursor=pointer]
+                - generic [ref=f24e243]:
+                  - generic [ref=f24e244]:
+                    - generic [ref=f24e245]: Reviewed today
+                    - strong [ref=f24e247]: "2"
+                  - generic [ref=f24e248]:
+                    - generic [ref=f24e249]: Retention rate
+                    - strong [ref=f24e251]: 50.0%
+                  - generic [ref=f24e252]:
+                    - generic [ref=f24e253]: Lapse rate
+                    - strong [ref=f24e255]: 50.0%
+                  - generic [ref=f24e256]:
+                    - generic [ref=f24e257]: Avg answer time
+                    - strong [ref=f24e259]: 44.6s
+                  - generic [ref=f24e260]:
+                    - generic [ref=f24e261]: Study streak
+                    - strong [ref=f24e263]: 1 days
+                - status [ref=f24e264]:
+                  - generic [ref=f24e265]: "0 cards remaining, 1 reviewed, Available now: 1, new: 1, learning: 0, due: 0"
+                  - generic [ref=f24e266]:
+                    - generic [aria-hidden] [ref=f24e267]: Study queue
+                    - generic [aria-hidden] [ref=f24e268]: "0"
+                    - generic [aria-hidden] [ref=f24e269]: cards remaining
+                  - generic [aria-hidden] [ref=f24e271]: 1 reviewed
+                  - generic [aria-hidden] [ref=f24e273]: "Available now: 1"
+                  - generic [aria-hidden] [ref=f24e275]: "new: 1"
+                  - generic [aria-hidden] [ref=f24e277]: "learning: 0"
+                  - generic [aria-hidden] [ref=f24e279]: "due: 0"
+                - generic [ref=f24e303]:
+                  - generic [ref=f24e305]:
+                    - generic [ref=f24e306]: Standard
+                    - generic [ref=f24e307]: New
+                    - generic [ref=f24e309]: SM-2+
+                    - 'link "Note #e4edbead-edff-4656-b620-231598d0adc6" [ref=f24e394] [cursor=pointer]':
+                      - /url: /notes?source_ref_id=e4edbead-edff-4656-b620-231598d0adc6
+                    - button "Edit card (E)" [ref=f24e312] [cursor=pointer]:
+                      - generic [ref=f24e313]: Edit
+                  - generic [ref=f24e314]:
+                    - heading "Front" [level=5] [ref=f24e315]
+                    - paragraph [ref=f24e417]: When does Project Aster garden open, and who coordinates it?
+                  - generic [ref=f24e418]:
+                    - heading "Back" [level=5] [ref=f24e419]
+                    - paragraph [ref=f24e422]: The garden opens on 18 December 2026 and is coordinated by Mira Chen.
+                  - generic [ref=f24e319]:
+                    - button "Need help?" [ref=f24e321] [cursor=pointer]
+                    - tooltip [ref=f24e327]:
+                      - generic [ref=f24e331]:
+                        - generic [ref=f24e334]:
+                          - paragraph [ref=f24e335]: Study assistant
+                          - paragraph [ref=f24e336]: Need help understanding a card? Ask the study assistant.
+                        - button "Dismiss" [ref=f24e337] [cursor=pointer]
+                  - button "End Session" [ref=f24e397] [cursor=pointer]
+                  - generic [ref=f24e423]:
+                    - generic [ref=f24e424]: Rate
+                    - group "Rating options" [ref=f24e425]:
+                      - 'button "Again: I didn’t remember this card. Press 1" [ref=f24e426] [cursor=pointer]':
+                        - generic [ref=f24e427]:
+                          - generic [ref=f24e431]:
+                            - text: Again
+                            - generic [ref=f24e432]: "1"
+                          - generic [ref=f24e433]: 1 min
+                      - 'button "Hard: I barely remembered; it felt difficult. Press 2" [ref=f24e434] [cursor=pointer]':
+                        - generic [ref=f24e435]:
+                          - generic [ref=f24e437]:
+                            - text: Hard
+                            - generic [ref=f24e438]: "2"
+                          - generic [ref=f24e439]: 6 min
+                      - 'button "Good: I remembered with a bit of effort. Press 3" [ref=f24e440] [cursor=pointer]':
+                        - generic [ref=f24e441]:
+                          - generic [ref=f24e444]:
+                            - text: Good
+                            - generic [ref=f24e445]: "3"
+                          - generic [ref=f24e446]: 10 min
+                      - 'button "Easy: I recalled it quickly and confidently. Press 4" [ref=f24e447] [cursor=pointer]':
+                        - generic [ref=f24e448]:
+                          - generic [ref=f24e451]:
+                            - text: Easy
+                            - generic [ref=f24e452]: "4"
+                          - generic [ref=f24e453]: 4 days
+                    - generic [ref=f24e454]: Again = shortest gap, Hard = short gap, Good = medium gap, Easy = longest gap.
+                    - button "Why these ratings?" [ref=f24e455] [cursor=pointer]
+                    - generic [ref=f24e457]:
+                      - generic [ref=f24e458]: 1-4 Rate
+                      - generic [ref=f24e459]: E Edit
+                      - generic [ref=f24e460]: Ctrl+Z Re-rate
+                      - button "Compact hints" [ref=f24e461] [cursor=pointer]
+                - generic [ref=f24e283]:
+                  - generic [ref=f24e284]: Recent study sessions
+                  - list "Recent study sessions" [ref=f24e288]:
+                    - listitem [ref=f24e289]:
+                      - generic [ref=f24e290]:
+                        - generic [ref=f24e291]:
+                          - strong [ref=f24e293]: All decks
+                          - button "View completed session" [ref=f24e294] [cursor=pointer]
+                        - generic [ref=f24e296]:
+                          - generic [ref=f24e297]: Completed
+                          - generic [ref=f24e298]: Due review
+                          - generic [ref=f24e299]: 1 card reviewed
+                        - generic [ref=f24e300]: Completed 2026-09-14 21:44
+  - button "Open Next.js Dev Tools" [ref=f24e15] [cursor=pointer]
+  - alert [ref=f24e19]
+```
