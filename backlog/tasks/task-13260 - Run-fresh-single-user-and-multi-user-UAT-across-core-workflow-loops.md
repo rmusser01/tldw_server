@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-15 22:55'
+updated_date: '2026-09-15 23:49'
 labels:
   - uat
   - testing
@@ -113,6 +113,14 @@ Baseline correction complete under13260.32: reviewed Chat fixa0c48e84c4 then mer
 Post-dev-integration targetednative: Cedaractualbacklink/correctcharacter/originalanswer/tworeloads/ownedDexie andoriginalanswercard/Study pass; earlyEnd andpracticeCram also pass. New093canonicalChatentryrenderloop under33 (reviewpending); titleblank058/Untitled062followup under34. Visualanswer-obscuringhint094removed, independentlyreviewedandnativeverified under35Done. Currentcycle3findings40 (15P2/25P3), fullfreshacceptancepending. Retained27filechat-mirror-native-round8 and15filestudy-hint094 bundles, credential-scanned/hash-indexed; nativecapturequalificationsexplicit.
 
 2026-09-15 continuation: confirmed original branch missed32 already-fetched dev commits; origin/dev2e1a5e58d3 is now included by merge267c00cab1, current dev-only count0. User was explicitly informed that original latest-dev-at-start assurance was incorrect. Reviewed repair checkpoints: Settings form a246441257, cached Chat title ordering7c577342fb, Chat sidebar/composer layoutb2f2b4ba31. All remain pending required native/full fresh acceptance. Current compiler matches90 existing baseline signatures,0added/0removed; final .33 ownership/drawer review corrections still in progress. Tracker records43findings16P2/27P3. Retaining23native reassessment artifacts plus SHA, original failures and interrupted-wait limitations, with14credential scan clear. Full fresh single/multi rerun has not started.
+
+Retaining final reviewed-source native Chat restoration evidence under chat-restoration-native-final: single Aster Note backlink/two reloads/native owned mirror/Robot switch, root multi reload/title/sidebar geometry, and explicit mobile UAT098 failure. Bundle is pre-TASK13260.39 Header correction; no full fresh or combined scene-native certification. Credential scan, PNG inspection, provenance index and independent SHA validation required before completion.
+
+Native restoration evidence retained at output/playwright/cycle3-repair-verification-2026-09-15/chat-restoration-native-final: 42 original artifacts (all byte-identical), 4 documentation/index files plus SHA256SUMS = 47 files / 1,229,940 bytes. Independently validated 46/46 hashes, 5 JSON, all 7 inspected PNGs, 14 known isolated credentials and JWT/private-key scan with 0 matches. Includes single backlink/two reloads/owned native Dexie/Robot return, root multi Robot reload, original Cedar title restored then reloaded, desktop sidebar/composer geometry, and explicit UAT098 mobile Header failure. Evidence predates TASK13260.39 Header edits; no combined scene-native or full fresh UAT certification. Exact list is INDEX.md; origin/retained hashes are retention-manifest.json.
+
+Retained final targeted UAT086/.27 and UAT096/.37 native account controls in output/playwright/cycle3-repair-verification-2026-09-15/qa-history-settings-native-final: Alice verified id2 own history/cited Cedar restore → normal logout200 with zero bounded console/Form errors → Bob UI login then independently verified id3 QA reload with empty history/no Alice content/no observed conversation responses → settled health6/8 → Bob logout200 without bounded Form error → Alice verified id2 own history returns. Login principals[] is explicitly not identity proof. Raw populated login form omitted. 17 files/73,887 bytes,16 hashes validated,11 originals byte-identical,14credentials/JWT/private-key scan0. Sources match primary committed QA/Settings modules; Header edit unrelated. Full fresh matrix still pending.
+
+Current targeted repair total is46findings (17P2/29P3), adding mobileHeader098, Media progress099 and mobile drawer100 after original frozen32 plus087-097. Final savedChat ownership repair committed98a97eea7a with197/11PASS. Native restoration and QAaccount/Settings logout evidence retained separately; Header98 CSS reviewed/nativegeometrypass and awaitscheckpoint, Media99 layout passes actualprogressPUT but reload overwriteszero and remainsunderrepair; drawer100 same-routeacceptedselection remainsunderrepair. Full new freshmatrix has not started.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

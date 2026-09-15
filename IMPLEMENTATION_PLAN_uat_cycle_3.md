@@ -225,6 +225,11 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 ## Stage 5: Verify integration and repeat fresh UAT
 ### Integrated-runtime presentation follow-ups
 
+- [ ] TASK13260.41 / UAT100: close the mobile Chat drawer after an accepted same-route conversation selection; preserve desktop and failed/canceled navigation. Verify actual selection-to-visible-timeline behavior.
+
+- [ ] TASK13260.40 / UAT099: trace actual Media scroll ownership; repair missing reading-position save/restore when the content panel grows beyond the viewport. Native wheel moves the outer document and never sends progress; verify actual owned progress requests and reload, with meaningful regressions and independent review.
+
+- [ ] TASK13260.39 / UAT098: repair actual390px saved-title/Shortcuts overlap in ChatHeader, preserving actions, editable title and desktop layout. Use existing interaction regressions and actual DOM geometry as RED/GREEN evidence; no class-only test mirroring is needed for this CSS sizing correction.
 - [ ] TASK13260.38: keep expanded shortcuts/recent chats in one scrollable sidebar region and wrap composer controls according to available width. Original rendered-contract replay2RED, current56/6GREEN and no new lint findings; independently review and verify actual1280×720 mouse navigation, footer separation, toolbar bounds and smaller viewports.
 - [ ] TASK13260.33 ownership correction: actual WebUI shim and live setter stack reproduce destructive render-mismatch clearing despite the committed timing repair. Follow the22:30UTC design reassessment: canonical active saved identity, explicit replacement detachment before persistence, remove obsolete pre-metadata write/wait, retain delayed owner guards. Test real web storage/action handlers and cross-tab hydration; repeat canonical/sidebar/backlink/reload native controls.
 - [ ] TASK13260.37: reproduce and correct disconnected Settings form access during normal logout, preserve supported auth/account behavior, independently review and repeat actual logout. The logout itself currently succeeds; UAT096 records its console lifecycle error.

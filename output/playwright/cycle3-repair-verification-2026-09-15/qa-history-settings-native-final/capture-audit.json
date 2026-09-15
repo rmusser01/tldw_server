@@ -1,0 +1,22 @@
+{
+  "checkedAt": "2026-09-15T23:41:16.209Z",
+  "candidateNativeCaptures": 12,
+  "retainedNativeCaptures": 11,
+  "toolErrors": 0,
+  "knownCredentialCount": 14,
+  "knownCredentialMatches": 0,
+  "jwtOrPrivateKeyMatches": 0,
+  "omitted": [
+    {
+      "file": "uat086-final-alice-login-form.txt",
+      "reason": "Username input was populated, so the raw login form is omitted per retention instruction. Password input was blank; no credential values are reproduced here."
+    }
+  ],
+  "assertionLimits": {
+    "bobLogin": "principals[] is empty; loggedIn=true is UI outcome only. Later reload /auth/me id3 supplies verified identity.",
+    "requests": "requests[] observes response URLs containing /chat/conversations/ only, until the captured reload outcome. It is not an all-network or indefinite absence proof.",
+    "logout": "Console and logout observers stop at Login Required (Alice additionally waits for DOM content loaded). Zero errors/Form warnings applies to this window, not indefinite console cleanliness. Bob did not register pageerror separately.",
+    "aliceReturn": "Verified /auth/me id2 and own history are captured after the parent-reported normal UI login; raw form excluded.",
+    "sourceHealth": "Bob reload has transient source health unavailable, while later settled snapshot shows 6 of 8."
+  }
+}

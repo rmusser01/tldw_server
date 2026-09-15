@@ -1,0 +1,53 @@
+# Exact retained files
+
+47 files: 42 original artifacts, 4 generated documentation/index files, and SHA256SUMS. SHA256SUMS validates all 46 other files. Original artifact provenance and both hashes are in retention-manifest.json.
+
+| File | Group |
+| --- | --- |
+| [INDEX.md](INDEX.md) | bundle-documentation |
+| [README.md](README.md) | bundle-documentation |
+| [retention-manifest.json](retention-manifest.json) | bundle-documentation |
+| [SCREENSHOT_REVIEW.md](SCREENSHOT_REVIEW.md) | bundle-documentation |
+| [SHA256SUMS](SHA256SUMS) | integrity |
+| [uat-cycle3-multi-reviewed-robot-reload.txt](uat-cycle3-multi-reviewed-robot-reload.txt) | multi-native |
+| [uat-cycle3-multi-reviewed-snapshot.txt](uat-cycle3-multi-reviewed-snapshot.txt) | multi-native |
+| [uat-cycle3-reviewed-combined-typecheck-comparison.json](uat-cycle3-reviewed-combined-typecheck-comparison.json) | reviewed-runtime-checkpoint |
+| [uat-cycle3-reviewed-combined-typecheck.log](uat-cycle3-reviewed-combined-typecheck.log) | reviewed-runtime-checkpoint |
+| [uat-cycle3-reviewed-runtime-source-manifest.json](uat-cycle3-reviewed-runtime-source-manifest.json) | reviewed-runtime-checkpoint |
+| [uat-cycle3-single-final-aster-backlink-action.txt](uat-cycle3-single-final-aster-backlink-action.txt) | single-native |
+| [uat-cycle3-single-final-aster-backlink-settled.txt](uat-cycle3-single-final-aster-backlink-settled.txt) | single-native |
+| [uat-cycle3-single-final-aster-backlink.png](uat-cycle3-single-final-aster-backlink.png) | single-native |
+| [uat-cycle3-single-final-aster-note-loaded.txt](uat-cycle3-single-final-aster-note-loaded.txt) | single-native |
+| [uat-cycle3-single-final-aster-note-menu.txt](uat-cycle3-single-final-aster-note-menu.txt) | single-native |
+| [uat-cycle3-single-final-aster-note-open.txt](uat-cycle3-single-final-aster-note-open.txt) | single-native |
+| [uat-cycle3-single-final-aster-reload1-action.txt](uat-cycle3-single-final-aster-reload1-action.txt) | single-native |
+| [uat-cycle3-single-final-aster-reload1-settled.txt](uat-cycle3-single-final-aster-reload1-settled.txt) | single-native |
+| [uat-cycle3-single-final-aster-reload2-action.txt](uat-cycle3-single-final-aster-reload2-action.txt) | single-native |
+| [uat-cycle3-single-final-aster-reload2-dexie.txt](uat-cycle3-single-final-aster-reload2-dexie.txt) | single-native |
+| [uat-cycle3-single-final-aster-reload2-settled.txt](uat-cycle3-single-final-aster-reload2-settled.txt) | single-native |
+| [uat-cycle3-single-final-aster-reload2.png](uat-cycle3-single-final-aster-reload2.png) | single-native |
+| [uat-cycle3-single-final-aster-return-row-click.txt](uat-cycle3-single-final-aster-return-row-click.txt) | single-native |
+| [uat-cycle3-single-final-aster-return-settled.txt](uat-cycle3-single-final-aster-return-settled.txt) | single-native |
+| [uat-cycle3-single-final-aster-return-state.txt](uat-cycle3-single-final-aster-return-state.txt) | single-native |
+| [uat-cycle3-single-final-aster-return.png](uat-cycle3-single-final-aster-return.png) | single-native |
+| [uat-cycle3-single-final-completion-source-check.json](uat-cycle3-single-final-completion-source-check.json) | single-native |
+| [uat-cycle3-single-final-native-report.md](uat-cycle3-single-final-native-report.md) | single-native |
+| [uat-cycle3-single-final-resumed-notes-snapshot.txt](uat-cycle3-single-final-resumed-notes-snapshot.txt) | single-native |
+| [uat-cycle3-single-final-resumed-source-check.json](uat-cycle3-single-final-resumed-source-check.json) | single-native |
+| [uat-cycle3-single-final-robot-row-click.txt](uat-cycle3-single-final-robot-row-click.txt) | single-native |
+| [uat-cycle3-single-final-robot-settled.txt](uat-cycle3-single-final-robot-settled.txt) | single-native |
+| [uat-cycle3-single-final-robot-state.txt](uat-cycle3-single-final-robot-state.txt) | single-native |
+| [uat-cycle3-single-final-robot.png](uat-cycle3-single-final-robot.png) | single-native |
+| [uat-cycle3-single-final-sidebar-recent.txt](uat-cycle3-single-final-sidebar-recent.txt) | single-native |
+| [uat034-reviewed-cedar-original-title-restored.txt](uat034-reviewed-cedar-original-title-restored.txt) | multi-native |
+| [uat034-reviewed-cedar-title-reload.txt](uat034-reviewed-cedar-title-reload.txt) | multi-native |
+| [uat097-reviewed-1024-layout.png](uat097-reviewed-1024-layout.png) | multi-layout-including-mobile-failure |
+| [uat097-reviewed-1280-layout.png](uat097-reviewed-1280-layout.png) | multi-layout-including-mobile-failure |
+| [uat097-reviewed-1280-mouse-and-layout.txt](uat097-reviewed-1280-mouse-and-layout.txt) | multi-layout-including-mobile-failure |
+| [uat097-reviewed-390-layout.png](uat097-reviewed-390-layout.png) | multi-layout-including-mobile-failure |
+| [uat097-reviewed-expanded-sidebar.txt](uat097-reviewed-expanded-sidebar.txt) | multi-layout-including-mobile-failure |
+| [uat097-reviewed-mobile-header-bounds.txt](uat097-reviewed-mobile-header-bounds.txt) | multi-layout-including-mobile-failure |
+| [uat097-reviewed-mobile-snapshot.txt](uat097-reviewed-mobile-snapshot.txt) | multi-layout-including-mobile-failure |
+| [uat097-reviewed-mouse-keyboard-switch.txt](uat097-reviewed-mouse-keyboard-switch.txt) | multi-layout-including-mobile-failure |
+| [uat097-reviewed-recent-expanded.txt](uat097-reviewed-recent-expanded.txt) | multi-layout-including-mobile-failure |
+| [uat097-reviewed-responsive-layout.txt](uat097-reviewed-responsive-layout.txt) | multi-layout-including-mobile-failure |

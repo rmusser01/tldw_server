@@ -1,0 +1,15 @@
+### Result
+{"checkedAt":"2026-09-15T23:31:46.141Z","title":"Knowledge | tldw","principals":[{"id":2,"username":"cycle3_multi_alice","status":200},{"id":2,"username":"cycle3_multi_alice","status":200},{"id":2,"username":"cycle3_multi_alice","status":200}],"body":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nSkip to search\nSources: 4 selected\nBalanced\nWeb\nAI: Server default\nSources ready: 8 of 8\nAsk Your Library\nHow it works\n\nSearch selected personal-library sources and get cited answers\n\nKnowledge QA searches documents, media, notes, and other selected sources, then grounds answer claims in citations you can inspect.\n\nThis page answers questions over searchable sources. Add or manage sources in their owner pages, then use /knowledge for QA.\n\nHOW IT WORKS\nExplain the methodology used in this study\nSummarize the key findings in my latest sources\nWhat claims have direct citations?\nCompare conclusions across my documents\n\nRecent QA session available.\n\nContinue recent session\nSelect sources\n\nNeed a full workspace? Try Research Workspace →\n\nRECENT SEARCHES\n\nWho coordinates Project Indigo and what is its catalog token?\n\n1\n13h ago\n\nWho coordinates Project Cedar, how many reading tables does it have, and where is the book return?\n\n2\n13h ago\n\nAsk questions about your documents and get AI-powered answers with citations from your knowledge base.\n\nAsk\nPress / to focus, Cmd+K for new search\nHelp & Documentation"}
+### Ran Playwright code
+```js
+await (async page => { const principals=[]; const observer=async r=>{if(r.url().split("?")[0]==="http://127.0.0.1:18201/api/v1/auth/me"&&r.status()===200){const b=await r.json();principals.push({id:b.id,username:b.username,status:200});}};page.on("response",observer);try{await page.reload();await page.getByText("Recent searches",{exact:true}).waitFor({timeout:20000});await page.getByText("Who coordinates Project Cedar, how many reading tables does it have, and where is the book return?",{exact:true}).waitFor({timeout:20000});return {checkedAt:new Date().toISOString(),title:await page.title(),principals,body:await page.locator("body").innerText()};}finally{page.off("response",observer);}})(page);
+```
+### Open tabs
+- 0: (current) [Knowledge | tldw](http://127.0.0.1:18281/knowledge)
+- 1: [Server Settings | tldw](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/knowledge
+- Page Title: Knowledge | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T23-31-03-143Z.log#L9-L10

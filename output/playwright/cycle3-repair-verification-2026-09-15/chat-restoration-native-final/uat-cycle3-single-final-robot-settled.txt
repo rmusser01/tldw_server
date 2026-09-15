@@ -1,0 +1,307 @@
+### Open tabs
+- 0: (current) [Cycle3 Beep Robot Chat (20260915_084745) | tldw](http://127.0.0.1:18280/chat)
+- 1: [127.0.0.1](chrome-error://chromewebdata/)
+- 2: [GitHub - rmusser01/tldw_browser_assistant: Browser extension for tldw_server · GitHub](https://github.com/rmusser01/tldw_browser_assistant)
+### Page
+- Page URL: http://127.0.0.1:18280/chat
+- Page Title: Cycle3 Beep Robot Chat (20260915_084745) | tldw
+### Snapshot
+```yaml
+- generic [ref=f17e11]:
+  - generic [ref=f17e14]:
+    - link "Skip to main content" [ref=f17e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f17e16]:
+      - generic [ref=f17e465]:
+        - heading "Chats" [level=2] [ref=f17e466]
+        - generic [ref=f17e467]:
+          - button "New Chat" [ref=f17e468] [cursor=pointer]
+          - button "Select chats" [ref=f17e577] [cursor=pointer]
+          - button "Collapse sidebar" [ref=f17e470] [cursor=pointer]
+      - generic [ref=f17e20]:
+        - button "Shortcuts" [expanded] [ref=f17e473] [cursor=pointer]
+        - generic [ref=f17e477]:
+          - button "Quick Ingest" [ref=f17e478] [cursor=pointer]
+          - button "Chat" [ref=f17e483] [cursor=pointer]
+          - button "Prompts" [ref=f17e487] [cursor=pointer]
+          - button "Characters" [ref=f17e492] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f17e498] [cursor=pointer]
+          - button "World Books" [ref=f17e503] [cursor=pointer]
+          - button "Notes" [ref=f17e507] [cursor=pointer]
+          - button "Knowledge QA" [ref=f17e512] [cursor=pointer]
+          - button "Media" [ref=f17e521] [cursor=pointer]
+          - button "Document Workspace" [ref=f17e525] [cursor=pointer]
+          - button "Research Workspace" [ref=f17e532] [cursor=pointer]
+          - button "Kanban" [ref=f17e539] [cursor=pointer]
+          - button "Watchlists" [ref=f17e542] [cursor=pointer]
+        - button "Recent conversations" [expanded] [ref=f17e549] [cursor=pointer]
+        - generic [ref=f17e581]:
+          - textbox "Search chats..." [ref=f17e588]
+          - generic [ref=f17e590]:
+            - generic [ref=f17e591]: Chat view
+            - radiogroup "Chat view" [ref=f17e592]:
+              - generic [ref=f17e593]:
+                - generic [ref=f17e594] [cursor=pointer]:
+                  - radio "Server (9)" [checked]
+                  - generic "Server (9)" [ref=f17e595]
+                - generic [ref=f17e596] [cursor=pointer]:
+                  - radio "Folders"
+                  - generic "Folders" [ref=f17e597]
+          - generic [ref=f17e599]:
+            - generic [ref=f17e600]:
+              - generic [ref=f17e601]: Chat type filter
+              - generic [ref=f17e602] [cursor=pointer]:
+                - generic [ref=f17e603]:
+                  - generic "All Chats" [ref=f17e604]
+                  - combobox "Chat type filter" [ref=f17e605]
+                - img "down" [ref=f17e607]
+            - generic [ref=f17e610]:
+              - generic [ref=f17e611]:
+                - button "When does Project Indigo archive open? Cite the source. in-progress Updated 14 hours ago Server" [ref=f17e612] [cursor=pointer]:
+                  - generic "When does Project Indigo archive open? Cite the source." [ref=f17e613]
+                  - generic [ref=f17e614]:
+                    - generic [ref=f17e615]: in-progress
+                    - generic "9/15/2026, 2:06:49 AM" [ref=f17e616]: Updated 14 hours ago
+                  - generic [ref=f17e617]: Server
+                - generic [ref=f17e619]:
+                  - button "Pin" [ref=f17e620] [cursor=pointer]
+                  - 'button "More actions: When does Project Indigo archive open? Cite the source." [ref=f17e623] [cursor=pointer]'
+              - generic [ref=f17e628]:
+                - button "Cycle3 Beep Robot Chat (20260915_084745) in-progress Updated 14 hours ago Server" [active] [ref=f17e629] [cursor=pointer]:
+                  - generic "Cycle3 Beep Robot Chat (20260915_084745)" [ref=f17e630]
+                  - generic [ref=f17e631]:
+                    - generic [ref=f17e632]: in-progress
+                    - generic "9/15/2026, 1:47:52 AM" [ref=f17e633]: Updated 14 hours ago
+                  - generic [ref=f17e634]: Server
+                - generic [ref=f17e636]:
+                  - button "Pin" [ref=f17e637] [cursor=pointer]
+                  - 'button "More actions: Cycle3 Beep Robot Chat (20260915_084745)" [ref=f17e640] [cursor=pointer]'
+              - generic [ref=f17e645]:
+                - button "Cycle3 Aster Guide Chat (20260915_084533) in-progress Updated 14 hours ago Cycle3 Aster Guide Chat (20260915_084533) Server" [ref=f17e646] [cursor=pointer]:
+                  - generic "Cycle3 Aster Guide Chat (20260915_084533)" [ref=f17e647]
+                  - generic [ref=f17e648]:
+                    - generic [ref=f17e649]: in-progress
+                    - generic "9/15/2026, 1:45:41 AM" [ref=f17e650]: Updated 14 hours ago
+                    - generic "Cycle3 Aster Guide Chat (20260915_084533)" [ref=f17e651]
+                  - generic [ref=f17e652]: Server
+                - generic [ref=f17e654]:
+                  - button "Pin" [ref=f17e655] [cursor=pointer]
+                  - 'button "More actions: Cycle3 Aster Guide Chat (20260915_084533)" [ref=f17e658] [cursor=pointer]'
+              - generic [ref=f17e663]:
+                - button "Helpful AI Assistant (20260915_080249) in-progress Updated 14 hours ago Server" [ref=f17e664] [cursor=pointer]:
+                  - generic "Helpful AI Assistant (20260915_080249)" [ref=f17e665]
+                  - generic [ref=f17e666]:
+                    - generic [ref=f17e667]: in-progress
+                    - generic "9/15/2026, 1:40:41 AM" [ref=f17e668]: Updated 14 hours ago
+                  - generic [ref=f17e669]: Server
+                - generic [ref=f17e671]:
+                  - button "Pin" [ref=f17e672] [cursor=pointer]
+                  - 'button "More actions: Helpful AI Assistant (20260915_080249)" [ref=f17e675] [cursor=pointer]'
+              - generic [ref=f17e680]:
+                - 'button "Chat with this media: pasted-text Project Aster is a fictional community gar… in-progress Updated 14 hours ago Server" [ref=f17e681] [cursor=pointer]':
+                  - 'generic "Chat with this media: pasted-text Project Aster is a fictional community gar…" [ref=f17e682]'
+                  - generic [ref=f17e683]:
+                    - generic [ref=f17e684]: in-progress
+                    - generic "9/15/2026, 1:40:41 AM" [ref=f17e685]: Updated 14 hours ago
+                  - generic [ref=f17e686]: Server
+                - generic [ref=f17e688]:
+                  - button "Pin" [ref=f17e689] [cursor=pointer]
+                  - 'button "More actions: Chat with this media: pasted-text Project Aster is a fictional community gar…" [ref=f17e692] [cursor=pointer]'
+              - generic [ref=f17e697]:
+                - button "When does Project Aster garden open, and who coordinates it? Cite the source. in-progress Updated 14 hours ago Server" [ref=f17e698] [cursor=pointer]:
+                  - generic "When does Project Aster garden open, and who coordinates it? Cite the source." [ref=f17e699]
+                  - generic [ref=f17e700]:
+                    - generic [ref=f17e701]: in-progress
+                    - generic "9/15/2026, 1:40:41 AM" [ref=f17e702]: Updated 14 hours ago
+                  - generic [ref=f17e703]: Server
+                - generic [ref=f17e705]:
+                  - button "Pin" [ref=f17e706] [cursor=pointer]
+                  - 'button "More actions: When does Project Aster garden open, and who coordinates it? Cite the source." [ref=f17e709] [cursor=pointer]'
+              - generic [ref=f17e714]:
+                - button "Helpful AI Assistant (20260915_083647) in-progress Updated 14 hours ago Server" [ref=f17e715] [cursor=pointer]:
+                  - generic "Helpful AI Assistant (20260915_083647)" [ref=f17e716]
+                  - generic [ref=f17e717]:
+                    - generic [ref=f17e718]: in-progress
+                    - generic "9/15/2026, 1:40:41 AM" [ref=f17e719]: Updated 14 hours ago
+                  - generic [ref=f17e720]: Server
+                - generic [ref=f17e722]:
+                  - button "Pin" [ref=f17e723] [cursor=pointer]
+                  - 'button "More actions: Helpful AI Assistant (20260915_083647)" [ref=f17e726] [cursor=pointer]'
+              - generic [ref=f17e731]:
+                - button "Tell me about the weather today. in-progress Updated 14 hours ago Server" [ref=f17e732] [cursor=pointer]:
+                  - generic "Tell me about the weather today." [ref=f17e733]
+                  - generic [ref=f17e734]:
+                    - generic [ref=f17e735]: in-progress
+                    - generic "9/15/2026, 1:40:41 AM" [ref=f17e736]: Updated 14 hours ago
+                  - generic [ref=f17e737]: Server
+                - generic [ref=f17e739]:
+                  - button "Pin" [ref=f17e740] [cursor=pointer]
+                  - 'button "More actions: Tell me about the weather today." [ref=f17e743] [cursor=pointer]'
+              - generic [ref=f17e748]:
+                - button "Cycle3 Aster Guide Chat (20260915_084036) in-progress Updated 14 hours ago Cycle3 Aster Guide Chat (20260915_084036) Server" [ref=f17e749] [cursor=pointer]:
+                  - generic "Cycle3 Aster Guide Chat (20260915_084036)" [ref=f17e750]
+                  - generic [ref=f17e751]:
+                    - generic [ref=f17e752]: in-progress
+                    - generic "9/15/2026, 1:40:41 AM" [ref=f17e753]: Updated 14 hours ago
+                    - generic "Cycle3 Aster Guide Chat (20260915_084036)" [ref=f17e754]
+                  - generic [ref=f17e755]: Server
+                - generic [ref=f17e757]:
+                  - button "Pin" [ref=f17e758] [cursor=pointer]
+                  - 'button "More actions: Cycle3 Aster Guide Chat (20260915_084036)" [ref=f17e761] [cursor=pointer]'
+      - generic [ref=f17e553]:
+        - button "Settings" [ref=f17e554] [cursor=pointer]
+        - generic [ref=f17e560]:
+          - generic [ref=f17e562]:
+            - generic [ref=f17e563]: Mode
+            - group "Mode" [ref=f17e564]:
+              - button "Casual" [pressed] [ref=f17e565] [cursor=pointer]
+              - button "Pro" [ref=f17e566] [cursor=pointer]
+          - generic [ref=f17e567]:
+            - button "Open Notes Dock" [ref=f17e568] [cursor=pointer]
+            - button "Open Quick Chat Helper (sidebar)" [ref=f17e573] [cursor=pointer]
+    - main [ref=f17e95]:
+      - generic [ref=f17e96]:
+        - generic [ref=f17e99]:
+          - generic [ref=f17e100]:
+            - button "Collapse sidebar" [ref=f17e576] [cursor=pointer]
+            - generic [ref=f17e103]:
+              - img "tldw Assistant" [ref=f17e104]
+              - generic [ref=f17e105]: tldw Assistant
+              - button "Companion Home" [ref=f17e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f17e110] [cursor=pointer]
+            - button "Cycle3 Beep Robot Chat (20260915_084745)" [ref=f17e769] [cursor=pointer]
+            - generic [ref=f17e115]:
+              - generic "Saved chat. History is persisted." [ref=f17e116]: Saved
+              - generic "Character mode is active." [ref=f17e117]: "Character: Cycle3 Beep Robot"
+          - generic [ref=f17e123]:
+            - button "Search - Open command palette" [ref=f17e124] [cursor=pointer]:
+              - generic [ref=f17e128]: Search
+              - generic [ref=f17e129]: ⌘K
+            - button "New saved chat" [ref=f17e130] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f17e134] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f17e135] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f17e136] [cursor=pointer]
+            - button "Open settings" [ref=f17e143] [cursor=pointer]
+            - generic [ref=f17e155]:
+              - button "Notifications, 0 unread" [ref=f17e156] [cursor=pointer]
+              - status [ref=f17e160]: Notifications are active
+            - button "Switch to light theme" [ref=f17e161] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f17e168] [cursor=pointer]:
+              - generic [ref=f17e169]: "?"
+        - generic [ref=f17e170]:
+          - heading "Chat" [level=1] [ref=f17e171]
+          - generic [ref=f17e174]:
+            - paragraph [ref=f17e175]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f17e176]:
+              - main [ref=f17e177]:
+                - generic [ref=f17e178]:
+                  - generic [ref=f17e180]:
+                    - generic [ref=f17e181]:
+                      - generic [ref=f17e182]:
+                        - text: Character Chat
+                        - generic [ref=f17e183]: Cycle3 Beep Robot
+                      - generic [ref=f17e184]: Conversation timeline
+                    - generic [ref=f17e185]:
+                      - button "Switch to light theme" [ref=f17e186] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f17e193] [cursor=pointer]:
+                        - generic [ref=f17e199]: Focus
+                      - button "Shortcuts" [ref=f17e200] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f17e204]
+                  - log "Chat messages" [ref=f17e206]:
+                    - generic [ref=f17e208]:
+                      - article "User message 1 of 2" [ref=f17e770]:
+                        - generic [ref=f17e773]:
+                          - generic [ref=f17e775]:
+                            - generic [ref=f17e776]: You
+                            - generic [ref=f17e777]: • 1:47 AM
+                          - paragraph [ref=f17e779]: Hello, who are you?
+                          - button "More actions" [ref=f17e782] [cursor=pointer]: •••
+                      - article "Assistant message 2 of 2" [ref=f17e786]:
+                        - generic [ref=f17e792]:
+                          - generic [ref=f17e794]:
+                            - generic [ref=f17e795]: Cycle3 Beep Robot
+                            - generic [ref=f17e796]: • 1:47 AM
+                          - generic [ref=f17e797]:
+                            - button "collapsed Model’s reasoning (optional)" [ref=f17e800] [cursor=pointer]:
+                              - img "collapsed" [ref=f17e802]
+                              - generic [ref=f17e805]: Model’s reasoning (optional)
+                            - paragraph [ref=f17e833]: BEEP BOOP
+                          - generic [ref=f17e810]:
+                            - generic [ref=f17e811]:
+                              - generic [ref=f17e812]: Was this helpful?
+                              - generic [ref=f17e813]:
+                                - button "Helpful" [ref=f17e814] [cursor=pointer]
+                                - button "Not helpful" [ref=f17e817] [cursor=pointer]
+                                - button "More feedback" [ref=f17e820] [cursor=pointer]
+                            - button "More actions" [ref=f17e826] [cursor=pointer]: •••
+                  - generic [ref=f17e298]:
+                    - generic [ref=f17e299]: Composer
+                    - generic [ref=f17e307]:
+                      - button [aria-hidden] [ref=f17e308]
+                      - button [aria-hidden] [ref=f17e309]
+                      - generic [ref=f17e310]:
+                        - generic [ref=f17e312]:
+                          - button "Hide composer options" [expanded] [ref=f17e313] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [ref=f17e318]
+                          - generic [ref=f17e319]:
+                            - button "Improve prompt" [ref=f17e322] [cursor=pointer]
+                            - generic [ref=f17e327]:
+                              - button "Send message" [ref=f17e328] [cursor=pointer]:
+                                - generic [ref=f17e329]: Send
+                              - button "Open message delivery options" [ref=f17e334] [cursor=pointer]
+                        - generic [ref=f17e339]:
+                          - generic [ref=f17e341]:
+                            - group "Mode and context controls" [ref=f17e342]:
+                              - button "Modes" [ref=f17e343] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f17e350] [cursor=pointer]':
+                                - generic [ref=f17e351]:
+                                  - generic [ref=f17e352]: MCP
+                                  - generic [ref=f17e353]: None
+                              - button "Search & Context" [ref=f17e356] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f17e361] [cursor=pointer]:
+                                - generic [ref=f17e364]: Prompt
+                              - button "Cycle3 Beep Robot" [ref=f17e827] [cursor=pointer]
+                              - button "Role-play setup" [ref=f17e370] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f17e377] [cursor=pointer]
+                            - group "Run input controls" [ref=f17e383]:
+                              - button "OpenUI" [ref=f17e384] [cursor=pointer]
+                              - button "Start dictation" [ref=f17e390] [cursor=pointer]
+                              - generic [ref=f17e394]:
+                                - button "Attach image" [ref=f17e396] [cursor=pointer]
+                                - button "More attachments" [ref=f17e400] [cursor=pointer]
+                              - button "More tools" [ref=f17e403] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f17e406] [cursor=pointer]:
+                                - generic [ref=f17e410]: Chat Settings
+                          - generic "Active context" [ref=f17e411]:
+                            - button "LLaMa.cpp / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf" [ref=f17e413] [cursor=pointer]:
+                              - generic "Provider status" [ref=f17e417]: Healthy
+                            - button "Character Cycle3 Beep Robot" [ref=f17e828] [cursor=pointer]:
+                              - generic [ref=f17e419]: Character
+                              - generic [ref=f17e420]: Cycle3 Beep Robot
+                            - 'generic "Character context: Included" [ref=f17e421]':
+                              - generic [ref=f17e422]: Character context
+                              - generic [ref=f17e423]: Included
+                            - button "Chat 2 messages" [ref=f17e829] [cursor=pointer]:
+                              - generic [ref=f17e830]: Chat
+                              - generic [ref=f17e831]: 2 messages
+                            - button "Configure context window size" [ref=f17e428] [cursor=pointer]:
+                              - generic [ref=f17e429]: 94 + ~0 = 94 tokens
+                            - button "Saved" [ref=f17e431] [cursor=pointer]
+                            - button "Advanced controls" [ref=f17e433] [cursor=pointer]
+                        - status [ref=f17e437]:
+                          - generic [ref=f17e438]: Add expression images for Cycle3 Beep Robot.
+                          - generic [ref=f17e439]:
+                            - link "Edit expressions" [ref=f17e440] [cursor=pointer]:
+                              - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=5
+                            - button "Dismiss expression image setup" [ref=f17e441] [cursor=pointer]: Dismiss
+              - generic [ref=f17e442]:
+                - button "Restore context sidechannel" [ref=f17e443] [cursor=pointer]:
+                  - generic [ref=f17e447]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f17e448]:
+                - button "Restore runtime sidechannel" [ref=f17e449] [cursor=pointer]:
+                  - generic [ref=f17e450]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f17e459] [cursor=pointer]
+  - alert [ref=f17e10]
+```
