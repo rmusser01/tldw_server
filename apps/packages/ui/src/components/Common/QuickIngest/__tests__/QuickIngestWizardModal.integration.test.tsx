@@ -401,7 +401,8 @@ vi.mock("@/services/background-proxy", () => ({
   bgRequest: vi.fn().mockResolvedValue({}),
 }))
 
-vi.mock("@/services/tldw/quick-ingest-batch", () => ({
+vi.mock("@/services/tldw/quick-ingest-batch", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/tldw/quick-ingest-batch")>()),
   cancelQuickIngestSession: vi.fn().mockResolvedValue({ ok: true }),
   startQuickIngestSession: vi.fn().mockResolvedValue({ ok: true, sessionId: "qi-test" }),
   submitQuickIngestBatch: vi.fn().mockResolvedValue({ ok: true, results: [] }),
@@ -1041,6 +1042,71 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
   // -------------------------------------------------------------------------
   // Step 2 -> Step 3: Advance to Review
   // -------------------------------------------------------------------------
+  it.each(["", "   ", "none"])(
+    "keeps Configure open for required analysis provider %j and advances after correction",
+    async (invalidProvider) => {
+      const user = userEvent.setup()
+      render(
+        <WizardTestHarness
+          onClose={onClose}
+          initialState={{ currentStep: 2, highestStep: 2 }}
+        />
+      )
+      const provider = await screen.findByRole("combobox", {
+        name: "Analysis provider",
+      })
+      if (invalidProvider) {
+        await user.type(provider, invalidProvider)
+      }
+      await user.click(screen.getByRole("button", { name: "Next", exact: true }))
+
+      expect(screen.queryByText("Ready to Process")).not.toBeInTheDocument()
+      expect(provider).toHaveFocus()
+      expect(provider).toHaveAttribute("aria-invalid", "true")
+      expect(provider).toHaveAccessibleDescription(
+        /Choose an analysis provider before running ingest analysis/
+      )
+
+      await user.clear(provider)
+      await user.type(provider, "llama.cpp")
+      expect(provider).not.toHaveAttribute("aria-invalid", "true")
+      await user.click(screen.getByRole("button", { name: "Next", exact: true }))
+      expect(screen.getByText("Ready to Process")).toBeInTheDocument()
+    }
+  )
+
+  it("allows the analysis-disabled Quick preset to reach Review without a provider", async () => {
+    const user = userEvent.setup()
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{ currentStep: 2, highestStep: 2 }}
+      />
+    )
+    await user.click(screen.getByRole("button", { name: /quick preset/i }))
+    await user.click(screen.getByRole("button", { name: "Next", exact: true }))
+
+    expect(screen.getByText("Ready to Process")).toBeInTheDocument()
+  })
+
+  it("revalidates the provider after returning from Review to Configure", async () => {
+    const user = userEvent.setup()
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{ currentStep: 2, highestStep: 2 }}
+      />
+    )
+    await user.type(screen.getByRole("combobox", { name: "Analysis provider" }), "llama.cpp")
+    await user.click(screen.getByRole("button", { name: "Next", exact: true }))
+    await user.click(screen.getByRole("button", { name: "Back to Settings" }))
+    await user.click(screen.getByRole("button", { name: "Clear analysis provider" }))
+    await user.click(screen.getByRole("button", { name: "Next", exact: true }))
+
+    expect(screen.queryByText("Ready to Process")).not.toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "Analysis provider" })).toHaveFocus()
+  })
+
   it("Step 2 -> Step 3 — clicking Next advances to review summary", async () => {
     const user = userEvent.setup()
     render(<WizardTestHarness onClose={onClose} />)
@@ -1067,6 +1133,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
 
     // Click Next to go to step 3
     const nextButton = screen.getByText("Next")
+    await user.type(screen.getByRole("combobox", { name: "Analysis provider" }), "llama.cpp")
     await user.click(nextButton)
 
     // Step 3: Review summary should show "Ready to Process"
@@ -1139,6 +1206,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       ).toBeTruthy()
     })
 
+    await user.type(screen.getByRole("combobox", { name: "Analysis provider" }), "llama.cpp")
     await user.click(screen.getByText("Next"))
 
     await waitFor(() => {
@@ -1185,6 +1253,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       ).toBeTruthy()
     })
 
+    await user.type(screen.getByRole("combobox", { name: "Analysis provider" }), "llama.cpp")
     await user.click(screen.getByText("Next"))
 
     await waitFor(() => {
@@ -1342,6 +1411,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       ).toBeTruthy()
     })
 
+    await user.type(screen.getByRole("combobox", { name: "Analysis provider" }), "llama.cpp")
     await user.click(screen.getByText("Next"))
 
     await waitFor(() => {
@@ -1430,6 +1500,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       ).toBeTruthy()
     })
 
+    await user.type(screen.getByRole("combobox", { name: "Analysis provider" }), "llama.cpp")
     await user.click(screen.getByText("Next"))
 
     await waitFor(() => {
@@ -1564,6 +1635,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     await user.type(screen.getByLabelText("Shared tags"), "conference, clojure")
 
     await user.click(screen.getByText(/Configure 34 items/i))
+    await user.type(screen.getByRole("combobox", { name: "Analysis provider" }), "llama.cpp")
     await user.click(await screen.findByText("Next"))
 
     await waitFor(() => {
@@ -1599,6 +1671,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     await user.type(screen.getByLabelText("Speaker for item 1"), "Rich Hickey")
 
     await user.click(screen.getByText(/Configure 2 items/i))
+    await user.type(screen.getByRole("combobox", { name: "Analysis provider" }), "llama.cpp")
     await user.click(await screen.findByText("Next"))
 
     await waitFor(() => {
