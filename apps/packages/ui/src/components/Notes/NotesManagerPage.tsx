@@ -124,10 +124,11 @@ const NotesManagerPage: React.FC = () => {
   const {
     config: canonicalConnectionConfig,
     loading: canonicalConnectionLoading,
+    authorityLoading: canonicalAuthorityLoading,
   } = useCanonicalConnectionConfig()
   const notesGraphAuthorityScope = useNotesGraphAuthorityScope({
     config: canonicalConnectionConfig,
-    loading: canonicalConnectionLoading,
+    loading: canonicalAuthorityLoading ?? canonicalConnectionLoading,
   })
   const message = useAntdMessage()
   const rawConfirmDanger = useConfirmDanger()

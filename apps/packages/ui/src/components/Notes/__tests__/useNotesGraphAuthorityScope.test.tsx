@@ -469,4 +469,53 @@ describe("useNotesGraphAuthorityScope", () => {
       )
     })
   })
+
+  it("preserves verified ownership for benign config events but clears on session invalidation", async () => {
+    mocks.getCurrentUser.mockResolvedValue(activeUser(7))
+    const canonicalConfig = config("https://notes.example.test")
+    const { result, rerender } = renderHook(({ config }) => useNotesGraphAuthorityScope({ config, loading: false }), { initialProps: { config: canonicalConfig } })
+    await waitFor(() => expect(result.current).toBe(expectedScope("https://notes.example.test", 7)))
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } })))
+    rerender({ config: { ...canonicalConfig } })
+    expect(result.current).toBe(expectedScope("https://notes.example.test", 7))
+    expect(mocks.getCurrentUser).toHaveBeenCalledTimes(1)
+    mocks.getCurrentUser.mockReturnValue(new Promise(() => undefined))
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false, refreshSessionInvalidated: true } })))
+    expect(result.current).toBeNull()
+  })
+
+
+  it.each([
+    { serverUrl: "https://replacement.test" },
+    { orgId: 42 },
+    { authSource: "cookie-session" as const }
+  ])("still invalidates a changed authority fingerprint despite a benign event: %j", async replacement => {
+    mocks.getCurrentUser.mockResolvedValue(activeUser(7))
+    const canonicalConfig = config("https://notes.example.test")
+    const { result, rerender } = renderHook(({ config }) => useNotesGraphAuthorityScope({ config, loading: false }), { initialProps: { config: canonicalConfig } })
+    await waitFor(() => expect(result.current).not.toBeNull())
+    mocks.getCurrentUser.mockReturnValue(new Promise(() => undefined))
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } })))
+    rerender({ config: { ...canonicalConfig, ...replacement } })
+    expect(result.current).toBeNull()
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2))
+  })
+
+
+  it("keeps verified ownership for same-principal token rotation and rejects a different principal", async () => {
+    const token = (sub: number, suffix: string) => `test.${btoa(JSON.stringify({ sub: String(sub) }))}.${suffix}`
+    const canonicalConfig = config("https://notes.example.test", { accessToken: token(7, "old") })
+    mocks.getCurrentUser.mockResolvedValue(activeUser(7))
+    const { result, rerender } = renderHook(({ config }) => useNotesGraphAuthorityScope({ config, loading: false }), { initialProps: { config: canonicalConfig } })
+    await waitFor(() => expect(result.current).toBe(expectedScope("https://notes.example.test", 7)))
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } })))
+    rerender({ config: { ...canonicalConfig, accessToken: token(7, "refreshed") } })
+    expect(result.current).toBe(expectedScope("https://notes.example.test", 7))
+    expect(mocks.getCurrentUser).toHaveBeenCalledTimes(1)
+    mocks.getCurrentUser.mockReturnValue(new Promise(() => undefined))
+    rerender({ config: { ...canonicalConfig, accessToken: token(8, "different-owner") } })
+    expect(result.current).toBeNull()
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2))
+  })
+
 })

@@ -161,6 +161,7 @@ export function useCallerCapabilities() {
     notifications: decision(result?.capabilities.can_read_notifications),
     monitoringAlerts: decision(result?.capabilities.can_read_monitoring_alerts),
     scopeKey: result?.scopeKey ?? null,
+    userId: result?.capabilities.user_id ?? null,
     loading: online && discovery.loading,
     refresh,
     refreshAfterForbidden

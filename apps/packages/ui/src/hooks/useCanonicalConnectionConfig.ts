@@ -6,7 +6,12 @@ import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
-import { REFRESH_ROTATION_KEY } from "@/services/tldw/single-user-credential"
+import {
+  applyRefreshRotation,
+  REFRESH_ROTATION_KEY
+} from "@/services/tldw/single-user-credential"
+import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
+import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
 
 const DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 
@@ -78,6 +83,8 @@ const normalizeConnectionConfig = (
 export const useCanonicalConnectionConfig = (): {
   config: TldwConfig | null
   loading: boolean
+  /** False during rehydration only when stored lineage preserves resolved authority. */
+  authorityLoading: boolean
 } => {
   const [legacyServerUrl] = useStorage(
     "serverUrl",
@@ -87,6 +94,7 @@ export const useCanonicalConnectionConfig = (): {
   const [legacyApiKey] = useStorage("apiKey", "")
   const [legacyAccessToken] = useStorage("accessToken", "")
   const [refreshRotation] = useStorage<unknown>(REFRESH_ROTATION_KEY)
+  const [storedConfig] = useStorage<TldwConfig | null>("tldwConfig", null)
 
   const fallbackConfig = React.useMemo<TldwConfig>(
     () => ({
@@ -106,6 +114,32 @@ export const useCanonicalConnectionConfig = (): {
 
   const [config, setConfig] = React.useState<TldwConfig | null>(null)
   const [loading, setLoading] = React.useState(true)
+  const [resolvedAuthority, setResolvedAuthority] = React.useState<{
+    config: TldwConfig
+    fallbackConfig: TldwConfig
+    storedConfig: TldwConfig | null
+    refreshRotation: unknown
+  } | null>(null)
+
+  const sameInputs = resolvedAuthority?.fallbackConfig === fallbackConfig &&
+    resolvedAuthority?.storedConfig === storedConfig &&
+    resolvedAuthority?.refreshRotation === refreshRotation
+  let authorityPreserved = false
+  if (resolvedAuthority && storedConfig && typeof storedConfig === "object" &&
+    connectionAuthoritiesMatch(fallbackConfig, resolvedAuthority.fallbackConfig)) {
+    const previous = applyRefreshRotation(storedConfig, resolvedAuthority.refreshRotation)
+    const next = applyRefreshRotation(storedConfig, refreshRotation)
+    // Prove the source lineage against the last canonical credential pair;
+    // matching claims in a replacement token alone cannot establish continuity.
+    authorityPreserved =
+      (refreshRotation === resolvedAuthority.refreshRotation || next !== storedConfig) &&
+      servicePromptTargetsMatch(previous, resolvedAuthority.config) &&
+      previous.accessToken === resolvedAuthority.config.accessToken &&
+      previous.refreshToken === resolvedAuthority.config.refreshToken &&
+      connectionAuthoritiesMatch(previous, resolvedAuthority.config) &&
+      connectionAuthoritiesMatch(next, resolvedAuthority.config)
+  }
+  const authorityLoading = !resolvedAuthority || (!sameInputs && !authorityPreserved)
 
   React.useEffect(() => {
     let cancelled = false
@@ -115,13 +149,16 @@ export const useCanonicalConnectionConfig = (): {
       try {
         const canonicalConfig = await tldwClient.getConfig()
         if (!cancelled) {
-          setConfig(
-            normalizeConnectionConfig(canonicalConfig, fallbackConfig)
-          )
+          const next = normalizeConnectionConfig(canonicalConfig, fallbackConfig)
+          setConfig(next)
+          setResolvedAuthority(canonicalConfig ? {
+            config: next, fallbackConfig, storedConfig, refreshRotation
+          } : null)
         }
       } catch {
         if (!cancelled) {
           setConfig(fallbackConfig)
+          setResolvedAuthority(null)
         }
       } finally {
         if (!cancelled) {
@@ -135,7 +172,7 @@ export const useCanonicalConnectionConfig = (): {
     return () => {
       cancelled = true
     }
-  }, [fallbackConfig, refreshRotation])
+  }, [fallbackConfig, refreshRotation, storedConfig])
 
-  return { config, loading }
+  return { config, loading, authorityLoading }
 }
