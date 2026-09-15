@@ -10,6 +10,7 @@ import {
   updateMessage,
   updateMessageMedia,
   removeMessageByIndex,
+  removeMessageById,
   formatToChatHistory,
   formatToMessage,
   getSessionFiles,
@@ -466,7 +467,8 @@ type UseChatActionsOptions = {
   ensureServerChatHistoryId: (
     chatId: string,
     title?: string,
-    scopeInvalidatedSignal?: AbortSignal
+    scopeInvalidatedSignal?: AbortSignal,
+    snapshot?: ServicePromptSnapshot
   ) => Promise<string | null>
   contextFiles: UploadedFile[]
   setContextFiles: (files: UploadedFile[]) => void
@@ -1307,7 +1309,7 @@ export const useChatActions = ({
 
   const buildChatModeParams = async (
     overrides: ChatModeOverrides = {},
-    scopeInvalidatedSignal?: AbortSignal
+    snapshot?: ServicePromptSnapshot
   ) => {
     const hasHistoryOverride = Object.prototype.hasOwnProperty.call(
       overrides,
@@ -1321,7 +1323,8 @@ export const useChatActions = ({
         ? await ensureServerChatHistoryId(
             resolvedServerChatId,
             serverChatTitle || undefined,
-            scopeInvalidatedSignal
+            snapshot?.scopeInvalidatedSignal,
+            snapshot
           )
         : historyId
 
@@ -1430,7 +1433,8 @@ export const useChatActions = ({
           options
             ? tldwClient.createChat(payload, options)
             : tldwClient.createChat(payload),
-        ensureServerChatHistoryId,
+        ensureServerChatHistoryId: (chatId, title, signal) =>
+          ensureServerChatHistoryId(chatId, title, signal, servicePromptSnapshot),
         invalidateServerChatHistory,
         setServerChatId,
         setServerChatTitle,
@@ -1527,7 +1531,8 @@ export const useChatActions = ({
           const ensuredHistoryId = await ensureServerChatHistoryId(
             resolvedServerChatId,
             serverChatTitle || undefined,
-            servicePromptSnapshot?.scopeInvalidatedSignal
+            servicePromptSnapshot?.scopeInvalidatedSignal,
+            servicePromptSnapshot
           )
           linkedHistoryId = ensuredHistoryId
           throwIfTurnCancelled()
@@ -1572,7 +1577,8 @@ export const useChatActions = ({
           const ensuredHistoryId = await ensureServerChatHistoryId(
             validatedServerChatId,
             serverChatTitle || undefined,
-            servicePromptSnapshot?.scopeInvalidatedSignal
+            servicePromptSnapshot?.scopeInvalidatedSignal,
+            servicePromptSnapshot
           )
           throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
           return { chatId: validatedServerChatId, historyId: ensuredHistoryId }
@@ -1639,7 +1645,8 @@ export const useChatActions = ({
       const ensuredHistoryId = await ensureServerChatHistoryId(
         normalizedId,
         createdTitle || titleSeed || undefined,
-        servicePromptSnapshot?.scopeInvalidatedSignal
+        servicePromptSnapshot?.scopeInvalidatedSignal,
+        servicePromptSnapshot
       )
       linkedHistoryId = ensuredHistoryId
       throwIfTurnCancelled()
@@ -3340,7 +3347,11 @@ export const useChatActions = ({
         !turnShouldUseRag &&
         turnResolvedSendMode !== "tracked_character" &&
         turnResolvedSendMode !== "tracked_persona"
-      if (turnPromptIds.length > 0 || needsSavedNormalScope) {
+      const needsSavedMirrorScope = !temporaryChat && (
+        Boolean(requestOverrides?.serverChatId ?? serverChatIdOverride ?? serverChatId) ||
+        (!compareModeActive && (turnResolvedSendMode === "tracked_character" || turnResolvedSendMode === "tracked_persona"))
+      )
+      if (turnPromptIds.length > 0 || needsSavedNormalScope || needsSavedMirrorScope) {
         const loadedSnapshot = await loadServicePromptSnapshot(turnPromptIds, {
           signal
         })
@@ -3376,9 +3387,7 @@ export const useChatActions = ({
           dynamicUIRequest: turnDynamicUIRequest,
           userMetadataExtra: turnUserMetadataExtra
         },
-        (
-          turnServicePromptSnapshot ?? compareServicePromptSnapshot
-        )?.scopeInvalidatedSignal
+        turnServicePromptSnapshot ?? compareServicePromptSnapshot
       )
       const baseMessages = chatHistory || messages
       const baseHistory = memory || history
@@ -3967,7 +3976,7 @@ export const useChatActions = ({
               releaseAbortControllerIfOwned: () => false,
               messageSteering: messageSteeringForTurn
             },
-            compareServicePromptSnapshot?.scopeInvalidatedSignal
+            compareServicePromptSnapshot
           )
           const compareEnhancedParams = {
             ...compareChatModeParams,
@@ -4238,7 +4247,7 @@ export const useChatActions = ({
               : webSearch
                 ? ["chat.web_search.answer"]
                 : []
-      if (replyPromptIds.length > 0) {
+      if (replyPromptIds.length > 0 || (!temporaryChat && Boolean(serverChatId))) {
         replyServicePromptSnapshot = await loadServicePromptSnapshot(
           replyPromptIds,
           { signal }
@@ -4249,7 +4258,7 @@ export const useChatActions = ({
       }
       const chatModeParams = await buildChatModeParams(
         { messageSteering: messageSteeringForTurn },
-        replyServicePromptSnapshot?.scopeInvalidatedSignal
+        replyServicePromptSnapshot
       )
       const enhancedChatModeParams = {
         ...chatModeParams,
@@ -4494,13 +4503,13 @@ export const useChatActions = ({
       if (!target) return
 
       // Capture values synchronously before any awaits
-      const targetId = target.serverMessageId ?? target.id
+      const targetId = target.id
       const serverMessageId = target.serverMessageId
       const serverMessageVersion = target.serverMessageVersion
       const historyRole = target.role ?? (target.isBot ? "assistant" : "user")
       const historyContent = target.message ?? ""
 
-      if (replyTarget?.id && targetId && replyTarget.id === targetId) {
+      if (replyTarget?.id && (replyTarget.id === targetId || replyTarget.id === serverMessageId)) {
         clearReplyTarget()
       }
 
@@ -4524,7 +4533,8 @@ export const useChatActions = ({
         }
 
         if (historyId) {
-          await removeMessageByIndex(historyId, index)
+          if (targetId) await removeMessageById(historyId, targetId)
+          else await removeMessageByIndex(historyId, index)
         }
       } catch (err) {
         console.error("[deleteMessage] Failed to delete message", err)

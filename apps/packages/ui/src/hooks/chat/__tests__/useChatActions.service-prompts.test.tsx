@@ -1269,6 +1269,7 @@ describe("useChatActions Compare service prompt snapshot", () => {
       "server-chat-7",
       undefined,
       snapshot.scopeInvalidatedSignal,
+      snapshot,
     );
     expect(events.indexOf("loadSnapshot")).toBeLessThan(
       events.indexOf("ensureHistory"),
@@ -1324,7 +1325,7 @@ describe("useChatActions Compare service prompt snapshot", () => {
     expect(releaseSnapshotMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not read a Service Prompt and preserves server history when Compare web search is disabled", async () => {
+  it("captures only owner scope and preserves server history when Compare web search is disabled", async () => {
     const options = createHookOptions({
       webSearch: false,
       serverChatId: "server-chat-7",
@@ -1345,7 +1346,9 @@ describe("useChatActions Compare service prompt snapshot", () => {
       await result.current.onSubmit({ message: "Compare this", image: "" });
     });
 
-    expect(loadServicePromptSnapshotMock).not.toHaveBeenCalled();
+    expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith([], expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(options.ensureServerChatHistoryId.mock.calls[0][3]).toBe(snapshot);
+    expect(releaseSnapshotMock).toHaveBeenCalledTimes(1);
     expect(options.ensureServerChatHistoryId).toHaveBeenCalledTimes(1);
     expect(saveMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({ history_id: "history-from-server" }),

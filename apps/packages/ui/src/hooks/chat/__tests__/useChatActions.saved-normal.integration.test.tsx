@@ -14,6 +14,8 @@ import { useStoreMessageOption } from "@/store/option"
 import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue"
 
 const mocks = vi.hoisted(() => ({
+  removeMessageById: vi.fn(),
+  deleteMessage: vi.fn(),
   createChat: vi.fn(),
   getChat: vi.fn(),
   addChatMessage: vi.fn(),
@@ -57,6 +59,7 @@ vi.mock("@/services/tldw/TldwAuth", () => ({
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    deleteMessage: mocks.deleteMessage,
     initialize: mocks.initialize,
     getConfig: async () => mocks.config,
     ensureConfigForRequest: async () => mocks.config,
@@ -94,6 +97,7 @@ vi.mock("@/db/dexie/helpers", () => ({
   updateMessage: vi.fn(),
   updateMessageMedia: vi.fn(),
   removeMessageByIndex: vi.fn(),
+  removeMessageById: mocks.removeMessageById,
   formatToChatHistory: (items: unknown) => items,
   formatToMessage: (items: unknown) => items,
   getSessionFiles: async () => [],
@@ -343,6 +347,22 @@ const seedLocalDraft = () =>
   })
 
 describe("saved normal Chat pipeline with autosave", () => {
+  it.each(["local", "server"])("deletes a qualified mirror row and clears its %s reply target using the canonical request ID", async replyKind => {
+    const localId = "history-A:server:answer"
+    const serverId = "canonical-answer"
+    useStoreMessageOption.setState({ historyId: "mirror", serverChatId: "cedar", temporaryChat: false,
+      messages: [{ id: localId, serverMessageId: serverId, serverMessageVersion: 2, role: "assistant", isBot: true, name: "Cedar", message: "Cedar reply" }],
+      history: [{ role: "assistant", content: "Cedar reply" }],
+      replyTarget: { id: replyKind === "local" ? localId : serverId, role: "assistant", text: "Cedar reply" }
+    })
+    const { result } = renderWorkspace()
+    await act(async () => { await result.current.actions.deleteMessage(0) })
+    expect(mocks.deleteMessage).toHaveBeenCalledWith(serverId, 2, "cedar")
+    expect(mocks.removeMessageById).toHaveBeenCalledWith("mirror", localId)
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+    expect(useStoreMessageOption.getState().replyTarget).toBeNull()
+  })
+
   it.each([0, 1])(
     "retains incomplete promotion across same-authority reconnect after %s copies",
     async (copied) => {

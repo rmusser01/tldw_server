@@ -43,6 +43,13 @@ const {
   }
 }))
 
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async (_ids: unknown, { signal }: { signal: AbortSignal }) => ({
+    scopeKey: "scope:test-chat", requestScope: { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }, userId: null },
+    scopeSignal: signal, scopeInvalidatedSignal: signal, definitions: {}, capability: "unchecked", release: vi.fn()
+  })
+}))
+
 vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
   normalChatMode: normalChatModeMock
 }))

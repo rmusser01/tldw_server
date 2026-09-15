@@ -3151,8 +3151,8 @@ export const useMessage = () => {
       const target = messages[index];
       if (!target) return;
 
-      const targetId = target.serverMessageId ?? target.id;
-      if (replyTarget?.id && targetId && replyTarget.id === targetId) {
+      const targetId = target.id;
+      if (replyTarget?.id && (replyTarget.id === targetId || replyTarget.id === target.serverMessageId)) {
         clearReplyTarget();
       }
 

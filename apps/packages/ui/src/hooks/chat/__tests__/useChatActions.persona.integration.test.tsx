@@ -356,7 +356,7 @@ describe("useChatActions persona integration", () => {
       cluster_id: undefined,
       source: undefined,
       external_ref: undefined
-    })
+    }, { scope: undefined, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal })
     expect(options.setServerChatId).toHaveBeenCalledWith("persona-chat-1")
     expect(options.setServerChatCharacterId).toHaveBeenCalledWith(null)
     expect(options.setServerChatAssistantKind).toHaveBeenCalledWith("persona")
@@ -380,7 +380,7 @@ describe("useChatActions persona integration", () => {
         trackedAssistantDisplayName: "Garden Helper",
         trackedAssistantAvatarUrl: null,
         serverChatPersonaMemoryMode: "read_only",
-        scopeKey: "scope:chat",
+        scopeKey: servicePromptSnapshot.scopeKey,
         trackedAssistantSelection: expect.objectContaining({
           kind: "persona",
           id: "garden-helper",
@@ -410,6 +410,20 @@ describe("useChatActions persona integration", () => {
         serverChatId: "persona-chat-1"
       })
     )
+  })
+
+  it.each(["turn", "reply"])("captures the tracked %s owner before mirror linking and releases it", async operation => {
+    const pending = deferred<typeof servicePromptSnapshot>()
+    loadServicePromptSnapshotMock.mockReturnValueOnce(pending.promise)
+    const options = { ...createHookOptions(), serverChatId: "persona-chat-1", serverChatMetaLoaded: true, serverChatAssistantKind: "persona", serverChatAssistantId: "garden-helper", compareFeatureEnabled: true }
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    let request!: Promise<unknown>
+    act(() => { request = operation === "turn" ? result.current.onSubmit({ message: "Owned follow-up", image: "" }) : result.current.sendPerModelReply({ clusterId: "cluster", modelId: "openai:gpt-4.1", message: "Owned reply" }) })
+    await vi.waitFor(() => expect(loadServicePromptSnapshotMock).toHaveBeenCalledTimes(1))
+    expect(options.ensureServerChatHistoryId).not.toHaveBeenCalled()
+    await act(async () => { pending.resolve(servicePromptSnapshot); await request })
+    expect(options.ensureServerChatHistoryId).toHaveBeenCalledWith("persona-chat-1", options.serverChatTitle || undefined, servicePromptSnapshot.scopeInvalidatedSignal, servicePromptSnapshot)
+    expect(servicePromptSnapshot.release).toHaveBeenCalledTimes(1)
   })
 
   it("persists the canonical captured scope for a prompt-backed persona turn", async () => {
@@ -459,7 +473,7 @@ describe("useChatActions persona integration", () => {
         source: undefined,
         external_ref: undefined
       },
-      { scope }
+      { scope, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal }
     )
     expect(normalChatModeMock).toHaveBeenCalledWith(
       "Hello scoped persona",
@@ -517,7 +531,7 @@ describe("useChatActions persona integration", () => {
       cluster_id: undefined,
       source: undefined,
       external_ref: undefined
-    })
+    }, { scope: undefined, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal })
     expect(options.setServerChatAssistantKind).toHaveBeenCalledWith("persona")
     expect(options.setServerChatAssistantId).toHaveBeenCalledWith(
       "workspace-helper"
@@ -837,7 +851,8 @@ describe("useChatActions persona integration", () => {
     expect(options.ensureServerChatHistoryId).toHaveBeenCalledWith(
       "workspace-scope-race-chat",
       "Workspace scope race",
-      scopeController.signal
+      scopeController.signal,
+      scopedSnapshot
     )
     expect(options.setServerChatId).not.toHaveBeenCalled()
     expect(options.setServerChatTitle).not.toHaveBeenCalled()
@@ -954,7 +969,7 @@ describe("useChatActions persona integration", () => {
       cluster_id: undefined,
       source: undefined,
       external_ref: undefined
-    })
+    }, { scope: undefined, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal })
     expect(options.setServerChatAssistantKind).toHaveBeenLastCalledWith("persona")
     expect(options.setServerChatAssistantId).toHaveBeenLastCalledWith(
       "garden-helper"

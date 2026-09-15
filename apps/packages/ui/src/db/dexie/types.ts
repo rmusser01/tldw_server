@@ -14,6 +14,8 @@ export type HistoryInfo = {
   last_used_prompt?: LastUsedModelType;
   model_id?: string;
   server_chat_id?: string;
+  // Optional data-only association. Legacy histories are adopted only by a verified session.
+  server_scope_key?: string;
   // Timeline/branching fields (server-compatible with ChaChaDB)
   root_id?: string;                    // All forks share same root_id
   parent_conversation_id?: string;     // Parent in fork tree

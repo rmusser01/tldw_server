@@ -377,11 +377,6 @@ export const useMessageOption = (
         ? "explicit"
         : "none";
 
-  React.useEffect(() => {
-    if (!serverChatId || temporaryChat) return;
-    void ensureServerChatHistoryId(serverChatId, serverChatTitle || undefined);
-  }, [ensureServerChatHistoryId, serverChatId, serverChatTitle, temporaryChat]);
-
   usePromptPersistence({
     selectedSystemPrompt,
     setSelectedSystemPrompt,

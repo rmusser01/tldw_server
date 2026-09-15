@@ -3,8 +3,10 @@ import React from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundMessage } from "../Message"
+import { mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
+const knowledgeCapabilities = vi.hoisted(() => ({ enabled: false, actions: vi.fn() }))
 const storageOverrides = vi.hoisted(() => new Map<string, unknown>())
 const detectCharacterMoodMock = vi.hoisted(() =>
   vi.fn(() => ({ label: "neutral", confidence: 0.5, topic: null }))
@@ -124,10 +126,12 @@ vi.mock("@/components/Sidepanel/Chat/ToolCallBlock", () => ({
 
 vi.mock("../MessageActionsBar", () => ({
   MessageActionsBar: ({
-    onSaveKnowledge
+    onSaveKnowledge, ...props
   }: {
     onSaveKnowledge?: (makeFlashcard: boolean) => void
-  }) => (
+    canSaveToNotes?: boolean
+    canSaveToFlashcards?: boolean
+  }) => { knowledgeCapabilities.actions(props); return (
     <div data-testid="message-actions">
       <button type="button" onClick={() => onSaveKnowledge?.(false)}>
         Save to Notes
@@ -136,7 +140,7 @@ vi.mock("../MessageActionsBar", () => ({
         Save to Flashcards
       </button>
     </div>
-  )
+  ) }
 }))
 
 vi.mock("../ReasoningBlock", () => ({
@@ -182,6 +186,9 @@ vi.mock("@/hooks/useImplicitFeedback", () => ({
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({
     capabilities: {
+      hasChatKnowledgeSave: knowledgeCapabilities.enabled,
+      hasNotes: knowledgeCapabilities.enabled,
+      hasFlashcards: knowledgeCapabilities.enabled,
       hasFeedbackExplicit: false,
       hasFeedbackImplicit: false
     }
@@ -324,6 +331,8 @@ const baseProps: React.ComponentProps<typeof PlaygroundMessage> = {
 
 describe("PlaygroundMessage routing fallback integration", () => {
   beforeEach(() => {
+    knowledgeCapabilities.enabled = false
+    knowledgeCapabilities.actions.mockClear()
     storageOverrides.clear()
     initializeMock.mockClear()
     saveChatKnowledgeMock.mockClear()
@@ -561,6 +570,18 @@ describe("PlaygroundMessage routing fallback integration", () => {
     )
     expect(contextMessageMock.success).toHaveBeenCalledWith("Saved to Notes")
     expect(staticMessageMock.success).not.toHaveBeenCalled()
+  })
+
+  it("offers saved knowledge actions for a canonical linked reply with a qualified local row ID", async () => {
+    knowledgeCapabilities.enabled = true
+    const [mapped] = mapServerChatMessagesToPlaygroundMessages({
+      serverMessages: [{ id: "canonical-answer", role: "assistant", content: "Cedar opens at 08:30.", created_at: "2026-09-15T10:00:00Z", version: 1 }],
+      assistantName: "Cedar", characterId: 4
+    })
+    render(<PlaygroundMessage {...baseProps} message={mapped.message} messageId="history-A:server:canonical-answer" serverMessageId={mapped.serverMessageId} serverChatId="cedar" temporaryChat={false} />)
+    expect(knowledgeCapabilities.actions).toHaveBeenLastCalledWith(expect.objectContaining({ canSaveToNotes: true, canSaveToFlashcards: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+    await waitFor(() => expect(saveChatKnowledgeMock).toHaveBeenCalledWith(expect.objectContaining({ conversation_id: "cedar", message_id: "canonical-answer" }), undefined))
   })
 
   it("saves only the visible answer to Notes", async () => {

@@ -4882,8 +4882,15 @@ export class TldwApiClientBase {
     })
   }
 
-  async getCharacter(id: string | number, options?: { forceRefresh?: boolean }): Promise<any> {
+  async getCharacter(id: string | number, options?: ScopedRequestOptions & { forceRefresh?: boolean }): Promise<any> {
     const cid = String(id)
+    if (options?.requestScope) {
+      const template = await this.resolveApiPath("characters.get", ["/api/v1/characters/{id}", "/api/v1/characters/{id}/"])
+      return bgRequest({
+        path: this.fillPathParams(template, cid), method: "GET",
+        ...requestScopeFields(options.requestScope), abortSignal: options.signal
+      })
+    }
     const forceRefresh = options?.forceRefresh === true
     if (!forceRefresh) {
       const cached = this.characterCache.get(cid)
