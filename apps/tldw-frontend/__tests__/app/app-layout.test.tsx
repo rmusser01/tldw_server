@@ -1,6 +1,12 @@
 import React from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { Storage } from "@plasmohq/storage"
+import {
+  invalidateRefreshSessionIfCurrent,
+  storeRefreshRotationIfCurrent
+} from "@/services/tldw/single-user-credential"
+import { COOKIE_SESSION_CONFIG_KEY } from "@/services/tldw/browser-networking"
 
 vi.mock("@web/lib/i18n-web", () => ({}))
 
@@ -64,6 +70,7 @@ const mockGetCurrentUser = vi.fn()
 const mockLogout = vi.fn()
 let mockLogoutAvailable = true
 let currentConfig: Record<string, unknown> | null = null
+let useCanonicalAuthStorage = false
 
 vi.mock("next/router", () => ({
   useRouter: () => mockRouter
@@ -187,10 +194,16 @@ vi.mock("@/components/PersonaGarden/FirstRunGate", () => ({
   )
 }))
 
-vi.mock("@web/lib/configured-auth-state", () => ({
-  loadTldwClient: async () => ({
-    getConfig: (...args: unknown[]) => mockGetConfig(...args)
-  }),
+vi.mock("@web/lib/configured-auth-state", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@web/lib/configured-auth-state")>()),
+  loadConfiguredAuthConfig: async () =>
+    useCanonicalAuthStorage
+      ? (
+          await importOriginal<
+            typeof import("@web/lib/configured-auth-state")
+          >()
+        ).loadConfiguredAuthConfig()
+      : mockGetConfig(),
   loadTldwAuth: async () => ({
     getCurrentUser: (...args: unknown[]) => mockGetCurrentUser(...args),
     ...(mockLogoutAvailable
@@ -231,6 +244,7 @@ beforeEach(() => {
   mockGetCurrentUser.mockResolvedValue({ username: "test-user" })
   mockLogout.mockResolvedValue(undefined)
   currentConfig = null
+  useCanonicalAuthStorage = false
   mockGetConfig.mockImplementation(async () => currentConfig)
   delete process.env.NEXT_PUBLIC_X_API_KEY
   delete process.env.NEXT_PUBLIC_API_BEARER
@@ -246,6 +260,259 @@ afterAll(() => {
 })
 
 describe("App layout routing", () => {
+  describe("canonical browser authentication on the existing app owner", () => {
+    const signedIn = {
+      serverUrl: "https://shell.example.test",
+      authMode: "multi-user" as const,
+      authSource: "manual" as const,
+      accessToken: "bob-access",
+      refreshToken: "bob-refresh"
+    }
+    const signedOut = {
+      ...signedIn,
+      accessToken: undefined,
+      refreshToken: undefined
+    }
+    const nativeConfigWrite = (config: typeof signedOut | typeof signedIn) => {
+      const newValue = JSON.stringify(config)
+      localStorage.setItem("tldwConfig", newValue)
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: "tldwConfig", newValue })
+      )
+    }
+    const expectHeader = (hidden: boolean) =>
+      waitFor(() =>
+        expect(screen.getByTestId("option-layout")).toHaveAttribute(
+          "data-hide-header",
+          String(hidden)
+        )
+      )
+    beforeEach(() => {
+      useCanonicalAuthStorage = true
+    })
+
+    it.each(["same-tab", "cross-tab"] as const)(
+      "restores the Settings shell after %s login despite a stale client and preserves the draft",
+      async (channel) => {
+        const storage = new Storage({ area: "local" })
+        await storage.set("tldwConfig", signedOut)
+        const cachedClient = new TldwApiClient()
+        await cachedClient.initialize()
+        mockGetConfig.mockImplementation(() => cachedClient.getConfig())
+        function SettingsDraft() {
+          const [draft, setDraft] = React.useState("")
+          return (
+            <input
+              aria-label="Settings draft"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+          )
+        }
+        mockRouter.pathname = "/settings/tldw"
+        mockRouter.asPath = "/settings/tldw"
+        render(<App Component={SettingsDraft} pageProps={{}} />)
+        await expectHeader(true)
+        fireEvent.change(screen.getByLabelText("Settings draft"), {
+          target: { value: "unsaved timeout and server settings" }
+        })
+        await act(async () => {
+          if (channel === "same-tab") await storage.set("tldwConfig", signedIn)
+          else nativeConfigWrite(signedIn)
+        })
+        expect((await cachedClient.getConfig())?.accessToken).toBeUndefined()
+        await expectHeader(false)
+        expect(screen.getByTestId("app-providers")).toHaveAttribute(
+          "data-enable-notifications",
+          "true"
+        )
+        expect(screen.getByLabelText("Settings draft")).toHaveValue(
+          "unsaved timeout and server settings"
+        )
+      }
+    )
+
+    it("hides private shell consumers for an invalidated rotated pair and restores only the new login", async () => {
+      const storage = new Storage({ area: "local" })
+      await storage.set("tldwConfig", signedIn)
+      currentConfig = signedIn
+      renderApp("/settings/tldw")
+      await expectHeader(false)
+      const rotated = {
+        accessToken: "rotated-access",
+        refreshToken: "rotated-refresh"
+      }
+      await act(async () => {
+        await storeRefreshRotationIfCurrent(
+          storage,
+          signedIn,
+          signedIn.refreshToken,
+          rotated
+        )
+        await invalidateRefreshSessionIfCurrent(storage, {
+          ...signedIn,
+          ...rotated
+        })
+      })
+      await expectHeader(true)
+      expect(screen.queryByTestId("persistent-buddy")).toBeNull()
+      expect(screen.getByTestId("app-providers")).toHaveAttribute(
+        "data-enable-notifications",
+        "false"
+      )
+      await act(async () =>
+        nativeConfigWrite({
+          ...signedIn,
+          accessToken: "new-login",
+          refreshToken: "new-refresh"
+        })
+      )
+      await expectHeader(false)
+    })
+
+    it.each(["success", "unauthorized"] as const)(
+      "ignores a delayed %s validation after canonical logout",
+      async (outcome) => {
+        const storage = new Storage({ area: "local" })
+        await storage.set("tldwConfig", signedIn)
+        currentConfig = signedIn
+        let finish!: () => void
+        mockGetCurrentUser.mockReturnValueOnce(
+          new Promise((resolve, reject) => {
+            finish = () =>
+              outcome === "success"
+                ? resolve({ id: 2 })
+                : reject(makeStatusError("Expired", 401))
+          })
+        )
+        renderApp("/settings/tldw")
+        await waitFor(() => expect(mockGetCurrentUser).toHaveBeenCalledTimes(1))
+        await act(async () => nativeConfigWrite(signedOut))
+        await expectHeader(true)
+        await act(async () => finish())
+        await expectHeader(true)
+        expect(mockLogout).not.toHaveBeenCalled()
+        expect(screen.getByTestId("app-providers")).toHaveAttribute(
+          "data-enable-notifications",
+          "false"
+        )
+      }
+    )
+
+    it("keeps the new A login after A → B → A despite the old A validation failing late", async () => {
+      const storage = new Storage({ area: "local" })
+      await storage.set("tldwConfig", signedIn)
+      let rejectOldLogin!: () => void
+      mockGetCurrentUser.mockReturnValueOnce(
+        new Promise((_, reject) => {
+          rejectOldLogin = () => reject(makeStatusError("Expired", 401))
+        })
+      )
+      renderApp("/settings/tldw")
+      await waitFor(() => expect(mockGetCurrentUser).toHaveBeenCalledTimes(1))
+
+      await act(async () =>
+        nativeConfigWrite({
+          ...signedIn,
+          accessToken: "alice-access",
+          refreshToken: "alice-refresh"
+        })
+      )
+      await expectHeader(false)
+      const validationsBeforeReturn = mockGetCurrentUser.mock.calls.length
+      await act(async () =>
+        nativeConfigWrite({
+          ...signedIn,
+          accessToken: "bob-new-access",
+          refreshToken: "bob-new-refresh"
+        })
+      )
+      await waitFor(() =>
+        expect(mockGetCurrentUser.mock.calls.length).toBeGreaterThan(
+          validationsBeforeReturn
+        )
+      )
+      await expectHeader(false)
+      await act(async () => rejectOldLogin())
+
+      await expectHeader(false)
+      expect(mockLogout).not.toHaveBeenCalled()
+      expect(screen.getByTestId("app-providers")).toHaveAttribute(
+        "data-enable-notifications",
+        "true"
+      )
+      expect(
+        (await storage.get<typeof signedIn>("tldwConfig"))?.accessToken
+      ).toBe("bob-new-access")
+    })
+
+    it("ignores a delayed canonical configuration read after another account signs out", async () => {
+      const storage = new Storage({ area: "local" })
+      await storage.set("tldwConfig", signedIn)
+      const originalGet = Storage.prototype.get
+      let completeOldRead!: () => void
+      let readStarted = false
+      const getSpy = vi
+        .spyOn(Storage.prototype, "get")
+        .mockImplementation(function (key) {
+          if (key === "tldwConfig" && !readStarted) {
+            readStarted = true
+            const oldRead = originalGet.call(this, key)
+            return new Promise((resolve) => {
+              completeOldRead = () => {
+                void oldRead.then(resolve)
+              }
+            })
+          }
+          return originalGet.call(this, key)
+        })
+      try {
+        renderApp("/settings/tldw")
+        await waitFor(() => expect(readStarted).toBe(true))
+        await act(async () =>
+          nativeConfigWrite({
+            ...signedOut,
+            serverUrl: "https://other-server.example.test"
+          })
+        )
+        await expectHeader(true)
+        await act(async () => completeOldRead())
+
+        await expectHeader(true)
+        expect(mockGetCurrentUser).not.toHaveBeenCalled()
+        expect(screen.getByTestId("app-providers")).toHaveAttribute(
+          "data-enable-notifications",
+          "false"
+        )
+      } finally {
+        getSpy.mockRestore()
+      }
+    })
+
+    it("follows real quickstart cookie activation and removal without a cached client", async () => {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      const storage = new Storage({ area: "local" })
+      renderApp("/settings/tldw")
+      await expectHeader(true)
+
+      await act(async () =>
+        storage.set(COOKIE_SESSION_CONFIG_KEY, {
+          serverUrl: window.location.origin,
+          authMode: "single-user",
+          authSource: "cookie-session"
+        })
+      )
+      await expectHeader(false)
+      await act(async () => storage.remove(COOKIE_SESSION_CONFIG_KEY))
+      await expectHeader(true)
+      expect(mockGetCurrentUser).not.toHaveBeenCalled()
+      expect(screen.getByTestId("app-providers")).toHaveAttribute(
+        "data-enable-notifications",
+        "false"
+      )
+    })
+  })
+
   it("wraps non-login routes with OptionLayout", async () => {
     renderApp("/media")
     expect(

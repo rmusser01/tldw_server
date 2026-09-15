@@ -22,9 +22,17 @@ import {
   hasActiveCookieSessionAuth,
   hasEnvApiAuth
 } from "@web/lib/authStorage"
-import { loadTldwAuth, loadTldwClient } from "@web/lib/configured-auth-state"
+import {
+  loadTldwAuth,
+  loadConfiguredAuthConfig
+} from "@web/lib/configured-auth-state"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
-import { REFRESH_SESSION_INVALIDATION_PREFIX } from "@/services/tldw/single-user-credential"
+import {
+  REFRESH_ROTATION_KEY,
+  REFRESH_SESSION_INVALIDATION_PREFIX
+} from "@/services/tldw/single-user-credential"
+import { COOKIE_SESSION_CONFIG_KEY } from "@/services/tldw/browser-networking"
+import { createSafeStorage } from "@/utils/safe-storage"
 import {
   buildFirstRunOnboardingRoute,
   CHARACTER_CHAT_ONBOARDING_INTENT,
@@ -153,8 +161,7 @@ const getConfiguredAuthState = async (
   isCurrent: () => boolean
 ): Promise<ConfiguredAuthState | null> => {
   try {
-    const tldwClient = await loadTldwClient()
-    const config = await tldwClient.getConfig()
+    const config = await loadConfiguredAuthConfig()
     if (!isCurrent()) return null
     if (!config) {
       return {
@@ -298,12 +305,24 @@ export default function App({ Component, pageProps }: AppProps) {
       void refreshAuthState()
     }
     const onStorage = (event: StorageEvent) => {
-      if (!event.key || event.key === "tldwConfig" ||
-        event.key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX)) {
+      if (
+        !event.key ||
+        event.key === "tldwConfig" ||
+        event.key === REFRESH_ROTATION_KEY ||
+        event.key === COOKIE_SESSION_CONFIG_KEY ||
+        event.key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX)
+      ) {
         void refreshAuthState()
       }
     }
 
+    const storage = createSafeStorage({ area: "local" })
+    const watchers = {
+      tldwConfig: onConfigUpdated,
+      [REFRESH_ROTATION_KEY]: onConfigUpdated,
+      [COOKIE_SESSION_CONFIG_KEY]: onConfigUpdated
+    }
+    storage.watch(watchers)
     window.addEventListener("tldw:config-updated", onConfigUpdated)
     window.addEventListener("focus", onConfigUpdated)
     window.addEventListener("online", onConfigUpdated)
@@ -311,6 +330,7 @@ export default function App({ Component, pageProps }: AppProps) {
 
     return () => {
       cancelled = true
+      storage.unwatch(watchers)
       window.removeEventListener("tldw:config-updated", onConfigUpdated)
       window.removeEventListener("focus", onConfigUpdated)
       window.removeEventListener("online", onConfigUpdated)
