@@ -33,6 +33,15 @@
 **Tests:** Real interacting hooks/stores, deferred async boundaries and old Dexie cache round trips.
 **Status:** Not Started
 
+### TASK-13260.24 — UAT080 session refresh
+
+**Files:** AuthNZ refresh endpoint/dependencies/session manager/repository as required by the diagnosis; frontend refresh/proxy/connection and session-query lifecycle; existing real SQLite AuthNZ and authority regressions.
+- [ ] Reproduce the real request's outer `BEGIN IMMEDIATE` blocking the session service's second transaction; retain the observed wrong401 before implementation.
+- [ ] Use the existing non-locking request connection pattern while retaining the inner atomic refresh/CAS transaction, rotation and replay/revocation protections.
+- [ ] Distinguish retryable service failures from invalid sessions and verify rollback/repeated/concurrent refresh behavior with actual SQLite connections.
+- [ ] Verify retryable failures retain credentials; invalid sessions clear only their authority and stop cross-tab private queries; refresh cancellation cannot open an unrelated connection modal or discard saved/scoped data.
+- [ ] Independently review, run focused backend/frontend checks and scoped Bandit, then perform targeted real expiry/recovery before the next full UAT.
+
 ### TASK-13260.13 — UAT064
 
 **Files:** `apps/packages/ui/src/services/tldw/flashcards-generate-handoff.ts`, its five Notes/Media/sidepanel/Quiz producers, Flashcards page/GeneratePanel consumers, existing authority/logout cleanup; adjacent handoff and Notes/Flashcards/platform integration suites.
@@ -76,6 +85,15 @@
 - [ ] Verify analysis-disabled presets, terminal partial/failure/success, cancellation and unavailable progress. Run touched backend tests/Bandit and frontend lint/regressions.
 - [ ] Review and exercise real small-source analysis plus the exact Wikipedia attempt without bypassing its refusal.
 
+### TASK-13260.26 — UAT082 private ingest state
+
+**Files:** `store/quick-ingest-session.ts`, `store/quick-ingest.tsx`, Quick Ingest wizard/button, DocumentPicker, `services/tldw/quick-ingest-session-reattach.ts`, `quick-ingest-batch.ts`, auth cleanup and result actions; existing close/resume and authority regressions.
+- [ ] Reproduce completed Bob results visible after normal logout/admin login, plus delayed completion and persisted-state hydration after A→B→A.
+- [ ] Immediately mask/reset private state at verified authority changes and reject stale async work/actions without cancelling another account's server jobs.
+- [ ] Reject unowned persisted sessions/recent-document metadata; prevent late upserts recreating cleared state and old serial batch entries using new credentials.
+- [ ] Preserve same-account close/resume, reconnect and valid source actions; verify different servers and colliding numeric IDs.
+- [ ] Independently review, run scoped frontend checks, and exercise the exact same-browser account transition before the next full UAT.
+
 ### TASK-13260.17 — UAT060/066/071/072/073
 
 **Files:** `components/Media/ContentViewer.tsx`, Knowledge source card/preview type normalization, `components/Review/ViewMediaPage.tsx`, `hooks/useUndoNotification.tsx`, `components/Media/hooks/useContentEditState.tsx`, `hooks/useMediaReadingProgress.ts`; associated behavior suites.
@@ -107,11 +125,21 @@
 - [ ] Reproduce the successful ordinary Note save followed by `system.logs`403. Resolve a narrow authoritative entitlement contract, gate optional monitoring reads and discard delayed notices after account/note changes without weakening permissions or losing authorized feedback.
 - [ ] Verify real pointer/keyboard use with five notes/three recents, resize/reload/mobile, plus new/dirty/offline/stale-account status protections; review and commit.
 
-### TASK-13260.19 — UAT055/074
+### TASK-13260.25 — UAT081 Flashcard source links
 
-**Files:** `components/Flashcards/components/DeckStudyDashboard.tsx`, `tabs/ManageTab.tsx` and existing dashboard/ReviewTab/Manage tests.
+**Files:** `Flashcards/utils/source-reference.ts`, Notes route/editor hydration and canonical Media/Chat route helpers; source action and actual destination integration tests. Coordinate Notes edits with .13 and Chat changes with .14/.15.
+- [ ] Reproduce the actual Note source click leaving a blank editor while an owned source exists; compare the Media/message builder branches with their actual route consumers.
+- [ ] Use canonical destinations and owned loading, preserving dirty drafts and giving truthful missing/deleted/foreign source feedback.
+- [ ] Test click-to-loaded-source and reload for all three types, target changes, account generations and unavailable message conversation identity; URL-only tests are insufficient.
+- [ ] Independently review and confirm actual linked Note/Media/Chat content in targeted live checks.
+
+### TASK-13260.19 — UAT055/074/083/084
+
+**Files:** `components/Flashcards/components/DeckStudyDashboard.tsx`, `ReviewProgress.tsx`, `tabs/ManageTab.tsx`, `ReviewTab.tsx`, next-due query/locale copy and existing dashboard/ReviewTab/Manage tests.
 - [ ] Reproduce five expired learning cards displaying ten ready and actual Manage List deprecations.
 - [ ] Use `due + new` and native active/pending-deletion lists preserving all controls/states.
+- [ ] Reproduce shrinking due queue minus cumulative reviews reporting zero too soon; use consistent remaining semantics while preserving fixed Cram queues, refetch/failure behavior and newly due cards.
+- [ ] Label the next-due one-hour count accurately; verify staggered timestamps, boundary inclusion, capped uncertainty and actual translations.
 - [ ] Verify future/mixed/due-time states, row selection/edit/keyboard/pagination/Undo and actual queue agreement; review and live-check Study/Manage.
 
 ### TASK-13260.20 — UAT058/059/075/078

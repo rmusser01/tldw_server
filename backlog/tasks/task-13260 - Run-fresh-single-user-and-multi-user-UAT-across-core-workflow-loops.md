@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-15 10:21'
+updated_date: '2026-09-15 10:50'
 labels:
   - uat
   - testing
@@ -75,12 +75,16 @@ Cycle3 environment repair: repeated ENOSPC is dominated by the isolated multi fr
 Environment cache repair independently reviewed and verified: actual Next config comparison normal dev cache=true, isolated UAT=false, other normalized config/headers/redirects/rewrites/webpack identical; node syntax and scoped ESLint pass. Initial verifier omitted required advanced-mode NEXT_PUBLIC_API_URL and failed configuration validation before testing; corrected isolated env passed. Frontend48482/session52335 loginHTTP200, API42500 preserved, both runners resumed. No Python touched, Bandit inapplicable. Added shared caller-capability prerequisite TASK-13260.23 through CLI after stalled MCP calls under disk pressure; no duplicate record existed.
 
 Retained environment/cache evidence at output/playwright/cycle3-full-uat-2026-09-15/environment/README.md with4 hash-indexed files. Combined checkpoint verifies145 single captures/22 JSON,4 environment captures,167 scanned docs/tasks/evidence files,14 unique runtime credential values with0 matches, and25 current findings (9P2/16P3). Only the documented isolated dev-cache configuration changes application-tree files; all functional repairs remain pending frozen multi UAT.
+
+Cycle3 continued: Bob five-card Biology generation/save/review/reload and actual server schedule/session checks pass after normal re-login; source link opens blank Note (UAT081/task25), though direct visible library selection loads exact source. Normal Bob logout/admin login exposes prior Bob Quick Ingest result metadata (UAT082/task26); no stale source action clicked. Admin own sole-item deletion/restore preserves exact content and truthful date; hidden Trash071 and notifications072 recur. Alice prompt real system/request/reload passes; character replacement068 and settled-reload070 recur. Full multi still running; no application/test changes.
+
+Independent Bob/admin evidence review passes69files/68hashes/20JSON and supports functional claims. It additionally identifies Study display UAT083 (remaining double subtraction) and084 (one-hour nextdue count presented at one timestamp); both added to task19 and tracker. Currenttotal30open:12P2/18P3. Original sealed captures/report preserved; addenda recorded in runningtracker. No product/test changes while mainUAT completes.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Active UAT→review→fix loop remains In Progress. Previous findings001–055 have targeted repairs through d40e17dc81, with historical limits retained. Frozen cycle3 single-user execution is complete with22current findings (new056–076 plus reopened055); fresh multi-user UAT is in progress. Individual source/Chat/Note/card operations and manual-key recovery have successful controls, but duplicate/character/reload Chat state, private note URL transfer, study session accounting and presentation/recovery defects remain. Exact Wikipedia article retrieval is externally blocked. Current tracker, cycle3 evidence and repair plan contain the latest scope; this is not acceptance or release sign-off.
+Cycle3 UAT remains active at application revision d40e17dc81 with documented cache-only exception c10e1464fc. Single execution finished with failures; main multi-user execution continues. Tracker has30open findings:12P2/18P3 across UAT056-084 plus reopened055, assigned to repair children13-26. Bob learning persistence and owned API/admin recovery controls are independently supported; source navigation081, cross-account ingest metadata082 and Study display083/084 fail. Exact Wikipedia stores zero articles in both modes and remains blocked. No full issue-free pass or completed repair claim.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

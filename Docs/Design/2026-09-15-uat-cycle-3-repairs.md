@@ -4,7 +4,7 @@ Tracking: repair children under TASK-13260. Evidence: [running tracker](../Revie
 
 Environment-only exception during the frozen multi-user run: repeated disk exhaustion required disabling Next's development filesystem cache when the existing `TLDW_NEXT_DIST_DIR` selects an isolated UAT build. The four-line configuration change preserves default development behavior and all application logic. Both browser profiles, API and databases survive the frontend restart. Actual normalized configuration comparison and independent review passed; record the transition in the evidence rather than claiming identical build configuration throughout.
 
-This design covers UAT056–079 and reopened UAT055 Manage scope, including evidence-review discovery076 and fresh multi-user discoveries077–079. Fresh multi-user UAT is still running. Finish that frozen matrix and reconcile its findings before changing application code or tests. The user has authorized the continuing UAT → review → fix loop; these are repairs to existing behavior within that scope.
+This design covers UAT056–084 and reopened UAT055 Manage scope, including evidence-review discoveries076/083/084 and fresh multi-user discoveries077–082. Fresh multi-user UAT is still running. Finish that frozen matrix and reconcile its findings before changing application code or tests. The user has authorized the continuing UAT → review → fix loop; these are repairs to existing behavior within that scope.
 
 ## Shared contracts
 
@@ -54,6 +54,8 @@ Use one validated linked local history. Dexie message IDs are global primary key
 
 Recommended implementation order: canonical selection, first-saved neutral bootstrap, then mirror reconciliation. Cover actual picker interaction, deferred legacy/profile reads, the observed two-row old mirror versus three server rows, repeated reload, unsynced draft plus fetched reply, older snapshots during streaming, and identical IDs in different accounts.
 
+Multi-user evidence adds a conversation with no greeting: two server rows (user plus custom-named Cedar assistant) become one visible user after settled reload. The actual API adapter already normalizes that custom sender and timestamp correctly; do not change sender projection based on raw endpoint field names. Its independent read omitted metadata, so absent metadata in that capture is not proof of absent stored speaker identity. Add this exact no-greeting fixture through the real adapter/loader, while retaining the single-user Dexie capture as the established incomplete-mirror diagnosis.
+
 ## 4. Truthful ingestion — TASK-13260.16 / UAT056/057/061/065
 
 Validate required analysis provider configuration before advancing from Configure to a Ready review. Keep final submission validation for stale state, with the same actionable field focus. Analysis-disabled presets remain valid without a model.
@@ -80,9 +82,13 @@ Expanded Views, Filters and Recent Notes must not consume all sidebar height. Bo
 
 Ordinary successful saves must not eagerly read `monitoring/alerts`, whose router requires `system.logs`. Preserve optional feedback for users who actually have that permission, including custom roles. Use TASK-13260.23's narrow current-user capabilities; deployment/OpenAPI flags and an `admin` role-name check are not authoritative entitlement checks. Capture the save's authority generation before its first await and carry it into monitoring, using the existing guarded Notes transport and the verified owner's `user_id` filter. Check the originating account and selected Note before dispatch and before publishing any alert. Permission lookup failure must not turn a successful Note save into an error or reveal a prior account's notice. Test ordinary denial, authorized feedback, unavailable lookup and delayed save/alert A→B→A or note replacement.
 
-## 7. Study eligibility and supported lists — TASK-13260.19 / UAT055/074
+## 7. Study counts and supported lists — TASK-13260.19 / UAT055/074/083/084
 
 Backend analytics categories overlap: `due` includes expired learning/relearning/review cards; `learning` includes future learning too. Dashboard readiness is `due + new`. Keep Learning as a descriptive count and preserve the actual queue's existing disjoint filters. Test future learning, expired learning, mixed states and a controlled due-time transition; capping the incorrect sum at total is insufficient.
+
+During due-mode Study, the refreshed queue total already excludes graded cards. ReviewProgress currently subtracts cumulative reviewedCount again, reaching zero while two actual cards remain. Give the progress component explicit, consistent remaining/total semantics; preserve Cram's fixed queue and index accounting. Verify the real five-card rating/invalidation sequence, accessible announcement, failed rating, transient refetch, newly due cards and deck/account changes. Avoid freezing an initial due count if that would misreport a queue that legitimately changes.
+
+The next-due query counts cards in a one-hour interval beginning at the earliest due time. Its label must identify that window rather than imply all cards are due at the earliest instant. Preserve the existing bounded/capped-query uncertainty. Test staggered due times, exact boundary inclusion, a single card and locale-visible copy with actual translation resources.
 
 Replace both active and pending-deletion AntD Lists in Manage with native supported markup. Preserve loading and empty states, compact/expanded rows, action menus, selection, keyboard focus, pagination, pending deletion and Undo. Existing RecentStudySessions is an adjacent working pattern, not proof that Manage is repaired.
 
@@ -125,6 +131,34 @@ Add only `can_read_scheduled_tasks`, `can_read_notifications` and `can_read_moni
 The existing self-profile requires an active verified stored user, while Home/Notes permission eligibility does not imply that profile contract. Bob's profile200 is confirmed, but another retained profile403 has no captured body. A separate narrow capability endpoint preserves profile verification and avoids extending deprecated, optionally410 `/auth/me`. Do not assign the uncaptured403 a reason or equate a discovery403 with three known denied permissions.
 
 Keep frontend permission discovery separate from deployment capabilities. Bind results to verified server/account/org plus authority generation; immediately mask them on disconnect/account change and reject delayed A→B→A results. Distinguish allowed, denied, unknown and unsupported. Refresh on reconnect, explicit refresh and a protected request's403; actual endpoint authorization remains decisive. Do not persist these decisions with preferences or reuse them indefinitely from login state. Home and Notes consume this shared bounded contract in their own repair units.
+
+## 12. Session refresh and recovery — TASK-13260.24 / UAT080
+
+The refresh endpoint holds the SQLite write lock through `get_db_transaction` while calling a session service that opens a separate write transaction. This causes a self-lock at normal access-token renewal. Reuse the existing non-locking auth connection pattern for request-level user reads; preserve the session repository's narrow atomic refresh/CAS transaction and replay protections. Do not remove the inner transaction, extend session lifetimes or relax revocation to hide the failure.
+
+Separate actual invalid/expired/revoked sessions from transient database/service failures. A retryable refresh-service outcome must not be reported as invalid credentials or clear a valid refresh token. Preserve rollback safety, avoid replaying non-idempotent application writes without proof, and retain correct401 behavior for genuinely invalid tokens. Verify the real SQLite endpoint/dependency/session chain with separate connections; a mocked session manager returning tokens cannot reproduce this failure. Include repeated refresh, concurrent rotation/replay, injected transient error and revoked/expired controls.
+
+At the frontend, a refresh-triggered request cancellation must not open a server-unreachable modal. A genuine invalid-session response must clear only the originating authority, gate protected content and stop private polling across tabs, with a usable sign-in path. Retryable failures retain credentials and truthful recovery guidance. Preserve saved cards and account-scoped offline drafts; late refresh success/failure after A→B→A cannot restore or clear another authority. Inspect actual connection/session-query/proxy integration rather than weakening generic error reporting.
+
+The actual request-core catch drops the constructed AbortError's name/code into status0 and message text; the strict cancellation matcher then misses the longer refresh-abort phrase. Preserve structured caller cancellation through this boundary, with separate caller-abort and genuine deadline-timeout controls. Refresh helpers must retain status instead of turning all refresh failures into generic errors followed by a stale-token retry. The shared online poller continues calling `checkOnce` while disconnected, and the connection store only early-gates missing single-user credentials; add the appropriate multi-user/session-rejection gate. Clear credentials only on authoritative terminal refresh rejection, not any endpoint-specific401.
+
+## 13. Flashcard source destinations — TASK-13260.25 / UAT081
+
+The actual Note source action opens `/notes?source_ref_id=…`, but Notes does not consume that query; it stays on an empty New note despite an available owned source. Add a direct, authority-scoped Note selection through the existing editor loading and unsaved-change protections. Do not depend on the current list page containing the source, and do not silently display a blank or previous Note when an explicit target is unavailable. Avoid the global last-note setting for this link; delayed setting hydration must not replace an explicit route target.
+
+Compare all three branches of the shared source-reference builder with actual consumers. Media currently consumes `id`, while the builder emits `source_ref_id`. The existing `buildChatThreadPath({ serverChatId })` uses the server-chat parameter that Playground actually consumes; use that canonical conversation destination instead of the builder's ignored `conversation_id` and `source_ref_id`. The separate character-mode route aliases apply only with `mode=character`; they must not force ordinary Chat sources into Character mode. The Note branch is live-confirmed; Media/message branches are static related scope until independently exercised. A message ID without a known owned conversation must not pretend to be a resolvable conversation link.
+
+Test actual click-to-loaded-source behavior, not href string assertions alone. Cover Note, Media and message sources, reload/direct entry, missing/deleted/foreign records, dirty Note cancellation, rapid target replacement and delayed A→B→A hydration. Preserve server authorization and neutral versus explicit-character Chat semantics. If message focus is unsupported, do not invent a query flag that the destination ignores. Coordinate Notes edits with TASK-13260.13 and Chat loader changes with .14/.15.
+
+## 14. Private ingest state — TASK-13260.26 / UAT082
+
+Normal Bob logout and admin login leave Bob's completed Quick Ingest filename/results/actions visible under admin authority. Clear or immediately mask private ingest inputs, progress, result metadata and source actions at logout/account/server boundaries. Bind asynchronous start, polling, completion, cancellation and persisted-state hydration to the captured authority generation; an old completion must not repopulate the replacement account, including A→B→A.
+
+Preserve same-account close/resume behavior and server-owned jobs. Do not cancel or delete a prior account's job using new credentials, and do not infer ownership from colliding numeric Media/job IDs. Source actions require the result's still-current owner before dispatch/navigation. Diagnose the actual store and mounted wizard lifecycles before selecting the smallest state reset; no broad storage wipe or global auth workaround. Regression and targeted same-browser verification must include the observed completed-result transition and a delayed in-flight result.
+
+Read-only diagnosis confirms `quick-ingest-session.ts` persists one tab-wide key without account/server identity, and logout does not clear it. The button resumes terminal sessions and the wizard hydrates their results using only session ID/open revision. Completed results also populate unscoped `recentlyIngestedDocs`, exposed by DocumentPicker. Reattach and direct batch work use current credentials for retained job IDs; late tracking/upsert can recreate a cleared session. These adjacent asynchronous consequences are source-derived risks, not observed cross-account server writes.
+
+Bind persisted sessions and recent-document metadata to verified server/principal identity; reject legacy unowned data and mask it until authority resolves. Use session ID plus captured authority generation for each asynchronous operation, including serial batch entries, uploads, polling, cancellation and result actions. Stop pending client work at replacement and prevent redispatch using new credentials. Preserve same-principal token refresh and same-account reload/resume; a token rotation alone is not an account change. Cover actual store hydration, button resume, wizard, reattach and batch boundaries instead of testing a logout clear in isolation.
 
 ## Completion boundary
 

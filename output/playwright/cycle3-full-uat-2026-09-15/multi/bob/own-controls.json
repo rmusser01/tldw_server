@@ -1,0 +1,39 @@
+{
+  "accountId": "3",
+  "results": [
+    {
+      "label": "own-note",
+      "path": "/api/v1/notes/a80707b3-c761-4d8a-8bbe-fe2222886bc2",
+      "status": 200,
+      "id": "a80707b3-c761-4d8a-8bbe-fe2222886bc2",
+      "title": "Cycle3 Bob private note",
+      "content": "Bob owns this fictional notebook entry. The Copper Finch observatory opens at 09:40 on Tuesdays. Bob-only sentinel: BOB-COPPER-FINCH-20260915.",
+      "version": 1,
+      "client_id": "3"
+    },
+    {
+      "label": "admin-user-list",
+      "path": "/api/v1/admin/users",
+      "status": 403,
+      "detail": "Access denied. Required role(s): admin"
+    },
+    {
+      "label": "home-tasks-denial",
+      "path": "/api/v1/scheduled-tasks",
+      "status": 403,
+      "detail": "Permission denied: missing tasks.read"
+    },
+    {
+      "label": "home-results-denial",
+      "path": "/api/v1/scheduled-tasks/results?limit=50",
+      "status": 403,
+      "detail": "Permission denied: missing tasks.read"
+    },
+    {
+      "label": "note-monitoring-denial",
+      "path": "/api/v1/monitoring/alerts?source=notes.create&unread_only=true&limit=50",
+      "status": 403,
+      "detail": "Permission denied: missing system.logs"
+    }
+  ]
+}

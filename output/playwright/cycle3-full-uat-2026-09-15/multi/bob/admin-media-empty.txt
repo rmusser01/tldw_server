@@ -1,0 +1,73 @@
+### Page
+- Page URL: http://127.0.0.1:18281/media
+- Console: 2 errors, 2 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f15e11]:
+  - generic [ref=f15e14]:
+    - link "Skip to main content" [ref=f15e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f15e16]:
+      - button "Expand sidebar" [ref=f15e17] [cursor=pointer]
+      - button "New Chat" [ref=f15e21] [cursor=pointer]
+      - generic [ref=f15e24]:
+        - button "Quick Ingest" [ref=f15e25] [cursor=pointer]
+        - button "Chat" [ref=f15e29] [cursor=pointer]
+        - button "Prompts" [ref=f15e32] [cursor=pointer]
+        - button "Characters" [ref=f15e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f15e41] [cursor=pointer]
+        - button "World Books" [ref=f15e45] [cursor=pointer]
+        - button "Notes" [ref=f15e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f15e52] [cursor=pointer]
+        - button "Media" [ref=f15e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f15e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f15e69] [cursor=pointer]
+        - button "Kanban" [ref=f15e75] [cursor=pointer]
+        - button "Watchlists" [ref=f15e77] [cursor=pointer]
+      - generic [ref=f15e82]:
+        - button "Open Notes Dock" [ref=f15e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f15e88] [cursor=pointer]
+        - button "Settings" [ref=f15e91] [cursor=pointer]
+    - main [ref=f15e95]:
+      - generic [ref=f15e96]:
+        - generic [ref=f15e99]:
+          - generic [ref=f15e100]:
+            - button "Expand sidebar" [ref=f15e101] [cursor=pointer]
+            - generic [ref=f15e103]:
+              - img "tldw Assistant" [ref=f15e104]
+              - generic [ref=f15e105]: tldw Assistant
+              - button "Companion Home" [ref=f15e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f15e110] [cursor=pointer]
+          - generic [ref=f15e113]:
+            - button "Search - Open command palette" [ref=f15e114] [cursor=pointer]:
+              - generic [ref=f15e118]: Search
+              - generic [ref=f15e119]: ⌘K
+            - button "Open settings" [ref=f15e120] [cursor=pointer]
+            - generic [ref=f15e132]:
+              - button "Notifications, 0 unread" [ref=f15e133] [cursor=pointer]
+              - status [ref=f15e137]: Notifications are active
+            - button "Switch to light theme" [ref=f15e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f15e145] [cursor=pointer]:
+              - generic [ref=f15e146]: "?"
+        - generic [ref=f15e150]:
+          - heading "Media Inspector" [level=1] [ref=f15e151]
+          - generic [ref=f15e152]:
+            - generic [ref=f15e153]:
+              - generic [ref=f15e154]:
+                - generic [ref=f15e155]: Results
+                - generic [ref=f15e156]: 0 / 0
+              - generic [ref=f15e157]:
+                - button "Standard view" [pressed] [ref=f15e158] [cursor=pointer]
+                - button "Compact view" [ref=f15e164] [cursor=pointer]
+            - generic [ref=f15e168]:
+              - heading "Get started — ingest your first content" [level=3] [ref=f15e172]
+              - paragraph [ref=f15e173]: Paste a YouTube URL, or use Quick Ingest to upload PDFs, audio, EPUB, and more.
+              - generic [ref=f15e174]:
+                - textbox "Paste a YouTube URL..." [ref=f15e175]
+                - button "Ingest" [ref=f15e176] [cursor=pointer]
+              - button "Skip for now" [ref=f15e178] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f15e184] [cursor=pointer]
+  - alert [ref=f15e10]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T10-35-43-473Z.log#L3-L6

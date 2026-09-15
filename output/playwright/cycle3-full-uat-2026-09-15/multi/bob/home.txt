@@ -1,0 +1,198 @@
+### Page
+- Page URL: http://127.0.0.1:18281/
+- Console: 2 errors, 2 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e66]:
+    - link "Skip to main content" [ref=e67] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e68]:
+      - button "Expand sidebar" [ref=e69] [cursor=pointer]
+      - button "New Chat" [ref=e73] [cursor=pointer]
+      - generic [ref=e76]:
+        - button "Quick Ingest" [ref=e77] [cursor=pointer]
+        - button "Chat" [ref=e81] [cursor=pointer]
+        - button "Prompts" [ref=e84] [cursor=pointer]
+        - button "Characters" [ref=e88] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e93] [cursor=pointer]
+        - button "World Books" [ref=e97] [cursor=pointer]
+        - button "Notes" [ref=e100] [cursor=pointer]
+        - button "Knowledge QA" [ref=e104] [cursor=pointer]
+        - button "Media" [ref=e112] [cursor=pointer]
+        - button "Document Workspace" [ref=e115] [cursor=pointer]
+        - button "Research Workspace" [ref=e121] [cursor=pointer]
+        - button "Kanban" [ref=e127] [cursor=pointer]
+        - button "Watchlists" [ref=e129] [cursor=pointer]
+      - generic [ref=e134]:
+        - button "Open Notes Dock" [ref=e135] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e140] [cursor=pointer]
+        - button "Settings" [ref=e143] [cursor=pointer]
+    - main [ref=e147]:
+      - generic [ref=e148]:
+        - generic [ref=e151]:
+          - generic [ref=e152]:
+            - button "Expand sidebar" [ref=e153] [cursor=pointer]
+            - generic [ref=e155]:
+              - img "tldw Assistant" [ref=e156]
+              - generic [ref=e157]: tldw Assistant
+              - button "Companion Home" [ref=e158] [cursor=pointer]
+              - button "Show shortcuts" [ref=e162] [cursor=pointer]
+          - generic [ref=e165]:
+            - button "Search - Open command palette" [ref=e166] [cursor=pointer]:
+              - generic [ref=e170]: Search
+              - generic [ref=e171]: ⌘K
+            - button "Open settings" [ref=e172] [cursor=pointer]
+            - generic [ref=e184]:
+              - button "Notifications, 0 unread" [ref=e185] [cursor=pointer]
+              - status [ref=e189]: Notifications are active
+            - button "Switch to light theme" [ref=e190] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e197] [cursor=pointer]:
+              - generic [ref=e198]: "?"
+        - generic [ref=e199]:
+          - status [ref=e200]:
+            - paragraph [ref=e201]: Server setup isn't finished. Everything is connected, so you can keep working — resume setup whenever you like.
+            - generic [ref=e202]:
+              - button "Resume setup" [ref=e203] [cursor=pointer]
+              - button "Dismiss" [ref=e204] [cursor=pointer]
+          - generic [ref=e205]:
+            - generic [ref=e206]:
+              - generic [ref=e207]:
+                - generic [ref=e208]:
+                  - generic [ref=e209]:
+                    - paragraph [ref=e210]: Companion Home
+                    - heading "Companion" [level=1] [ref=e211]
+                    - paragraph [ref=e212]: Review what is waiting in your inbox, what needs attention next, and which work threads are worth resuming right now.
+                  - generic [ref=e213]:
+                    - button "Customize Home" [ref=e214] [cursor=pointer]
+                    - button "Refresh" [ref=e215] [cursor=pointer]
+                - generic [ref=e216]:
+                  - paragraph [ref=e217]: Setup
+                  - generic [ref=e218]:
+                    - generic [ref=e219]:
+                      - heading "Companion setup required" [level=2] [ref=e220]
+                      - paragraph [ref=e221]: Personalization is unavailable on this connection. Your server operator may need to enable the backend feature using the configuration guide.
+                    - link "Personalization configuration guide" [ref=e222] [cursor=pointer]:
+                      - /url: https://github.com/rmusser01/tldw_server/blob/main/Docs/Product/Personalization_Design.md#current-status-v02x-dev
+                - generic [ref=e223]:
+                  - generic [ref=e224]:
+                    - paragraph [ref=e225]: Inbox
+                    - paragraph [ref=e226]: "0"
+                    - paragraph [ref=e227]: Unread or newly surfaced items
+                  - generic [ref=e228]:
+                    - paragraph [ref=e229]: Goals
+                    - paragraph [ref=e230]: "0"
+                    - paragraph [ref=e231]: Live priorities in focus
+                  - generic [ref=e232]:
+                    - paragraph [ref=e233]: Reading
+                    - paragraph [ref=e234]: "0"
+                    - paragraph [ref=e235]: Queued items ready to revisit
+                  - generic [ref=e236]:
+                    - paragraph [ref=e237]: Resume
+                    - paragraph [ref=e238]: "0"
+                    - paragraph [ref=e239]: Threads worth picking back up
+              - generic [ref=e240]:
+                - generic [ref=e241]:
+                  - heading "Getting Started" [level=3] [ref=e242]
+                  - generic [ref=e243]: 0 of 2 complete
+                - generic [ref=e244]:
+                  - link "Add your first source Upload a video, article, or document to get started." [ref=e245] [cursor=pointer]:
+                    - /url: /media
+                    - generic [ref=e253]:
+                      - generic [ref=e254]: Add your first source
+                      - generic [ref=e255]: Upload a video, article, or document to get started.
+                  - link "Start a conversation Chat with the AI about anything, or ask about your content." [ref=e256] [cursor=pointer]:
+                    - /url: /chat
+                    - generic [ref=e263]:
+                      - generic [ref=e264]: Start a conversation
+                      - generic [ref=e265]: Chat with the AI about anything, or ask about your content.
+              - generic [ref=e266]:
+                - generic [ref=e269]:
+                  - generic [ref=e273]:
+                    - generic [ref=e274]: "What's next: Add your first source"
+                    - generic [ref=e275]: Upload a video, article, or document to get started.
+                  - button "Go" [ref=e276] [cursor=pointer]
+                - generic [ref=e281]:
+                  - generic [ref=e282]:
+                    - generic [ref=e283]:
+                      - heading "Automation Inbox" [level=2] [ref=e284]
+                      - paragraph [ref=e285]: 0 signals
+                    - generic [ref=e286]: "0"
+                  - generic [ref=e287]:
+                    - generic [ref=e288]: Automation signals unavailable
+                    - paragraph [ref=e289]: Scheduled-task results are temporarily unavailable. Other Home cards remain available.
+                - generic [ref=e290]:
+                  - generic [ref=e291]:
+                    - generic [ref=e292]:
+                      - heading "Inbox Preview" [level=2] [ref=e293]
+                      - paragraph [ref=e294]: Setup required
+                    - generic [ref=e295]: "0"
+                  - generic [ref=e296]:
+                    - generic [ref=e297]: Setup required
+                    - paragraph [ref=e298]: Connect your tldw server and enable personalization to unlock this feature. Companion inbox items unlock once personalization is available for this workspace.
+                - generic [ref=e299]:
+                  - generic [ref=e300]:
+                    - generic [ref=e301]:
+                      - heading "Needs Attention" [level=2] [ref=e302]
+                      - paragraph [ref=e303]: Setup required
+                    - generic [ref=e304]: "0"
+                  - generic [ref=e305]:
+                    - generic [ref=e306]: Setup required
+                    - paragraph [ref=e307]: Connect your tldw server and enable personalization to unlock needs-attention signals from goals and reading.
+              - generic [ref=e308]:
+                - generic [ref=e309]:
+                  - generic [ref=e310]:
+                    - generic [ref=e311]:
+                      - heading "Resume Work" [level=2] [ref=e312]
+                      - paragraph [ref=e313]: Setup required
+                    - generic [ref=e314]: "0"
+                  - generic [ref=e315]:
+                    - generic [ref=e316]: Setup required
+                    - paragraph [ref=e317]: Connect your tldw server and enable personalization to unlock resume suggestions across goals, reading, and notes.
+                - generic [ref=e318]:
+                  - generic [ref=e319]:
+                    - generic [ref=e320]:
+                      - heading "Goals / Focus" [level=2] [ref=e321]
+                      - paragraph [ref=e322]: Setup required
+                    - generic [ref=e323]: "0"
+                  - generic [ref=e324]:
+                    - generic [ref=e325]: Setup required
+                    - paragraph [ref=e326]: Connect your tldw server and enable personalization to unlock this feature. Enable Companion to turn goals and focus prompts into a live dashboard block.
+                - generic [ref=e327]:
+                  - generic [ref=e328]:
+                    - generic [ref=e329]:
+                      - heading "Recent Activity" [level=2] [ref=e330]
+                      - paragraph [ref=e331]: Setup required
+                    - generic [ref=e332]: "0"
+                  - generic [ref=e333]:
+                    - generic [ref=e334]: Setup required
+                    - paragraph [ref=e335]: Connect your tldw server and enable personalization to unlock this feature. Enable Companion to review recent activity and capture trails here.
+                - generic [ref=e336]:
+                  - generic [ref=e337]:
+                    - generic [ref=e338]:
+                      - heading "Reading Queue" [level=2] [ref=e339]
+                      - paragraph [ref=e340]: Temporarily unavailable
+                    - generic [ref=e341]: "0"
+                  - generic [ref=e342]:
+                    - generic [ref=e343]: Temporarily unavailable
+                    - paragraph [ref=e344]: Reading queue data is temporarily unavailable.
+            - generic [ref=e345]:
+              - generic [ref=e346]:
+                - heading "Quick actions" [level=2] [ref=e347]
+                - paragraph [ref=e348]: Jump to the main features.
+              - generic [ref=e349]:
+                - link "Open Chat Continue active work in the main chat workspace." [ref=e350] [cursor=pointer]:
+                  - /url: /chat
+                  - generic [ref=e351]: Open Chat
+                  - paragraph [ref=e352]: Continue active work in the main chat workspace.
+                - link "Open Knowledge Review sources, notes, and captured knowledge from the main workspace." [ref=e353] [cursor=pointer]:
+                  - /url: /knowledge
+                  - generic [ref=e354]: Open Knowledge
+                  - paragraph [ref=e355]: Review sources, notes, and captured knowledge from the main workspace.
+                - link "Open Analysis Review and compare media from the main workspace." [ref=e356] [cursor=pointer]:
+                  - /url: /media-multi
+                  - generic [ref=e357]: Open Analysis
+                  - paragraph [ref=e358]: Review and compare media from the main workspace.
+  - button "Open Next.js Dev Tools" [ref=e47] [cursor=pointer]
+  - alert [ref=e51]: TLDW Chatbook
+```
