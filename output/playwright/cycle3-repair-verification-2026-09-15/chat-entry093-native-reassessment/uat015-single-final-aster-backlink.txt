@@ -1,0 +1,15 @@
+### Result
+{"checkedAt":"2026-09-15T22:24:00.315Z","note":"","url":"http://127.0.0.1:18280/chat","title":"Cycle3 Aster Guide Chat (20260915_084036) | tldw","body":"Skip to main content\ntldw Assistant\nCycle3 Aster Guide Chat (20260915_084036)\nSaved\nCharacter: Cycle3 Aster Guide\nSearch\n⌘K\nTemp\nCharacter\nNotifications are active\n?\nChat\n\nCockpit rails hidden. Chat and composer remain active.\n\nCharacter Chat\nCycle3 Aster Guide\nConversation timeline\nFocus\nShortcuts\nArtifacts panel closed\n\nChecking chat model readiness\n\nYour character selection and draft are kept while tldw_server checks which chat models can be used with Cycle3 Aster Guide.\n\nTry again\nCycle3 Aster Guide\n• 1:40 AM\ngreeting\n\nHello, I can help with Project Aster garden facts.\n\nWas this helpful?\n•••\nYou\n• 1:40 AM\n\nHow many raised beds does Project Aster have?\n\n•••\nCycle3 Aster Guide\n• 1:40 AM\nModel’s reasoning (optional)\n\nProject Aster has seven raised beds.\n\nWas this helpful?\nComposer\nTRY AGAIN\nModes\nMCP\nNone\nSearch & Context\nPrompt\nRole-play setup\nBuddy & Persona\nOpenUI\nAttach image\nMore tools\nChat Settings\nLLaMa.cpp / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf\nChecking model readiness\nCharacter\nCycle3 Aster Guide\nCharacter context\nIncluded\nChat\n3 messages\n84 + ~0 = 84 tokens\nSaved\nAdvanced controls\nAdd expression images for Cycle3 Aster Guide.\nEdit expressions\nDismiss\nContext rail\nRestore context sidechannel\nRuntime rail\nRestore runtime sidechannel\n\nChat | tldw"}
+### Ran Playwright code
+```js
+await (async(page)=>{await page.getByRole("button",{name:"Snippet: Cycle3 Aster Guide Chat (20260915_084036)",exact:true}).click({timeout:10000});await page.getByRole("textbox",{name:"Note content",exact:true}).waitFor({timeout:10000});const note=await page.getByRole("textbox",{name:"Note content",exact:true}).inputValue();await page.getByRole("button",{name:"More actions",exact:true}).click();await page.getByRole("menuitem",{name:"Open conversation",exact:true}).click();await page.getByRole("log",{name:"Chat messages"}).getByText("Project Aster has seven raised beds.",{exact:true}).waitFor({timeout:20000});return {checkedAt:new Date().toISOString(),note,url:page.url(),title:await page.title(),body:await page.locator("body").innerText()};})(page);
+```
+### Open tabs
+- 0: (current) [Cycle3 Aster Guide Chat (20260915_084036) | tldw](http://127.0.0.1:18280/chat)
+- 1: [Server Settings | tldw](http://127.0.0.1:18280/settings/tldw)
+- 2: [GitHub - rmusser01/tldw_browser_assistant: Browser extension for tldw_server · GitHub](https://github.com/rmusser01/tldw_browser_assistant)
+### Page
+- Page URL: http://127.0.0.1:18280/chat
+- Page Title: Cycle3 Aster Guide Chat (20260915_084036) | tldw
+### Events
+- New console entries: ../../../../../private/tmp/.playwright-cli/console-2026-09-15T22-21-56-075Z.log#L4-L7

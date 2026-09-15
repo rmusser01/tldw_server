@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-15 21:27'
+updated_date: '2026-09-15 22:55'
 labels:
   - uat
   - testing
@@ -111,6 +111,8 @@ User latest-dev clarification exposed missed baseline check: branch based on exi
 Baseline correction complete under13260.32: reviewed Chat fixa0c48e84c4 then merge267c00cab1 includes freshly verified dev2e1a5e58d3 (0dev-only commits). Retained original32-commitmiss transparently. Combined207backend/174WebUI and scoped/static/security gates documented; both isolated modes restarted,4HTTP200 at20:48:28UTC. Original profiles/data preserved. Continue targeted actual Dexie/Chatbacklink, QAaccount and remaining Media/sourcecontrols before another fullfreshsingle/multi matrix; no new fullUAT pass claimed.
 
 Post-dev-integration targetednative: Cedaractualbacklink/correctcharacter/originalanswer/tworeloads/ownedDexie andoriginalanswercard/Study pass; earlyEnd andpracticeCram also pass. New093canonicalChatentryrenderloop under33 (reviewpending); titleblank058/Untitled062followup under34. Visualanswer-obscuringhint094removed, independentlyreviewedandnativeverified under35Done. Currentcycle3findings40 (15P2/25P3), fullfreshacceptancepending. Retained27filechat-mirror-native-round8 and15filestudy-hint094 bundles, credential-scanned/hash-indexed; nativecapturequalificationsexplicit.
+
+2026-09-15 continuation: confirmed original branch missed32 already-fetched dev commits; origin/dev2e1a5e58d3 is now included by merge267c00cab1, current dev-only count0. User was explicitly informed that original latest-dev-at-start assurance was incorrect. Reviewed repair checkpoints: Settings form a246441257, cached Chat title ordering7c577342fb, Chat sidebar/composer layoutb2f2b4ba31. All remain pending required native/full fresh acceptance. Current compiler matches90 existing baseline signatures,0added/0removed; final .33 ownership/drawer review corrections still in progress. Tracker records43findings16P2/27P3. Retaining23native reassessment artifacts plus SHA, original failures and interrupted-wait limitations, with14credential scan clear. Full fresh single/multi rerun has not started.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

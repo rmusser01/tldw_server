@@ -1,0 +1,74 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:28470) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > UAT093 actual WebUI storage boundary > preserves saved entry through independent hook state: cross-tab
+CROSS_TAB_RENDER {
+  mode: 'tracked_character',
+  kind: 'character',
+  id: '7',
+  displayName: 'Other tab choice',
+  avatarUrl: null,
+  systemPromptSnapshot: null,
+  source: 'tracked'
+}
+
+ ❯ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (34 tests | 1 failed | 33 skipped) 665ms
+     ↓ registers the webui chat route context on mount
+     ↓ waits for session scope readiness before consuming the one-time restore pass
+     ↓ falls back to recent chat only when restore reports nothing restored
+     ↓ stops recent-chat initialization when restore reports cancellation
+     ↓ does not overwrite a server chat selected while session scope initializes
+     ↓ applies explicit character chat route ids before persisted session restore
+     ↓ applies character route ids before persisted session restore
+     ↓ applies a settings-return server chat before persisted session restore
+     ↓ selects the saved Flashcard source conversation through the actual neutral Chat route consumer
+     ↓ applies a sidepanel handoff before persisted session restore
+     ↓ starts a fresh character route chat over an active server chat
+     ↓ settles canonical saved entry with the real session subscription and local loader (StrictMode=false)
+     ↓ settles canonical saved entry with the real session subscription and local loader (StrictMode=true)
+     ↓ cancels pending generic restoration before applying an explicit settings target
+     ↓ finishes a delayed current settings local-history load
+     ↓ finishes a delayed current timeline local-history load
+     ↓ does not complete a failed local settings return as a successful server selection
+     ↓ keeps a saved target over a previous character while profile is delayed
+     ↓ keeps a saved target over a previous character while messages is delayed
+     ↓ does not install a late saved identity after picker changes during metadata fetch
+     ↓ does not install a late saved identity after picker-roundtrip changes during metadata fetch
+     ↓ does not install a late saved identity after replacement changes during metadata fetch
+     ↓ does not install a late saved identity after principal changes during metadata fetch
+     ↓ does not replay a consumed saved route or apply a late profile over a new picker choice (same turn false)
+     ↓ does not replay a consumed saved route or apply a late profile over a new picker choice (same turn true)
+     ↓ discards optional profile completion after replacement
+     ↓ discards optional profile completion after principal
+     ↓ discards optional profile completion after unmount
+     ↓ waits for shared selection storage and a later queued picker before metadata readiness (new picker false)
+     ↓ waits for shared selection storage and a later queued picker before metadata readiness (new picker true)
+     ↓ preserves saved entry through independent hook state: immediate
+     ↓ preserves saved entry through independent hook state: held-profile
+     ↓ preserves saved entry through independent hook state: newer-picker
+     × preserves saved entry through independent hook state: cross-tab 664ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > UAT093 actual WebUI storage boundary > preserves saved entry through independent hook state: cross-tab
+AssertionError: expected '7' to be '5' // Object.is equality
+
+Expected: "5"
+Received: "7"
+
+ ❯ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx:878:66
+    842|   })
+    843|
+    844| })
+       |   ^
+    845|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 33 skipped (34)
+   Start at  15:28:15
+   Duration  3.79s (transform 1.35s, setup 85ms, import 2.73s, tests 665ms, environment 221ms)

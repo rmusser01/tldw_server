@@ -1,0 +1,159 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:26042) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > UAT093 actual WebUI storage boundary > preserves saved entry through independent hook state: immediate
+MISMATCH_AT_CLEAR {
+  serverChatId: 'robot',
+  serverChatCharacterId: 5,
+  selectedTrackedCharacterId: '4',
+  selectedAssistant: {
+    kind: 'character',
+    id: '4',
+    name: 'Cedar',
+    avatar_url: null,
+    system_prompt: null,
+    metadata: { selectionMode: 'tracked' },
+    slug: undefined,
+    greeting: undefined,
+    buddy_summary: null,
+    extensions: null
+  },
+  activeCharacterSelection: {
+    id: '4',
+    name: 'Cedar',
+    avatar_url: null,
+    system_prompt: null,
+    greeting: null,
+    slug: null,
+    extensions: null
+  }
+}
+
+stdout | src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > UAT093 actual WebUI storage boundary > preserves saved entry through independent hook state: immediate
+WEB_STORAGE_TRACE immediate [{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":null,"load":"loading","messages":0},{"id":"robot","meta":true,"character":null,"load":"loading","messages":0},{"id":"robot","meta":true,"character":null,"load":"loading","messages":0},{"id":"robot","meta":true,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":null,"meta":false,"character":null,"load":"idle","messages":0}] stored {"kind":"character","id":"5","name":"Assistant","avatar_url":null,"system_prompt":null,"metadata":{"selectionMode":"tracked"},"buddy_summary":null,"extensions":null}
+
+stdout | src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > UAT093 actual WebUI storage boundary > preserves saved entry through independent hook state: held-profile
+MISMATCH_AT_CLEAR {
+  serverChatId: 'robot',
+  serverChatCharacterId: 5,
+  selectedTrackedCharacterId: '4',
+  selectedAssistant: {
+    kind: 'character',
+    id: '4',
+    name: 'Cedar',
+    avatar_url: null,
+    system_prompt: null,
+    metadata: { selectionMode: 'tracked' },
+    slug: undefined,
+    greeting: undefined,
+    buddy_summary: null,
+    extensions: null
+  },
+  activeCharacterSelection: {
+    id: '4',
+    name: 'Cedar',
+    avatar_url: null,
+    system_prompt: null,
+    greeting: null,
+    slug: null,
+    extensions: null
+  }
+}
+
+stdout | src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > UAT093 actual WebUI storage boundary > preserves saved entry through independent hook state: held-profile
+WEB_STORAGE_TRACE held-profile [{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":null,"load":"loading","messages":0},{"id":"robot","meta":true,"character":null,"load":"loading","messages":0},{"id":"robot","meta":true,"character":null,"load":"loading","messages":0},{"id":"robot","meta":true,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":null,"meta":false,"character":null,"load":"idle","messages":0}] stored {"kind":"character","id":"5","name":"Assistant","avatar_url":null,"system_prompt":null,"metadata":{"selectionMode":"tracked"},"buddy_summary":null,"extensions":null}
+
+stdout | src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > UAT093 actual WebUI storage boundary > preserves saved entry through independent hook state: newer-picker
+MISMATCH_AT_CLEAR {
+  serverChatId: 'robot',
+  serverChatCharacterId: 5,
+  selectedTrackedCharacterId: '4',
+  selectedAssistant: {
+    kind: 'character',
+    id: '4',
+    name: 'Cedar',
+    avatar_url: null,
+    system_prompt: null,
+    metadata: { selectionMode: 'tracked' },
+    slug: undefined,
+    greeting: undefined,
+    buddy_summary: null,
+    extensions: null
+  },
+  activeCharacterSelection: {
+    id: '4',
+    name: 'Cedar',
+    avatar_url: null,
+    system_prompt: null,
+    greeting: null,
+    slug: null,
+    extensions: null
+  }
+}
+
+stdout | src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > UAT093 actual WebUI storage boundary > preserves saved entry through independent hook state: newer-picker
+WEB_STORAGE_TRACE newer-picker [{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":null,"load":"loading","messages":0},{"id":"robot","meta":true,"character":null,"load":"loading","messages":0},{"id":"robot","meta":true,"character":null,"load":"loading","messages":0},{"id":"robot","meta":true,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":null,"meta":false,"character":null,"load":"idle","messages":0}] stored {"kind":"character","id":"7","name":"New choice","metadata":{"selectionMode":"tracked"},"buddy_summary":null,"extensions":null}
+
+ ❯ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (33 tests | 2 failed | 30 skipped) 1912ms
+     ↓ registers the webui chat route context on mount
+     ↓ waits for session scope readiness before consuming the one-time restore pass
+     ↓ falls back to recent chat only when restore reports nothing restored
+     ↓ stops recent-chat initialization when restore reports cancellation
+     ↓ does not overwrite a server chat selected while session scope initializes
+     ↓ applies explicit character chat route ids before persisted session restore
+     ↓ applies character route ids before persisted session restore
+     ↓ applies a settings-return server chat before persisted session restore
+     ↓ selects the saved Flashcard source conversation through the actual neutral Chat route consumer
+     ↓ applies a sidepanel handoff before persisted session restore
+     ↓ starts a fresh character route chat over an active server chat
+     ↓ settles canonical saved entry with the real session subscription and local loader (StrictMode=false)
+     ↓ settles canonical saved entry with the real session subscription and local loader (StrictMode=true)
+     ↓ cancels pending generic restoration before applying an explicit settings target
+     ↓ finishes a delayed current settings local-history load
+     ↓ finishes a delayed current timeline local-history load
+     ↓ does not complete a failed local settings return as a successful server selection
+     ↓ keeps a saved target over a previous character while profile is delayed
+     ↓ keeps a saved target over a previous character while messages is delayed
+     ↓ does not install a late saved identity after picker changes during metadata fetch
+     ↓ does not install a late saved identity after picker-roundtrip changes during metadata fetch
+     ↓ does not install a late saved identity after replacement changes during metadata fetch
+     ↓ does not install a late saved identity after principal changes during metadata fetch
+     ↓ does not replay a consumed saved route or apply a late profile over a new picker choice (same turn false)
+     ↓ does not replay a consumed saved route or apply a late profile over a new picker choice (same turn true)
+     ↓ discards optional profile completion after replacement
+     ↓ discards optional profile completion after principal
+     ↓ discards optional profile completion after unmount
+     ↓ waits for shared selection storage and a later queued picker before metadata readiness (new picker false)
+     ↓ waits for shared selection storage and a later queued picker before metadata readiness (new picker true)
+     × preserves saved entry through independent hook state: immediate 663ms
+     × preserves saved entry through independent hook state: held-profile 622ms
+     ✓ preserves saved entry through independent hook state: newer-picker  626ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > UAT093 actual WebUI storage boundary > preserves saved entry through independent hook state: immediate
+ FAIL  src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > UAT093 actual WebUI storage boundary > preserves saved entry through independent hook state: held-profile
+AssertionError: expected null to be 'robot' // Object.is equality
+
+- Expected:
+"robot"
+
++ Received:
+null
+
+ ❯ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx:871:63
+    842|   })
+    843|
+    844| })
+       |   ^
+    845|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed | 30 skipped (33)
+   Start at  15:25:24
+   Duration  5.12s (transform 1.35s, setup 133ms, import 2.43s, tests 1.91s, environment 508ms)

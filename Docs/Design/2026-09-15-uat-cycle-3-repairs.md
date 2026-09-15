@@ -213,3 +213,31 @@ Chat browser titles need declarative Next Head ownership so Next cannot clear an
 ### Study answer readability — TASK13260.35 / UAT094
 
 The automatic discovery hint overlaps the question/answer. Remove only this hint invocation from ReviewTab; the visible Need help button already identifies the optional assistant and continues to open its existing panel. No scheduling, source, model or global hint behavior changes. Existing assistant/Study tests plus native reading and practice controls verify this reversible presentation removal.
+
+### Saved Chat identity ownership reassessment — TASK13260.33, 22:30 UTC
+
+The reviewed timing repairs did not pass native entry. The actual Next storage shim gives each hook separate React state; the earlier coordinator harness collapsed this into a shared Zustand field. A new actual-shim probe reproduces the stale rendered selection causing Playground to clear a freshly loaded target. A read-only native store subscription independently captures the same Playground effect clearing Robot after actual sidebar selection. That sidebar publishes summary metadata itself and bypasses the loader's new pre-metadata selection/wait block.
+
+Use one clear ownership rule: validated metadata owns an active saved conversation's tracked identity. A global draft or cross-tab preference hydration must not relabel or clear that conversation. A fresh conversation can use draft identity. Explicit replacement actions detach the saved target before awaiting selection persistence; same-identity choices retain it. Existing AssistantSelect/legacy picker actions already provide most of this transition; complete the inline role-play and saved/startup-template paths instead of inferring intent from rendered state.
+
+Remove Playground's destructive render-mismatch fallback. Remove the added pre-metadata minimal selection write and commit-chain wait, whose purpose was avoiding that fallback. Retain independent delayed-profile authority/operation guards and consumed route-target behavior. Do not introduce another global queue, broaden auth policy, or revert owned mirror/local cancellation repairs.
+
+The alternative of waiting for more render/storage phases is rejected: it still confuses preference hydration with deliberate action and misses alternate metadata publishers. A new general coordinator framework is unnecessary; use existing explicit action handlers and the effective-assistant resolver.
+
+Review requires guarding the entire explicit action, including actual RolePlaySetupDrawer and saved-preview scene persistence. Run the accepted identity/settings callback first; its false result cancels continuation. Save scene settings against the resulting target/history, then publish only while that action, component lifetime and target are still current. A pending old scene must not invoke a later identity action or publish into another chat. Retain same-identity and known metadata-ready plain-to-plain targets. Scene-save failure may leave already accepted identity/settings applied: keep the draft available and report the scene failure truthfully, without pretending the operation is atomic or rolling back a replacement chat. Existing order expectations change deliberately; actual drawer plus Form/preview tests must cover delayed completion, replacement, unmount, cancellation and retry.
+
+Verification must exercise the actual WebUI storage class/hook, multiple real loader consumers, immediate/delayed responses, actual picker handlers, same-identity retention, cross-tab storage events, template/inline role-play replacement, cancelled legacy confirmation, late profile/account changes and A→B→A. Existing tests that treated any raw draft setter as user intent must be updated deliberately to this contract, not described as stale fixtures. Retain original failing probes unchanged. Separate native acceptance covers canonical URL entry, actual sidebar selection, Note backlink and normal reload in both modes.
+
+Single-user reload's missing title is separately tracked by TASK13260.34: cached session restoration marks partial identity metadata ready without restoring a title. Do not silently include a title fix in the identity ownership change.
+
+## Cached session title and metadata ordering — TASK13260.34
+
+Restore a cached title only when its history row identifies the selected server conversation. Keep cached messages available while the full server record loads; cached assistant identity alone cannot mark canonical metadata complete. Publish cached title/identity and the pending flag before awaiting selection storage. The server loader may finish during that await, so the resumed restore must not overwrite its canonical identity/readiness. Retain restore cancellation checks. Verify matching/foreign cached titles, delayed storage, canonical response ordering, explicit target replacement and actual reload/rename.
+
+## Settings Form lifetime — TASK13260.37 / UAT096
+
+Configuration can resolve while the Settings skeleton still owns the render. Stage accepted field values and apply them in an effect after the Form mounts. Preserve the existing load generation and login/logout handlers. Use actual Ant Form and WebUI storage in tests; distinguish the reproducible initial hydration warning from the native logout scheduling that still needs a browser retest.
+
+## Chat navigation and composer layout — TASK13260.38 / UAT097
+
+Use one scrollable middle region for shortcuts, recent search/tabs and results between nonshrinking sidebar header/footer. Avoid competing nested flex scrollers that collapse recent results to zero height. Let composer action groups wrap at every width, with individual controls retaining their size: a wide viewport can still have a narrow center panel when both rails are open. Preserve existing controls and actions. Rendered-class regressions cannot certify geometry; verify mouse and keyboard navigation, nonzero usable height, footer separation and control bounds at1280×720 and smaller viewports.
