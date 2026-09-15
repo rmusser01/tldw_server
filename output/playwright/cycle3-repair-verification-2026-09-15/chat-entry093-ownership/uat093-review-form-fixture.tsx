@@ -1,20 +1,15 @@
 // @vitest-environment jsdom
 import React from "react"
-import { act, render, screen, waitFor, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { PlaygroundEmpty } from "../PlaygroundEmpty"
 import { PlaygroundForm } from "../PlaygroundForm"
-import type { Character } from "@/types/character"
-import { resolveServerChatAssistantIdentity } from "@/hooks/chat/useServerChatLoader"
 import { createStartupTemplateBundle } from "../startup-template-bundles"
-import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useBuddyManagementStore } from "@/store/buddy-management"
 
-const saveActorSettingsMock = vi.hoisted(() => vi.fn(async (_args: unknown) => true))
-const ownerGuardFixture = vi.hoisted(() => ({ capture: null as null | (() => () => boolean) }))
 const savedSetupFixture = vi.hoisted(() => ({ raw: "[]" }))
 const viewportState = vi.hoisted(() => ({ mobile: false }))
 const onSubmitMock = vi.hoisted(() => vi.fn(async (_payload: unknown) => null))
@@ -737,15 +732,14 @@ vi.mock("../CompareToggle", () => ({
   CompareToggle: () => null
 }))
 
-vi.mock("@/services/actor-settings", () => ({ saveActorSettingsForChat: saveActorSettingsMock }))
+vi.mock("@/services/actor-settings", () => ({ saveActorSettingsForChat: vi.fn(async () => null) }))
 
 vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => null }))
 
 vi.mock("@/components/Chat/composer/PromptAssistComposerAction", () => ({ PromptAssistComposerAction: () => null }))
 
 vi.mock("../RolePlaySetupDrawer", () => ({
-  RolePlaySetupDrawer: ({ characterId, onApply, onClose, returnFocusRef, savedRolePlaySetups, onPreviewSavedSetup, captureApplyGuard }: { captureApplyGuard?: () => () => boolean; savedRolePlaySetups?: Array<{ id: string }>; onPreviewSavedSetup?: (id: string) => void; characterId?: string | null; onApply: (payload: unknown) => Promise<void>; onClose: () => void; returnFocusRef?: React.RefObject<HTMLElement> }) => {
-    ownerGuardFixture.capture = captureApplyGuard ?? null
+  RolePlaySetupDrawer: ({ characterId, onApply, onClose, returnFocusRef, savedRolePlaySetups, onPreviewSavedSetup }: { savedRolePlaySetups?: Array<{ id: string }>; onPreviewSavedSetup?: (id: string) => void; characterId?: string | null; onApply: (payload: unknown) => Promise<void>; onClose: () => void; returnFocusRef?: React.RefObject<HTMLElement> }) => {
     const [result, setResult] = React.useState("")
     const apply = (payload: unknown) => {
       void onApply(payload).then(() => setResult("Applied"), () => setResult("Apply failed"))
@@ -1051,7 +1045,6 @@ vi.mock("@/hooks/playground", () => ({
 
 beforeEach(() => {
   savedSetupFixture.raw = "[]"
-  saveActorSettingsMock.mockReset().mockResolvedValue(true)
   viewportState.mobile = false
   useBuddyManagementStore.getState().close()
   onSubmitMock.mockClear()
@@ -1162,7 +1155,7 @@ describe("PlaygroundForm role-play starter", () => {
     const identity = { kind, id: "new-identity", name: "New identity" }
     savedSetupFixture.raw = JSON.stringify([createStartupTemplateBundle({
       name: "Saved setup", selectedModel: null, systemPrompt: "New behavior",
-      character: kind === "character" ? { id: identity.id, name: identity.name } as Character : null,
+      character: kind === "character" ? { id: identity.id, name: identity.name } as any : null,
       rolePlay: { source: "role-play-setup", identity, behavior: null, scene: null, generation: null, context: null }
     })])
     playgroundFormMessageOptionState.value.serverChatId = "chat-original"
@@ -1178,95 +1171,6 @@ describe("PlaygroundForm role-play starter", () => {
       expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(identity))
     } finally { finishCommit?.() }
     await waitFor(() => expect(screen.queryByRole("button", { name: "Apply saved template" })).not.toBeInTheDocument())
-  })
-
-  it.each(["inline", "template"].flatMap(origin => ["target", "history", "roundtrip"].map(change => ({ origin, change }))))("ignores late $origin settings after $change changes", async ({ origin, change }) => {
-    savedSetupFixture.raw = JSON.stringify([createStartupTemplateBundle({ name: "Replacement", selectedModel: "other-model", systemPrompt: "Stale template", character: { id: "new", name: "New" } as Character, rolePlay: { source: "role-play-setup", identity: { kind: "character", id: "new", name: "New" }, behavior: null, scene: null, generation: null, context: null } })])
-    playgroundFormMessageOptionState.value.serverChatId = "original"
-    let finishCommit!: () => void
-    const pending = new Promise<void>(resolve => { finishCommit = resolve })
-    selectedAssistantMock.setSelectedAssistant.mockReturnValueOnce(pending)
-    const user = userEvent.setup()
-    render(<PlaygroundForm droppedFiles={[]} />)
-    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
-    if (origin === "template") {
-      await user.click(screen.getByRole("button", { name: "Preview saved setup" }))
-      await user.click(await screen.findByRole("button", { name: "Apply saved template" }))
-    } else await user.click(screen.getByRole("button", { name: "Apply Persona setup" }))
-    const updatesBefore = chatModelSettingsState.updateSettings.mock.calls.length
-    const promptsBefore = chatModelSettingsState.updateSetting.mock.calls.length
-    if (change === "target") playgroundFormMessageOptionState.value.serverChatId = "newer-chat"
-    if (change === "history") playgroundFormMessageOptionState.value.historyId = "newer-history"
-    if (change === "roundtrip") usePlaygroundSessionStore.getState().cancelPendingRestore()
-    await act(async () => { finishCommit(); await pending })
-    expect(chatModelSettingsState.updateSettings.mock.calls.length).toBe(updatesBefore)
-    expect(chatModelSettingsState.updateSetting.mock.calls.length).toBe(promptsBefore)
-    expect(playgroundFormMessageOptionState.value.setSelectedModel).not.toHaveBeenCalledWith("other-model")
-  })
-
-  it.each(["inline", "template"])("ignores late %s settings after the Form unmounts", async origin => {
-    savedSetupFixture.raw = JSON.stringify([createStartupTemplateBundle({ name: "Replacement", selectedModel: "other-model", systemPrompt: "Stale template", character: { id: "new", name: "New" } as Character, rolePlay: { source: "role-play-setup", identity: { kind: "character", id: "new", name: "New" }, behavior: null, scene: null, generation: null, context: null } })])
-    let finishCommit!: () => void
-    const pending = new Promise<void>(resolve => { finishCommit = resolve })
-    selectedAssistantMock.setSelectedAssistant.mockReturnValueOnce(pending)
-    const user = userEvent.setup()
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
-    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
-    if (origin === "template") {
-      await user.click(screen.getByRole("button", { name: "Preview saved setup" }))
-      await user.click(await screen.findByRole("button", { name: "Apply saved template" }))
-    } else await user.click(screen.getByRole("button", { name: "Apply Persona setup" }))
-    const updatesBefore = chatModelSettingsState.updateSettings.mock.calls.length
-    view.unmount()
-    await act(async () => { finishCommit(); await pending })
-    expect(chatModelSettingsState.updateSettings.mock.calls.length).toBe(updatesBefore)
-    expect(playgroundFormMessageOptionState.value.setSelectedModel).not.toHaveBeenCalledWith("other-model")
-  })
-
-  it.each([true, false])("retains none-to-none identity only for metadata-ready neutral saved chats: %s", async ready => {
-    const canonical = resolveServerChatAssistantIdentity({ id: "neutral", source: "webui", character_id: null, assistant_kind: null, assistant_id: null })
-    Object.assign(playgroundFormMessageOptionState.value, { serverChatId: "neutral", serverChatMetaLoaded: ready, serverChatAssistantKind: canonical.assistantKind, serverChatAssistantId: canonical.assistantId, serverChatCharacterId: canonical.characterId })
-    const user = userEvent.setup()
-    render(<PlaygroundForm droppedFiles={[]} />)
-    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
-    await user.click(screen.getByRole("button", { name: "Apply clear identity" }))
-    await screen.findByText("Applied")
-    expect(playgroundFormMessageOptionState.value.setServerChatId).toHaveBeenCalledTimes(ready ? 0 : 1)
-  })
-
-  it("detaches before saved role-play scene persistence and suppresses its late presentation", async () => {
-    savedSetupFixture.raw = JSON.stringify([createStartupTemplateBundle({ name: "Setup with scene", selectedModel: null, systemPrompt: "", rolePlay: { source: "role-play-setup", identity: { kind: "persona", id: "guide", name: "Guide" }, behavior: null, scene: null, generation: null, context: null } })])
-    playgroundFormMessageOptionState.value.serverChatId = "old-chat"
-    playgroundFormMessageOptionState.value.historyId = "old-history"
-    playgroundFormMessageOptionState.value.setServerChatId.mockImplementation((id: string | null) => { playgroundFormMessageOptionState.value.serverChatId = id })
-    playgroundFormMessageOptionState.value.setHistoryId.mockImplementation((id: string | null) => { playgroundFormMessageOptionState.value.historyId = id })
-    let finishScene!: () => void
-    const pending = new Promise<boolean>(resolve => { finishScene = () => resolve(true) })
-    saveActorSettingsMock.mockReturnValueOnce(pending)
-    const user = userEvent.setup()
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
-    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
-    await user.click(screen.getByRole("button", { name: "Preview saved setup" }))
-    await user.click(await screen.findByRole("button", { name: "Apply saved template" }))
-    try {
-      expect(saveActorSettingsMock).toHaveBeenCalledWith(expect.objectContaining({ historyId: null, serverChatId: null }))
-      expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCalledTimes(1)
-    } finally { view.unmount(); finishScene(); await pending }
-  })
-
-  it("passes the Form action guard to the drawer and invalidates it on a newer same-destination action", async () => {
-    let release!: () => void
-    const pending = new Promise<void>(resolve => { release = resolve })
-    selectedAssistantMock.setSelectedAssistant.mockReturnValueOnce(pending)
-    const user = userEvent.setup()
-    render(<PlaygroundForm droppedFiles={[]} />)
-    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
-    await user.click(screen.getByRole("button", { name: "Apply Persona setup" }))
-    const isCurrent = ownerGuardFixture.capture!()
-    expect(isCurrent()).toBe(true)
-    await user.click(screen.getByRole("button", { name: "Apply clear identity" }))
-    expect(isCurrent()).toBe(false)
-    await act(async () => { release(); await pending })
   })
 
   it("clears identity with one awaited canonical selection write", async () => {
@@ -1460,3 +1364,38 @@ describe("PlaygroundForm role-play starter", () => {
     expect(selector).not.toHaveTextContent("Ready")
   })
 })
+
+
+it.each(["replacement", "unmount"])("review: late saved-template persistence cannot publish after %s", async change => {
+  savedSetupFixture.raw = JSON.stringify([createStartupTemplateBundle({
+    name: "Old-owner setup", selectedModel: "old-model", systemPrompt: "Old-owner behavior",
+    character: { id: "old-identity", name: "Old identity" } as any,
+    rolePlay: { source: "startup-template", identity: { kind: "character", id: "old-identity", name: "Old identity" }, behavior: null, scene: null, generation: null, context: null }
+  })]);
+  playgroundFormMessageOptionState.value.serverChatId = "chat-original";
+  let release!: () => void;
+  selectedAssistantMock.setSelectedAssistant.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve }));
+  const user = userEvent.setup();
+  const view = render(<PlaygroundForm droppedFiles={[]} />);
+  await user.click(screen.getByRole("button", { name: "Open role-play setup" }));
+  await user.click(await screen.findByRole("button", { name: "Preview saved setup" }));
+  await user.click(await screen.findByRole("button", { name: "Apply saved template" }));
+  expect(chatModelSettingsState.updateSettings).not.toHaveBeenCalled();
+  if (change === "unmount") view.unmount();
+  else playgroundFormMessageOptionState.value.serverChatId = "replacement-chat";
+  await React.act(async () => { release(); await new Promise(resolve => setTimeout(resolve, 30)); });
+  expect(chatModelSettingsState.updateSettings).not.toHaveBeenCalled();
+  view.unmount();
+});
+
+
+it("review: clearing absent identity retains the same neutral saved conversation", async () => {
+  Object.assign(playgroundFormMessageOptionState.value, {serverChatId:"plain-chat",serverChatMetaLoaded:true,serverChatAssistantKind:null,serverChatAssistantId:null,serverChatCharacterId:null});
+  const user=userEvent.setup();
+  const view=render(<PlaygroundForm droppedFiles={[]} />);
+  await user.click(screen.getByRole("button",{name:"Open role-play setup"}));
+  await user.click(await screen.findByRole("button",{name:"Apply clear identity"}));
+  await screen.findByText("Applied");
+  expect(playgroundFormMessageOptionState.value.setServerChatId).not.toHaveBeenCalled();
+  view.unmount();
+});

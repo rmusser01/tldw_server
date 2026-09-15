@@ -1,0 +1,9 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ✓ src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx (22 tests | 21 skipped) 217ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 21 skipped (22)
+   Start at  16:08:10
+   Duration  771ms (transform 194ms, setup 85ms, import 225ms, tests 217ms, environment 193ms)

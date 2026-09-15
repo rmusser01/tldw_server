@@ -128,11 +128,6 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const applyingRef = React.useRef(false)
-  const applyingDestinationRef = React.useRef<{
-    historyId: string | null
-    serverChatId: string | null
-    isCurrent: () => boolean
-  } | null>(null)
   const mountedRef = React.useRef(true)
   const lifetimeRef = React.useRef({ open, revision: 0 })
   if (lifetimeRef.current.open !== open) {
@@ -188,11 +183,6 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
 
   React.useEffect(() => {
     if (!open) return
-    const ownDestination = applyingDestinationRef.current
-    if (ownDestination?.historyId === historyId &&
-        ownDestination.serverChatId === serverChatId && ownDestination.isCurrent()) {
-      return
-    }
 
     let cancelled = false
     setLoading(true)
@@ -370,9 +360,6 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
             current.historyId === destinationHistoryId && current.serverChatId === destinationServerChatId &&
             usePlaygroundSessionStore.getState().restoreRevision === restoreRevision
         }
-        applyingDestinationRef.current = {
-          historyId: destinationHistoryId, serverChatId: destinationServerChatId, isCurrent
-        }
         if (await applied === false || !isCurrent()) return
         settingsAccepted = true
         if (scene) {
@@ -401,7 +388,6 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
               "Settings could not be applied. Your draft is still here; retry Apply."
             ))
       } finally {
-        applyingDestinationRef.current = null
         applyingRef.current = false
         if (mountedRef.current) setSaving(false)
       }

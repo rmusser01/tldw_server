@@ -29,14 +29,6 @@ let selectedAssistantCommitChain: Promise<void> = Promise.resolve()
 
 export const getSelectedAssistantOperationRevision = (): number => selectedAssistantOperationRevision
 
-export const waitForSelectedAssistantCommit = async (): Promise<void> => {
-  let pending: Promise<void>
-  do {
-    pending = selectedAssistantCommitChain
-    await pending
-  } while (pending !== selectedAssistantCommitChain)
-}
-
 export type SelectedAssistantCommitOptions = {
   isCurrent?: () => boolean
 }

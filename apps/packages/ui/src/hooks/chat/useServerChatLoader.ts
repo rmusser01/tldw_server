@@ -12,7 +12,7 @@ import {
 import { reconcileServerChatMessages, reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
 import { watchServerChatLoadAuthority } from "@/services/server-chat-load-authority"
-import { getSelectedAssistantOperationRevision, useSelectedAssistant, waitForSelectedAssistantCommit } from "@/hooks/useSelectedAssistant"
+import { getSelectedAssistantOperationRevision, useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { syncChatSettingsForServerChat } from "@/services/chat-settings"
 import { validateCachedServerChatId } from "@/store/workspace-sync-contract"
 import type { ChatScope } from "@/types/chat-scope"
@@ -811,22 +811,6 @@ export const useServerChatLoader = ({
               characterId = resolvedAssistantIdentity.characterId
               personaMemoryMode = resolvedAssistantIdentity.personaMemoryMode
               restoreAssistantSelection = getSelectedAssistantOperationRevision() === ownedSelectionRevision
-              const canonicalSelection = effectiveAssistantStateToSelection(
-                resolveEffectiveAssistantState({ tracked: { assistantKind, assistantId, characterId } })
-              )
-              // The previous chat's picker value is not a new user choice. Publish
-              // validated identity before metadata readiness can trigger mismatch
-              // detachment, without waiting for optional profile enrichment.
-              if (restoreAssistantSelection && canonicalSelection &&
-                (selectedAssistantRef.current?.kind !== canonicalSelection.kind ||
-                  selectedAssistantRef.current?.id !== canonicalSelection.id)) {
-                restoreAssistantSelection = await applyOwnedAssistantSelection(canonicalSelection)
-                if (!canCommitCurrentLoad()) return
-              }
-              // Other consumers can load this same chat concurrently. Their
-              // canonical write (or a newer picker choice) must settle too.
-              await waitForSelectedAssistantCommit()
-              if (!canCommitCurrentLoad()) return
               setServerChatTitle(chatTitle || "")
               setServerChatCharacterId(characterId)
               setServerChatAssistantKind(assistantKind)

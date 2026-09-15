@@ -1,0 +1,163 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:41995) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | ../packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx > review: old scene save cannot start an identity action after replacement
+Warning: The current testing environment is not configured to support act(...)
+Warning: The current testing environment is not configured to support act(...)
+
+stderr | ../packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx > review: old scene save cannot start an identity action after replacement
+Warning: The current testing environment is not configured to support act(...)
+
+ ❯ ../packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx (16 tests | 2 failed | 14 skipped) 213ms
+     ↓ loads actor settings and renders before/after role-play state
+     ↓ announces scene setting loading as a status
+     ↓ does not crash when stored actor settings omit aspects
+     ↓ surfaces scene load failures without applying stale scene state
+     ↓ cancel closes without applying or saving
+     ↓ applies all staged changes with one apply callback
+     ↓ stages behavior templates and generation style before applying
+     ↓ resets scene draft to default actor settings
+     ↓ closes on Escape and returns focus to the trigger
+     ↓ shows only role-play relevant saved setups
+     ↓ requires confirmation before deleting a saved role-play setup
+     ↓ exposes generation style choices as radios
+     ↓ applies saved role-play setup scene through the actor settings save path
+     ↓ saves the staged role-play setup metadata
+   × review: old scene save cannot start an identity action after replacement 148ms
+   × review: old scene save cannot start an identity action after unmount 65ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx > review: old scene save cannot start an identity action after replacement
+ FAIL  ../packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx > review: old scene save cannot start an identity action after unmount
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "sceneSettings": Object {
+          "appendable": false,
+          "aspects": Array [
+            Object {
+              "id": "user_role",
+              "key": "user_role",
+              "name": "User role",
+              "source": "free",
+              "target": "user",
+              "value": "",
+            },
+            Object {
+              "id": "user_state",
+              "key": "user_state",
+              "name": "User emotional state",
+              "source": "free",
+              "target": "user",
+              "value": "",
+            },
+            Object {
+              "id": "user_focus",
+              "key": "user_focus",
+              "name": "User focus/objective",
+              "source": "free",
+              "target": "user",
+              "value": "",
+            },
+            Object {
+              "id": "char_role",
+              "key": "char_role",
+              "name": "Character role",
+              "source": "free",
+              "target": "char",
+              "value": "",
+            },
+            Object {
+              "id": "char_state",
+              "key": "char_state",
+              "name": "Character emotional state",
+              "source": "free",
+              "target": "char",
+              "value": "",
+            },
+            Object {
+              "id": "char_goal",
+              "key": "char_goal",
+              "name": "Character goal",
+              "source": "free",
+              "target": "char",
+              "value": "",
+            },
+            Object {
+              "id": "world_location",
+              "key": "world_location",
+              "name": "Location",
+              "source": "free",
+              "target": "world",
+              "value": "Observatory",
+            },
+            Object {
+              "id": "world_time_of_day",
+              "key": "world_time_of_day",
+              "name": "Time of day",
+              "source": "free",
+              "target": "world",
+              "value": "",
+            },
+            Object {
+              "id": "world_weather",
+              "key": "world_weather",
+              "name": "Weather",
+              "source": "free",
+              "target": "world",
+              "value": "",
+            },
+            Object {
+              "id": "world_lighting",
+              "key": "world_lighting",
+              "name": "Lighting",
+              "source": "free",
+              "target": "world",
+              "value": "",
+            },
+            Object {
+              "id": "world_tone",
+              "key": "world_tone",
+              "name": "Scene tone",
+              "source": "free",
+              "target": "world",
+              "value": "",
+            },
+          ],
+          "chatDepth": 0,
+          "chatPosition": "before",
+          "chatRole": "system",
+          "isEnabled": true,
+          "notes": "The room smells like ozone.",
+          "notesGmOnly": false,
+          "templateMode": "merge",
+          "version": 3,
+        },
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ ../packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx:706:23
+    688|     )
+    689|   })
+    690| })
+       |   ^
+    691|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 14 skipped (16)
+   Start at  15:51:23
+   Duration  753ms (transform 119ms, setup 83ms, import 155ms, tests 213ms, environment 212ms)

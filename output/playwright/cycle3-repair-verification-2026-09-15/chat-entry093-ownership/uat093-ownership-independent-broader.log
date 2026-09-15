@@ -1,0 +1,76 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:48396) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx (26 tests) 3243ms
+     ✓ opens character selection from the starter and returns focus after selecting the default assistant  320ms
+(node:48450) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (37 tests) 7521ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn false)  524ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn true)  520ms
+     ✓ preserves canonical saved identity with actual WebUI storage and six loaders: sidebar  434ms
+     ✓ uses the real picker to deliberately select Robot with a saved target  736ms
+     ✓ uses the real picker to deliberately select New choice with a saved target  620ms
+     ✓ keeps the saved conversation and preference after cancelling the real legacy picker confirmation  648ms
+(node:48720) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx (10 tests) 2880ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting true)  623ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting false)  615ms
+(node:48734) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > still applies persona selection when persona detail lookup fails
+[assistant-overlay] Failed to load persona detail; using summary snapshot Error: persona detail unavailable
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/__tests__/AssistantSelect.behavior.test.tsx:746:7
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+    at runTest (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:12)
+
+stderr | src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > still applies local selection when overlay settings persistence fails
+[AssistantSelect] Failed to persist assistant overlay; keeping local selection Error: settings write failed
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/__tests__/AssistantSelect.behavior.test.tsx:785:48
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+    at runTest (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:12)
+
+ ✓ src/components/Common/__tests__/AssistantSelect.behavior.test.tsx (31 tests) 1593ms
+(node:48740) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx (21 tests) 1797ms
+(node:48753) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useSelectedAssistant.test.tsx (15 tests) 96ms
+(node:48761) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx (7 tests) 22ms
+(node:48765) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useMessageOption.assistant-overlay.test.tsx (2 tests) 11ms
+(node:48803) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Playground/__tests__/usePromptTemplates.role-play-apply.test.ts (2 tests) 10ms
+(node:48807) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts (30 tests) 6ms
+(node:48811) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat/__tests__/effective-assistant-state.test.ts (13 tests) 3ms
+
+ Test Files  11 passed (11)
+      Tests  194 passed (194)
+   Start at  16:02:49
+   Duration  27.32s (transform 2.18s, setup 722ms, import 5.42s, tests 17.18s, environment 2.75s)

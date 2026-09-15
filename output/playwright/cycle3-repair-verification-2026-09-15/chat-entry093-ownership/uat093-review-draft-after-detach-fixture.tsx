@@ -785,64 +785,28 @@ describe("RolePlaySetupDrawer", () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  it("accepted detachment retains the edited scene through failed save and retry", async () => {
-    useStoreMessageOption.setState({ serverChatId: "server-1", historyId: "history-1" })
-    actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockReset()
-      .mockResolvedValueOnce(activeScene()).mockResolvedValue(createDefaultActorSettings())
-    let release!: () => void
-    actorSettingsMocks.saveActorSettingsForChat.mockReset()
-      .mockImplementationOnce(() => new Promise<boolean>(resolve => { release = () => resolve(false) }))
-      .mockResolvedValue(true)
-    const onApply = vi.fn(async () => {
-      useStoreMessageOption.setState({ serverChatId: null, historyId: null })
-      return true
-    })
-    const onClose = vi.fn()
-    const props = { open: true, beforeState, historyId: "history-1" as string | null, serverChatId: "server-1" as string | null, onClose, onApply }
-    const view = render(<RolePlaySetupDrawer {...props} />)
-    await screen.findByText(/1 detail/)
-    fireEvent.change(screen.getByLabelText("Scene notes"), { target: { value: "Keep my edited scene after detachment" } })
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
-    await waitFor(() => expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalledTimes(1))
-    view.rerender(<RolePlaySetupDrawer {...props} historyId={null} serverChatId={null} />)
-    await act(async () => { release(); await new Promise(resolve => setTimeout(resolve, 30)) })
-    await screen.findByText(/Identity and behavior were applied, but scene settings could not be saved/)
-    expect(screen.getByLabelText("Scene notes")).toHaveValue("Keep my edited scene after detachment")
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
-    expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenLastCalledWith(expect.objectContaining({
-      settings: expect.objectContaining({ notes: "Keep my edited scene after detachment" })
-    }))
-    view.unmount()
-  })
-
-  it.each(["replacement", "reopen"])("loads the new scene normally after %s during an own-detach save", async change => {
-    actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockReset()
-      .mockResolvedValueOnce(activeScene())
-      .mockResolvedValue({ ...createDefaultActorSettings(), notes: "New context scene" })
-    let release!: (saved: boolean) => void
-    const pending = new Promise<boolean>(resolve => { release = resolve })
-    actorSettingsMocks.saveActorSettingsForChat.mockReturnValueOnce(pending)
-    const onApply = async () => { useStoreMessageOption.setState({ serverChatId: null, historyId: null }); return true }
-    const props = { beforeState, onApply, onClose: vi.fn() }
-    const view = render(<RolePlaySetupDrawer {...props} open historyId="history-1" serverChatId="server-1" />)
-    await screen.findByText(/1 detail/)
-    fireEvent.change(screen.getByLabelText("Scene notes"), { target: { value: "Pending old scene" } })
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
-    await waitFor(() => expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalled())
-    view.rerender(<RolePlaySetupDrawer {...props} open historyId={null} serverChatId={null} />)
-    if (change === "replacement") {
-      useStoreMessageOption.setState({ historyId: "other-history", serverChatId: "other-server" })
-      view.rerender(<RolePlaySetupDrawer {...props} open historyId="other-history" serverChatId="other-server" />)
-    } else {
-      view.rerender(<RolePlaySetupDrawer {...props} open={false} historyId={null} serverChatId={null} />)
-      view.rerender(<RolePlaySetupDrawer {...props} open historyId={null} serverChatId={null} />)
-    }
-    await waitFor(() => expect(screen.getByLabelText("Scene notes")).toHaveValue("New context scene"))
-    expect(actorSettingsMocks.getActorSettingsForChatWithCharacterFallback).toHaveBeenCalledTimes(2)
-    await act(async () => { release(false); await pending })
-    expect(screen.getByLabelText("Scene notes")).toHaveValue("New context scene")
-    expect(props.onClose).not.toHaveBeenCalled()
-  })
-
 })
+
+
+it("review: accepted detachment retains the edited scene through failed save and retry", async () => {
+  useStoreMessageOption.setState({serverChatId:"server-1",historyId:"history-1"});
+  actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockReset().mockResolvedValueOnce(activeScene()).mockResolvedValue(createDefaultActorSettings());
+  let release!: () => void;
+  actorSettingsMocks.saveActorSettingsForChat.mockReset().mockImplementationOnce(() => new Promise<boolean>(resolve => {release=()=>resolve(false)})).mockResolvedValue(true);
+  const onApply=vi.fn(async()=> {useStoreMessageOption.setState({serverChatId:null,historyId:null});return true});
+  const onClose=vi.fn();
+  const props={open:true,beforeState,historyId:"history-1" as string|null,serverChatId:"server-1" as string|null,onClose,onApply};
+  const view=render(<RolePlaySetupDrawer {...props} />);
+  await screen.findByText(/1 detail/);
+  fireEvent.change(screen.getByLabelText("Scene notes"),{target:{value:"Keep my edited scene after detachment"}});
+  fireEvent.click(screen.getByRole("button",{name:"Apply"}));
+  await waitFor(()=>expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalledTimes(1));
+  view.rerender(<RolePlaySetupDrawer {...props} historyId={null} serverChatId={null} />);
+  await act(async()=>{release();await new Promise(resolve=>setTimeout(resolve,30))});
+  await screen.findByText(/Identity and behavior were applied, but scene settings could not be saved/);
+  expect(screen.getByLabelText("Scene notes")).toHaveValue("Keep my edited scene after detachment");
+  fireEvent.click(screen.getByRole("button",{name:"Apply"}));
+  await waitFor(()=>expect(onClose).toHaveBeenCalledTimes(1));
+  expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenLastCalledWith(expect.objectContaining({settings:expect.objectContaining({notes:"Keep my edited scene after detachment"})}));
+  view.unmount();
+});

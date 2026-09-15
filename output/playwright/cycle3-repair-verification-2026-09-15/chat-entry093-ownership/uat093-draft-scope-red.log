@@ -1,0 +1,66 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx (24 tests | 3 failed | 21 skipped) 373ms
+     ↓ loads actor settings and renders before/after role-play state
+     ↓ announces scene setting loading as a status
+     ↓ does not crash when stored actor settings omit aspects
+     ↓ surfaces scene load failures without applying stale scene state
+     ↓ cancel closes without applying or saving
+     ↓ applies all staged changes with one apply callback
+     ↓ stages behavior templates and generation style before applying
+     ↓ resets scene draft to default actor settings
+     ↓ closes on Escape and returns focus to the trigger
+     ↓ shows only role-play relevant saved setups
+     ↓ requires confirmation before deleting a saved role-play setup
+     ↓ exposes generation style choices as radios
+     ↓ applies saved role-play setup scene through the actor settings save path
+     ↓ saves the staged role-play setup metadata
+     ↓ persists a scene only after accepted replacement and against its new destination
+     ↓ does not persist or display a scene after identity application is cancelled
+     ↓ suppresses held scene presentation after target changes
+     ↓ suppresses held scene presentation after unmount changes
+     ↓ keeps the scene draft and reports partial failure without rolling back the accepted identity
+     ↓ does not publish a held scene after the drawer closes and reopens
+     ↓ respects an explicit owner action change while the accepted scene destination stays empty
+     × accepted detachment retains the edited scene through failed save and retry 189ms
+     × loads the new scene normally after replacement during an own-detach save 92ms
+     × loads the new scene normally after reopen during an own-detach save 90ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx > RolePlaySetupDrawer > accepted detachment retains the edited scene through failed save and retry
+Error: expect(element).toHaveValue(Keep my edited scene after detachment)
+
+Expected the element to have value:
+  Keep my edited scene after detachment
+Received:
+
+ ❯ src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx:804:50
+    802|     await act(async()=>{release();await new Promise(resolve=>setTimeou…
+    803|     await screen.findByText(/Identity and behavior were applied, but s…
+    804|     expect(screen.getByLabelText("Scene notes")).toHaveValue("Keep my …
+       |                                                  ^
+    805|     fireEvent.click(screen.getByRole("button",{name:"Apply"}));
+    806|     await waitFor(()=>expect(onClose).toHaveBeenCalledTimes(1));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx > RolePlaySetupDrawer > loads the new scene normally after replacement during an own-detach save
+ FAIL  src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx > RolePlaySetupDrawer > loads the new scene normally after reopen during an own-detach save
+AssertionError: expected "vi.fn()" to be called 2 times, but got 3 times
+ ❯ src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx:833:77
+    831|     }
+    832|     await waitFor(() => expect(screen.getByLabelText("Scene notes")).t…
+    833|     expect(actorSettingsMocks.getActorSettingsForChatWithCharacterFall…
+       |                                                                             ^
+    834|     await act(async () => { release(false); await pending })
+    835|     expect(screen.getByLabelText("Scene notes")).toHaveValue("New cont…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 21 skipped (24)
+   Start at  16:06:00
+   Duration  909ms (transform 179ms, setup 62ms, import 233ms, tests 373ms, environment 188ms)

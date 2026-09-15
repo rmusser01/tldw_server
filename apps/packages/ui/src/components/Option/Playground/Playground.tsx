@@ -520,8 +520,6 @@ export const Playground = () => {
     serverChatState,
     serverChatTopic,
     serverChatSource,
-    serverChatCharacterId,
-    serverChatMetaLoaded,
     isLoading,
     selectedModel,
     setHistoryId,
@@ -828,44 +826,6 @@ export const Playground = () => {
       ? String(activeCharacterSelection.id)
       : null;
   }, [activeCharacterSelection?.id]);
-
-  React.useEffect(() => {
-    if (
-      !serverChatId ||
-      !serverChatMetaLoaded ||
-      serverChatCharacterId == null ||
-      !selectedTrackedCharacterId ||
-      String(serverChatCharacterId) === selectedTrackedCharacterId
-    ) {
-      return;
-    }
-
-    setHistoryId(null, { preserveServerChatId: false });
-    setHistory([]);
-    setMessages([]);
-    setServerChatCharacterId(null);
-    setServerChatAssistantKind(null);
-    setServerChatAssistantId(null);
-    setServerChatPersonaMemoryMode(null);
-    setServerChatMetaLoaded(false);
-    setServerChatId(null);
-    void Promise.resolve(clearPersistedSession()).catch(() => undefined);
-  }, [
-    clearPersistedSession,
-    selectedTrackedCharacterId,
-    serverChatCharacterId,
-    serverChatId,
-    serverChatMetaLoaded,
-    setHistory,
-    setHistoryId,
-    setMessages,
-    setServerChatAssistantId,
-    setServerChatAssistantKind,
-    setServerChatCharacterId,
-    setServerChatId,
-    setServerChatMetaLoaded,
-    setServerChatPersonaMemoryMode,
-  ]);
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext,
   );

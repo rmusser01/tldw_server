@@ -1,0 +1,11 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:51693) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx (22 tests | 21 skipped) 223ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 21 skipped (22)
+   Start at  16:12:03
+   Duration  871ms (transform 208ms, setup 92ms, import 259ms, tests 223ms, environment 214ms)

@@ -1,0 +1,53 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx (11 tests | 2 failed | 9 skipped) 385ms
+     ↓ restores the opening control after the conditionally mounted setup drawer closes
+     ↓ keeps Buddy management reachable in mobile cockpit with the current conversation and setup action
+     × detaches the previous tracked chat before persisting a deliberate replacement 267ms
+     × keeps the deliberate replacement detached and skips generation changes when persistence rejects 118ms
+     ↓ clears identity with one awaited canonical selection write
+     ↓ clears a custom override only when the selected system template identity changes
+     ↓ does not crash role-play state derivation when document context is null
+     ↓ opens character selection from the starter and returns focus after selecting the default assistant
+     ↓ turns blocked character chat composer SEND into setup without dropping the draft
+     ↓ keeps knowledge ask sends behind the character chat setup blocker
+     ↓ shows character model-usability copy in the model selector
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx > PlaygroundForm role-play starter > detaches the previous tracked chat before persisting a deliberate replacement
+AssertionError: expected "vi.fn()" to be called with arguments: [ null, …(1) ]
+
+Number of calls: 0
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx:1111:65
+    1109|     await user.click(await screen.findByRole("button", { name: "Apply …
+    1110|     expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCalle…
+    1111|     expect(playgroundFormMessageOptionState.value.setHistoryId).toHave…
+       |                                                                 ^
+    1112|     expect(playgroundFormMessageOptionState.value.setServerChatId).toH…
+    1113|     expect(chatModelSettingsState.updateSettings).not.toHaveBeenCalled…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx > PlaygroundForm role-play starter > keeps the deliberate replacement detached and skips generation changes when persistence rejects
+AssertionError: expected "vi.fn()" to be called with arguments: [ null ]
+
+Number of calls: 0
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx:1130:68
+    1128|     await user.click(await screen.findByRole("button", { name: "Apply …
+    1129|     await screen.findByText("Apply failed")
+    1130|     expect(playgroundFormMessageOptionState.value.setServerChatId).toH…
+       |                                                                    ^
+    1131|     expect(chatModelSettingsState.updateSettings).not.toHaveBeenCalled…
+    1132|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 9 skipped (11)
+   Start at  15:42:32
+   Duration  2.23s (transform 1.09s, setup 126ms, import 1.30s, tests 385ms, environment 356ms)

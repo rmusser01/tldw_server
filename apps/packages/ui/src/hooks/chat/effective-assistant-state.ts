@@ -88,34 +88,20 @@ export const resolveEffectiveAssistantState = ({
   const trackedCharacterId = normalizeId(tracked?.characterId)
   const trackedAssistantId = normalizeId(tracked?.assistantId)
   const draftSelectionMode = getAssistantSelectionMode(draftSelection)
-  if (draftSelection && draftSelectionMode === "tracked") {
-    const trackedKind =
-      trackedAssistantKind === "character" && trackedCharacterId
-        ? "character"
-        : trackedAssistantKind === "persona" && trackedAssistantId
-          ? "persona"
-          : null
-    const trackedId =
-      trackedKind === "character"
-        ? trackedCharacterId
-        : trackedKind === "persona"
-          ? trackedAssistantId
-          : null
-
-    if (draftSelection.kind !== trackedKind || draftSelection.id !== trackedId) {
-      return {
-        mode:
-          draftSelection.kind === "persona"
-            ? "tracked_persona"
-            : "tracked_character",
-        kind: draftSelection.kind,
-        id: draftSelection.id,
-        displayName: normalizeText(draftSelection.name) ?? null,
-        avatarUrl: normalizeText(draftSelection.avatar_url) ?? null,
-        systemPromptSnapshot:
-          normalizeText(draftSelection.system_prompt) ?? null,
-        source: "tracked"
-      }
+  // An active saved conversation owns its identity. A draft preference may
+  // change in another tab without replacing this conversation.
+  const hasTrackedIdentity =
+    (trackedAssistantKind === "character" && trackedCharacterId) ||
+    (trackedAssistantKind === "persona" && trackedAssistantId)
+  if (!hasTrackedIdentity && draftSelection && draftSelectionMode === "tracked") {
+    return {
+      mode: draftSelection.kind === "persona" ? "tracked_persona" : "tracked_character",
+      kind: draftSelection.kind,
+      id: draftSelection.id,
+      displayName: normalizeText(draftSelection.name) ?? null,
+      avatarUrl: normalizeText(draftSelection.avatar_url) ?? null,
+      systemPromptSnapshot: normalizeText(draftSelection.system_prompt) ?? null,
+      source: "tracked"
     }
   }
 

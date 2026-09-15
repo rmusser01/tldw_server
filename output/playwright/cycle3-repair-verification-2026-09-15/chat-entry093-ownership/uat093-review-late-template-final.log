@@ -1,0 +1,68 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:40835) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx > review: late saved-template persistence cannot publish after replacement
+Warning: The current testing environment is not configured to support act(...)
+
+stderr | ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx > review: late saved-template persistence cannot publish after replacement
+Warning: The current testing environment is not configured to support act(...)
+Warning: The current testing environment is not configured to support act(...)
+
+stderr | ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx > review: late saved-template persistence cannot publish after replacement
+Warning: The current testing environment is not configured to support act(...)
+    at PlaygroundForm (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx:297:3)
+
+ ❯ ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx (16 tests | 2 failed | 14 skipped) 550ms
+     ↓ restores the opening control after the conditionally mounted setup drawer closes
+     ↓ keeps Buddy management reachable in mobile cockpit with the current conversation and setup action
+     ↓ detaches the previous tracked chat before persisting a deliberate replacement
+     ↓ keeps the deliberate replacement detached and skips generation changes when persistence rejects
+     ↓ retains the active saved identity when inline setup chooses that same persona
+     ↓ detaches through the real Form and saved-template action before one character selection write
+     ↓ detaches through the real Form and saved-template action before one persona selection write
+     ↓ clears identity with one awaited canonical selection write
+     ↓ clears a custom override only when the selected system template identity changes
+     ↓ does not crash role-play state derivation when document context is null
+     ↓ opens character selection from the starter and returns focus after selecting the default assistant
+     ↓ turns blocked character chat composer SEND into setup without dropping the draft
+     ↓ keeps knowledge ask sends behind the character chat setup blocker
+     ↓ shows character model-usability copy in the model selector
+   × review: late saved-template persistence cannot publish after replacement 369ms
+   × review: late saved-template persistence cannot publish after unmount 180ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx > review: late saved-template persistence cannot publish after replacement
+ FAIL  ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx > review: late saved-template persistence cannot publish after unmount
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "systemPromptTemplateId": undefined,
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx:1387:53
+    1386|           providerQualifiedModelId: "custom:deepseek-chat",
+    1387|           matchedModelId: "deepseek-chat",
+    1388|           matchedProvider: "custom",
+       |          ^
+    1389|           recommendedAction: "open-model-settings",
+    1390|           detailReason: "provider-unconfigured"
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 14 skipped (16)
+   Start at  15:47:48
+   Duration  2.21s (transform 993ms, setup 86ms, import 1.18s, tests 550ms, environment 218ms)

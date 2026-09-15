@@ -1,0 +1,505 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx (26 tests | 2 failed | 24 skipped) 445ms
+     ↓ restores the opening control after the conditionally mounted setup drawer closes
+     ↓ keeps Buddy management reachable in mobile cockpit with the current conversation and setup action
+     ↓ detaches the previous tracked chat before persisting a deliberate replacement
+     ↓ keeps the deliberate replacement detached and skips generation changes when persistence rejects
+     ↓ retains the active saved identity when inline setup chooses that same persona
+     × detaches through the real Form and saved-template action before one character selection write 248ms
+     × detaches through the real Form and saved-template action before one persona selection write 197ms
+     ↓ ignores late 'inline' settings after 'target' changes
+     ↓ ignores late 'inline' settings after 'history' changes
+     ↓ ignores late 'inline' settings after 'roundtrip' changes
+     ↓ ignores late 'template' settings after 'target' changes
+     ↓ ignores late 'template' settings after 'history' changes
+     ↓ ignores late 'template' settings after 'roundtrip' changes
+     ↓ ignores late inline settings after the Form unmounts
+     ↓ ignores late template settings after the Form unmounts
+     ↓ retains none-to-none identity only for metadata-ready neutral saved chats: true
+     ↓ retains none-to-none identity only for metadata-ready neutral saved chats: false
+     ↓ detaches before saved role-play scene persistence and suppresses its late presentation
+     ↓ passes the Form action guard to the drawer and invalidates it on a newer same-destination action
+     ↓ clears identity with one awaited canonical selection write
+     ↓ clears a custom override only when the selected system template identity changes
+     ↓ does not crash role-play state derivation when document context is null
+     ↓ opens character selection from the starter and returns focus after selecting the default assistant
+     ↓ turns blocked character chat composer SEND into setup without dropping the draft
+     ↓ keeps knowledge ask sends behind the character chat setup blocker
+     ↓ shows character model-usability copy in the model selector
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx > PlaygroundForm role-play starter > detaches through the real Form and saved-template action before one character selection write
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Preview saved setup"
+
+Here are the accessible roles:
+
+  button:
+
+  Name "Ask knowledge":
+  [36m<button[39m
+    [33mdata-testid[39m=[32m"knowledge-ask"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Hide composer options":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"composer-options-panel"[39m
+    [33maria-expanded[39m=[32m"true"[39m
+    [33maria-label[39m=[32m"Hide composer options"[39m
+    [33mclass[39m=[32m"inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-surface/80 text-text-muted transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus/40 border-primary/40 text-primaryStrong"[39m
+    [33mdata-testid[39m=[32m"composer-options-toggle"[39m
+    [33mtitle[39m=[32m"Hide composer options"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Send message":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Send message"[39m
+    [33mtitle[39m=[32m"Send message (Enter)"[39m
+    [33mtype[39m=[32m"submit"[39m
+  [36m/>[39m
+
+  Name "Open message delivery options":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Open message delivery options"[39m
+    [33mtitle[39m=[32m"Open message delivery options"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "deepseek-chat":
+  [36m<button[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"listbox"[39m
+    [33maria-label[39m=[32m"deepseek-chat"[39m
+    [33mclass[39m=[32m"inline-flex min-h-[44px] min-w-0 cursor-pointer items-center gap-1 rounded-full border px-2 text-[10px] transition-colors border-border bg-surface hover:bg-surface-hover"[39m
+    [33mdata-testid[39m=[32m"model-selector"[39m
+    [33mtitle[39m=[32m"deepseek-chat"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "More tools":
+  [36m<button[39m
+    [33maria-label[39m=[32m"More tools"[39m
+    [33mdata-testid[39m=[32m"tools-button"[39m
+    [33mtitle[39m=[32m"More tools"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Send message":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Send message"[39m
+    [33mtitle[39m=[32m"Send message (Enter)"[39m
+    [33mtype[39m=[32m"submit"[39m
+  [36m/>[39m
+
+  Name "Open message delivery options":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Open message delivery options"[39m
+    [33mtitle[39m=[32m"Open message delivery options"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Open role-play setup":
+  [36m<button[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Reselect system prompt":
+  [36m<button[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Change system prompt":
+  [36m<button[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Save current":
+  [36m<button[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  textbox:
+
+  Name "":
+  [36m<textarea[39m
+    [33mdata-testid[39m=[32m"composer-textarea"[39m
+    [33mplaceholder[39m=[32m"Type a message... (/ commands, @ mentions)"[39m
+  [36m/>[39m
+
+  Name "Template name":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Template name"[39m
+    [33mclass[39m=[32m"min-w-[180px] max-w-[260px]"[39m
+    [33mplaceholder[39m=[32m"Template name"[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  combobox:
+
+  Name "":
+  [36m<select[39m
+    [33mclass[39m=[32m"min-w-[220px]"[39m
+    [33mdata-testid[39m=[32m"startup-template-launch-select"[39m
+    [33mplaceholder[39m=[32m"Launch saved template"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  option:
+
+  Name "Saved setup":
+  [36m<option[39m
+    [33mvalue[39m=[32m"02ba1fb1-c734-4cba-b54d-8bf99cdb3495"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"flex w-full flex-col items-center px-2 pb-0 sm:px-4 sm:pb-0"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"relative z-10 flex w-full max-w-[64rem] flex-col items-center justify-center gap-2 text-base"[39m
+        [33mdata-checkwidemode[39m=[32m"false"[39m
+        [33mdata-ui-mode[39m=[32m"pro"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"relative flex w-full flex-row justify-center"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"relative w-full rounded-xl border border-transparent bg-surface/95 p-2 text-text shadow-sm backdrop-blur-lg transition-all duration-200 data-[istemporary-chat='true']:border-t-4 data-[istemporary-chat='true']:border-t-purple-500 data-[istemporary-chat='true']:border-dashed data-[istemporary-chat='true']:opacity-90 sm:rounded-3xl sm:p-3 sm:shadow-card "[39m
+            [33mdata-istemporary-chat[39m=[32m"false"[39m
+            [33mdata-mobile-keyboard[39m=[32m"desktop"[39m
+          [36m>[39m
+            [36m<div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"flex w-full min-w-0 bg-transparent"[39m
+              [36m>[39m
+                [36m<form[39m
+                  [33mclass[39m=[32m"flex w-full min-w-0 flex-col items-center"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33maccept[39m=[32m"image/*"[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33maria-label[39m=[32m"Attach image"[39m
+                    [33mclass[39m=[32m"sr-only"[39m
+                    [33mid[39m=[32m"file-upload"[39m
+                    [33mname[39m=[32m"file-upload"[39m
+                    [33mtabindex[39m=[32m"-1"[39m
+                    [33mtype[39m=[32m"file"[39m
+                  [36m/>[39m
+                  [36m<input[39m
+                    [33maccept[39m=[32m".pdf,.docx,.txt,.csv,.md,.markdown,text/markdown"[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33maria-label[39m=[32m"Attach document"[39m
+                    [33mclass[39m=[32m"sr-only"[39m
+                    [33mid[39m=[32m"document-upload"[39m
+                    [33mname[39m=[32m"document-upload"[39m
+                    [33mtabindex[39m=[32m"-1"[39m
+                    [33mtype[39m=[32m"file"[39m
+                  [36m/>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"w-full flex flex-col px-0 sm:px-2 "[39m
+                  [36m>[39m
+                    [36m<button[39m
+                      [33mdata-testid[39m=[32m"knowledge-ask"[39m
+                      [33mtype[39m=[32m"button"[39m
+                    [36m>[39m
+                      [0mAsk knowledge[0m
+                    [36m</button>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"relative"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"flex items-end gap-2"[39m
+                      [36m>[39m
+                        [36m<button[39m
+                          [33maria-controls[39m=[32m"composer-options-panel"[39m
+                          [33maria-expanded[39m=[32m"true"[39m
+                          [33maria-label[39m=[32m"Hide composer options"[39m
+                          [33mclass[39m=[32m"inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-surface/80 text-text-muted transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus/40 border-primary/40 text-primaryStrong"[39m
+                          [33mdata-testid[39m=[32m"composer-options-toggle"[39m
+                          [33mtitle[39m=[32m"Hide composer options"[39m
+                          [33mtype[39m=[32m"button"[39m
+                        [36m>[39m
+                          [36m<svg[39m
+                            [33maria-hidden[39m=[32m"true"[39m
+                            [33mclass[39m=[32m"lucide lucide-chevron-right h-4 w-4 transition-transform rotate-90"[39m
+                            [33mfill[39m=[32m"none"[39m
+                            [33mheight[39m=[32m"24"[39m
+                            [33mstroke[39m=[32m"currentColor"[39m
+                            [33mstroke-linecap[39m=[32m"round"[39m
+                            [33mstroke-linejoin[39m=[32m"round"[39m
+                            [33mstroke-width[39m=[32m"2"[39m
+                            [33mviewBox[39m=[32m"0 0 24 24"[39m
+                            [33mwidth[39m=[32m"24"[39m
+                            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                          [36m>[39m
+                            [36m<path[39m
+                              [33md[39m=[32m"m9 18 6-6-6-6"[39m
+                            [36m/>[39m
+                          [36m</svg>[39m
+                        [36m</button>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"min-w-0 flex-1"[39m
+                        [36m>[39m
+                          [36m<textarea[39m
+                            [33mdata-testid[39m=[32m"composer-textarea"[39m
+                            [33mplaceholder[39m=[32m"Type a message... (/ commands, @ mentions)"[39m
+                          [36m/>[39m
+                        [36m</div>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"flex shrink-0 items-end gap-2 self-end"[39m
+                          [33mdata-testid[39m=[32m"composer-inline-send-control"[39m
+                        [36m>[39m
+                          [36m<div[39m
+                            [33mclass[39m=[32m"flex items-center gap-2"[39m
+                          [36m>[39m
+                            [36m<div>[39m
+                              [36m<button[39m
+                                [33maria-label[39m=[32m"Send message"[39m
+                                [33mtitle[39m=[32m"Send message (Enter)"[39m
+                                [33mtype[39m=[32m"submit"[39m
+                              [36m>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"inline-flex items-center gap-2"[39m
+                                [36m>[39m
+                                  [36m<svg[39m
+                                    [33mclass[39m=[32m"h-5 w-5"[39m
+                                    [33mfill[39m=[32m"none"[39m
+                                    [33mstroke[39m=[32m"currentColor"[39m
+                                    [33mstroke-linecap[39m=[32m"round"[39m
+                                    [33mstroke-linejoin[39m=[32m"round"[39m
+                                    [33mstroke-width[39m=[32m"2"[39m
+                                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                                  [36m>[39m
+                                    [36m<path[39m
+                                      [33md[39m=[32m"M9 10L4 15 9 20"[39m
+                                    [36m/>[39m
+                                    [36m<path[39m
+                                      [33md[39m=[32m"M20 4v7a4 4 0 01-4 4H4"[39m
+                                    [36m/>[39m
+                                  [36m</svg>[39m
+                                  [36m<span[39m
+                                    [33mclass[39m=[32m""[39m
+                                  [36m>[39m
+                                    [0mSend[0m
+                                  [36m</span>[39m
+                                [36m</div>[39m
+                              [36m</button>[39m
+                              [36m<div>[39m
+                                [36m<div>[39m
+                                  [36m<button[39m
+                                    [33maria-label[39m=[32m"Open message delivery options"[39m
+                                    [33mtitle[39m=[32m"Open message delivery options"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m/>[39m
+                                [36m</div>[39m
+                              [36m</div>[39m
+                            [36m</div>[39m
+                          [36m</div>[39m
+                        [36m</div>[39m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33maria-hidden[39m=[32m"false"[39m
+                      [33mclass[39m=[32m"w-full transition-all duration-200 overflow-hidden max-h-[480px] opacity-100 visible"[39m
+                      [33mid[39m=[32m"composer-options-panel"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mdata-testid[39m=[32m"composer-toolbar"[39m
+                      [36m>[39m
+                        [36m<div>[39m
+                          [36m<div>[39m
+                            [36m<button[39m
+                              [33maria-expanded[39m=[32m"false"[39m
+                              [33maria-haspopup[39m=[32m"listbox"[39m
+                              [33maria-label[39m=[32m"deepseek-chat"[39m
+                              [33mclass[39m=[32m"inline-flex min-h-[44px] min-w-0 cursor-pointer items-center gap-1 rounded-full border px-2 text-[10px] transition-colors border-border bg-surface hover:bg-surface-hover"[39m
+                              [33mdata-testid[39m=[32m"model-selector"[39m
+                              [33mtitle[39m=[32m"deepseek-chat"[39m
+                              [33mtype[39m=[32m"button"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"max-w-[120px] truncate"[39m
+                              [36m>[39m
+                                [0mdeepseek-chat[0m
+                              [36m</span>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"rounded-full px-1.5 py-0.5 text-[9px] bg-success/10 text-success"[39m
+                                [33mtitle[39m=[32m"Provider status"[39m
+                              [36m>[39m
+                                [0mHealthy[0m
+                              [36m</span>[39m
+                            [36m</button>[39m
+                          [36m</div>[39m
+                        [36m</div>[39m
+                        [36m<button[39m
+                          [33maria-label[39m=[32m"More tools"[39m
+                          [33mdata-testid[39m=[32m"tools-button"[39m
+                          [33mtitle[39m=[32m"More tools"[39m
+                          [33mtype[39m=[32m"button"[39m
+                        [36m>[39m
+                          [36m<span>[39m
+                            [0m+Tools[0m
+                          [36m</span>[39m
+                        [36m</button>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"flex items-center gap-2"[39m
+                        [36m>[39m
+                          [36m<div>[39m
+                            [36m<button[39m
+                              [33maria-label[39m=[32m"Send message"[39m
+                              [33mtitle[39m=[32m"Send message (Enter)"[39m
+                              [33mtype[39m=[32m"submit"[39m
+                            [36m>[39m
+                              [36m<div[39m
+                                [33mclass[39m=[32m"inline-flex items-center gap-2"[39m
+                              [36m>[39m
+                                [36m<svg[39m
+                                  [33mclass[39m=[32m"h-5 w-5"[39m
+                                  [33mfill[39m=[32m"none"[39m
+                                  [33mstroke[39m=[32m"currentColor"[39m
+                                  [33mstroke-linecap[39m=[32m"round"[39m
+                                  [33mstroke-linejoin[39m=[32m"round"[39m
+                                  [33mstroke-width[39m=[32m"2"[39m
+                                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                                [36m>[39m
+                                  [36m<path[39m
+                                    [33md[39m=[32m"M9 10L4 15 9 20"[39m
+                                  [36m/>[39m
+                                  [36m<path[39m
+                                    [33md[39m=[32m"M20 4v7a4 4 0 01-4 4H4"[39m
+                                  [36m/>[39m
+                                [36m</svg>[39m
+                                [36m<span[39m
+                                  [33mclass[39m=[32m""[39m
+                                [36m>[39m
+                                  [0mSend[0m
+                                [36m</span>[39m
+                              [36m</div>[39m
+                            [36m</button>[39m
+                            [36m<div>[39m
+                              [36m<div>[39m
+                                [36m<button[39m
+                                  [33maria-label[39m=[32m"Open message delivery options"[39m
+                                  [33mtitle[39m=[32m"Open message delivery options"[39m
+                                  [33mtype[39m=[32m"button"[39m
+                                [36m/>[39m
+                              [36m</div>[39m
+                            [36m</div>[39m
+                          [36m</div>[39m
+                        [36m</div>[39m
+                        [36m<button[39m
+                          [33mtype[39m=[32m"button"[39m
+                        [36m>[39m
+                          [0mOpen role-play setup[0m
+                        [36m</button>[39m
+                        [36m<button[39m
+                          [33mtype[39m=[32m"button"[39m
+                        [36m>[39m
+                          [0mReselect system prompt[0m
+                        [36m</button>[39m
+                        [36m<button[39m
+                          [33mtype[39m=[32m"button"[39m
+                        [36m>[39m
+                          [0mChange system prompt[0m
+                        [36m</button>[39m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"px-2 py-1 text-label text-text-subtle"[39m
+                    [36m>[39m
+                      [36m<span>[39m
+                        [0mType a message and press Enter to send[0m
+                      [36m</span>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"mt-2 rounded-md border border-border/60 bg-surface2/70 px-2 py-2"[39m
+                      [33mdata-testid[39m=[32m"startup-template-controls"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"flex flex-wrap items-center gap-2"[39m
+                      [36m>[39m
+                        [36m<span[39m
+                          [33mclass[39m=[32m"text-[11px] font-semibold uppercase tracking-wide text-text-muted"[39m
+                        [36m>[39m
+                          [0mStartup templates[0m
+                        [36m</span>[39m
+                        [36m<input[39m
+                          [33maria-label[39m=[32m"Template name"[39m
+                          [33mclass[39m=[32m"min-w-[180px] max-w-[260px]"[39m
+                          [33mplaceholder[39m=[32m"Template name"[39m
+                          [33mvalue[39m=[32m""[39m
+                        [36m/>[39m
+                        [36m<button[39m
+                          [33mtype[39m=[32m"button"[39m
+                        [36m>[39m
+                          [0mSave current[0m
+                        [36m</button>[39m
+                        [36m<select[39m
+                          [33mclass[39m=[32m"min-w-[220px]"[39m
+                          [33mdata-testid[39m=[32m"startup-template-launch-select"[39m
+                          [33mplaceholder[39m=[32m"Launch saved template"[39m
+                        [36m>[39m
+                          [36m<option[39m
+                            [33mvalue[39m=[32m"02ba1fb1-c734-4cba-b54d-8bf99cdb3495"[39m
+                          [36m>[39m
+                            [0mSaved setup[0m
+                          [36m</option>[39m
+                        [36m</select>[39m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</form>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ Object.getElementError ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx:1174:29
+    1172|     render(<PlaygroundForm droppedFiles={[]} />)
+    1173|     await user.click(screen.getByRole("button", { name: "Open role-pla…
+    1174|     await user.click(screen.getByRole("button", { name: "Preview saved…
+       |                             ^
+    1175|     await user.click(await screen.findByRole("button", { name: "Apply …
+    1176|     try {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx > PlaygroundForm role-play starter > detaches through the real Form and saved-template action before one persona selection write
+AssertionError: expected "vi.fn()" to be called with arguments: [ null ]
+
+Number of calls: 0
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx:1177:70
+    1175|     await user.click(await screen.findByRole("button", { name: "Apply …
+    1176|     try {
+    1177|       expect(playgroundFormMessageOptionState.value.setServerChatId).t…
+       |                                                                      ^
+    1178|       expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCal…
+    1179|     } finally { finishCommit?.() }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 24 skipped (26)
+   Start at  16:01:16
+   Duration  2.01s (transform 1.02s, setup 76ms, import 1.24s, tests 445ms, environment 195ms)

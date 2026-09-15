@@ -1,0 +1,10 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ✓ src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx (24 tests) 1561ms
+ ✓ src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx (26 tests) 2811ms
+
+ Test Files  2 passed (2)
+      Tests  50 passed (50)
+   Start at  16:07:54
+   Duration  6.19s (transform 958ms, setup 123ms, import 1.20s, tests 4.37s, environment 377ms)

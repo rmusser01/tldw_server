@@ -1,0 +1,51 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx (22 tests | 1 failed | 21 skipped) 189ms
+     ↓ loads actor settings and renders before/after role-play state
+     ↓ announces scene setting loading as a status
+     ↓ does not crash when stored actor settings omit aspects
+     ↓ surfaces scene load failures without applying stale scene state
+     ↓ cancel closes without applying or saving
+     ↓ applies all staged changes with one apply callback
+     ↓ stages behavior templates and generation style before applying
+     ↓ resets scene draft to default actor settings
+     ↓ closes on Escape and returns focus to the trigger
+     ↓ shows only role-play relevant saved setups
+     ↓ requires confirmation before deleting a saved role-play setup
+     ↓ exposes generation style choices as radios
+     ↓ applies saved role-play setup scene through the actor settings save path
+     ↓ saves the staged role-play setup metadata
+     ↓ persists a scene only after accepted replacement and against its new destination
+     ↓ does not persist or display a scene after identity application is cancelled
+     ↓ suppresses held scene presentation after target changes
+     ↓ suppresses held scene presentation after unmount changes
+     ↓ keeps the scene draft and reports partial failure without rolling back the accepted identity
+     ↓ does not publish a held scene after the drawer closes and reopens
+     ↓ respects an explicit owner action change while the accepted scene destination stays empty
+     × accepted detachment retains the edited scene through failed save and retry 188ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx > RolePlaySetupDrawer > accepted detachment retains the edited scene through failed save and retry
+Error: expect(element).toHaveValue(Keep my edited scene after detachment)
+
+Expected the element to have value:
+  Keep my edited scene after detachment
+Received:
+
+ ❯ src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx:804:50
+    802|     await act(async()=>{release();await new Promise(resolve=>setTimeou…
+    803|     await screen.findByText(/Identity and behavior were applied, but s…
+    804|     expect(screen.getByLabelText("Scene notes")).toHaveValue("Keep my …
+       |                                                  ^
+    805|     fireEvent.click(screen.getByRole("button",{name:"Apply"}));
+    806|     await waitFor(()=>expect(onClose).toHaveBeenCalledTimes(1));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 21 skipped (22)
+   Start at  16:05:15
+   Duration  739ms (transform 189ms, setup 67ms, import 241ms, tests 189ms, environment 186ms)

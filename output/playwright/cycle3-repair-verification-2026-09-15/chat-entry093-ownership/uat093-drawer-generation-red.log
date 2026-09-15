@@ -1,0 +1,184 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx (21 tests | 2 failed | 19 skipped) 267ms
+     ↓ loads actor settings and renders before/after role-play state
+     ↓ announces scene setting loading as a status
+     ↓ does not crash when stored actor settings omit aspects
+     ↓ surfaces scene load failures without applying stale scene state
+     ↓ cancel closes without applying or saving
+     ↓ applies all staged changes with one apply callback
+     ↓ stages behavior templates and generation style before applying
+     ↓ resets scene draft to default actor settings
+     ↓ closes on Escape and returns focus to the trigger
+     ↓ shows only role-play relevant saved setups
+     ↓ requires confirmation before deleting a saved role-play setup
+     ↓ exposes generation style choices as radios
+     ↓ applies saved role-play setup scene through the actor settings save path
+     ↓ saves the staged role-play setup metadata
+     ↓ persists a scene only after accepted replacement and against its new destination
+     ↓ does not persist or display a scene after identity application is cancelled
+     ↓ suppresses held scene presentation after target changes
+     ↓ suppresses held scene presentation after unmount changes
+     ↓ keeps the scene draft and reports partial failure without rolling back the accepted identity
+     × does not publish a held scene after the drawer closes and reopens 172ms
+     × respects an explicit owner action change while the accepted scene destination stays empty 94ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx > RolePlaySetupDrawer > does not publish a held scene after the drawer closes and reopens
+AssertionError: expected { Object (settings, preview, ...) } to be { settings: null, preview: '', …(4) } // Object.is equality
+
+- Expected
++ Received
+
+  {
+-   "preview": "",
++   "preview": "Scene information:
++ The location is Observatory.
++ Scene notes: The room smells like ozone.",
+    "reset": [Function reset],
+    "setPreviewAndTokens": [Function setPreviewAndTokens],
+    "setSettings": [Function setSettings],
+-   "settings": null,
+-   "tokenCount": 0,
++   "settings": {
++     "appendable": false,
++     "aspects": [
++       {
++         "id": "user_role",
++         "key": "user_role",
++         "name": "User role",
++         "source": "free",
++         "target": "user",
++         "value": "",
++       },
++       {
++         "id": "user_state",
++         "key": "user_state",
++         "name": "User emotional state",
++         "source": "free",
++         "target": "user",
++         "value": "",
++       },
++       {
++         "id": "user_focus",
++         "key": "user_focus",
++         "name": "User focus/objective",
++         "source": "free",
++         "target": "user",
++         "value": "",
++       },
++       {
++         "id": "char_role",
++         "key": "char_role",
++         "name": "Character role",
++         "source": "free",
++         "target": "char",
++         "value": "",
++       },
++       {
++         "id": "char_state",
++         "key": "char_state",
++         "name": "Character emotional state",
++         "source": "free",
++         "target": "char",
++         "value": "",
++       },
++       {
++         "id": "char_goal",
++         "key": "char_goal",
++         "name": "Character goal",
++         "source": "free",
++         "target": "char",
++         "value": "",
++       },
++       {
++         "id": "world_location",
++         "key": "world_location",
++         "name": "Location",
++         "source": "free",
++         "target": "world",
++         "value": "Observatory",
++       },
++       {
++         "id": "world_time_of_day",
++         "key": "world_time_of_day",
++         "name": "Time of day",
++         "source": "free",
++         "target": "world",
++         "value": "",
++       },
++       {
++         "id": "world_weather",
++         "key": "world_weather",
++         "name": "Weather",
++         "source": "free",
++         "target": "world",
++         "value": "",
++       },
++       {
++         "id": "world_lighting",
++         "key": "world_lighting",
++         "name": "Lighting",
++         "source": "free",
++         "target": "world",
++         "value": "",
++       },
++       {
++         "id": "world_tone",
++         "key": "world_tone",
++         "name": "Scene tone",
++         "source": "free",
++         "target": "world",
++         "value": "",
++       },
++     ],
++     "chatDepth": 0,
++     "chatPosition": "before",
++     "chatRole": "system",
++     "isEnabled": true,
++     "notes": "The room smells like ozone.",
++     "notesGmOnly": false,
++     "templateMode": "merge",
++     "version": 3,
++   },
++   "tokenCount": 22,
+  }
+
+ ❯ src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx:764:38
+    762|     const before = useActorStore.getState()
+    763|     await act(async () => { release(true); await pending })
+    764|     expect(useActorStore.getState()).toBe(before)
+       |                                      ^
+    765|     expect(onClose).not.toHaveBeenCalled()
+    766|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx > RolePlaySetupDrawer > respects an explicit owner action change while the accepted scene destination stays empty
+AssertionError: expected { Object (settings, preview, ...) } to be { Object (settings, preview, ...) } // Object.is equality
+
+If it should pass with deep equality, replace "toBe" with "toStrictEqual"
+
+Expected: { Object (settings, preview, ...) }
+Received: serializes to the same string
+
+
+Compared values have no visual difference.
+
+ ❯ src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx:784:38
+    782|     const before = useActorStore.getState()
+    783|     await act(async () => { release(true); await pending })
+    784|     expect(useActorStore.getState()).toBe(before)
+       |                                      ^
+    785|     expect(onClose).not.toHaveBeenCalled()
+    786|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 19 skipped (21)
+   Start at  15:59:01
+   Duration  1.11s (transform 243ms, setup 130ms, import 319ms, tests 267ms, environment 329ms)

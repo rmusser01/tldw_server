@@ -1,0 +1,19 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:47894) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx > review: late saved-template persistence cannot publish after replacement
+Warning: The current testing environment is not configured to support act(...)
+
+stderr | ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx > review: late saved-template persistence cannot publish after replacement
+Warning: The current testing environment is not configured to support act(...)
+    at PlaygroundForm (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx:299:3)
+
+ ✓ ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx (17 tests | 14 skipped) 636ms
+   ✓ review: late saved-template persistence cannot publish after replacement  368ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 14 skipped (17)
+   Start at  16:02:07
+   Duration  2.55s (transform 1.09s, setup 135ms, import 1.31s, tests 636ms, environment 368ms)
