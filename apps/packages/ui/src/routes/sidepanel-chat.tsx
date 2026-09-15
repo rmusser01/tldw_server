@@ -545,7 +545,7 @@ const SidepanelChat = () => {
     webSearch,
     setWebSearch
   } = useMessage()
-  const [selectedCharacter, setSelectedCharacter] =
+  const [selectedCharacter] =
     useSelectedCharacter<Character | null>(null)
   const [selectedAssistant] = useSelectedAssistant(null)
   const setRagMediaIds = useStoreMessageOption((state) => state.setRagMediaIds)
@@ -591,8 +591,7 @@ const SidepanelChat = () => {
     historyId,
     messagesLength: messages.length,
     setMessages,
-    setHistory,
-    setSelectedCharacter
+    setHistory
   })
   const composerPadding = composerHeight
     ? `${composerHeight + 16}px`

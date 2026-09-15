@@ -1815,7 +1815,6 @@ export const Playground = () => {
     messagesLength: messages.length,
     setMessages,
     setHistory,
-    setSelectedCharacter,
   });
 
   const loadLocalConversation = useLoadLocalConversation(

@@ -805,6 +805,20 @@ describe("CharactersManager first-use onboarding", () => {
     expect(window.localStorage.getItem(TEMPLATE_CHOOSER_SEEN_KEY)).toBe("true")
   })
 
+  it("opens Create without writing to the disconnected Edit form", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    const user = userEvent.setup()
+    render(<CharactersManager />)
+
+    await user.click(screen.getByRole("button", { name: "New character" }))
+    expect(await screen.findByText("Choose a template")).toBeInTheDocument()
+    expect(
+      consoleError.mock.calls.filter((args) =>
+        args.some((value) => String(value).includes("not connected to any Form"))
+      )
+    ).toEqual([])
+  }, 60000)
+
   it("expands template chooser on first create-modal open and keeps it collapsed once seen", async () => {
     const user = userEvent.setup()
     render(<CharactersManager />)

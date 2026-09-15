@@ -128,6 +128,7 @@ export const useSelectedAssistant = (
       next: AssistantSelection | null,
       options: SelectedAssistantCommitOptions = {}
     ) => {
+      if (options.isCurrent && !options.isCurrent()) return
       const normalizedCurrent = normalizeAssistantSelection(
         parseSelectedAssistantValue(latestSelectedAssistantRef.current)
       )

@@ -724,6 +724,7 @@ export const useServerChatLoader = ({
     serverChatDebounceRef.current.timer = setTimeout(() => {
       const controller = new AbortController()
       const canCommitCurrentLoad = () =>
+        useStoreMessageOption.getState().serverChatId === serverChatId &&
         shouldCommitServerChatLoadResult({
           requestedChatId: serverChatId,
           activeServerChatId: serverChatLoadRef.current.chatId,
@@ -851,7 +852,7 @@ export const useServerChatLoader = ({
                     id: assistantId,
                     name: nextAssistantName
                   })
-                  await setSelectedAssistant(selection)
+                  await setSelectedAssistant(selection, { isCurrent: canCommitCurrentLoad })
                   return {
                     assistantName: nextAssistantName,
                     assistantAvatarUrl: selection?.avatar_url ?? null
@@ -872,7 +873,7 @@ export const useServerChatLoader = ({
                   id: assistantId,
                   name: "Persona"
                 })
-                await setSelectedAssistant(selection)
+                await setSelectedAssistant(selection, { isCurrent: canCommitCurrentLoad })
                 return {
                   assistantName: selection?.name || "Persona",
                   assistantAvatarUrl: selection?.avatar_url ?? null
@@ -889,7 +890,7 @@ export const useServerChatLoader = ({
                     ...character,
                     id: String(character.id ?? characterId)
                   })
-                  await setSelectedAssistant(selection)
+                  await setSelectedAssistant(selection, { isCurrent: canCommitCurrentLoad })
                   return {
                     assistantName:
                       selection?.name ||
@@ -922,13 +923,13 @@ export const useServerChatLoader = ({
               const selection =
                 effectiveAssistantStateToSelection(fallbackState)
               if (selection) {
-                await setSelectedAssistant(selection)
+                await setSelectedAssistant(selection, { isCurrent: canCommitCurrentLoad })
                 return {
                   assistantName: selection.name,
                   assistantAvatarUrl: selection.avatar_url ?? null
                 }
               }
-              await setSelectedAssistant(null)
+              await setSelectedAssistant(null, { isCurrent: canCommitCurrentLoad })
               return null
             }
 
@@ -946,13 +947,13 @@ export const useServerChatLoader = ({
             const selection =
               effectiveAssistantStateToSelection(effectiveAssistantState)
             if (selection) {
-              await setSelectedAssistant(selection)
+              await setSelectedAssistant(selection, { isCurrent: canCommitCurrentLoad })
               return {
                 assistantName: selection.name,
                 assistantAvatarUrl: selection.avatar_url ?? null
               }
             }
-            await setSelectedAssistant(null)
+            await setSelectedAssistant(null, { isCurrent: canCommitCurrentLoad })
             return null
           })()
 
