@@ -939,7 +939,7 @@ describe("background effective extension auth", () => {
     ["/api/v1/chats/chat%2fid/messages", "POST"],
     ["/api/v1/chats/chat%5cid/messages", "POST"],
     ["/api/v1/chats/chat-123/messages/search", "POST"],
-    ["/api/v1/chats/chat-123/messages", "GET"]
+    ["/api/v1/chats/chat-123/messages/search", "GET"]
   ] as const)("rejects a checked target on non-allowlisted worker route %s %s", async (path, method) => {
     const fetchSpy = vi.fn()
     vi.stubGlobal("fetch", fetchSpy)

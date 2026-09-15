@@ -1,4 +1,4 @@
-import { bgRequest } from "@/services/background-proxy"
+import { assertQuickIngestRequestCurrent, scopedQuickIngestRequest, type QuickIngestRequestContext } from "./quick-ingest-request-scope"
 import {
   completedIngestJobIndicatesFailure,
   extractCompletedIngestJobError,
@@ -91,10 +91,10 @@ const isTransientThrownStatusRead = (error: unknown): boolean => {
   return typeof status === "undefined" || isTransientHttpStatus(status)
 }
 
-const readJobStatus = async (jobId: number): Promise<any> => {
+const readJobStatus = async (jobId: number, context: QuickIngestRequestContext): Promise<any> => {
   for (let attempt = 0; attempt < STATUS_READ_ATTEMPTS; attempt += 1) {
     try {
-      const response = await bgRequest<any>({
+      const response = await scopedQuickIngestRequest<any>(context, {
         path: `/api/v1/media/ingest/jobs/${jobId}`,
         method: "GET",
         timeoutMs: 10_000,
@@ -106,6 +106,7 @@ const readJobStatus = async (jobId: number): Promise<any> => {
         return response
       }
     } catch (error) {
+      assertQuickIngestRequestCurrent(context, error);
       if (
         !isTransientThrownStatusRead(error) ||
         attempt === STATUS_READ_ATTEMPTS - 1
@@ -176,7 +177,8 @@ const deriveLifecycle = (
 }
 
 export const reattachQuickIngestSession = async (
-  tracking: PersistedQuickIngestTracking
+  tracking: PersistedQuickIngestTracking,
+  context: QuickIngestRequestContext = {},
 ): Promise<ReattachedQuickIngestSnapshot> => {
   const jobIds = normalizeJobIds(tracking.jobIds)
   if (tracking.mode !== "webui-direct" || jobIds.length === 0) {
@@ -189,7 +191,7 @@ export const reattachQuickIngestSession = async (
 
   try {
     for (const [index, jobId] of jobIds.entries()) {
-      const response = await readJobStatus(jobId)
+      const response = await readJobStatus(jobId, context)
 
       if (!response?.ok || !normalizeJobStatus(response.data?.status)) {
         return interruptedSnapshot()
@@ -203,7 +205,8 @@ export const reattachQuickIngestSession = async (
         )
       )
     }
-  } catch {
+  } catch (error) {
+    assertQuickIngestRequestCurrent(context, error)
     return interruptedSnapshot()
   }
 

@@ -3517,7 +3517,9 @@ export class TldwApiClientBase {
     return await bgUpload<any>({ path: '/api/v1/media/add', method: 'POST', fields: normalized })
   }
 
-  async uploadMedia(file: File, fields?: Record<string, any>): Promise<any> {
+  async uploadMedia(file: File, fields?: Record<string, any>, options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope; assertCurrent?: () => void }): Promise<any> {
+    options?.signal?.throwIfAborted()
+    options?.assertCurrent?.()
     const data = await file.arrayBuffer()
     const name = file.name || 'upload'
     const type = file.type || 'application/octet-stream'
@@ -3536,7 +3538,11 @@ export class TldwApiClientBase {
       }
     }
     uploadTimeoutMs = Math.max(uploadTimeoutMs, 5000)
+    options?.signal?.throwIfAborted()
+    options?.assertCurrent?.()
     return await bgUpload<any>({
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
       path: '/api/v1/media/add',
       method: 'POST',
       fields: normalized,
@@ -3552,10 +3558,11 @@ export class TldwApiClientBase {
       results_per_page?: number
       include_keywords?: boolean
     },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<any> {
     const query = this.buildQuery(params as Record<string, any>)
     return await bgRequest<any>({
+      ...requestScopeFields(options?.requestScope),
       path: `/api/v1/media${query}`,
       method: "GET",
       abortSignal: options?.signal
@@ -3575,7 +3582,7 @@ export class TldwApiClientBase {
       boost_fields?: Record<string, number>
     },
     params?: { page?: number; results_per_page?: number },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<any> {
     const query = this.buildQuery(params as Record<string, any>)
     return await bgRequest<any>({
@@ -3583,6 +3590,7 @@ export class TldwApiClientBase {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload,
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }

@@ -1,7 +1,7 @@
 import React from "react"
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -411,6 +411,7 @@ vi.mock("@/services/tldw/quick-ingest-batch", async (importOriginal) => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn().mockResolvedValue(undefined),
+    ensureConfigForRequest: async () => JSON.parse(localStorage.getItem("tldwConfig") || "null"),
     getTranscriptionModels: getTranscriptionModelsMock,
     getProvidersStatus: getProvidersStatusMock,
   },
@@ -2404,3 +2405,17 @@ describe("QuickIngestWizardModal — real configure step", () => {
     })
   })
 })
+
+vi.mock("@plasmohq/storage", async () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: { getCurrentUser: async () => ({ id: 1 }) } }))
+vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }))
+vi.mock("@/services/tldw-server", () => ({ getWebSearchPrompt: vi.fn(), LEGACY_SERVICE_PROMPT_DEFAULTS: {}, promptForRag: vi.fn() }))
+import { quickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
+let releaseAuthority: (() => void) | undefined
+beforeEach(async () => {
+  localStorage.setItem("tldwConfig", JSON.stringify({ serverUrl: "https://test.test", authMode: "single-user", apiKey: "synthetic" }))
+  useQuickIngestSessionStore.getState().setAuthority(null)
+  releaseAuthority = quickIngestAuthority.retain()
+  await waitFor(() => expect(useQuickIngestSessionStore.getState().authorityKey).toBeTruthy())
+})
+afterEach(() => releaseAuthority?.())

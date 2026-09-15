@@ -124,11 +124,13 @@ vi.mock("@/store/connection", () => ({
     }),
 }))
 
-vi.mock("lucide-react", () => {
+vi.mock("lucide-react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("lucide-react")>()
   const icon = (name: string) => (props: any) => (
     <span data-icon={name} aria-hidden={props?.["aria-hidden"]} />
   )
   return {
+    ...actual,
     ArrowLeft: icon("ArrowLeft"),
     ArrowRight: icon("ArrowRight"),
     ChevronDown: icon("ChevronDown"),
@@ -172,6 +174,7 @@ vi.mock("@/services/tldw/quick-ingest-session-reattach", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: (...args: unknown[]) => mocks.initialize(...args),
+    ensureConfigForRequest: async () => JSON.parse(localStorage.getItem("tldwConfig") || "null"),
   },
 }))
 
@@ -424,8 +427,32 @@ const SessionBackedQuickIngestModal = () => {
   )
 }
 
+vi.mock("@plasmohq/storage", async () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: { getCurrentUser: async () => ({ id: 1 }) } }))
+vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }))
+import { quickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
+let releaseAuthority: (() => void) | undefined
+
 describe("QuickIngestWizardModal session runtime", () => {
-  beforeEach(() => {
+  it("masks Bob's completed result on logout before a replacement account can act", async () => {
+    useQuickIngestSessionStore.getState().createDraftSession({
+      ...createEmptyQuickIngestSession(),
+      currentStep: 5,
+      lifecycle: "completed",
+      processingState: { status: "complete", perItemProgress: [], elapsed: 1, estimatedRemaining: 0 },
+      results: [{ id: "Bob-private.pdf", status: "ok", type: "pdf", mediaId: 7 }],
+    })
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    expect(await screen.findByTestId("wizard-result-Bob-private.pdf")).toBeInTheDocument()
+    act(() => {
+      window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } }))
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
+    })
+    await waitFor(() => expect(screen.queryByTestId("wizard-result-Bob-private.pdf")).not.toBeInTheDocument())
+    expect(mocks.cancelQuickIngestSession).not.toHaveBeenCalled()
+  })
+
+  beforeEach(async () => {
     mocks.runtimeListeners.splice(0, mocks.runtimeListeners.length)
     mocks.startQuickIngestSession.mockReset()
     mocks.submitQuickIngestBatch.mockReset()
@@ -447,6 +474,11 @@ describe("QuickIngestWizardModal session runtime", () => {
       offlineBypass: false,
     })
     mocks.cancelQuickIngestSession.mockResolvedValue({ ok: true })
+    localStorage.setItem("tldwConfig", JSON.stringify({ serverUrl: "https://test.test", authMode: "single-user", apiKey: "synthetic" }))
+    useQuickIngestSessionStore.getState().setAuthority(null)
+    releaseAuthority = quickIngestAuthority.retain()
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().authorityKey).toBeTruthy())
+    mocks.initialize.mockClear()
     useQuickIngestSessionStore.setState({
       session: null,
       triggerSummary: { count: 0, label: null, hadFailure: false },
@@ -454,6 +486,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   })
 
   afterEach(() => {
+    releaseAuthority?.()
     vi.useRealTimers()
     vi.restoreAllMocks()
   })
@@ -1044,7 +1077,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       resolveBatch = resolve
     })
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -1173,7 +1206,7 @@ describe("QuickIngestWizardModal session runtime", () => {
           plannedItemIds: ["11"],
           jobIdToCollectionItemId: { "77": "11" },
           durableMode: "durable_collection",
-        })
+        }), expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
       )
     })
     await waitFor(() => {
@@ -1521,7 +1554,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   it("rehydrates a hidden processing session when the modal is reopened", () => {
     const onClose = vi.fn()
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       visibility: "hidden",
@@ -1563,7 +1596,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   })
 
   it("rehydrates a completed session with results after a remount", () => {
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "completed",
       currentStep: 5,
@@ -1608,7 +1641,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   })
 
   it("restores persisted file stubs with a reattach-required warning", () => {
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "draft",
       currentStep: 1,
@@ -1655,7 +1688,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       errorMessage: null,
     })
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -1700,7 +1733,7 @@ describe("QuickIngestWizardModal session runtime", () => {
           mode: "webui-direct",
           batchId: "batch-77",
           jobIds: [77],
-        })
+        }), expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
       )
     })
 
@@ -1725,7 +1758,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       errorMessage: null,
     })
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -1781,7 +1814,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   })
 
   it("does not run persisted direct-job reattach for extension runtime sessions", async () => {
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -1851,7 +1884,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       ],
     })
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -1899,7 +1932,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       errorMessage: null,
     })
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -1960,7 +1993,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     const reattach = deferred<any>()
     mocks.reattachQuickIngestSession.mockReturnValue(reattach.promise)
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -2020,7 +2053,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     const reattach = deferred<any>()
     mocks.reattachQuickIngestSession.mockReturnValue(reattach.promise)
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -2086,7 +2119,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       errorMessage: null,
     })
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -2142,7 +2175,7 @@ describe("QuickIngestWizardModal session runtime", () => {
 
   it("preserves already completed item results when cancellation finalizes pending items", async () => {
     const user = userEvent.setup()
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -2228,7 +2261,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   it("opens durable conference collections from terminal results", async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "completed",
       currentStep: 5,
@@ -2286,7 +2319,7 @@ describe("QuickIngestWizardModal session runtime", () => {
         errorMessage: null,
       })
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,

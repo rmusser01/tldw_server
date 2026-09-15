@@ -8,7 +8,10 @@ vi.mock("@/services/background-proxy", () => ({
   bgRequest: (...args: unknown[]) => mocks.bgRequest(...args),
 }))
 
-import { reattachQuickIngestSession } from "@/services/tldw/quick-ingest-session-reattach"
+import { reattachQuickIngestSession as reattach } from "@/services/tldw/quick-ingest-session-reattach"
+
+const context = { requestScope: { config: { serverUrl: "https://server-a.test", authMode: "single-user" as const, expectedSingleUserApiKeyScope: "synthetic-scope" }, userId: null } }
+const reattachQuickIngestSession = (tracking: Parameters<typeof reattach>[0]) => reattach(tracking, context)
 
 describe("reattachQuickIngestSession", () => {
   beforeEach(() => {
