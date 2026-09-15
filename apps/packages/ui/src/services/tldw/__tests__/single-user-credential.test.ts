@@ -54,6 +54,17 @@ const jwtForUser = (userId: string | number): string =>
   `header.${btoa(JSON.stringify({ sub: String(userId) }))}.signature`
 
 describe("terminal refresh session invalidation", () => {
+  it("does not mistake the raw pre-rotation JWT for a newer same-user login", async () => {
+    const persistent = new MemoryStorage()
+    const original = { ...multiUserConfig, accessToken: jwtForUser(42) }
+    const rotated = { ...original, accessToken: `${jwtForUser(42)}-rotated`, refreshToken: "refresh-1" }
+    await persistent.set("tldwConfig", original)
+    await storeRefreshRotationIfCurrent(persistent, original, original.refreshToken, rotated)
+
+    await expect(hasNewerCurrentAccessToken(persistent, rotated, rotated.accessToken)).resolves.toBe(false)
+    await expect(waitForNewerCurrentAccessToken(persistent, rotated, rotated.accessToken, { timeoutMs: 0 })).resolves.toBe(false)
+  })
+
   it("removes only the rejected effective credentials while retaining connection settings", async () => {
     const persistent = new MemoryStorage()
     const session = new MemoryStorage()

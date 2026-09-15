@@ -225,9 +225,9 @@ export const hasNewerCurrentAccessToken = async (
     stored,
     await persistent.get<unknown>(REFRESH_ROTATION_KEY)
   )
-  if (record && record.accessToken !== captured) {
-    return true
-  }
+  // An applicable rotation owns the effective credential. Its unchanged source
+  // JWT is older, even when it identifies the same account as the captured JWT.
+  if (record) return record.accessToken !== captured
   const current = nonEmptySecret(stored.accessToken)
   if (!current || current === captured) return false
   const unknownPrincipal = deriveScopedUserId({

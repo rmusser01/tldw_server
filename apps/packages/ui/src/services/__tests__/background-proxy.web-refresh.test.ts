@@ -61,6 +61,31 @@ const jwtForUser = (userId: string | number): string =>
   `header.${btoa(JSON.stringify({ sub: String(userId) }))}.signature`
 
 describe("background proxy web token refresh", () => {
+  it.each([false, true])("invalidates a revoked rotated session without replaying its stale raw JWT (scoped=%s)", async (scoped) => {
+    const config = {
+      serverUrl: "https://api.example.com", authMode: "multi-user" as const,
+      accessToken: jwtForUser(42), refreshToken: "original-refresh"
+    }
+    mocks.store.tldwConfig = config
+    const { createSafeStorage } = await import("@/utils/safe-storage")
+    const { storeRefreshRotationIfCurrent } = await import("@/services/tldw/single-user-credential")
+    const storage = createSafeStorage({ area: "local" })
+    await storeRefreshRotationIfCurrent(storage, config, config.refreshToken, {
+      accessToken: `${jwtForUser(42)}-rotated`, refreshToken: "rotated-refresh"
+    })
+    const fetchSpy = vi.fn(async () => new Response("unauthorized", { status: 401 }))
+    vi.stubGlobal("fetch", fetchSpy)
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({
+      path: "/api/v1/notes/private-note", method: "GET",
+      ...(scoped ? { servicePromptConfig: { serverUrl: config.serverUrl, authMode: config.authMode, expectedUserId: 42 } } : {})
+    })).rejects.toMatchObject({ status: 401 })
+    const { resolveDirectBrowserConfig } = await import("@/services/tldw/direct-browser-config")
+    expect(await resolveDirectBrowserConfig(storage)).not.toHaveProperty("accessToken")
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(mocks.store.tldwConfig).toEqual(config)
+  })
+
   it.each([false, true])("invalidates only the current session after an actual refresh401 (scoped=%s)", async (scoped) => {
     const config = {
       serverUrl: "https://api.example.com", authMode: "multi-user" as const,
