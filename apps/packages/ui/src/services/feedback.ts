@@ -78,7 +78,8 @@ export async function submitImplicitFeedback(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: payload,
-    timeoutMs: FEEDBACK_IMPLICIT_TIMEOUT_MS
+    timeoutMs: FEEDBACK_IMPLICIT_TIMEOUT_MS,
+    suppressBackendUnavailableEvent: true
   })
 }
 

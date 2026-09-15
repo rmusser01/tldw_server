@@ -1,4 +1,6 @@
 import React from "react"
+import { useConnectionState } from "@/hooks/useConnectionState"
+import { ConnectionPhase } from "@/types/connection"
 
 import {
   buildNotificationScopeKey,
@@ -126,6 +128,10 @@ export function NotificationLifecycleProvider({
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
   scopeKey: suppliedScopeKey
 }: NotificationLifecycleProviderProps) {
+  const connection = useConnectionState()
+  const connectionVerified = connection.isConnected &&
+    connection.phase === ConnectionPhase.CONNECTED &&
+    connection.mode !== "demo" && !connection.offlineBypass
   const [liveScopeKey, setLiveScopeKey] = React.useState(() =>
     suppliedScopeKey ?? buildWebNotificationScopeKey()
   )
@@ -208,8 +214,11 @@ export function NotificationLifecycleProvider({
     cursorCurrentRef.current = false
     terminalGenerationRef.current = null
     terminalStateRef.current = null
-    setSnapshot(initialSnapshot(scopeKey, lifecycleEpoch))
-    if (!enabled) return
+    setSnapshot({
+      ...initialSnapshot(scopeKey, lifecycleEpoch),
+      ...(!connectionVerified ? { state: "auth-required" as const } : {})
+    })
+    if (!enabled || !connectionVerified) return
     const requestAbort = new AbortController()
     requestAbortRef.current = requestAbort
 
@@ -354,7 +363,7 @@ export function NotificationLifecycleProvider({
     if (terminalGenerationRef.current !== generation) {
       pollTimerRef.current = setInterval(() => void pollNotificationState(), pollIntervalMs)
     }
-  }, [applyFailure, enabled, pollIntervalMs, scopeKey, stopWork, updateCurrent])
+  }, [applyFailure, connectionVerified, enabled, pollIntervalMs, scopeKey, stopWork, updateCurrent])
 
   React.useEffect(() => {
     let cancelled = false
@@ -461,27 +470,30 @@ export function NotificationLifecycleProvider({
     [applyFailure, updateCurrent]
   )
 
-  const projected =
-    snapshot.scopeKey === scopeKey
-      ? snapshot
-      : initialSnapshot(scopeKey, lifecycleEpochRef.current)
   const value = React.useMemo<NotificationLifecycleContextValue>(
-    () => ({
-      scopeKey: projected.scopeKey,
-      lifecycleEpoch: projected.lifecycleEpoch,
-      state: projected.state,
-      unreadCount: projected.unreadCount,
-      updatedAt: projected.updatedAt,
-      latestEvent: projected.latestEvent,
-      eventSequence: projected.eventSequence,
-      events: projected.events,
-      mutationError: projected.mutationError,
-      tryAgain: startWork,
-      refreshPermissions: startWork,
-      reportRequestError,
-      reportMutationError
-    }),
-    [projected, reportMutationError, reportRequestError, startWork]
+    () => {
+      const projected = !connectionVerified
+        ? { ...initialSnapshot(scopeKey, lifecycleEpochRef.current), state: "auth-required" as const }
+        : snapshot.scopeKey === scopeKey
+          ? snapshot
+          : initialSnapshot(scopeKey, lifecycleEpochRef.current)
+      return {
+        scopeKey: projected.scopeKey,
+        lifecycleEpoch: projected.lifecycleEpoch,
+        state: projected.state,
+        unreadCount: projected.unreadCount,
+        updatedAt: projected.updatedAt,
+        latestEvent: projected.latestEvent,
+        eventSequence: projected.eventSequence,
+        events: projected.events,
+        mutationError: projected.mutationError,
+        tryAgain: startWork,
+        refreshPermissions: startWork,
+        reportRequestError,
+        reportMutationError
+      }
+    },
+    [connectionVerified, scopeKey, snapshot, reportMutationError, reportRequestError, startWork]
   )
 
   return (

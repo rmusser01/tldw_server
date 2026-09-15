@@ -20,6 +20,10 @@ vi.mock("@web/lib/api", () => ({
   getApiBaseUrl: () => "https://api.example.test/api/v1"
 }))
 
+vi.mock("@/hooks/useConnectionState", () => ({
+  useConnectionState: () => ({ phase: "connected", isConnected: true, mode: "normal", offlineBypass: false })
+}))
+
 vi.mock("@web/lib/authStorage", () => ({
   getApiBearer: () => null,
   getApiKey: () => "test-api-key"

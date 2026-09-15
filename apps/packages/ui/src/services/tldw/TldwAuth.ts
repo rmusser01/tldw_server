@@ -236,8 +236,8 @@ export class TldwAuthService {
         path: this.isHostedMode() ? '/api/auth/logout' : '/api/v1/auth/logout',
         method: 'POST'
       })
-    } catch (error) {
-      console.error('Server logout failed:', error)
+    } catch {
+      console.warn('Server logout unavailable; continuing local sign-out without confirmed remote revocation.')
     }
 
     clearSourceReviewHandoffs()

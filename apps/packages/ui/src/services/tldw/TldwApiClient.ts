@@ -32,6 +32,7 @@ import { createJsonResponseLike } from "@/services/tldw/json-response-like"
 import type { AllowedPath, PathOrUrl } from "@/services/tldw/openapi-guard"
 import { tldwRequest } from "@/services/tldw/request-core"
 import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
+import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
 import { appendPathQuery } from "@/services/tldw/path-utils"
 import { inferUploadMediaTypeFromUrl } from "@/services/tldw/media-routing"
 import {
@@ -1721,9 +1722,13 @@ export class TldwApiClientBase {
     }
   }
 
-  private publishConfigUpdated(): void {
+  private publishConfigUpdated(previousConfig: TldwConfig | null, onlyIfAuthorityChanged = false): void {
+    const authorityChanged = !connectionAuthoritiesMatch(this.config, previousConfig)
+    if (onlyIfAuthorityChanged && !authorityChanged) return
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("tldw:config-updated"))
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", {
+        detail: { authorityChanged }
+      }))
     }
   }
 
@@ -1945,6 +1950,7 @@ export class TldwApiClientBase {
       timeoutMs?: number
       signal?: AbortSignal
       responseType?: "json" | "text" | "arrayBuffer"
+      suppressBackendUnavailableEvent?: boolean
     }
   ): Promise<{
     ok: boolean
@@ -1963,6 +1969,7 @@ export class TldwApiClientBase {
       timeoutMs: init?.timeoutMs,
       abortSignal: init?.signal,
       responseType: init?.responseType,
+      suppressBackendUnavailableEvent: init?.suppressBackendUnavailableEvent,
       returnResponse: true
     })
     const data = response?.data
@@ -2139,16 +2146,18 @@ export class TldwApiClientBase {
     this.applyConfigState()
   }
 
-  private async activateManualConfig(config: TldwConfig): Promise<void> {
+  private async activateManualConfig(config: TldwConfig, previousConfig: TldwConfig | null): Promise<void> {
     this.config = config
-    await this.syncConnectionServerUrl(config.serverUrl)
     this.applyConfigState()
-    this.publishConfigUpdated()
+    this.publishConfigUpdated(previousConfig, true)
+    await this.syncConnectionServerUrl(config.serverUrl)
+    this.publishConfigUpdated(config)
   }
 
   private async writeSessionOrMemory(
     input: { serverUrl: string; apiKey: string },
-    serverOrigin: string
+    serverOrigin: string,
+    previousConfig: TldwConfig | null
   ): Promise<"session" | "memory"> {
     const persisted: TldwConfig = {
       authMode: "single-user",
@@ -2169,7 +2178,7 @@ export class TldwApiClientBase {
     try {
       await this.storage.set("tldwConfig", persisted)
       await this.sessionStorage.set(MANUAL_SESSION_KEY, record)
-      await this.activateManualConfig(hydrated)
+      await this.activateManualConfig(hydrated, previousConfig)
       return "session"
     } catch {
       await clearManualCredentials(this.storage, this.sessionStorage).catch(
@@ -2179,7 +2188,7 @@ export class TldwApiClientBase {
             .catch(() => undefined)
         }
       )
-      await this.activateManualConfig(hydrated)
+      await this.activateManualConfig(hydrated, previousConfig)
       return "memory"
     }
   }
@@ -2195,6 +2204,7 @@ export class TldwApiClientBase {
     if (!serverOrigin) throw new Error("Invalid server URL")
     if (!apiKey) throw new Error("API key is required")
 
+    const previousConfig = await this.getConfig()
     await this.clearManualSingleUserCredentials()
     if (input.persistence === "device") {
       const deviceConfig: TldwConfig = {
@@ -2211,19 +2221,21 @@ export class TldwApiClientBase {
         await this.sessionStorage
           .remove(MANUAL_SESSION_KEY)
           .catch(() => undefined)
-        await this.activateManualConfig(deviceConfig)
+        await this.activateManualConfig(deviceConfig, previousConfig)
         return "device"
       } catch {
         return await this.writeSessionOrMemory(
           { serverUrl, apiKey },
-          serverOrigin
+          serverOrigin,
+          previousConfig
         )
       }
     }
 
     return await this.writeSessionOrMemory(
       { serverUrl, apiKey },
-      serverOrigin
+      serverOrigin,
+      previousConfig
     )
   }
 
@@ -2243,6 +2255,7 @@ export class TldwApiClientBase {
   }
 
   async clearCookieSingleUserSession(): Promise<void> {
+    const previousConfig = this.config
     let failure: unknown
     try {
       await this.storage.remove(COOKIE_SESSION_CONFIG_KEY)
@@ -2251,12 +2264,14 @@ export class TldwApiClientBase {
     }
     invalidateCookieSessionConfig()
     this.config = null
+    this.applyConfigState()
+    this.publishConfigUpdated(previousConfig, true)
     try {
       await this.initialize()
     } catch (error) {
       failure ??= error
     }
-    this.publishConfigUpdated()
+    this.publishConfigUpdated(null)
     if (failure) throw failure
   }
 
@@ -2310,6 +2325,7 @@ export class TldwApiClientBase {
   async updateConfig(config: Partial<TldwConfig>): Promise<void> {
     await this.initialize()
     let currentConfig = (await this.getConfig()) || ({} as TldwConfig)
+    const previousConfig = currentConfig
     const targetAuthMode = config.authMode || currentConfig.authMode
     const submittedApiKey = Object.prototype.hasOwnProperty.call(config, "apiKey")
       ? String(config.apiKey || "").trim()
@@ -2348,11 +2364,13 @@ export class TldwApiClientBase {
     const persisted = toPersistedTldwConfig(newConfig)
     await this.storage.set("tldwConfig", persisted)
     this.config = persisted
+    this.applyConfigState()
+    this.publishConfigUpdated(previousConfig, true)
     if (Object.prototype.hasOwnProperty.call(config, "serverUrl")) {
       await this.syncConnectionServerUrl(config.serverUrl)
     }
     await this.initialize().catch(() => null)
-    this.publishConfigUpdated()
+    this.publishConfigUpdated(persisted)
   }
 
   async healthCheck(): Promise<boolean> {

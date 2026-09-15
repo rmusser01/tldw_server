@@ -11,8 +11,12 @@ const mocks = vi.hoisted(() => ({
   failDeviceWrite: false,
   failSessionWrite: false,
   failClearWrite: false,
-  beforeLocalConfigWrite: null as null | (() => void)
+  beforeLocalConfigWrite: null as null | (() => void),
+  beforeServerUrlWrite: null as null | (() => Promise<void>),
+  apiSend: vi.fn()
 }))
+
+vi.mock("@/services/api-send", () => ({ apiSend: (...args: unknown[]) => mocks.apiSend(...args) }))
 
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: (...args: unknown[]) => mocks.bgRequest(...args),
@@ -35,6 +39,9 @@ vi.mock("@/utils/safe-storage", () => ({
     return {
       get: vi.fn(async (key: string) => values.get(key)),
       set: vi.fn(async (key: string, value: unknown) => {
+        if (options?.area === "local" && key === "tldwServerUrl") {
+          await mocks.beforeServerUrlWrite?.()
+        }
         if (
           options?.area === "session" &&
           mocks.failSessionWrite &&
@@ -81,6 +88,8 @@ import {
   tldwClient
 } from "@/services/tldw/TldwApiClient"
 import { TldwAuthService } from "@/services/tldw/TldwAuth"
+import { useConnectionStore } from "@/store/connection"
+import { ConnectionPhase } from "@/types/connection"
 
 describe("TldwApiClient connection storage sync", () => {
   beforeEach(() => {
@@ -95,6 +104,8 @@ describe("TldwApiClient connection storage sync", () => {
     mocks.failSessionWrite = false
     mocks.failClearWrite = false
     mocks.beforeLocalConfigWrite = null
+    mocks.beforeServerUrlWrite = null
+    mocks.apiSend.mockReset()
     window.localStorage.clear()
   })
 
@@ -117,6 +128,75 @@ describe("TldwApiClient connection storage sync", () => {
       apiKey: "test-api-key"
     })
     expect(mocks.syncStorage.has("tldwConfig")).toBe(false)
+  })
+
+  it("publishes only an authority-change flag and keeps same-principal refresh benign", async () => {
+    const client = new TldwApiClient()
+    const details: unknown[] = []
+    const capture = (event: Event) => details.push((event as CustomEvent).detail)
+    window.addEventListener("tldw:config-updated", capture)
+    try {
+      await client.updateConfig({ serverUrl: "https://server.test", authMode: "multi-user", accessToken: "e30.eyJzdWIiOiJhbGljZSJ9.sig" })
+      await client.updateConfig({ accessToken: "e30.eyJzdWIiOiJhbGljZSIsImlhdCI6Mn0.sig" })
+      await client.updateConfig({ accessToken: "e30.eyJzdWIiOiJib2IifQ.sig" })
+      await client.updateConfig({ accessToken: undefined, refreshToken: undefined })
+    } finally {
+      window.removeEventListener("tldw:config-updated", capture)
+    }
+    expect(details).toEqual([
+      { authorityChanged: true }, { authorityChanged: false },
+      { authorityChanged: false },
+      { authorityChanged: true }, { authorityChanged: false },
+      { authorityChanged: true }, { authorityChanged: false }
+    ])
+  })
+
+  it("preserves authority when saving the same manual key with different persistence", async () => {
+    const client = new TldwApiClient()
+    await client.saveManualSingleUserCredential({ serverUrl: "https://server.test", apiKey: "same-key", persistence: "device" })
+    const capture = vi.fn()
+    window.addEventListener("tldw:config-updated", capture)
+    try {
+      await client.saveManualSingleUserCredential({ serverUrl: "https://server.test", apiKey: "same-key", persistence: "session" })
+      expect(capture.mock.calls.at(-1)?.[0].detail).toEqual({ authorityChanged: false })
+    } finally {
+      window.removeEventListener("tldw:config-updated", capture)
+    }
+  })
+
+  it.each(["single-user", "multi-user"] as const)("invalidates %s authority at activation before URL synchronization completes", async (authMode) => {
+    const before = {
+      serverUrl: "https://server-a.test", authMode,
+      ...(authMode === "single-user" ? { apiKey: "key-a" } : { accessToken: "e30.eyJzdWIiOiJhbGljZSJ9.sig" })
+    }
+    await tldwClient.updateConfig(before)
+    useConnectionStore.setState(({ state }) => ({ state: {
+      ...state, phase: ConnectionPhase.CONNECTED, isConnected: true, isChecking: false,
+      mode: "normal", offlineBypass: false, lastCheckedAt: 0,
+      knowledgeStatus: "ready", knowledgeLastCheckedAt: Date.now()
+    } }))
+    let finishOldProbe: (value: unknown) => void = () => {}
+    mocks.apiSend.mockImplementationOnce(() => new Promise((resolve) => { finishOldProbe = resolve }))
+    const oldCheck = useConnectionStore.getState().checkOnce({ force: true })
+    await vi.waitFor(() => expect(mocks.apiSend).toHaveBeenCalledTimes(1))
+    let finishSync: () => void = () => {}
+    let syncStarted = false
+    mocks.beforeServerUrlWrite = () => new Promise<void>((resolve) => { syncStarted = true; finishSync = resolve })
+    const update = tldwClient.updateConfig({
+      serverUrl: "https://server-b.test", authMode,
+      ...(authMode === "single-user" ? { apiKey: "key-b" } : { accessToken: "e30.eyJzdWIiOiJib2IifQ.sig" })
+    })
+    await vi.waitFor(() => expect(syncStarted).toBe(true))
+    const activatedServer = (await tldwClient.getConfig())?.serverUrl
+    const connectedDuringSync = useConnectionStore.getState().state.isConnected
+    finishOldProbe({ ok: true, status: 200, data: {} })
+    await oldCheck
+    const connectedAfterOldProbe = useConnectionStore.getState().state.isConnected
+    finishSync()
+    await update
+    expect(activatedServer).toBe("https://server-b.test")
+    expect(connectedDuringSync).toBe(false)
+    expect(connectedAfterOldProbe).toBe(false)
   })
 
   it("clears mirrored server URLs when the saved URL is removed", async () => {

@@ -384,6 +384,10 @@ vi.mock('@/components/Common/KeyboardShortcutsModal', () => ({
   KeyboardShortcutsModal: () => null,
 }));
 
+vi.mock('@/components/Timeline', () => ({
+  TimelineModal: () => null,
+}));
+
 vi.mock('@/hooks/useConnectionState', () => ({
   useConnectionActions: () => ({ checkOnce: connectionState.value.checkOnce }),
   useConnectionState: () => ({

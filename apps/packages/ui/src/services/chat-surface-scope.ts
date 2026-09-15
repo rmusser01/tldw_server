@@ -15,6 +15,29 @@ export type ChatSurfaceScopeInput = {
   apiKey?: string | null
 }
 
+/** Compare connection authority while allowing token refresh for the same known user. */
+export const connectionAuthoritiesMatch = (
+  current: Partial<TldwConfig> | null | undefined,
+  previous: Partial<TldwConfig> | null | undefined
+): boolean => {
+  if (!current || !previous) return current == null && previous == null
+  const authMode = current.authMode || "single-user"
+  if (
+    String(current.serverUrl || "").trim().replace(/\/+$/, "") !==
+      String(previous.serverUrl || "").trim().replace(/\/+$/, "") ||
+    authMode !== (previous.authMode || "single-user") ||
+    (current.authSource || "manual") !== (previous.authSource || "manual") ||
+    (current.orgId ?? null) !== (previous.orgId ?? null)
+  ) return false
+  if (authMode === "single-user") {
+    return String(current.apiKey || "").trim() === String(previous.apiKey || "").trim()
+  }
+  if (current.accessToken === previous.accessToken) return true
+  const principal = deriveScopedUserId({ authMode, accessToken: current.accessToken })
+  return principal !== deriveScopedUserId({ authMode }) &&
+    principal === deriveScopedUserId({ authMode, accessToken: previous.accessToken })
+}
+
 const normalizeAuthMode = (authMode: string | null | undefined): string => {
   const normalized = String(authMode || "").trim().toLowerCase()
   return normalized || "unknown"
