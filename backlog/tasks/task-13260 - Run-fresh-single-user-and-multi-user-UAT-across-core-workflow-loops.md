@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-15 20:13'
+updated_date: '2026-09-15 20:49'
 labels:
   - uat
   - testing
@@ -107,6 +107,8 @@ Repair checkpoint: Quick Ingest af1e7bb08b committed after61 focused parent test
 Independent round5/round6 evidence review clear:34 hashes (14+20),10 JSON parse. Original reload command retained; final three-rating/error details explicitly runner-reported while terminal UI, per-card timestamps/versions and one completed session7 corroborate result. Chat .15 parent52/6 and independent303/25 tests pass, but review found P2 existing-mirror display rollback/hidden persistent draft; repair remains frozen pending final review and correction. No full fresh run started.
 
 User latest-dev clarification exposed missed baseline check: branch based on existing email checkout, shareddevc703;32 commits already in remote2e1a were absent at creation. Freshfetch confirms same remote;13260.32 tracks merge+revalidation, conflict-free preview only so far. Tracker explicitly limits older evidence. Native private Quick Ingest now passes Bob completed/resume then normal logout/admin emptywizard, retainedround7. No further native UAT until pending Chat review correction and dev integration are complete.
+
+Baseline correction complete under13260.32: reviewed Chat fixa0c48e84c4 then merge267c00cab1 includes freshly verified dev2e1a5e58d3 (0dev-only commits). Retained original32-commitmiss transparently. Combined207backend/174WebUI and scoped/static/security gates documented; both isolated modes restarted,4HTTP200 at20:48:28UTC. Original profiles/data preserved. Continue targeted actual Dexie/Chatbacklink, QAaccount and remaining Media/sourcecontrols before another fullfreshsingle/multi matrix; no new fullUAT pass claimed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -225,8 +225,8 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 ### TASK-13260.32 — reconcile verified dev baseline
 
 - [x] Record the missed latest-dev check and exact branch/ref ancestry; fresh fetch confirms `origin/dev` at `2e1a5e58d3`, with 32 commits missing at branch creation. Committed-repair integration preview is conflict-free.
-- [ ] Finish and preserve the active reviewed Chat correction; integrate verified origin/dev while retaining unrelated work.
-- [ ] Resolve integration failures, rerun affected regressions/static/Bandit checks and restart isolated runtimes before the next full fresh matrices.
+- [x] Finish and preserve the active reviewed Chat correction; integrate verified origin/dev while retaining unrelated work. Chat `a0c48e84c4`, merge `267c00cab1`; verified dev `2e1a5e58d3` is an ancestor and Git reports zero dev-only commits.
+- [x] Resolve integration failures, rerun affected regressions/static/Bandit checks and restart isolated runtimes before the next full fresh matrices. Backend207/frontend174 pass; portable98 plus two permission-adjusted retries pass; schema drift repaired and checked; compiler90 baseline unchanged; no new lint/Bandit findings. Both APIs/frontends return200 after restart at20:48:28UTC. Full fresh matrices remain below.
 
 - [ ] Resolve independent review findings and run combined relevant checks once all changed interfaces settle; record baseline failures separately.
 - [ ] Keep the tracker current for each repaired, verified or blocked finding, with commit and evidence links.
