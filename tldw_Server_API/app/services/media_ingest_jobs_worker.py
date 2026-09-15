@@ -349,7 +349,8 @@ def _build_form_data(payload: dict[str, Any]) -> AddMediaForm:
 
 def _create_db(user_id: str):
     db_path = DatabasePaths.get_media_db_path(user_id)
-    return create_media_database(client_id=f"media_ingest_worker:{user_id}", db_path=str(db_path))
+    # Media writes derive ownership from the same user identity as API writes.
+    return create_media_database(client_id=str(user_id), db_path=str(db_path))
 
 
 async def _schedule_embeddings(
@@ -528,7 +529,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
 
         db = _create_db(user_id)
         db_path = getattr(db, "db_path_str", None) or getattr(db, "db_path", None) or ""
-        client_id = getattr(db, "client_id", None) or f"media_ingest_worker:{user_id}"
+        client_id = getattr(db, "client_id", None) or str(user_id)
         loop = asyncio.get_running_loop()
 
         def cancel_check():
