@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react"
 import { useMutation, type QueryClient } from "@tanstack/react-query"
-import { notification } from "antd"
+import { useAntdNotification } from "@/hooks/useAntdNotification"
 import {
   deletePromptById,
   savePrompt,
@@ -43,6 +43,7 @@ export interface UsePromptEditorDeps {
 }
 
 export function usePromptEditor(deps: UsePromptEditorDeps) {
+  const notification = useAntdNotification()
   const {
     queryClient,
     t,
@@ -494,7 +495,7 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
       }
       throw new Error(result.error || "recipe_sync_failed")
     },
-    [t]
+    [notification, t]
   )
 
   const handleSaveRecipeAsNew = React.useCallback(

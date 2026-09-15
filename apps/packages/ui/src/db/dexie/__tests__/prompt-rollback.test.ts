@@ -14,7 +14,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { permanentlyDeletePrompt, restorePromptSnapshot } from "../helpers";
 
-vi.mock("antd", () => ({ notification: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("antd", () => {
+  const notification = { open: vi.fn(), success: vi.fn(), error: vi.fn() };
+  return { notification, App: { useApp: () => ({ notification }) } };
+});
 
 const mocks = vi.hoisted(() => ({
   updateDexie: vi.fn(),

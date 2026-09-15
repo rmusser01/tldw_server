@@ -6,11 +6,20 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { usePromptEditor } from '../hooks/usePromptEditor'
 
 const { save, update } = vi.hoisted(() => ({ save: vi.fn(), update: vi.fn() }))
+const notices = vi.hoisted(() => ({
+  contextSuccess: vi.fn(), contextError: vi.fn(), staticSuccess: vi.fn(), staticError: vi.fn()
+}))
 vi.mock('@/db/dexie/helpers', () => ({
   savePrompt: save, updatePrompt: update, deletePromptById: vi.fn(), restorePrompt: vi.fn(),
   permanentlyDeletePrompt: vi.fn(), emptyTrash: vi.fn(), incrementPromptUsage: vi.fn()
 }))
-vi.mock('antd', () => ({ notification: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('antd', () => {
+  const notification = { open: vi.fn(), success: notices.contextSuccess, error: notices.contextError }
+  return {
+    notification: { success: notices.staticSuccess, error: notices.staticError },
+    App: { useApp: () => ({ notification }) }
+  }
+})
 
 const renderEditor = () => {
   const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
@@ -25,8 +34,30 @@ const renderEditor = () => {
 }
 
 beforeEach(() => {
+  Object.values(notices).forEach(notice => notice.mockClear())
   save.mockReset().mockImplementation(async (payload) => ({ ...payload, id: 'saved-prompt' }))
   update.mockReset().mockResolvedValue('saved-prompt')
+})
+
+it('reports saved prompts through the active app notification context', async () => {
+  const { result } = renderEditor()
+  act(() => result.current.openFullEditor())
+  await act(async () => { await result.current.handleFullEditorSubmit({ name: 'Pirate helper' }) })
+  expect(notices.contextSuccess).toHaveBeenCalledWith(expect.objectContaining({
+    description: 'managePrompts.notification.addSuccessDesc'
+  }))
+  expect(notices.staticSuccess).not.toHaveBeenCalled()
+})
+
+it('reports failed saves through the active app notification context', async () => {
+  save.mockRejectedValue(new Error('Local save failed'))
+  const { result } = renderEditor()
+  act(() => result.current.openFullEditor())
+  await act(async () => {
+    await expect(result.current.handleFullEditorSubmit({ name: 'Keep this draft' })).rejects.toThrow('Local save failed')
+  })
+  expect(notices.contextError).toHaveBeenCalledWith(expect.objectContaining({ description: 'Local save failed' }))
+  expect(notices.staticError).not.toHaveBeenCalled()
 })
 
 it('adopts the saved identity and baseline so a second save updates the same prompt', async () => {
