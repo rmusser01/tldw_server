@@ -1343,7 +1343,7 @@ if (typeof window !== "undefined") {
   const onRefreshSessionInvalidation = () => {
     void checkRefreshSessionInvalidation().catch(() => undefined)
   }
-  if (browser.storage?.onChanged) {
+  if (browser?.storage?.onChanged) {
     browser.storage.onChanged.addListener((changes, area) => {
       if (area !== "local" || !changes || typeof changes !== "object") return
       if (["tldwConfig", "tldwRefreshRotation", COOKIE_SESSION_CONFIG_KEY].some(key => key in changes)) {
