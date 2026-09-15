@@ -8,6 +8,7 @@ import {
   resolveBrowserRequestTransport,
   tldwRequest
 } from "@/services/tldw/request-core"
+import { createTokenRefreshError } from "@/services/tldw/auth-refresh-error"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import {
   isCookieSessionBrowserTransport,
@@ -733,9 +734,7 @@ const refreshAuthDirect = async (
             | { access_token?: string; refresh_token?: string }
             | null
           if (!tokens?.access_token) {
-            throw new Error(
-              `Token refresh failed: ${resp?.error || `no access token in refresh response (status ${resp?.status ?? "unknown"})`}`
-            )
+            throw createTokenRefreshError(resp)
           }
           const stored = await storeRefreshRotationIfCurrent(
             storage,
@@ -778,10 +777,7 @@ const refreshAuthDirect = async (
         (await resolveDirectConfig(storage)) || null
       const refreshToken = String((cfg?.refreshToken as string) || "").trim()
       const capturedAccessToken = String(cfg?.accessToken || "").trim()
-      // Signal failure (throw) rather than resolving silently: request-core
-      // treats a resolved refreshAuth as success and would retry with the stale
-      // token. Throwing makes it mark the refresh as failed so a still-401 retry
-      // surfaces "Session expired" instead of masking the failure.
+      // A failed refresh must retain its status and stop the original request.
       if (!refreshToken) {
         throw new Error("Token refresh failed: no refresh token available")
       }
@@ -799,9 +795,7 @@ const refreshAuthDirect = async (
         | { access_token?: string; refresh_token?: string }
         | null
       if (!tokens?.access_token) {
-        throw new Error(
-          `Token refresh failed: ${resp?.error || `no access token in refresh response (status ${resp?.status ?? "unknown"})`}`
-        )
+        throw createTokenRefreshError(resp)
       }
       if (!cfg || cfg.authMode !== "multi-user") {
         throw new Error("Token refresh failed: account configuration changed")
@@ -1075,6 +1069,7 @@ async function bgRequestImpl<
     status?: number
     data?: unknown
     headers?: Record<string, string>
+    retryAfterMs?: number | null
   }
   type NormalizedRequestFailure = {
     message: string
@@ -1178,12 +1173,12 @@ async function bgRequestImpl<
     }
 
     return {
-      error: buildRequestError(
+      error: Object.assign(buildRequestError(
         sanitized.message,
         sanitized.status,
         sanitized.details,
         sanitized.code
-      ),
+      ), { headers: resp.headers, retryAfterMs: resp.retryAfterMs }),
       response: sanitizeRagProviderError || scopedError
         ? {
             ...resp,

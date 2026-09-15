@@ -61,6 +61,91 @@ const jwtForUser = (userId: string | number): string =>
   `header.${btoa(JSON.stringify({ sub: String(userId) }))}.signature`
 
 describe("background proxy web token refresh", () => {
+  it("keeps cancellation during refresh out of the backend-unreachable modal", async () => {
+    let started!: () => void
+    let release!: () => void
+    const entered = new Promise<void>(resolve => { started = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const events: Event[] = []
+    const listener = (event: Event) => { events.push(event) }
+    window.addEventListener("tldw:backend-unreachable", listener)
+    const abort = new AbortController()
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/auth/refresh")) {
+        started()
+        await gate
+        return new Response(JSON.stringify({ access_token: "fresh-access", refresh_token: "fresh-refresh" }), {
+          status: 200, headers: { "content-type": "application/json" }
+        })
+      }
+      return new Response("unauthorized", { status: 401 })
+    }))
+    try {
+      const { bgRequest } = await importProxy()
+      const rejected = expect(bgRequest({
+        path: "/api/v1/notes/", method: "GET", abortSignal: abort.signal
+      })).rejects.toMatchObject({ status: 0, code: "REQUEST_ABORTED" })
+      await entered
+      abort.abort()
+      release()
+      await rejected
+      expect(events).toHaveLength(0)
+    } finally {
+      release()
+      window.removeEventListener("tldw:backend-unreachable", listener)
+    }
+  })
+
+  it("still reports an actual request deadline as a connection failure", async () => {
+    const { bgRequest } = await importProxy()
+    const events: Event[] = []
+    const listener = (event: Event) => { events.push(event) }
+    window.addEventListener("tldw:backend-unreachable", listener)
+    vi.useFakeTimers()
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))
+      })))
+    try {
+      const result = bgRequest({
+        path: "/api/v1/notes/", method: "GET", timeoutMs: 10
+      }).then(value => value, error => error)
+      await vi.advanceTimersByTimeAsync(20)
+      expect(await result).toMatchObject({ status: 0, code: "REQUEST_TIMEOUT" })
+      expect(events).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+      window.removeEventListener("tldw:backend-unreachable", listener)
+    }
+  })
+
+  it.each([false, true])("retains retryable refresh failure details and does not replay a write (scoped=%s)", async (scoped) => {
+    const config = {
+      serverUrl: "https://api.example.com", authMode: "multi-user",
+      accessToken: jwtForUser(42), refreshToken: "valid-refresh"
+    }
+    mocks.store.tldwConfig = config
+    const writes: RequestInit[] = []
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/auth/refresh")) {
+        return new Response(JSON.stringify({ detail: "Authentication service is busy" }), {
+          status: 503, headers: { "content-type": "application/json", "retry-after": "2" }
+        })
+      }
+      writes.push(init ?? {})
+      return new Response("unauthorized", { status: 401 })
+    }))
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({
+      path: "/api/v1/notes/", method: "POST", body: { content: "Private draft" },
+      ...(scoped ? { servicePromptConfig: {
+        serverUrl: config.serverUrl, authMode: "multi-user" as const, expectedUserId: 42
+      } } : {})
+    })).rejects.toMatchObject({ status: 503, retryAfterMs: 2000 })
+    expect(writes).toHaveLength(1)
+    expect(mocks.store.tldwConfig).toEqual(config)
+  })
+
   it.each(["POST", "PUT"] as const)("does not dispatch a scoped Notes %s after credential loading switches accounts", async (method) => {
     let release!: () => void
     let started!: () => void
@@ -1328,9 +1413,7 @@ describe("background proxy web token refresh", () => {
 
     const { bgRequest } = await importProxy()
 
-    // Because refreshAuthDirect signals failure, request-core marks the refresh
-    // as failed and the still-401 retry surfaces "Session expired" rather than
-    // resolving as if the (stale-token) retry had succeeded.
+    // A malformed success is a service failure, not proof of an expired session.
     await expect(
       bgRequest<{ ok: boolean }>({
         path: "/api/v1/notes/search/" as unknown as `/${string}`,
@@ -1338,12 +1421,10 @@ describe("background proxy web token refresh", () => {
         headers: { "Content-Type": "application/json" },
         body: { q: "hello" }
       })
-    ).rejects.toThrow(/session expired/i)
+    ).rejects.toMatchObject({ status: 502 })
 
     expect(refreshHits).toBe(1)
-    // The retry ran with the stale token and 401'd; it must NOT have been
-    // treated as a success, and no bogus token was persisted.
-    expect(staleRetryHits).toBeGreaterThanOrEqual(1)
+    expect(staleRetryHits).toBe(1)
     expect((mocks.store.tldwConfig as Record<string, unknown>).accessToken).toBe(
       "stale-access"
     )

@@ -43,6 +43,29 @@ describe("deriveRequestTimeout generation defaults", () => {
 })
 
 describe("tldwRequest post-refresh retry", () => {
+  it("returns a transient refresh failure without replaying the rejected write", async () => {
+    const fetchFn = vi.fn(async () => new Response("unauthorized", { status: 401 }))
+    const response = await tldwRequest({
+      path: "/api/v1/notes/", method: "POST", body: { content: "Private draft" }
+    }, {
+      getConfig: async () => ({
+        serverUrl: "https://api.example.com", authMode: "multi-user",
+        accessToken: "expired-access", refreshToken: "valid-refresh"
+      }),
+      fetchFn,
+      refreshAuth: async () => {
+        throw Object.assign(new Error("Authentication service is busy"), {
+          status: 503, headers: { "retry-after": "2" }, retryAfterMs: 2000
+        })
+      }
+    })
+    expect(response).toMatchObject({
+      ok: false, status: 503, error: "Authentication service is busy",
+      headers: { "retry-after": "2" }, retryAfterMs: 2000
+    })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
   it("reuses the binary body (FormData) on the post-refresh retry instead of JSON.stringify", async () => {
     const bodies: unknown[] = []
     let refreshCalls = 0
@@ -126,7 +149,9 @@ describe("tldwRequest post-refresh retry", () => {
     abort.abort()
     releaseRefresh()
 
-    await expect(pending).resolves.toMatchObject({ ok: false, status: 0 })
+    await expect(pending).resolves.toMatchObject({
+      ok: false, status: 0, code: "REQUEST_ABORTED"
+    })
     expect(fetchFn).toHaveBeenCalledTimes(1)
   })
 })

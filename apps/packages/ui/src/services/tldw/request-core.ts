@@ -563,18 +563,22 @@ const performTldwRequest = async (
         clearTimeout(timeoutId)
         timeoutId = null
       }
-      let refreshSucceeded = false
       try {
         await runtime.refreshAuth()
-        refreshSucceeded = true
       } catch (refreshError) {
+        if (abortSignal?.aborted) throw refreshError
         if (isRequestConfigScopeChangedError(refreshError)) {
           throw refreshError
         }
-        console.warn(
-          `${REQUEST_LOG_PREFIX} Token refresh failed — retrying with stale token`,
-          refreshError
-        )
+        const failure = refreshError as Partial<ApiSendResponse> | null
+        return {
+          ok: false,
+          status: typeof failure?.status === "number" ? failure.status : 0,
+          error: formatErrorMessage(refreshError, "Unable to refresh session."),
+          code: failure?.code,
+          headers: failure?.headers,
+          retryAfterMs: failure?.retryAfterMs
+        }
       }
       if (abortSignal?.aborted) {
         const abortError = new Error(
@@ -672,13 +676,6 @@ const performTldwRequest = async (
         () => activeRetryController.abort(),
         timeoutMs
       )
-      if (!refreshSucceeded && resp.status === 401) {
-        return {
-          ok: false,
-          status: 401,
-          error: "Session expired. Please log in again."
-        }
-      }
     }
 
     const headersOut: Record<string, string> = {}
@@ -752,6 +749,14 @@ const performTldwRequest = async (
       retryAfterMs
     }
   } catch (e: any) {
+    // Internal deadlines also raise AbortError; only the caller's signal marks
+    // deliberate cancellation that should suppress connection/error feedback.
+    if (abortSignal?.aborted) {
+      return { ok: false, status: 0, error: "Request aborted.", code: "REQUEST_ABORTED" }
+    }
+    if (controller.signal.aborted || retryController?.signal.aborted) {
+      return { ok: false, status: 0, error: "Request timed out.", code: "REQUEST_TIMEOUT" }
+    }
     if (isRequestConfigScopeChangedError(e)) throw e
     return {
       ok: false,

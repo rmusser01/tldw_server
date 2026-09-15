@@ -36,6 +36,7 @@ export interface ApiSendResponse<T = any> {
   status: number
   data?: T
   error?: string
+  code?: string
   headers?: Record<string, string>
   retryAfterMs?: number | null
   /** Transport metadata, never supplied by the server response body. */

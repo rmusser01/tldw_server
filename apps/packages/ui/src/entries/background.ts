@@ -7,6 +7,7 @@ import { tldwAuth } from "@/services/tldw/TldwAuth";
 import { tldwModels } from "@/services/tldw";
 import { apiSend } from "@/services/api-send";
 import { tldwRequest } from "@/services/tldw/request-core";
+import { createTokenRefreshError } from "@/services/tldw/auth-refresh-error";
 import {
   type RecipeDeliveryReceipt,
   RecipePersistenceRegistry,
@@ -635,9 +636,7 @@ export default defineBackground({
                 } | null)
               : null;
             if (!tokens?.access_token) {
-              throw new Error(
-                `Token refresh failed: ${response.error || `no access token in refresh response (status ${response.status ?? "unknown"})`}`,
-              );
+              throw createTokenRefreshError(response);
             }
             const stored = await storeRefreshRotationIfCurrent(
               storage,
@@ -1750,11 +1749,7 @@ export default defineBackground({
                     }
                   })();
                 }
-                try {
-                  await refreshInFlight;
-                } catch (error) {
-                  logBackgroundError("refresh auth", error);
-                }
+                await refreshInFlight;
               },
         });
         return recipeDelivery ? { ...response, recipeDelivery } : response;
