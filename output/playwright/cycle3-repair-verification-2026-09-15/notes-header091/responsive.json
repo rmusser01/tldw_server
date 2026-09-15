@@ -1,0 +1,59 @@
+{
+  "at": "2026-09-15T18:05:42.035Z",
+  "results": [
+    {
+      "viewport": {
+        "width": 1024,
+        "height": 720
+      },
+      "documentWidth": 1024,
+      "heading": {
+        "text": "UAT repair sidebar note four",
+        "left": 461,
+        "top": 144,
+        "width": 218.03125,
+        "height": 24
+      },
+      "status": {
+        "text": "Saved 21m ago",
+        "left": 687.03125,
+        "top": 147.359375,
+        "width": 91.2421875,
+        "height": 17.28125
+      },
+      "actions": {
+        "left": 461,
+        "top": 180,
+        "width": 530,
+        "height": 62
+      }
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "documentWidth": 390,
+      "heading": {
+        "text": "UAT repair sidebar note four",
+        "left": 25,
+        "top": 237,
+        "width": 218.03125,
+        "height": 24
+      },
+      "status": {
+        "text": "Saved 21m ago",
+        "left": 251.03125,
+        "top": 240.359375,
+        "width": 91.2421875,
+        "height": 17.28125
+      },
+      "actions": {
+        "left": 25,
+        "top": 273,
+        "width": 340,
+        "height": 44
+      }
+    }
+  ]
+}
