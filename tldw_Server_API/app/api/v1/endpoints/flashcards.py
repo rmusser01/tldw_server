@@ -191,11 +191,13 @@ def _build_flashcard_verification_units(cards: list[dict[str, Any]]) -> list[Art
                 )
             )
         if back:
+            answer_claim = f"Question: {front}\nAnswer: {back}" if front else back
             units.append(
                 ArtifactVerificationUnit(
                     unit_id=f"flashcard:{index}:back",
-                    text=back,
-                    claims=[back],
+                    text=answer_claim,
+                    claims=[answer_claim],
+                    metadata={"requires_semantic_verification": True},
                 )
             )
         if notes:

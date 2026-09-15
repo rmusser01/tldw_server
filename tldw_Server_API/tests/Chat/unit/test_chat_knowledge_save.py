@@ -129,3 +129,65 @@ def test_knowledge_save_requires_exact_scope_match_for_workspace_conversations(t
         json={**base_payload, "scope_type": "workspace", "workspace_id": "ws-1"},
     )
     assert correct_scope.status_code == 201, correct_scope.text
+
+
+@pytest.mark.parametrize("make_flashcard", [False, True])
+def test_knowledge_save_excludes_reasoning_and_saves_completed_card(tmp_path, make_flashcard):
+    db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
+    try:
+        app = _build_app(db)
+        conv_id = db.add_conversation({"character_id": 1, "title": "Garden", "client_id": "user-1"})
+        msg_id = db.add_message({"conversation_id": conv_id, "sender": "assistant", "content": "Garden answer"})
+        response = app.post(
+            "/api/v1/chat/knowledge/save",
+            json={
+                "conversation_id": conv_id,
+                "message_id": msg_id,
+                "snippet": "<think>Private model reasoning.</think>The garden has seven raised beds.",
+                "make_flashcard": make_flashcard,
+                "flashcard_front": "How many raised beds does the garden have?",
+                "flashcard_back": "<reasoning>Private reasoning.</reasoning>Seven raised beds.",
+            },
+        )
+        assert response.status_code == 201, response.text
+        saved = response.json()
+        assert db.get_note_by_id(saved["note_id"])["content"] == "The garden has seven raised beds."
+        if make_flashcard:
+            card = db.get_flashcard(saved["flashcard_id"])
+            assert card["front"] == "How many raised beds does the garden have?"
+            assert card["back"] == "Seven raised beds."
+            assert card["conversation_id"] == conv_id
+            assert card["message_id"] == msg_id
+
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.parametrize(
+    "card_fields",
+    [
+        {},
+        {"flashcard_front": "Question", "flashcard_back": " "},
+        {"flashcard_front": " ", "flashcard_back": "Answer"},
+        {"flashcard_front": "Question", "flashcard_back": "<think>Still reasoning"},
+    ],
+)
+def test_knowledge_save_rejects_incomplete_card_before_creating_note(tmp_path, card_fields):
+    db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
+    try:
+        app = _build_app(db)
+        conv_id = db.add_conversation({"character_id": 1, "title": "Garden", "client_id": "user-1"})
+        response = app.post(
+            "/api/v1/chat/knowledge/save",
+            json={
+                "conversation_id": conv_id,
+                "snippet": "Answer",
+                "make_flashcard": True,
+                **card_fields,
+            },
+        )
+        assert response.status_code == 422, response.text
+        assert db.count_notes() == 0
+
+    finally:
+        db.close_connection()

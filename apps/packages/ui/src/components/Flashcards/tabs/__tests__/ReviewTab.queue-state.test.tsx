@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ReviewTab } from "../ReviewTab"
@@ -237,5 +237,24 @@ describe("ReviewTab queue state visibility", () => {
     )
 
     expect(screen.getByTestId("flashcards-review-scheduler-type")).toHaveTextContent("FSRS")
+  })
+
+  it("offers the ready queue without claiming it is complete before review starts", () => {
+    vi.mocked(useReviewQuery).mockReturnValue({ data: makeCard("new"), refetch: vi.fn() } as unknown as ReturnType<typeof useReviewQuery>)
+    render(<ReviewTab onNavigateToCreate={() => {}} onNavigateToImport={() => {}}
+      reviewDeckId={null} onReviewDeckChange={() => {}} isActive />)
+
+    expect(screen.getByRole("button", { name: "Review all due" })).toBeEnabled()
+    expect(screen.queryByText("You're all caught up!")).not.toBeInTheDocument()
+    expect(screen.queryByText("No cards are due for review. Great job!")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Review all due" }))
+    expect(screen.getByTestId("flashcards-review-active-card")).toHaveTextContent("Question")
+  })
+
+  it("does not announce completion while the review queue is loading", () => {
+    vi.mocked(useReviewQuery).mockReturnValue({ data: undefined, isLoading: true, refetch: vi.fn() } as unknown as ReturnType<typeof useReviewQuery>)
+    render(<ReviewTab onNavigateToCreate={() => {}} onNavigateToImport={() => {}}
+      reviewDeckId={1} onReviewDeckChange={() => {}} isActive />)
+    expect(screen.queryByText("You're all caught up!")).not.toBeInTheDocument()
   })
 })

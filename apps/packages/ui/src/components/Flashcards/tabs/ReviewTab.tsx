@@ -1709,6 +1709,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           </div>
         </Card>
       ) : (
+        !canShowAllDeckDashboard && !isReviewCardLoading && !isCramQueueLoading &&
         <Card data-testid="flashcards-review-empty-card">
           <Empty
             description={

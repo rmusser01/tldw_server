@@ -6754,8 +6754,8 @@ async def save_chat_knowledge(
             if payload.make_flashcard:
                 flashcard_id = db.add_flashcard(
                     {
-                        "front": payload.snippet,
-                        "back": "",
+                        "front": payload.flashcard_front,
+                        "back": payload.flashcard_back,
                         "notes": f"From {safe_title}",
                         "source_ref_type": "note",
                         "source_ref_id": note_id,
@@ -6789,8 +6789,8 @@ async def save_chat_knowledge(
                 if payload.make_flashcard:
                     flashcard_id = db.add_flashcard(
                         {
-                            "front": payload.snippet,
-                            "back": "",
+                            "front": payload.flashcard_front,
+                            "back": payload.flashcard_back,
                             "notes": f"From {safe_title}",
                             "source_ref_type": "note",
                             "source_ref_id": note_id,

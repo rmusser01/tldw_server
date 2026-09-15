@@ -1437,6 +1437,8 @@ export const chatRagMethods = {
     snippet: string
     tags?: string[]
     make_flashcard?: boolean
+    flashcard_front?: string
+    flashcard_back?: string
   }, options?: { scope?: ChatScope }): Promise<any> {
     const body = {
       ...payload,

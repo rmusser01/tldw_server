@@ -398,6 +398,11 @@ export const PlaygroundMessage = (props: Props) => {
   const [savingKnowledge, setSavingKnowledge] = React.useState<
     "note" | "flashcard" | null
   >(null)
+  const [flashcardDraft, setFlashcardDraft] = React.useState<{
+    front: string
+    back: string
+    sourceKey: string
+  } | null>(null)
   const responseDwellSentKeyRef = useRef<string | null>(null)
 
   // Disco Skills state
@@ -1110,8 +1115,21 @@ export const PlaygroundMessage = (props: Props) => {
     )
   }, [errorFriendlyText, props.message, props.serverChatId, props.serverMessageId])
 
+  const knowledgeSnippet = React.useMemo(
+    () => parseReasoning(errorFriendlyText || props.message || "")
+      .filter((part) => part.type === "text")
+      .map((part) => part.content)
+      .join("\n\n")
+      .trim(),
+    [errorFriendlyText, props.message]
+  )
+  const knowledgeSourceKey = JSON.stringify([
+    props.serverChatId, props.serverMessageId, props.scope, knowledgeSnippet
+  ])
+  React.useEffect(() => { setFlashcardDraft(null) }, [knowledgeSourceKey])
+
   const handleSaveToWorkspaceNotes = React.useCallback(() => {
-    const snippet = (errorFriendlyText || props.message || "").trim()
+    const snippet = knowledgeSnippet
     if (!snippet || !props.onSaveToWorkspaceNotes) return
     props.onSaveToWorkspaceNotes({
       message: snippet,
@@ -1124,7 +1142,7 @@ export const PlaygroundMessage = (props: Props) => {
           : undefined
     })
   }, [
-    errorFriendlyText,
+    knowledgeSnippet,
     props.createdAt,
     props.isBot,
     props.message,
@@ -1134,13 +1152,24 @@ export const PlaygroundMessage = (props: Props) => {
     props.serverMessageId
   ])
 
-  const handleSaveKnowledge = async (makeFlashcard: boolean) => {
+  const handleSaveKnowledge = async (
+    makeFlashcard: boolean,
+    reviewedCard?: NonNullable<typeof flashcardDraft>
+  ) => {
     if (!props.serverChatId || !props.serverMessageId) return
-    const snippet = (errorFriendlyText || props.message || "").trim()
+    const snippet = knowledgeSnippet
     if (!snippet) {
       messageApi.error(t("saveToNotesEmpty", "Nothing to save yet."))
       return
     }
+    if (makeFlashcard && !reviewedCard) {
+      setFlashcardDraft({ front: "", back: snippet, sourceKey: knowledgeSourceKey })
+      return
+    }
+    if (makeFlashcard && (
+      reviewedCard?.sourceKey !== knowledgeSourceKey ||
+      !reviewedCard?.front.trim() || !reviewedCard?.back.trim()
+    )) return
     setSavingKnowledge(makeFlashcard ? "flashcard" : "note")
     try {
       await tldwClient.initialize().catch(() => null)
@@ -1149,7 +1178,11 @@ export const PlaygroundMessage = (props: Props) => {
           conversation_id: props.serverChatId,
           message_id: props.serverMessageId,
           snippet,
-          make_flashcard: makeFlashcard
+          make_flashcard: makeFlashcard,
+          ...(reviewedCard ? {
+            flashcard_front: reviewedCard.front.trim(),
+            flashcard_back: reviewedCard.back.trim()
+          } : {})
         },
         props.scope ? { scope: props.scope } : undefined
       )
@@ -1158,6 +1191,7 @@ export const PlaygroundMessage = (props: Props) => {
           ? t("savedToFlashcards", "Saved to Flashcards")
           : t("savedToNotes", "Saved to Notes")
       )
+      setFlashcardDraft((draft) => draft === reviewedCard ? null : draft)
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error ? err.message : t("somethingWentWrong")
@@ -3022,6 +3056,36 @@ export const PlaygroundMessage = (props: Props) => {
           />
         </Modal>
       )}
+      <Modal
+        open={flashcardDraft !== null && flashcardDraft.sourceKey === knowledgeSourceKey}
+        title={t("reviewFlashcard", "Review flashcard")}
+        okText={t("saveFlashcard", "Save flashcard")}
+        confirmLoading={savingKnowledge === "flashcard"}
+        okButtonProps={{ disabled: !flashcardDraft?.front.trim() || !flashcardDraft?.back.trim() }}
+        onCancel={() => setFlashcardDraft(null)}
+        onOk={() => { if (flashcardDraft) void handleSaveKnowledge(true, flashcardDraft) }}
+      >
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1">
+            {t("flashcardQuestion", "Question")}
+            <textarea
+              className="rounded border border-border bg-surface p-2 text-text"
+              value={flashcardDraft?.front ?? ""}
+              onChange={(event) => setFlashcardDraft((draft) => draft && ({ ...draft, front: event.target.value }))}
+              rows={3}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            {t("flashcardAnswer", "Answer")}
+            <textarea
+              className="rounded border border-border bg-surface p-2 text-text"
+              value={flashcardDraft?.back ?? ""}
+              onChange={(event) => setFlashcardDraft((draft) => draft && ({ ...draft, back: event.target.value }))}
+              rows={5}
+            />
+          </label>
+        </div>
+      </Modal>
       {/* </div> */}
       {showFeedbackControls && (
         <FeedbackModal

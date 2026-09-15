@@ -1,4 +1,5 @@
 import React from "react"
+import { mapFlashcardsUiError } from "../../utils/error-taxonomy"
 import { Link } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button, Card, Form, Input, Select, Space, Switch, Tooltip, Typography } from "antd"
@@ -294,12 +295,10 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         message: successCopy
       })
     } catch (e: unknown) {
-      const baseMessage = e instanceof Error ? e.message : "Generation failed"
-      const errorCopy = t("option:flashcards.generateErrorWithHelp", {
-        defaultValue:
-          "{{message}}. Check provider/model settings, then retry with shorter text or fewer cards.",
-        message: baseMessage
-      })
+      const errorCopy = mapFlashcardsUiError(e, {
+        operation: "generating cards",
+        fallback: "Generation failed. Check provider/model settings and try shorter source text."
+      }).message
       setGenerationError(errorCopy)
       onTransferAction?.({
         area: "generate",
