@@ -64,6 +64,7 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
   const [fullEditorOpen, setFullEditorOpen] = useState(false)
   const [fullEditorMode, setFullEditorMode] = useState<"create" | "edit">("create")
   const [fullEditorInitialValues, setFullEditorInitialValues] = useState<any>(null)
+  const fullEditorEpochRef = React.useRef(0)
 
   const normalizePromptPayload = React.useCallback((values: any) => {
     const keywords = values?.keywords ?? values?.tags ?? []
@@ -167,7 +168,7 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
     [getPromptKeywords, getPromptTexts]
   )
 
-  const { mutate: savePromptMutation, isPending: savePromptLoading } =
+  const { mutate: savePromptMutation, mutateAsync: savePromptAsync, isPending: savePromptLoading } =
     useMutation({
       mutationFn: async (payload: any) => {
         const savedPrompt = await savePrompt(payload)
@@ -218,7 +219,7 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
     }
   })
 
-  const { mutate: updatePromptMutation, isPending: isUpdatingPrompt } =
+  const { mutate: updatePromptMutation, mutateAsync: updatePromptAsync, isPending: isUpdatingPrompt } =
     useMutation({
       mutationFn: async (data: any) => {
         const id = await updatePrompt({
@@ -353,6 +354,7 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
 
   const openFullEditor = React.useCallback(
     (promptRecord?: any) => {
+      fullEditorEpochRef.current += 1
       if (promptRecord?.id) {
         const { systemText, userText } = getPromptTexts(promptRecord)
         setFullEditorMode("edit")
@@ -387,6 +389,7 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
   )
 
   const closeFullEditor = React.useCallback(() => {
+    fullEditorEpochRef.current += 1
     setFullEditorOpen(false)
     setFullEditorInitialValues(null)
     const newParams = new URLSearchParams(searchParams)
@@ -440,15 +443,27 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
   )
 
   const handleFullEditorSubmit = React.useCallback(
-    (values: any) => {
+    async (values: any) => {
+      const requestEpoch = fullEditorEpochRef.current
       const payload = normalizePromptPayload(values)
-      if (fullEditorMode === "create") {
-        savePromptMutation(payload)
-      } else {
-        updatePromptMutation(payload)
+      let saved: { id: string }
+      try {
+        saved = await (fullEditorMode === "create" ? savePromptAsync(payload) : updatePromptAsync(payload))
+      } catch (error) {
+        if (fullEditorEpochRef.current !== requestEpoch) return false
+        throw error
       }
+      if (fullEditorEpochRef.current !== requestEpoch) return false
+      setEditId(saved.id)
+      setFullEditorMode("edit")
+      setFullEditorInitialValues({ ...payload, id: saved.id })
+      const nextParams = new URLSearchParams(searchParams)
+      nextParams.delete("new")
+      nextParams.set("edit", saved.id)
+      setSearchParams(nextParams, { replace: true })
+      return true
     },
-    [fullEditorMode, normalizePromptPayload, savePromptMutation, updatePromptMutation]
+    [fullEditorMode, normalizePromptPayload, savePromptAsync, updatePromptAsync, searchParams, setSearchParams]
   )
 
   const acceptRecipeSyncResult = React.useCallback(

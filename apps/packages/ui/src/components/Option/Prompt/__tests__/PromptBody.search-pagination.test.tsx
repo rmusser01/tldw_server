@@ -3078,6 +3078,21 @@ describe("PromptBody server search and pagination", () => {
     expect(editButton.className).toContain("min-w-8")
   })
 
+  it("saves a new prompt as a clean editor and Back returns to the library", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
+    renderPromptBody(["/prompts?new=1"])
+    const editor = await screen.findByTestId("prompt-full-page-editor")
+    fireEvent.change(screen.getByTestId("full-editor-name"), { target: { value: "Pirate helper" } })
+    fireEvent.change(screen.getByTestId("full-editor-system-prompt"), { target: { value: "Talk like a pirate." } })
+    fireEvent.click(screen.getByTestId("full-editor-save"))
+    await waitFor(() => expect(screen.getByTestId("prompt-location-search")).toHaveTextContent("edit=saved-id"))
+    fireEvent.click(within(editor).getByRole("button", { name: "Back to Prompts" }))
+    await waitFor(() => expect(screen.queryByTestId("prompt-full-page-editor")).not.toBeInTheDocument())
+    expect(confirm).not.toHaveBeenCalled()
+    expect(screen.getByTestId("prompt-location-search")).toBeEmptyDOMElement()
+    confirm.mockRestore()
+  })
+
   it("opens keyboard shortcuts help from button and from '?' shortcut", async () => {
     renderPromptBody()
 

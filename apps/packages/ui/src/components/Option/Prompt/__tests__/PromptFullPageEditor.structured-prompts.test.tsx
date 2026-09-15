@@ -1,6 +1,6 @@
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/built-in-recipes"
 import { PromptFullPageEditor } from "../PromptFullPageEditor"
 
@@ -71,6 +71,45 @@ describe("PromptFullPageEditor structured prompts", () => {
     isLoading: false,
     allTags: []
   }
+
+  it("closes a clean saved prompt without reporting unsaved changes", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
+    const onClose = vi.fn()
+    render(<PromptFullPageEditor {...baseProps} onClose={onClose} />)
+    fireEvent.click(screen.getByRole("button", { name: "Back to Prompts" }))
+    expect(confirm).not.toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalledOnce()
+    confirm.mockRestore()
+  })
+
+  it("prevents editing a submitted prompt while its save is pending", () => {
+    render(<PromptFullPageEditor {...baseProps} isLoading />)
+    expect(screen.getByDisplayValue("Legacy prompt")).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Convert to structured" })).toBeDisabled()
+  })
+
+  it("does not submit another save through the keyboard while one is pending", async () => {
+    const onSubmit = vi.fn()
+    render(<PromptFullPageEditor {...baseProps} onSubmit={onSubmit} isLoading />)
+    await act(async () => fireEvent.keyDown(window, { key: "s", ctrlKey: true }))
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("retains the newer draft when the save owner reports a stale completion", async () => {
+    let finish!: (value: boolean) => void
+    const onSubmit = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve }))
+    const view = render(<PromptFullPageEditor {...baseProps} onSubmit={onSubmit} />)
+    fireEvent.click(screen.getByTestId("full-editor-save"))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce())
+    view.rerender(<PromptFullPageEditor {...baseProps} onSubmit={onSubmit} initialValues={{ id: "prompt-b", name: "Draft B" }} />)
+    fireEvent.change(screen.getByTestId("full-editor-name"), { target: { value: "Edited draft B" } })
+    mockDraftState.clearDraft.mockClear()
+    await act(async () => finish(false))
+    expect(mockDraftState.clearDraft).not.toHaveBeenCalled()
+    const unloading = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(unloading)
+    expect(unloading.defaultPrevented).toBe(true)
+  })
 
   it("localizes the quarantined recipe message", () => {
     render(
