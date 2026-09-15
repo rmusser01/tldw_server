@@ -1,0 +1,6 @@
+### Result
+{"checkedAt":"2026-09-15T21:07:30.732Z","url":"http://127.0.0.1:18281/chat","pageTitle":"","question":"","answer":"Jonah Patel coordinates Project Cedar, and volunteers meet every Tuesday at 18:15.","saveDisabled":true}
+### Ran Playwright code
+```js
+await (async (page) => { return {checkedAt:new Date().toISOString(),url:page.url(),pageTitle:await page.title(),question:await page.getByRole("textbox",{name:"Question",exact:true}).inputValue(),answer:await page.getByRole("textbox",{name:"Answer",exact:true}).inputValue(),saveDisabled:await page.getByRole("button",{name:"Save flashcard",exact:true}).isDisabled()}; })(page);
+```

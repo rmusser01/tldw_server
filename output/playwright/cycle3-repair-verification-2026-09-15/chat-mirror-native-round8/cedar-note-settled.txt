@@ -1,0 +1,6 @@
+### Result
+{"checkedAt":"2026-09-15T21:00:38.536Z","title":"Snippet: Cycle3 Cedar Guide Chat (20260915_103705)","content":"Jonah Patel coordinates Project Cedar, and volunteers meet every Tuesday at 18:15.","origin":true,"url":"http://127.0.0.1:18281/notes"}
+### Ran Playwright code
+```js
+await (async (page) => { return {checkedAt:new Date().toISOString(), title:await page.getByRole("textbox",{name:"Note title",exact:true}).inputValue(), content:await page.getByRole("textbox",{name:"Note content",exact:true}).inputValue(), origin:await page.getByText("Origin: Saved from Chat",{exact:true}).isVisible(), url:page.url()}; })(page);
+```

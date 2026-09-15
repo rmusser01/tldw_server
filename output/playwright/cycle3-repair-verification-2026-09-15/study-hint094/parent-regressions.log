@@ -1,0 +1,28 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:78874) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:78873) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Browserslist: browsers data (caniuse-lite) is 8 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx (1 test) 471ms
+     ✓ keeps re-rate visible after advancing and restores the reviewed card  471ms
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.assistant.test.tsx (11 tests) 6931ms
+     ✓ keeps review recall first and resets explicit help when the active card changes  361ms
+     ✓ keeps assistant actions collapsed before answer reveal and expands on demand  463ms
+     ✓ requires transcript confirmation before submitting fact-check requests  646ms
+     ✓ stops voice capture and clears the transcript when the assistant is collapsed  330ms
+     ✓ plays back assistant replies on demand  337ms
+     ✓ shows assistant errors without blocking review controls  345ms
+     ✓ reloads the latest thread and offers retry actions after a conflict  974ms
+     ✓ clears the pending request when reloading the latest thread  1416ms
+     ✓ preserves transcript fact-check requests across conflict recovery  1406ms
+     ✓ uses refreshed top-level remediation context after conflict recovery  367ms
+
+ Test Files  2 passed (2)
+      Tests  12 passed (12)
+   Start at  14:19:21
+   Duration  9.95s (transform 2.06s, setup 295ms, import 4.61s, tests 7.40s, environment 852ms)

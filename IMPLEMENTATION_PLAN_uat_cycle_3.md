@@ -76,6 +76,12 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 - [ ] Reproduce Cedar Note backlink retaining Robot selection and missing saved-message actions; restore owned conversation/character/message identities together with dirty/account/stale-source guards.
 - [ ] Independently review and perform the real tracked Chat→Note→backlink→settled reload sequence before committing.
 
+### Integrated-runtime follow-up: TASK-13260.33 / UAT093
+
+- [ ] Diagnose the saved-conversation route-entry render loop and reproduce its actual interacting state boundary before production edits.
+- [ ] Apply the smallest correction, run focused regressions and scoped lint, and obtain independent review.
+- [ ] Repeat canonical Robot entry, the actual Cedar Note backlink, and settled reload using the existing original data. A normal cleaned-route reload recovered from the initial crash; do not confuse that recovery with a passing entry path.
+
 ## Stage 3: Repair ingest and Media feedback/recovery
 **Goal:** Make progress, extraction errors, analysis and recovery controls accurate and usable.
 **Success criteria:** Required provider validation precedes Ready; no invented progress/estimate; source/analysis presentation is consistent; last-item Trash and valid reading-progress persistence work.
@@ -217,6 +223,11 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 - [x] Verify the actual current native selector and existing/new deck choices after the isolated frontend rebuild; retain evidence. Reviewed/live-verified checkpoint `f9b0dd2f53`,24/3 regressions, flashcard-handoff-round5.
 
 ## Stage 5: Verify integration and repeat fresh UAT
+### Integrated-runtime presentation follow-ups
+
+- [ ] TASK13260.34: give Chat declarative Next title ownership, align Header with canonical server metadata/current Dexie storage, and guard delayed title reads/renames. Reproduce actual Head/Header behavior, obtain independent review, and verify saved Chat reload.
+- [x] TASK13260.35: removed the automatic Study hint that obscured card text, preserving Need help and its panel. Parent/independent12tests pass, covered lint0errors/0added and reviewclear. Native exact answer/help controls and2practiceCram ratings pass; independent card/session bodies unchanged. Retained study-hint094 evidence. Native early-End and original Cedar card Study also pass in chat-mirror-native-round8; full fresh matrices remain pending.
+
 **Goal:** Establish complete acceptance on the repaired application.
 **Success criteria:** Every required single/multi workflow completes with no encountered product issue; explicit blocks remain visible and cannot qualify as success.
 **Tests:** Combined touched frontend/backend regressions, scoped lint/Bandit, TypeScript baseline comparison, independent review, targeted live controls and fresh full workflow matrices.

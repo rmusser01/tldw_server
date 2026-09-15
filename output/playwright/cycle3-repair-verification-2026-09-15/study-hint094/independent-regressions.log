@@ -1,0 +1,25 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:79351) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/tabs/__tests__/ReviewTab.assistant.test.tsx (11 tests) 6601ms
+     ✓ keeps review recall first and resets explicit help when the active card changes  355ms
+     ✓ keeps assistant actions collapsed before answer reveal and expands on demand  400ms
+     ✓ requires transcript confirmation before submitting fact-check requests  593ms
+     ✓ stops voice capture and clears the transcript when the assistant is collapsed  324ms
+     ✓ plays back assistant replies on demand  332ms
+     ✓ shows assistant errors without blocking review controls  314ms
+     ✓ reloads the latest thread and offers retry actions after a conflict  917ms
+     ✓ clears the pending request when reloading the latest thread  1437ms
+     ✓ preserves transcript fact-check requests across conflict recovery  1323ms
+     ✓ uses refreshed top-level remediation context after conflict recovery  332ms
+(node:79471) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx (1 test) 369ms
+     ✓ keeps re-rate visible after advancing and restores the reviewed card  369ms
+
+ Test Files  2 passed (2)
+      Tests  12 passed (12)
+   Start at  14:19:51
+   Duration  11.44s (transform 1.10s, setup 227ms, import 3.37s, tests 6.97s, environment 637ms)

@@ -1,0 +1,191 @@
+### Open tabs
+- 0: (current) [Flashcards | tldw](http://127.0.0.1:18281/flashcards)
+- 1: [](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/flashcards
+- Page Title: Flashcards | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f44e20]:
+  - generic [ref=f44e23]:
+    - link "Skip to main content" [ref=f44e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f44e25]:
+      - button "Expand sidebar" [ref=f44e26] [cursor=pointer]
+      - button "New Chat" [ref=f44e30] [cursor=pointer]
+      - generic [ref=f44e33]:
+        - button "Quick Ingest" [ref=f44e34] [cursor=pointer]
+        - button "Chat" [ref=f44e38] [cursor=pointer]
+        - button "Prompts" [ref=f44e41] [cursor=pointer]
+        - button "Characters" [ref=f44e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f44e50] [cursor=pointer]
+        - button "World Books" [ref=f44e54] [cursor=pointer]
+        - button "Notes" [ref=f44e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f44e61] [cursor=pointer]
+        - button "Media" [ref=f44e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f44e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f44e78] [cursor=pointer]
+        - button "Kanban" [ref=f44e84] [cursor=pointer]
+        - button "Watchlists" [ref=f44e86] [cursor=pointer]
+      - generic [ref=f44e91]:
+        - button "Open Notes Dock" [ref=f44e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f44e97] [cursor=pointer]
+        - button "Settings" [ref=f44e100] [cursor=pointer]
+    - main [ref=f44e104]:
+      - generic [ref=f44e105]:
+        - generic [ref=f44e108]:
+          - generic [ref=f44e109]:
+            - button "Expand sidebar" [ref=f44e110] [cursor=pointer]
+            - generic [ref=f44e112]:
+              - img "tldw Assistant" [ref=f44e113]
+              - generic [ref=f44e114]: tldw Assistant
+              - button "Companion Home" [ref=f44e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f44e119] [cursor=pointer]
+          - generic [ref=f44e122]:
+            - button "Search - Open command palette" [ref=f44e123] [cursor=pointer]:
+              - generic [ref=f44e127]: Search
+              - generic [ref=f44e128]: ⌘K
+            - button "Open settings" [ref=f44e129] [cursor=pointer]
+            - generic [ref=f44e141]:
+              - button "Notifications, 0 unread" [ref=f44e262] [cursor=pointer]
+              - status [ref=f44e145]: Notifications are active
+            - button "Switch to light theme" [ref=f44e146] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f44e153] [cursor=pointer]:
+              - generic [ref=f44e154]: "?"
+        - generic [ref=f44e156]:
+          - generic [ref=f44e158]:
+            - generic [ref=f44e160]:
+              - generic [ref=f44e161]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f44e162]
+            - navigation "Flashcards modes" [ref=f44e163]:
+              - generic [ref=f44e164]: Study
+              - generic [ref=f44e165]: Manage
+              - generic [ref=f44e166]: Import / Export
+              - generic [ref=f44e167]: Templates
+              - generic [ref=f44e168]: Scheduler
+          - generic [ref=f44e171]:
+            - tablist [ref=f44e172]:
+              - generic [ref=f44e174]:
+                - tab "Study" [selected] [ref=f44e176] [cursor=pointer]
+                - tab "Manage" [ref=f44e178] [cursor=pointer]
+                - tab "Import / Export" [ref=f44e180] [cursor=pointer]
+                - tab "Templates" [ref=f44e182] [cursor=pointer]
+                - tab "Scheduler" [ref=f44e184] [cursor=pointer]
+              - generic [ref=f44e186]:
+                - button "Test with Quiz" [disabled] [ref=f44e188]
+                - button "Keyboard Shortcuts" [ref=f44e189] [cursor=pointer]
+            - tabpanel "Study" [ref=f44e196]:
+              - generic [ref=f44e197]:
+                - generic [ref=f44e198]:
+                  - generic [ref=f44e199] [cursor=pointer]:
+                    - generic [ref=f44e200]:
+                      - generic: Select deck
+                      - combobox [ref=f44e201]
+                    - img "down" [ref=f44e266]
+                  - radiogroup "segmented control" [ref=f44e206]:
+                    - generic [ref=f44e207]:
+                      - generic [ref=f44e208] [cursor=pointer]:
+                        - radio "Due only" [checked]
+                        - generic "Due only" [ref=f44e209]
+                      - generic [ref=f44e210] [cursor=pointer]:
+                        - radio "Cram"
+                        - generic "Cram" [ref=f44e211]
+                  - radiogroup "segmented control" [ref=f44e212]:
+                    - generic [ref=f44e213]:
+                      - generic [ref=f44e214] [cursor=pointer]:
+                        - radio "Front first" [checked]
+                        - generic "Front first" [ref=f44e215]
+                      - generic [ref=f44e216] [cursor=pointer]:
+                        - radio "Back first"
+                        - generic "Back first" [ref=f44e217]
+                - region [ref=f44e220]:
+                  - generic [ref=f44e221]:
+                    - generic [ref=f44e227]:
+                      - strong [ref=f44e229]: Source reviews
+                      - generic [ref=f44e230]: No source reviews due
+                    - button "Schedule" [ref=f44e231] [cursor=pointer]
+                - generic [ref=f44e276]:
+                  - generic [ref=f44e277]:
+                    - generic [ref=f44e278]: Reviewed today
+                    - strong [ref=f44e280]: "2"
+                  - generic [ref=f44e281]:
+                    - generic [ref=f44e282]: Retention rate
+                    - strong [ref=f44e284]: 100.0%
+                  - generic [ref=f44e285]:
+                    - generic [ref=f44e286]: Lapse rate
+                    - strong [ref=f44e288]: 0.0%
+                  - generic [ref=f44e289]:
+                    - generic [ref=f44e290]: Avg answer time
+                    - strong [ref=f44e292]: 19.6s
+                  - generic [ref=f44e293]:
+                    - generic [ref=f44e294]: Study streak
+                    - strong [ref=f44e296]: 1 days
+                - status [ref=f44e297]:
+                  - generic [ref=f44e298]: "1 cards remaining, 1 reviewed, Available now: 1, new: 1, learning: 0, due: 0"
+                  - generic [ref=f44e299]:
+                    - generic [aria-hidden] [ref=f44e300]: Study queue
+                    - generic [aria-hidden] [ref=f44e301]: "1"
+                    - generic [aria-hidden] [ref=f44e302]: cards remaining
+                  - generic [aria-hidden] [ref=f44e304]: 1 reviewed
+                  - generic [aria-hidden] [ref=f44e306]: "Available now: 1"
+                  - generic [aria-hidden] [ref=f44e308]: "new: 1"
+                  - generic [aria-hidden] [ref=f44e310]: "learning: 0"
+                  - generic [aria-hidden] [ref=f44e312]: "due: 0"
+                  - generic [aria-hidden] [ref=f44e314]: ~1 min left
+                - generic [ref=f44e330]:
+                  - generic [ref=f44e332]:
+                    - generic [ref=f44e333]: Standard
+                    - generic [ref=f44e334]: New
+                    - generic [ref=f44e336]: SM-2+
+                    - 'link "Note #94343d8e-33cc-401f-93d1-263cc2b7f086" [ref=f44e423] [cursor=pointer]':
+                      - /url: /notes?source_ref_id=94343d8e-33cc-401f-93d1-263cc2b7f086
+                    - button "Edit card (E)" [ref=f44e339] [cursor=pointer]:
+                      - generic [ref=f44e340]: Edit
+                  - generic [ref=f44e341]:
+                    - heading "Front" [level=5] [ref=f44e342]
+                    - paragraph [ref=f44e436]: Who coordinates Project Cedar, and when do volunteers meet?
+                  - generic [ref=f44e346]:
+                    - button "Need help?" [ref=f44e348] [cursor=pointer]
+                    - tooltip [ref=f44e354]:
+                      - generic [ref=f44e358]:
+                        - generic [ref=f44e361]:
+                          - paragraph [ref=f44e362]: Study assistant
+                          - paragraph [ref=f44e363]: Need help understanding a card? Ask the study assistant.
+                        - button "Dismiss" [ref=f44e364] [cursor=pointer]
+                  - generic [ref=f44e428]:
+                    - button "Show answer (Space)" [ref=f44e429] [cursor=pointer]:
+                      - generic [ref=f44e430]: Show Answer
+                    - generic [ref=f44e431]:
+                      - generic [ref=f44e432]: Space Flip
+                      - generic [ref=f44e433]: E Edit
+                      - button "Compact hints" [ref=f44e434] [cursor=pointer]
+                - generic [ref=f44e438]:
+                  - generic [ref=f44e439]: Study suggestions
+                  - generic [ref=f44e442]: Loading study suggestions...
+                - generic [ref=f44e252]:
+                  - generic [ref=f44e253]: Recent study sessions
+                  - list "Recent study sessions" [ref=f44e315]:
+                    - listitem [ref=f44e447]:
+                      - generic [ref=f44e448]:
+                        - generic [ref=f44e449]:
+                          - strong [ref=f44e451]: All decks
+                          - button "Viewing completed session" [ref=f44e452] [cursor=pointer]
+                        - generic [ref=f44e454]:
+                          - generic [ref=f44e455]: Completed
+                          - generic [ref=f44e456]: Due review
+                          - generic [ref=f44e457]: 1 card reviewed
+                        - generic [ref=f44e458]: Completed 2026-09-15 14:14
+                    - listitem [ref=f44e316]:
+                      - generic [ref=f44e317]:
+                        - generic [ref=f44e318]:
+                          - strong [ref=f44e320]: All decks
+                          - button "View completed session" [ref=f44e321] [cursor=pointer]
+                        - generic [ref=f44e323]:
+                          - generic [ref=f44e324]: Completed
+                          - generic [ref=f44e325]: Due review
+                          - generic [ref=f44e326]: 1 card reviewed
+                        - generic [ref=f44e327]: Completed 2026-09-15 03:48
+  - button "Open Next.js Dev Tools" [ref=f44e15] [cursor=pointer]
+  - alert [ref=f44e19]
+```

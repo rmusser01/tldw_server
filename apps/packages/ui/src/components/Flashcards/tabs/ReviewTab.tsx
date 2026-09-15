@@ -71,7 +71,6 @@ import {
 } from "../utils/error-taxonomy"
 import type { StudyAssistantRespondRequest } from "@/services/flashcards"
 import { trackFlashcardsErrorRecoveryTelemetry } from "@/utils/flashcards-error-recovery-telemetry"
-import { FeatureHint } from "@/components/Common/FeatureHint"
 import { StudySuggestionsPanel } from "@/components/StudySuggestions/StudySuggestionsPanel"
 import {
   parseStudySuggestionTargetId,
@@ -1418,17 +1417,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                   defaultExpanded={showAnswer}
                 />
               )}
-              <FeatureHint
-                featureKey="flashcards_study_assistant_discovery"
-                title={t("option:flashcards.studyAssistantHintTitle", {
-                  defaultValue: "Study assistant"
-                })}
-                description={t("option:flashcards.studyAssistantHintDescription", {
-                  defaultValue:
-                    "Need help understanding a card? Ask the study assistant."
-                })}
-                position="top"
-              />
             </div>
 
             {activeReviewSessionId != null && (

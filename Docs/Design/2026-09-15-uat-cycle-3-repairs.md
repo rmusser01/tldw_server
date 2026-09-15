@@ -203,3 +203,13 @@ The WebUI app owner must resolve current effective canonical authentication when
 ### Targeted Notes header follow-up — UAT091
 
 The live1280×720 result shows that restored saved-time text exposes the existing nonwrapping toolbar squeeze. Allow header/action groups to wrap, reserve a readable title region and keep the short save status together. Preserve compact desktop controls and mobile touch targets. This is a layout correction under13260.18; no save, auth or navigation behavior changes.
+
+### Integrated Chat follow-ups — TASK13260.33/.34
+
+The canonical settings-return effect must not invalidate the session store on each replay. Initialization already cancels a generic restore for the explicit return target; preserve that initial precedence while removing the redundant effect-driven revision loop. Local-history reads need a captured load generation, owner lifetime and existing restore revision so delayed completions cannot publish messages, settings, titles or continuation callbacks after cancellation. Keep local/offline history readable without adding a network authentication prerequisite; do not represent these local cancellation guards as a new verified ownership scheme.
+
+Chat browser titles need declarative Next Head ownership so Next cannot clear an imperative-only title after hydration. Resolve the current canonical server title or current Dexie local title, with a stable Chat fallback. The header must use that same source and preserve title editing through the appropriate server or current local adapter. Guard delayed reads and saved renames against the captured conversation/account; retain valid same-owner credential refresh. Do not edit the separate loader repair merely to share title state.
+
+### Study answer readability — TASK13260.35 / UAT094
+
+The automatic discovery hint overlaps the question/answer. Remove only this hint invocation from ReviewTab; the visible Need help button already identifies the optional assistant and continues to open its existing panel. No scheduling, source, model or global hint behavior changes. Existing assistant/Study tests plus native reading and practice controls verify this reversible presentation removal.

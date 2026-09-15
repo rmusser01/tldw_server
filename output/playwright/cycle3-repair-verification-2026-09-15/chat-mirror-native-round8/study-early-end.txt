@@ -1,0 +1,6 @@
+### Result
+{"checkedAt":"2026-09-15T21:14:54.768Z","status":200,"request":{"review_session_id":2},"response":{"id":2,"deck_id":null,"deck_name_snapshot":null,"review_mode":"due","tag_filter":null,"scope_key":"due:global","status":"completed","started_at":"2026-09-15T21:14:02.413Z","last_activity_at":"2026-09-15T21:14:54.761Z","completed_at":"2026-09-15T21:14:54.761Z","cards_reviewed":1,"client_id":"2"}}
+### Ran Playwright code
+```js
+await (async (page) => { const pending=page.waitForResponse(r=>r.url().endsWith("/api/v1/flashcards/review-sessions/end") && r.request().method()==="POST",{timeout:15000}); await page.getByRole("button",{name:"End Session",exact:true}).click(); const r=await pending; return {checkedAt:new Date().toISOString(),status:r.status(),request:r.request().postDataJSON(),response:await r.json()}; })(page);
+```

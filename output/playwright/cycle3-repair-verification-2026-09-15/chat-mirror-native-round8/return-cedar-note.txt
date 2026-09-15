@@ -1,0 +1,13 @@
+### Result
+{"checkedAt":"2026-09-15T21:03:42.313Z","url":"http://127.0.0.1:18281/notes","title":"Snippet: Cycle3 Cedar Guide Chat (20260915_103705)","content":"Jonah Patel coordinates Project Cedar, and volunteers meet every Tuesday at 18:15."}
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByRole("button",{name:"Notes",exact:true}).click(); await page.getByRole("button",{name:"Open note Snippet: Cycle3 Cedar Guide Chat (20260915_103705)",exact:true}).click(); await page.waitForFunction(() => document.querySelector("textarea[aria-label=\"Note content\"]")?.value === "Jonah Patel coordinates Project Cedar, and volunteers meet every Tuesday at 18:15.", {timeout:15000}); return {checkedAt:new Date().toISOString(),url:page.url(),title:await page.getByRole("textbox",{name:"Note title",exact:true}).inputValue(),content:await page.getByRole("textbox",{name:"Note content",exact:true}).inputValue()}; })(page);
+```
+### Open tabs
+- 0: (current) [Notes | tldw](http://127.0.0.1:18281/notes)
+- 1: [](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/notes
+- Page Title: Notes | tldw

@@ -1,0 +1,52 @@
+{
+  "checkedAt": "2026-09-15T21:16:35.206Z",
+  "identity": "alice",
+  "verifierAuth": "reuse",
+  "method": "GET",
+  "path": "/api/v1/flashcards/review-sessions?limit=20",
+  "status": 200,
+  "body": [
+    {
+      "id": 3,
+      "deck_id": null,
+      "deck_name_snapshot": null,
+      "review_mode": "due",
+      "tag_filter": null,
+      "scope_key": "due:global",
+      "status": "completed",
+      "started_at": "2026-09-15T21:15:21.966Z",
+      "last_activity_at": "2026-09-15T21:15:22.443Z",
+      "completed_at": "2026-09-15T21:15:22.443Z",
+      "cards_reviewed": 1,
+      "client_id": "2"
+    },
+    {
+      "id": 2,
+      "deck_id": null,
+      "deck_name_snapshot": null,
+      "review_mode": "due",
+      "tag_filter": null,
+      "scope_key": "due:global",
+      "status": "completed",
+      "started_at": "2026-09-15T21:14:02.413Z",
+      "last_activity_at": "2026-09-15T21:14:54.761Z",
+      "completed_at": "2026-09-15T21:14:54.761Z",
+      "cards_reviewed": 1,
+      "client_id": "2"
+    },
+    {
+      "id": 1,
+      "deck_id": null,
+      "deck_name_snapshot": null,
+      "review_mode": "due",
+      "tag_filter": null,
+      "scope_key": "due:global",
+      "status": "completed",
+      "started_at": "2026-09-15T10:48:36.413Z",
+      "last_activity_at": "2026-09-15T10:48:36.802Z",
+      "completed_at": "2026-09-15T10:48:36.802Z",
+      "cards_reviewed": 1,
+      "client_id": "2"
+    }
+  ]
+}

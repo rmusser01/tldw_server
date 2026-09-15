@@ -1,0 +1,9 @@
+{
+  "file": "apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx",
+  "covered": true,
+  "baselineErrors": 0,
+  "currentErrors": 0,
+  "baselineWarnings": 2,
+  "currentWarnings": 2,
+  "added": []
+}

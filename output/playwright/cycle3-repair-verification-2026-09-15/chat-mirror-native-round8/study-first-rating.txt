@@ -1,0 +1,6 @@
+### Result
+{"checkedAt":"2026-09-15T21:14:02.425Z","status":200,"request":{"card_uuid":"65e74e34-b5f3-49c7-80fb-a59f135e1d65","rating":3,"answer_time_ms":16538,"review_context":{"review_mode":"due","deck_id":null,"tag_filter":null}},"response":{"uuid":"65e74e34-b5f3-49c7-80fb-a59f135e1d65","ef":2.5,"interval_days":1,"repetitions":1,"lapses":0,"due_at":"2026-09-16T21:14:02.411Z","last_reviewed_at":"2026-09-15T21:14:02.411Z","last_modified":"2026-09-15T21:14:02.411Z","version":3,"scheduler_type":"sm2_plus","queue_state":"review","step_index":null,"suspended_reason":null,"next_intervals":{"again":"10 min","hard":"2 days","good":"2 days","easy":"13 days"},"review_session_id":2}}
+### Ran Playwright code
+```js
+await (async (page) => { const pending=page.waitForResponse(r=>r.url().endsWith("/api/v1/flashcards/review") && r.request().method()==="POST",{timeout:15000}); await page.getByRole("button",{name:"Good: I remembered with a bit of effort. Press 3",exact:true}).click(); const r=await pending; return {checkedAt:new Date().toISOString(),status:r.status(),request:r.request().postDataJSON(),response:await r.json()}; })(page);
+```
