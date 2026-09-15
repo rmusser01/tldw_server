@@ -1,4 +1,5 @@
 import React from "react"
+import { Storage } from "@plasmohq/storage"
 import { useConnectionState } from "@/hooks/useConnectionState"
 import { ConnectionPhase } from "@/types/connection"
 
@@ -8,7 +9,16 @@ import {
   reduceNotificationLifecycle,
   type NotificationLifecycleState
 } from "@/services/notification-lifecycle"
-import { getApiBearer, getApiKey } from "@web/lib/authStorage"
+import {
+  getApiBearer,
+  getApiKey,
+  getEffectiveStoredTldwConfig,
+  getSessionAccessToken
+} from "@web/lib/authStorage"
+import {
+  REFRESH_ROTATION_KEY,
+  REFRESH_SESSION_INVALIDATION_PREFIX
+} from "@/services/tldw/single-user-credential"
 import { getApiBaseUrl } from "@web/lib/api"
 import {
   AUTH_CREDENTIALS_CHANGED_EVENT,
@@ -83,32 +93,30 @@ const unreadIncrementForEvent = (event: NotificationStreamEvent): number => {
 }
 
 const readStoredOrgId = (): string | number | null => {
-  if (typeof window === "undefined") return null
-  try {
-    const raw = window.localStorage.getItem("tldwConfig")
-    if (!raw) return null
-    const config = JSON.parse(raw) as { orgId?: unknown }
-    return typeof config.orgId === "string" || typeof config.orgId === "number"
-      ? config.orgId
-      : null
-  } catch {
-    return null
-  }
+  const config = getEffectiveStoredTldwConfig()
+  return typeof config?.orgId === "string" || typeof config?.orgId === "number"
+    ? config.orgId
+    : null
 }
 
 export const buildWebNotificationScopeKey = (): string => {
-  const jwt =
-    typeof window !== "undefined" ? window.localStorage.getItem("access_token") : null
+  const jwt = getSessionAccessToken()
   const bearer = jwt || getApiBearer()
   const apiKey = getApiKey()
   return buildNotificationScopeKey({
-    serverUrl: getApiBaseUrl(),
+    serverUrl: getEffectiveStoredTldwConfig()?.serverUrl || getApiBaseUrl(),
     authMode: bearer ? "multi-user" : "single-user",
     orgId: readStoredOrgId(),
     userId: null,
     accessToken: bearer,
     apiKey
   })
+}
+
+const hasMissingConfiguredAuth = (): boolean => {
+  const config = getEffectiveStoredTldwConfig()
+  return config?.authMode === "multi-user" &&
+    config.authSource !== "cookie-session" && !getApiBearer()
 }
 
 export const useOptionalNotificationLifecycle = (): NotificationLifecycleContextValue | null =>
@@ -150,6 +158,11 @@ export function NotificationLifecycleProvider({
   const pollTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
   const requestAbortRef = React.useRef<AbortController | null>(null)
   const effectSetupSeenRef = React.useRef(false)
+  const observedCredentialsRef = React.useRef({
+    bearer: getSessionAccessToken() || getApiBearer(),
+    apiKey: getApiKey(),
+    scope: buildWebNotificationScopeKey()
+  })
 
   const stopWork = React.useCallback(() => {
     streamOpenRef.current = false
@@ -214,11 +227,12 @@ export function NotificationLifecycleProvider({
     cursorCurrentRef.current = false
     terminalGenerationRef.current = null
     terminalStateRef.current = null
+    const missingCredentials = hasMissingConfiguredAuth()
     setSnapshot({
       ...initialSnapshot(scopeKey, lifecycleEpoch),
-      ...(!connectionVerified ? { state: "auth-required" as const } : {})
+      ...(!connectionVerified || missingCredentials ? { state: "auth-required" as const } : {})
     })
-    if (!enabled || !connectionVerified) return
+    if (!enabled || !connectionVerified || missingCredentials) return
     const requestAbort = new AbortController()
     requestAbortRef.current = requestAbort
 
@@ -400,6 +414,8 @@ export function NotificationLifecycleProvider({
     const resetForChangedScope = (): boolean => {
       if (suppliedScopeKey !== undefined) return false
       const nextScopeKey = buildWebNotificationScopeKey()
+      // Replace pending scope changes even when storage returns to the rendered scope.
+      setLiveScopeKey(nextScopeKey)
       if (nextScopeKey === scopeKey) return false
       generationRef.current += 1
       stopWork()
@@ -408,7 +424,6 @@ export function NotificationLifecycleProvider({
       unreadCurrentRef.current = false
       cursorCurrentRef.current = false
       setSnapshot(initialSnapshot(nextScopeKey, ++lifecycleEpochRef.current))
-      setLiveScopeKey(nextScopeKey)
       return true
     }
     const onCredentialsChanged = (event: Event) => {
@@ -422,11 +437,16 @@ export function NotificationLifecycleProvider({
       }
     }
     const onStorage = (event: StorageEvent) => {
-      if (event.key === "tldwConfig") {
-        resetForChangedScope()
+      if (
+        event.key === "tldwConfig" || event.key === REFRESH_ROTATION_KEY ||
+        event.key?.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX)
+      ) {
+        onConfigUpdated()
         return
       }
       if (event.key !== "access_token") return
+      const config = getEffectiveStoredTldwConfig()
+      if (config?.authMode === "multi-user" || config?.authMode === "single-user") return
       if (event.newValue) {
         if (resetForChangedScope()) return
         if (terminalStateRef.current === "unavailable") return
@@ -436,13 +456,35 @@ export function NotificationLifecycleProvider({
       }
     }
     const onConfigUpdated = () => {
-      resetForChangedScope()
+      const next = {
+        bearer: getSessionAccessToken() || getApiBearer(),
+        apiKey: getApiKey(),
+        scope: buildWebNotificationScopeKey()
+      }
+      const previous = observedCredentialsRef.current
+      observedCredentialsRef.current = next
+      if (hasMissingConfiguredAuth()) {
+        stopForRemovedCredentials()
+        return
+      }
+      if (resetForChangedScope()) return
+      if (next.bearer === previous.bearer && next.apiKey === previous.apiKey &&
+        next.scope === previous.scope) return
+      if (terminalStateRef.current === "unavailable") return
+      void startWork()
     }
+
+    const storage = new Storage({ area: "local" })
+    const unwatch = storage.watch({
+      tldwConfig: onConfigUpdated,
+      [REFRESH_ROTATION_KEY]: onConfigUpdated
+    })
 
     window.addEventListener(AUTH_CREDENTIALS_CHANGED_EVENT, onCredentialsChanged)
     window.addEventListener("tldw:config-updated", onConfigUpdated)
     window.addEventListener("storage", onStorage)
     return () => {
+      unwatch()
       window.removeEventListener(AUTH_CREDENTIALS_CHANGED_EVENT, onCredentialsChanged)
       window.removeEventListener("tldw:config-updated", onConfigUpdated)
       window.removeEventListener("storage", onStorage)

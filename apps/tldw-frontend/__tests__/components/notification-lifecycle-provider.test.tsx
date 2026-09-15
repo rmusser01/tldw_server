@@ -26,7 +26,9 @@ vi.mock("@web/lib/api", () => ({
 
 vi.mock("@web/lib/authStorage", () => ({
   getApiBearer: () => null,
-  getApiKey: () => "test-api-key"
+  getApiKey: () => "test-api-key",
+  getEffectiveStoredTldwConfig: () => null,
+  getSessionAccessToken: () => window.localStorage.getItem("access_token")
 }))
 
 import {

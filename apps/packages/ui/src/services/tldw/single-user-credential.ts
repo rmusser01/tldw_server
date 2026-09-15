@@ -125,7 +125,7 @@ const applicableRefreshRotation = (
   return record
 }
 
-const applyRefreshRotation = (
+export const applyRefreshRotation = (
   stored: TldwConfig,
   value: unknown
 ): TldwConfig => {
@@ -139,7 +139,7 @@ const applyRefreshRotation = (
     : stored
 }
 
-const refreshSessionInvalidationKey = (config: TldwConfig): string | null => {
+export const refreshSessionInvalidationKey = (config: TldwConfig): string | null => {
   if (config.authMode !== "multi-user" || !config.accessToken || !config.refreshToken) return null
   const identity = JSON.stringify([
     String(config.serverUrl || "").trim().replace(/\/+$/, ""),
