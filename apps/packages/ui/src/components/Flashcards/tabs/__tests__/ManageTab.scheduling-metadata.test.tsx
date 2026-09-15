@@ -292,6 +292,34 @@ describe("ManageTab scheduling metadata visibility", () => {
     vi.mocked(getManageServerOrderBy).mockReturnValue("due_at")
   })
 
+  it("keeps compact and expanded card controls without deprecated List warnings", () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+    render(<ManageTab onNavigateToImport={() => {}} onReviewCard={() => {}} isActive />)
+    const selection = screen.getByTestId(`flashcard-item-${sampleCard.uuid}-select`)
+    fireEvent.click(selection)
+    expect(selection).toBeChecked()
+    fireEvent.click(screen.getByTestId("flashcards-density-toggle"))
+    expect(screen.getByTestId(`flashcard-item-${sampleCard.uuid}-select`)).toBeChecked()
+    expect(screen.getByText("Memory strength 2.70")).toBeInTheDocument()
+    expect(errors.mock.calls.flat().map(String).join("\n")).not.toMatch(/\[antd: List\]/)
+  })
+
+  it("preserves the pending-delete countdown and Undo without deprecated List warnings", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+    render(<ManageTab onNavigateToImport={() => {}} onReviewCard={() => {}} isActive />)
+    fireEvent.click(screen.getByTestId(`flashcard-item-${sampleCard.uuid}-select`))
+    fireEvent.click(screen.getByRole("button", { name: "Delete", exact: true }))
+    await waitFor(() => expect(screen.queryByTestId(`flashcard-item-${sampleCard.uuid}`)).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole("radio", { name: /Trash/ }))
+    const deleted = await screen.findByTestId(`flashcard-trash-${sampleCard.uuid}`)
+    expect(within(deleted).getByRole("timer")).toHaveAccessibleName(/Permanently deletes in \d+ seconds/)
+    fireEvent.click(within(deleted).getByRole("button", { name: "Undo", exact: true }))
+    expect(screen.queryByTestId(`flashcard-trash-${sampleCard.uuid}`)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("radio", { name: "Cards", exact: true }))
+    expect(screen.getByTestId(`flashcard-item-${sampleCard.uuid}`)).toBeInTheDocument()
+    expect(errors.mock.calls.flat().map(String).join("\n")).not.toMatch(/\[antd: List\]/)
+  })
+
   it("shows scheduling metadata in compact list rows", () => {
     render(
       <ManageTab

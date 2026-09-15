@@ -285,8 +285,10 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     enabled: isActive && !!activeCard
   })
   const assistantRespondMutation = useFlashcardAssistantRespondMutation()
-  const reviewProgressTotal =
-    reviewMode === "cram" ? cramQueue.length : dueCountsQuery.data?.total ?? 0
+  const remainingReviewCount =
+    reviewMode === "cram"
+      ? Math.max(0, cramQueue.length - reviewedCount)
+      : dueCountsQuery.data?.total ?? 0
   const scheduledDueCount = reviewMode === "cram" ? undefined : dueCountsQuery.data?.due
   const availableNowCount =
     reviewMode === "cram"
@@ -1299,9 +1301,9 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
         selectedDeckId={reviewDeckId ?? null}
       />
 
-      {reviewProgressTotal > 0 && (
+      {remainingReviewCount > 0 && (
         <ReviewProgress
-          dueCount={reviewProgressTotal}
+          remainingCount={remainingReviewCount}
           reviewedCount={reviewedCount}
           deckName={currentDeckName}
           availableNowCount={availableNowCount}
@@ -1905,8 +1907,8 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                           <Text type="secondary" className="text-xs mt-1 block">
                             {nextDueAbsoluteLabel ?? nextDueInfo.nextDueAt}
                             {" · "}
-                            {t("option:flashcards.nextDueCardCount", {
-                              defaultValue: "{{count}} cards due",
+                            {t("option:flashcards.nextDueHourCount", {
+                              defaultValue: "{{count}} cards due within the following hour",
                               count: nextDueInfo.cardsDue
                             })}
                           </Text>
@@ -1920,9 +1922,9 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                       )}
                       {nextDueInfo.isCapped && (
                         <Text type="secondary" className="text-xs mt-2 block">
-                          {t("option:flashcards.nextDueCapped", {
+                          {t("option:flashcards.nextDueScanLimited", {
                             defaultValue:
-                              "Next review is beyond the first {{count}} cards. Narrow filters to improve the estimate.",
+                              "Estimate based on the first {{count}} cards. The count may be incomplete. Narrow filters to improve the estimate.",
                             count: nextDueInfo.scanned
                           })}
                         </Text>

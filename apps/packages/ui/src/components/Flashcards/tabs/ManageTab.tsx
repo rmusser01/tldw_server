@@ -8,7 +8,6 @@ import {
   Drawer,
   Empty,
   Input,
-  List,
   Modal,
   Pagination,
   Popover,
@@ -211,8 +210,7 @@ const ManageExpertFilters: React.FC<ManageExpertFiltersProps> = ({
       <Popover
         trigger="click"
         placement="bottomLeft"
-        content={
-          <div className="w-72 space-y-2">
+        content=<div className="w-72 space-y-2">
             <div className="text-sm font-medium text-text-muted">
               {t("option:flashcards.filterByTag", {
                 defaultValue: "Filter by tag"
@@ -275,10 +273,9 @@ const ManageExpertFilters: React.FC<ManageExpertFiltersProps> = ({
               </div>
             )}
           </div>
-        }
       >
         <Badge dot={mTags.length > 0} offset={[-4, 4]}>
-          <Button icon={<Filter className="size-4" />}>
+          <Button icon=<Filter className="size-4" />>
             {t("option:flashcards.moreFilters", { defaultValue: "More" })}
           </Button>
         </Badge>
@@ -634,7 +631,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     []
   )
 
-  const pendingDeletionCount = Object.keys(pendingDeletions).length
+  const pendingDeletionItems = Object.values(pendingDeletions).sort((a, b) => a.expiresAt - b.expiresAt)
+  const pendingDeletionCount = pendingDeletionItems.length
 
   React.useEffect(() => {
     pendingDeletionsRef.current = pendingDeletions
@@ -2146,7 +2144,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                 >
                   <Button
                     type={listDensity === "compact" ? "default" : "text"}
-                    icon={<ListIcon className="size-4" />}
+                    icon=<ListIcon className="size-4" />
                     onClick={() => setPresentationMode("compact")}
                     data-testid="flashcards-density-toggle-compact"
                   />
@@ -2156,7 +2154,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                 >
                   <Button
                     type={listDensity === "expanded" ? "default" : "text"}
-                    icon={<LayoutList className="size-4" />}
+                    icon=<LayoutList className="size-4" />
                     onClick={() => setPresentationMode("expanded")}
                     data-testid="flashcards-density-toggle"
                   />
@@ -2205,8 +2203,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
             ) : (
               <span className="flex items-center gap-2">
                 <Badge
-                  count={
-                    <span className="flex items-center gap-1">
+                  count=<span className="flex items-center gap-1">
                       {/* Icon indicator for colorblind differentiation */}
                       {selectAllAcross ? (
                         <CheckCheck className="size-3" aria-hidden="true" />
@@ -2215,7 +2212,6 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                       )}
                       {selectedCount}
                     </span>
-                  }
                   showZero={false}
                   className="mr-1"
                   style={{ backgroundColor: selectAllAcross ? "rgb(var(--color-primary))" : "rgb(var(--color-success))" }}
@@ -2250,406 +2246,410 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         )}
 
         {viewMode === "cards" ? (
-        isDocumentMode ? (
-          <FlashcardDocumentView
-            items={documentItems}
-            decks={decksQuery.data || []}
-            isLoading={documentQuery.isLoading}
-            isFetchingNextPage={documentQuery.isFetchingNextPage}
-            hasNextPage={Boolean(documentQuery.hasNextPage)}
-            isTruncated={documentQuery.isTruncated}
-            selectedIds={selectedIds}
-            selectAllAcross={selectAllAcross}
-            filterContext={documentFilterContext}
-            queryKey={documentQueryKey}
-            onToggleSelect={toggleSelect}
-            onLoadMore={() => {
-              if (documentQuery.hasNextPage && !documentQuery.isFetchingNextPage) {
-                void documentQuery.fetchNextPage()
-              }
-            }}
-            onOpenDrawer={openEdit}
-            bulkUpdate={bulkUpdateMutation.mutateAsync}
-          />
-        ) : (
-          <List
-            loading={manageQuery.isFetching}
-            dataSource={pageItems}
-            locale={{
-              emptyText: (
-                <Empty
-                  description={t("option:flashcards.noCardsTitle", {
-                    defaultValue:
-                      hasActiveFilters
-                        ? "No cards match your filters"
-                        : "No flashcards yet"
-                  })}
-                >
-                  <Space orientation="vertical" align="center">
-                    <Text type="secondary">
-                      {t("option:flashcards.noCardsDescription", {
-                        defaultValue:
-                          hasActiveFilters
-                            ? "Try adjusting your search, deck, tag, or due filters."
-                            : "Create cards from your notes and media, or import an existing deck."
-                      })}
-                    </Text>
-                    <Space>
-                      {hasActiveFilters ? (
-                        <Button onClick={clearAllFilters}>
-                          {t("option:flashcards.clearFilters", {
-                            defaultValue: "Clear filters"
-                          })}
-                        </Button>
-                      ) : (
-                        <>
-                          <Button
-                            type="primary"
-                            onClick={openManualCreateDrawer}
-                            data-testid="flashcards-manage-empty-create-cta"
-                          >
-                            {t("option:flashcards.noCardsCreateCta", {
-                              defaultValue: "Create card"
-                            })}
-                          </Button>
-                          <Button
-                            onClick={onNavigateToImport}
-                            data-testid="flashcards-manage-empty-import-cta"
-                          >
-                            {t("option:flashcards.noCardsImportCta", {
-                              defaultValue: "Import flashcards"
-                            })}
-                          </Button>
-                          <Button
-                            onClick={onNavigateToGenerate ?? onNavigateToImport}
-                            data-testid="flashcards-manage-empty-generate-cta"
-                          >
-                            {t("option:flashcards.noCardsGenerateCta", {
-                              defaultValue: "Generate from text"
-                            })}
-                          </Button>
-                        </>
-                      )}
-                    </Space>
-                  </Space>
-                </Empty>
-              )
-            }}
-            renderItem={(item, index) => {
-            const isFocused = index === focusedIndex
-            const compactSchedule = compactSchedulingLabels(item)
-            const expandedSchedule = expandedSchedulingLabels(item)
-            const sourceMeta = getFlashcardSourceMeta(item)
-            const dueRelativeLabel = item.due_at
-              ? formatFlashcardRelativeTime(item.due_at)
-              : null
-            const dueAbsoluteLabel = item.due_at
-              ? formatFlashcardAbsoluteDateTime(item.due_at)
-              : null
-            const isDue = item.due_at
-              ? isFlashcardTimestampBefore(item.due_at)
-              : false
-            return (
-            <List.Item
-              data-testid={`flashcard-item-${item.uuid}`}
-              className={`cursor-pointer hover:bg-surface2/50 ${isFocused ? "ring-2 ring-primary ring-inset bg-surface2/30" : ""}`}
-              onClick={() => {
-                setFocusedIndex(index)
-                togglePreview(item.uuid)
+          isDocumentMode ? (
+            <FlashcardDocumentView
+              items={documentItems}
+              decks={decksQuery.data || []}
+              isLoading={documentQuery.isLoading}
+              isFetchingNextPage={documentQuery.isFetchingNextPage}
+              hasNextPage={Boolean(documentQuery.hasNextPage)}
+              isTruncated={documentQuery.isTruncated}
+              selectedIds={selectedIds}
+              selectAllAcross={selectAllAcross}
+              filterContext={documentFilterContext}
+              queryKey={documentQueryKey}
+              onToggleSelect={toggleSelect}
+              onLoadMore={() => {
+                if (documentQuery.hasNextPage && !documentQuery.isFetchingNextPage) {
+                  void documentQuery.fetchNextPage()
+                }
               }}
-              actions={[
-                <span
-                  key="sel"
-                  className="inline-flex items-center justify-center min-w-11 min-h-11"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Checkbox
-                    checked={selectAllAcross ? true : selectedIds.has(item.uuid)}
-                    disabled={selectAllAcross}
-                    onChange={(e) => {
-                      e.stopPropagation()
-                      toggleSelect(item.uuid, e.target.checked)
-                    }}
-                    aria-label={`Select card: ${item.front.slice(0, 80)}`}
-                    data-testid={`flashcard-item-${item.uuid}-select`}
-                  />
-                </span>,
-                <FlashcardActionsMenu
-                  key="actions"
-                  card={item}
-                  onEdit={() => openEdit(item)}
-                  onReview={() => onReviewCard(item)}
-                  onDuplicate={() => duplicateCard(item)}
-                  onMove={() => openMove(item)}
-                />
-              ]}
-            >
-              {listDensity === "compact" ? (
-                /* Compact mode: Front text + due indicator + deck name */
-                <List.Item.Meta
-                  title={
-                    <div className="flex items-center gap-2">
-                      {/* Due status indicator */}
-                      {isDue && (
-                        <Tooltip title={t("option:flashcards.dueNow", { defaultValue: "Due now" })}>
-                          <span className="inline-block w-2 h-2 rounded-full bg-success" />
-                        </Tooltip>
-                      )}
-                      <div className="min-w-0 flex-1 text-sm text-text">
-                        <div className="line-clamp-1">
-                          <FlashcardMarkdownSnippet
-                            content={item.front}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  }
-                  description={
-                    <div className="flex flex-col gap-0.5 text-xs">
-                      <div className="flex items-center gap-2">
-                        {item.deck_id != null && (
-                          <span className="text-text-muted">
-                            {resolveDeckLabel(item.deck_id)}
-                          </span>
-                        )}
-                        {item.due_at && (
-                          <span className="text-text-subtle">
-                            {dueRelativeLabel ?? item.due_at}
-                          </span>
-                        )}
-                        {sourceMeta && (
-                          sourceMeta.href ? (
-                            <a
-                              href={sourceMeta.href}
-                              onClick={(event) => event.stopPropagation()}
-                              className="text-primary hover:underline"
-                              title={t("option:flashcards.sourceOpenLink", {
-                                defaultValue: "Open source"
-                              })}
-                            >
-                              {sourceMeta.label}
-                            </a>
-                          ) : (
-                            <span className="text-text-subtle">
-                              {sourceMeta.label}
-                            </span>
-                          )
-                        )}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 text-text-subtle">
-                        <Tooltip
-                          title={t("option:flashcards.schedulingMemoryStrengthHelp", {
-                            defaultValue: "SM-2 ease factor (how fast review gaps grow)."
-                          })}
+              onOpenDrawer={openEdit}
+              bulkUpdate={bulkUpdateMutation.mutateAsync}
+            />
+          ) : (
+            <Spin spinning={manageQuery.isFetching}>
+              <div aria-busy={manageQuery.isFetching} className="min-h-16">
+                {pageItems.length > 0 ? (
+                  <ul
+                    aria-label={t("option:flashcards.title", { defaultValue: "Flashcards" })}
+                    className="m-0 list-none divide-y divide-border p-0"
+                  >
+                    {pageItems.map((item, index) => {
+                      const isFocused = index === focusedIndex
+                      const compactSchedule = compactSchedulingLabels(item)
+                      const expandedSchedule = expandedSchedulingLabels(item)
+                      const sourceMeta = getFlashcardSourceMeta(item)
+                      const dueRelativeLabel = item.due_at
+                        ? formatFlashcardRelativeTime(item.due_at)
+                        : null
+                      const dueAbsoluteLabel = item.due_at
+                        ? formatFlashcardAbsoluteDateTime(item.due_at)
+                        : null
+                      const isDue = item.due_at ? isFlashcardTimestampBefore(item.due_at) : false
+                      return (
+                        <li
+                          key={`flashcard-item-${item.uuid}`}
+                          data-testid={`flashcard-item-${item.uuid}`}
+                          className={`flex flex-wrap items-start gap-3 py-3 cursor-pointer hover:bg-surface2/50 ${isFocused ? "ring-2 ring-primary ring-inset bg-surface2/30" : ""}`}
+                          onClick={() => {
+                            setFocusedIndex(index)
+                            togglePreview(item.uuid)
+                          }}
                         >
-                          <span>{compactSchedule.memoryStrength}</span>
-                        </Tooltip>
-                        <Tooltip
-                          title={t("option:flashcards.schedulingNextGapHelp", {
-                            defaultValue: "SM-2 interval (days until next review)."
-                          })}
-                        >
-                          <span>{compactSchedule.nextReviewGap}</span>
-                        </Tooltip>
-                        <Tooltip
-                          title={t("option:flashcards.schedulingRecallRunsHelp", {
-                            defaultValue: "SM-2 repetitions (successful recalls)."
-                          })}
-                        >
-                          <span>{compactSchedule.recallRuns}</span>
-                        </Tooltip>
-                        <Tooltip
-                          title={t("option:flashcards.schedulingRelearnsHelp", {
-                            defaultValue: "SM-2 lapses (times forgotten)."
-                          })}
-                        >
-                          <span>{compactSchedule.relearns}</span>
-                        </Tooltip>
-                      </div>
-                    </div>
-                  }
-                />
-              ) : (
-                /* Expanded mode: Full details with front/back preview */
-                <>
-                  <List.Item.Meta
-                    title={
-                      <div className="flex min-w-0 items-start gap-2">
-                        <div className="min-w-0 flex-1 text-sm font-semibold text-text">
-                          <div className="line-clamp-1">
-                            <FlashcardMarkdownSnippet
-                              content={item.front}
-                            />
-                          </div>
-                        </div>
-                        <span className="text-text-subtle">-</span>
-                        <div className="min-w-0 flex-1 text-sm text-text-muted">
-                          <div className="line-clamp-1">
-                            <FlashcardMarkdownSnippet
-                              content={item.back}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    }
-                    description={
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {item.deck_id != null && (
-                          <Tag color="blue">
-                            {resolveDeckLabel(item.deck_id)}
-                          </Tag>
-                        )}
-                        <Tag>{formatCardType(item, t)}</Tag>
-                        <FlashcardQueueStateBadge
-                          card={item}
-                          testId={`flashcards-manage-queue-state-${item.uuid}`}
-                        />
-                        {(item.tags || []).map((tg) => (
-                          <Tag key={tg}>{tg}</Tag>
-                        ))}
-                        {sourceMeta && (
-                          <Tag
-                            color={
-                              sourceMeta.unavailable
-                                ? "default"
-                                : sourceMeta.type === "media"
-                                  ? "blue"
-                                  : sourceMeta.type === "note"
-                                    ? "gold"
-                                    : "green"
-                            }
-                          >
-                            {sourceMeta.href ? (
-                              <a href={sourceMeta.href} onClick={(event) => event.stopPropagation()}>
-                                {sourceMeta.label}
-                              </a>
+                          <div className="min-w-0 flex-1">
+                            {listDensity === "compact" ? (
+                              /* Compact mode: Front text + due indicator + deck name */
+                              <div className="min-w-0">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    {/* Due status indicator */}
+                                    {isDue && (
+                                      <Tooltip
+                                        title={t("option:flashcards.dueNow", { defaultValue: "Due now" })}
+                                      >
+                                        <span className="inline-block w-2 h-2 rounded-full bg-success" />
+                                      </Tooltip>
+                                    )}
+                                    <div className="min-w-0 flex-1 text-sm text-text">
+                                      <div className="line-clamp-1">
+                                        <FlashcardMarkdownSnippet content={item.front} />
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="mt-1">
+                                  <div className="flex flex-col gap-0.5 text-xs">
+                                    <div className="flex items-center gap-2">
+                                      {item.deck_id != null && (
+                                        <span className="text-text-muted">
+                                          {resolveDeckLabel(item.deck_id)}
+                                        </span>
+                                      )}
+                                      {item.due_at && (
+                                        <span className="text-text-subtle">
+                                          {dueRelativeLabel ?? item.due_at}
+                                        </span>
+                                      )}
+                                      {sourceMeta &&
+                                        (sourceMeta.href ? (
+                                          <a
+                                            href={sourceMeta.href}
+                                            onClick={(event) => event.stopPropagation()}
+                                            className="text-primary hover:underline"
+                                            title={t("option:flashcards.sourceOpenLink", {
+                                              defaultValue: "Open source"
+                                            })}
+                                          >
+                                            {sourceMeta.label}
+                                          </a>
+                                        ) : (
+                                          <span className="text-text-subtle">{sourceMeta.label}</span>
+                                        ))}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2 text-text-subtle">
+                                      <Tooltip
+                                        title={t("option:flashcards.schedulingMemoryStrengthHelp", {
+                                          defaultValue: "SM-2 ease factor (how fast review gaps grow)."
+                                        })}
+                                      >
+                                        <span>{compactSchedule.memoryStrength}</span>
+                                      </Tooltip>
+                                      <Tooltip
+                                        title={t("option:flashcards.schedulingNextGapHelp", {
+                                          defaultValue: "SM-2 interval (days until next review)."
+                                        })}
+                                      >
+                                        <span>{compactSchedule.nextReviewGap}</span>
+                                      </Tooltip>
+                                      <Tooltip
+                                        title={t("option:flashcards.schedulingRecallRunsHelp", {
+                                          defaultValue: "SM-2 repetitions (successful recalls)."
+                                        })}
+                                      >
+                                        <span>{compactSchedule.recallRuns}</span>
+                                      </Tooltip>
+                                      <Tooltip
+                                        title={t("option:flashcards.schedulingRelearnsHelp", {
+                                          defaultValue: "SM-2 lapses (times forgotten)."
+                                        })}
+                                      >
+                                        <span>{compactSchedule.relearns}</span>
+                                      </Tooltip>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
                             ) : (
-                              sourceMeta.label
+                              /* Expanded mode: Full details with front/back preview */
+                              <>
+                                <div className="min-w-0">
+                                  <div>
+                                    <div className="flex min-w-0 items-start gap-2">
+                                      <div className="min-w-0 flex-1 text-sm font-semibold text-text">
+                                        <div className="line-clamp-1">
+                                          <FlashcardMarkdownSnippet content={item.front} />
+                                        </div>
+                                      </div>
+                                      <span className="text-text-subtle">-</span>
+                                      <div className="min-w-0 flex-1 text-sm text-text-muted">
+                                        <div className="line-clamp-1">
+                                          <FlashcardMarkdownSnippet content={item.back} />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="mt-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {item.deck_id != null && (
+                                        <Tag color="blue">{resolveDeckLabel(item.deck_id)}</Tag>
+                                      )}
+                                      <Tag>{formatCardType(item, t)}</Tag>
+                                      <FlashcardQueueStateBadge
+                                        card={item}
+                                        testId={`flashcards-manage-queue-state-${item.uuid}`}
+                                      />
+                                      {(item.tags || []).map((tg) => (
+                                        <Tag key={tg}>{tg}</Tag>
+                                      ))}
+                                      {sourceMeta && (
+                                        <Tag
+                                          color={
+                                            sourceMeta.unavailable
+                                              ? "default"
+                                              : sourceMeta.type === "media"
+                                                ? "blue"
+                                                : sourceMeta.type === "note"
+                                                  ? "gold"
+                                                  : "green"
+                                          }
+                                        >
+                                          {sourceMeta.href ? (
+                                            <a
+                                              href={sourceMeta.href}
+                                              onClick={(event) => event.stopPropagation()}
+                                            >
+                                              {sourceMeta.label}
+                                            </a>
+                                          ) : (
+                                            sourceMeta.label
+                                          )}
+                                        </Tag>
+                                      )}
+                                      {item.due_at && (
+                                        <Tag color="green">
+                                          {t("option:flashcards.due", { defaultValue: "Due" })}:{" "}
+                                          {dueRelativeLabel ?? item.due_at} (
+                                          {dueAbsoluteLabel ?? item.due_at})
+                                        </Tag>
+                                      )}
+                                      <Tooltip
+                                        title={t("option:flashcards.schedulingMemoryStrengthHelp", {
+                                          defaultValue: "SM-2 ease factor (how fast review gaps grow)."
+                                        })}
+                                      >
+                                        <Tag>{expandedSchedule.memoryStrength}</Tag>
+                                      </Tooltip>
+                                      <Tooltip
+                                        title={t("option:flashcards.schedulingNextGapHelp", {
+                                          defaultValue: "SM-2 interval (days until next review)."
+                                        })}
+                                      >
+                                        <Tag>{expandedSchedule.nextReviewGap}</Tag>
+                                      </Tooltip>
+                                      <Tooltip
+                                        title={t("option:flashcards.schedulingRecallRunsHelp", {
+                                          defaultValue: "SM-2 repetitions (successful recalls)."
+                                        })}
+                                      >
+                                        <Tag>{expandedSchedule.recallRuns}</Tag>
+                                      </Tooltip>
+                                      <Tooltip
+                                        title={t("option:flashcards.schedulingRelearnsHelp", {
+                                          defaultValue: "SM-2 lapses (times forgotten)."
+                                        })}
+                                      >
+                                        <Tag>{expandedSchedule.relearns}</Tag>
+                                      </Tooltip>
+                                    </div>
+                                  </div>
+                                </div>
+                                {previewOpen.has(item.uuid) && (
+                                  <div className="mt-2">
+                                    <div className="border rounded p-2 bg-surface text-xs sm:text-sm">
+                                      <MarkdownWithBoundary
+                                        content={item.back}
+                                        size="xs"
+                                        className="sm:prose-sm"
+                                      />
+                                    </div>
+                                    {item.extra && (
+                                      <div className="opacity-80 text-xs mt-1">
+                                        <MarkdownWithBoundary content={item.extra} size="xs" />
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </>
                             )}
-                          </Tag>
-                        )}
-                        {item.due_at && (
-                          <Tag color="green">
-                            {t("option:flashcards.due", { defaultValue: "Due" })}:{" "}
-                            {dueRelativeLabel ?? item.due_at} (
-                            {dueAbsoluteLabel ?? item.due_at})
-                          </Tag>
-                        )}
-                        <Tooltip
-                          title={t("option:flashcards.schedulingMemoryStrengthHelp", {
-                            defaultValue: "SM-2 ease factor (how fast review gaps grow)."
-                          })}
-                        >
-                          <Tag>{expandedSchedule.memoryStrength}</Tag>
-                        </Tooltip>
-                        <Tooltip
-                          title={t("option:flashcards.schedulingNextGapHelp", {
-                            defaultValue: "SM-2 interval (days until next review)."
-                          })}
-                        >
-                          <Tag>{expandedSchedule.nextReviewGap}</Tag>
-                        </Tooltip>
-                        <Tooltip
-                          title={t("option:flashcards.schedulingRecallRunsHelp", {
-                            defaultValue: "SM-2 repetitions (successful recalls)."
-                          })}
-                        >
-                          <Tag>{expandedSchedule.recallRuns}</Tag>
-                        </Tooltip>
-                        <Tooltip
-                          title={t("option:flashcards.schedulingRelearnsHelp", {
-                            defaultValue: "SM-2 lapses (times forgotten)."
-                          })}
-                        >
-                          <Tag>{expandedSchedule.relearns}</Tag>
-                        </Tooltip>
-                      </div>
-                    }
-                  />
-                  {previewOpen.has(item.uuid) && (
-                    <div className="mt-2">
-                      <div className="border rounded p-2 bg-surface text-xs sm:text-sm">
-                        <MarkdownWithBoundary
-                          content={item.back}
-                          size="xs"
-                          className="sm:prose-sm"
-                        />
-                      </div>
-                      {item.extra && (
-                        <div className="opacity-80 text-xs mt-1">
-                          <MarkdownWithBoundary content={item.extra} size="xs" />
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </List.Item>
-          )}}
-        />
-        )
-        ) : (
-          <List
-            dataSource={Object.values(pendingDeletions).sort(
-              (a, b) => a.expiresAt - b.expiresAt
-            )}
-            locale={{
-              emptyText: (
-                <Empty
-                  description={t("option:flashcards.trashEmptyDescription", {
-                    defaultValue: "Deleted cards appear here for 30 seconds."
-                  })}
-                />
-              )
-            }}
-            renderItem={(item) => {
-              const remainingSeconds = Math.max(
-                0,
-                Math.ceil((item.expiresAt - nowMs) / 1000)
-              )
-              return (
-                <List.Item
-                  data-testid={`flashcard-trash-${item.card.uuid}`}
-                  actions={[
-                    <Button
-                      key="undo"
-                      className="min-h-11 min-w-11"
-                      onClick={() => undoSinglePendingDeletion(item.card.uuid)}
-                    >
-                      {t("option:flashcards.trashUndo", { defaultValue: "Undo" })}
-                    </Button>,
-                    <Tag
-                      key="expires"
-                      color="volcano"
-                      role="timer"
-                      aria-live={remainingSeconds <= 10 ? "assertive" : "off"}
-                      aria-label={t("option:flashcards.trashExpiresInAria", {
-                        defaultValue: "Permanently deletes in {{seconds}} seconds",
-                        seconds: remainingSeconds
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <span
+                              key="sel"
+                              className="inline-flex items-center justify-center min-w-11 min-h-11"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Checkbox
+                                checked={selectAllAcross ? true : selectedIds.has(item.uuid)}
+                                disabled={selectAllAcross}
+                                onChange={(e) => {
+                                  e.stopPropagation()
+                                  toggleSelect(item.uuid, e.target.checked)
+                                }}
+                                aria-label={`Select card: ${item.front.slice(0, 80)}`}
+                                data-testid={`flashcard-item-${item.uuid}-select`}
+                              />
+                            </span>
+                            <FlashcardActionsMenu
+                              key="actions"
+                              card={item}
+                              onEdit={() => openEdit(item)}
+                              onReview={() => onReviewCard(item)}
+                              onDuplicate={() => duplicateCard(item)}
+                              onMove={() => openMove(item)}
+                            />
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                ) : (
+                  !manageQuery.isFetching && (
+                    <Empty
+                      description={t("option:flashcards.noCardsTitle", {
+                        defaultValue: hasActiveFilters
+                          ? "No cards match your filters"
+                          : "No flashcards yet"
                       })}
                     >
-                      {t("option:flashcards.trashExpiresIn", {
-                        defaultValue: "Deletes in {{seconds}}s",
-                        seconds: remainingSeconds
-                      })}
-                    </Tag>
-                  ]}
-                >
-                  <List.Item.Meta
-                    title={<Text>{item.card.front}</Text>}
-                    description={
-                      item.card.back ? (
-                        <Text type="secondary" className="text-xs">
-                          {item.card.back.slice(0, 120)}
-                          {item.card.back.length > 120 ? "…" : ""}
+                      <Space orientation="vertical" align="center">
+                        <Text type="secondary">
+                          {t("option:flashcards.noCardsDescription", {
+                            defaultValue: hasActiveFilters
+                              ? "Try adjusting your search, deck, tag, or due filters."
+                              : "Create cards from your notes and media, or import an existing deck."
+                          })}
                         </Text>
-                      ) : null
-                    }
-                  />
-                </List.Item>
-              )
-            }}
-          />
+                        <Space>
+                          {hasActiveFilters ? (
+                            <Button onClick={clearAllFilters}>
+                              {t("option:flashcards.clearFilters", {
+                                defaultValue: "Clear filters"
+                              })}
+                            </Button>
+                          ) : (
+                            <>
+                              <Button
+                                type="primary"
+                                onClick={openManualCreateDrawer}
+                                data-testid="flashcards-manage-empty-create-cta"
+                              >
+                                {t("option:flashcards.noCardsCreateCta", {
+                                  defaultValue: "Create card"
+                                })}
+                              </Button>
+                              <Button
+                                onClick={onNavigateToImport}
+                                data-testid="flashcards-manage-empty-import-cta"
+                              >
+                                {t("option:flashcards.noCardsImportCta", {
+                                  defaultValue: "Import flashcards"
+                                })}
+                              </Button>
+                              <Button
+                                onClick={onNavigateToGenerate ?? onNavigateToImport}
+                                data-testid="flashcards-manage-empty-generate-cta"
+                              >
+                                {t("option:flashcards.noCardsGenerateCta", {
+                                  defaultValue: "Generate from text"
+                                })}
+                              </Button>
+                            </>
+                          )}
+                        </Space>
+                      </Space>
+                    </Empty>
+                  )
+                )}
+              </div>
+            </Spin>
+          )
+        ) : (
+          <div>
+            {pendingDeletionItems.length > 0 ? (
+              <ul
+                aria-label={t("option:flashcards.trash", { defaultValue: "Trash" })}
+                className="m-0 list-none divide-y divide-border p-0"
+              >
+                {pendingDeletionItems.map((item) => {
+                  const remainingSeconds = Math.max(0, Math.ceil((item.expiresAt - nowMs) / 1000))
+                  return (
+                    <li
+                      key={`flashcard-trash-${item.card.uuid}`}
+                      className="flex flex-wrap items-start gap-3 py-3"
+                      data-testid={`flashcard-trash-${item.card.uuid}`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="min-w-0">
+                          <div>
+                            <Text>{item.card.front}</Text>
+                          </div>
+                          <div className="mt-1">
+                            {item.card.back ? (
+                              <Text type="secondary" className="text-xs">
+                                {item.card.back.slice(0, 120)}
+                                {item.card.back.length > 120 ? "…" : ""}
+                              </Text>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Button
+                          key="undo"
+                          className="min-h-11 min-w-11"
+                          onClick={() => undoSinglePendingDeletion(item.card.uuid)}
+                        >
+                          {t("option:flashcards.trashUndo", { defaultValue: "Undo" })}
+                        </Button>
+                        <Tag
+                          key="expires"
+                          color="volcano"
+                          role="timer"
+                          aria-live={remainingSeconds <= 10 ? "assertive" : "off"}
+                          aria-label={t("option:flashcards.trashExpiresInAria", {
+                            defaultValue: "Permanently deletes in {{seconds}} seconds",
+                            seconds: remainingSeconds
+                          })}
+                        >
+                          {t("option:flashcards.trashExpiresIn", {
+                            defaultValue: "Deletes in {{seconds}}s",
+                            seconds: remainingSeconds
+                          })}
+                        </Tag>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : (
+              <Empty
+                description={t("option:flashcards.trashEmptyDescription", {
+                  defaultValue: "Deleted cards appear here for 30 seconds."
+                })}
+              />
+            )}
+          </div>
         )}
 
         {viewMode === "cards" && !isDocumentMode && (
@@ -2673,8 +2673,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
       {viewMode === "cards" && anySelection && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-surface border border-border rounded-lg shadow-lg px-4 py-3 flex items-center gap-4">
           <Badge
-            count={
-              <span className="flex items-center gap-1">
+            count=<span className="flex items-center gap-1">
                 {/* Icon indicator for colorblind differentiation */}
                 {selectAllAcross ? (
                   <CheckCheck className="size-3" aria-hidden="true" />
@@ -2683,7 +2682,6 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                 )}
                 {selectedCount}
               </span>
-            }
             showZero={false}
             style={{ backgroundColor: selectAllAcross ? "rgb(var(--color-primary))" : "rgb(var(--color-success))" }}
           />
@@ -2819,8 +2817,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
           setMoveCard(null)
           setMoveDeckId(null)
         }}
-        footer={
-          <div className="flex justify-end">
+        footer=<div className="flex justify-end">
             <Space>
               <Button
                 onClick={() => {
@@ -2840,7 +2837,6 @@ export const ManageTab: React.FC<ManageTabProps> = ({
             </Button>
             </Space>
           </div>
-        }
       >
         <Select<number>
           className="w-full"
@@ -2889,7 +2885,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
             type="primary"
             shape="circle"
             size="large"
-            icon={<Plus className="size-5" />}
+            icon=<Plus className="size-5" />
             className="fixed bottom-6 right-6 z-50 shadow-lg !w-14 !h-14 flex items-center justify-center"
             onClick={openManualCreateDrawer}
             data-testid="flashcards-fab-create"

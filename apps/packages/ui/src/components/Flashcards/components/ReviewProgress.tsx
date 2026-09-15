@@ -3,7 +3,7 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 
 interface ReviewProgressProps {
-  dueCount: number
+  remainingCount: number
   reviewedCount: number
   deckName?: string
   availableNowCount?: number
@@ -13,7 +13,7 @@ interface ReviewProgressProps {
 }
 
 export const ReviewProgress: React.FC<ReviewProgressProps> = ({
-  dueCount,
+  remainingCount,
   reviewedCount,
   deckName,
   availableNowCount,
@@ -22,7 +22,7 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
   learningCount
 }) => {
   const { t } = useTranslation(["option"])
-  const remaining = Math.max(0, dueCount - reviewedCount)
+  const remaining = Math.max(0, remainingCount)
   // Average time per card in seconds (based on typical flashcard review time of 10-20s)
   const avgTimePerCard = 15
   const estimatedMinutes = Math.ceil((remaining * avgTimePerCard) / 60)
@@ -66,7 +66,7 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
   }
   const statusMessage = statusMessageParts.join(", ")
 
-  if (dueCount === 0) return null
+  if (remaining === 0) return null
 
   return (
     <div
