@@ -37,7 +37,7 @@ import {
 } from "@/components/Notes/hooks"
 import type { NoteListItem } from "@/components/Notes/notes-manager-types"
 import { clearSetting, getSetting } from "@/services/settings/registry"
-import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
+import { useFlashcardsGenerateTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
 import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
 import { buildSourcesNewPath } from "@/routes/route-paths"
 import { deriveNoteStudio, getNoteStudioState, regenerateNoteStudio } from "@/services/notes-studio"
@@ -114,6 +114,7 @@ const CONVERSATION_LABEL_MAX_RETRIES = 3
 const CONVERSATION_LABEL_RETRY_DELAY_MS = 1500
 
 const NotesManagerPage: React.FC = () => {
+  const transferFlashcards = useFlashcardsGenerateTransfer()
   const { t } = useTranslation(['option', 'common'])
   const isOnline = useServerOnline()
   const isMobileViewport = useMobile()
@@ -1908,23 +1909,29 @@ const NotesManagerPage: React.FC = () => {
   }, [ed, message, t])
 
   // Flashcards
-  const handleGenerateFlashcardsFromNote = React.useCallback(() => {
-    const sourceText = ed.content.trim()
-    if (!sourceText) {
+  const handleGenerateFlashcardsFromNote = React.useCallback(async () => {
+    const sourceText = ed.content
+    if (!sourceText.trim()) {
       message.warning(t("option:notesSearch.generateFlashcardsEmpty", {
         defaultValue: "Add note content before generating flashcards."
       }))
       return
     }
-    navigate(buildFlashcardsGenerateRoute({
-      text: sourceText,
-      sourceType: "note",
-      sourceId: ed.selectedId != null ? String(ed.selectedId) : undefined,
-      sourceTitle: ed.title.trim() || undefined,
-      conversationId: ed.backlinkConversationId || undefined,
-      messageId: ed.backlinkMessageId || undefined
-    }))
-  }, [ed, message, navigate, t])
+    try {
+      await transferFlashcards(() => ({
+        text: sourceText,
+        sourceType: "note",
+        sourceId: ed.selectedId != null ? String(ed.selectedId) : undefined,
+        sourceTitle: ed.title || undefined,
+        conversationId: ed.backlinkConversationId || undefined,
+        messageId: ed.backlinkMessageId || undefined
+      }), { navigate })
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "AbortError")) {
+        message.error(error instanceof Error ? error.message : "The transfer could not be opened. Your note is unchanged.")
+      }
+    }
+  }, [ed, message, navigate, t, transferFlashcards])
 
   // Open linked conversation
   const openLinkedConversation = async () => {

@@ -1,4 +1,5 @@
 import type { ChatScope } from "@/types/chat-scope"
+import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-generate-handoff"
 import { toChatScopeParams } from "@/types/chat-scope"
 import type {
   LlamacppSnapshotSlotsResponse,
@@ -1727,6 +1728,9 @@ export class TldwApiClientBase {
   private publishConfigUpdated(previousConfig: TldwConfig | null, onlyIfAuthorityChanged = false): void {
     const authorityChanged = !connectionAuthoritiesMatch(this.config, previousConfig)
     if (onlyIfAuthorityChanged && !authorityChanged) return
+    if (authorityChanged) {
+      void clearFlashcardsGenerateHandoffs().catch(() => console.warn("Could not clear private Flashcards transfers after the account or server changed."))
+    }
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("tldw:config-updated", {
         detail: { authorityChanged }
@@ -3777,6 +3781,7 @@ export class TldwApiClientBase {
       include_content?: boolean
       include_versions?: boolean
       include_version_content?: boolean
+      requestScope?: ServicePromptRequestScope
       signal?: AbortSignal
       suppressBackendUnavailableEvent?: boolean
     }
@@ -3790,6 +3795,7 @@ export class TldwApiClientBase {
     return await bgRequest<any>({
       path: `/api/v1/media/${id}${query}`,
       method: "GET",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal,
       suppressBackendUnavailableEvent: options?.suppressBackendUnavailableEvent
     })

@@ -50,7 +50,7 @@ import {
   buildMediaFilterSearch,
   hasMediaFilterParams
 } from '@/components/Review/mediaFilterParams'
-import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
+import { useFlashcardsGenerateTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
 import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
 import {
   getMediaNavigationResumeEntry,
@@ -293,6 +293,7 @@ const ViewMediaPage: React.FC = () => {
 }
 
 const MediaPageContent: React.FC = () => {
+  const transferFlashcards = useFlashcardsGenerateTransfer()
   const { t } = useTranslation(['review', 'common'])
   const navigate = useNavigate()
   const location = useLocation()
@@ -980,13 +981,13 @@ const MediaPageContent: React.FC = () => {
   }, [nav.selected, setSelectedKnowledge, setRagMediaIds, setChatMode, navigate, message, t])
 
   const handleGenerateFlashcardsFromMedia = useCallback(
-    (payload: {
+    async (payload: {
       text: string
       sourceId?: string
       sourceTitle?: string
     }) => {
-      const sourceText = String(payload.text || "").trim()
-      if (!sourceText) {
+      const sourceText = String(payload.text || "")
+      if (!sourceText.trim()) {
         message.warning(
           t("review:mediaPage.generateFlashcardsEmpty", {
             defaultValue: "No content available to generate flashcards."
@@ -995,18 +996,20 @@ const MediaPageContent: React.FC = () => {
         return
       }
 
-      navigate(
-        buildFlashcardsGenerateRoute({
+      try {
+        await transferFlashcards(() => ({
           text: sourceText,
           sourceType: "media",
           sourceId:
             payload.sourceId ||
             (nav.selected?.id != null ? String(nav.selected.id) : undefined),
           sourceTitle: payload.sourceTitle || nav.selected?.title || undefined
-        })
-      )
+        }), { navigate })
+      } catch (error) {
+        if (!(error instanceof Error && error.name === "AbortError")) message.error(error instanceof Error ? error.message : "The transfer could not be opened. Reopen it from this source.")
+      }
     },
-    [message, navigate, nav.selected, t]
+    [message, navigate, nav.selected, t, transferFlashcards]
   )
 
   const handleCreateStudyPackFromMedia = useCallback(() => {

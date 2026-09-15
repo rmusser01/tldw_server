@@ -1,8 +1,14 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
+import { consumeFlashcardsGenerateHandoff } from "@/services/tldw/flashcards-generate-handoff"
+import { loadServicePromptSnapshot } from "@/services/service-prompts"
+import { flashcardsHandoffAuthority } from "@/services/tldw/flashcards-generate-transfer"
+vi.mock("@plasmohq/storage", async () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }))
+vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: { getCurrentUser: async () => ({ id: 1, is_active: true }) } }))
 
 const {
   mockBgRequest,
@@ -112,6 +118,7 @@ vi.mock("@/services/settings/registry", async (importOriginal) => {
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
+    ensureConfigForRequest: async () => JSON.parse(window.localStorage.getItem("tldwConfig") || "null"),
     getChat: vi.fn(async () => null),
     listChatMessages: vi.fn(async () => []),
     getCharacter: vi.fn(async () => null)
@@ -145,6 +152,11 @@ const renderPage = () => {
 describe("NotesManagerPage stage 3 toolbar and metrics", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.localStorage.clear()
+    window.localStorage.setItem("tldwConfig", JSON.stringify({ serverUrl: "https://notes.test", authMode: "multi-user", accessToken: `test.${btoa(JSON.stringify({ sub: "1" }))}.signature` }))
+    let tail = Promise.resolve()
+    const locks = { request: (_name: string, work: () => unknown) => { const next = tail.then(work); tail = next.then(() => undefined, () => undefined); return next } }
+    vi.stubGlobal("navigator", new Proxy(window.navigator, { get: (target, key) => key === "locks" ? locks : Reflect.get(target, key, target) }))
     mockConfirmDanger.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(null)
     mockClearSetting.mockResolvedValue(undefined)
@@ -160,6 +172,8 @@ describe("NotesManagerPage stage 3 toolbar and metrics", () => {
       return {}
     })
   })
+
+  afterEach(() => vi.unstubAllGlobals())
 
   it("inserts markdown syntax at cursor/selection via toolbar", async () => {
     renderPage()
@@ -219,4 +233,33 @@ describe("NotesManagerPage stage 3 toolbar and metrics", () => {
     const position = saveButton.compareDocumentPosition(overflowButton)
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
+  it("transfers the actual unsaved Note exactly through an opaque route", async () => {
+    renderPage()
+    const text = " \nPrivate unsaved note\n\t "
+    const textarea = screen.getByPlaceholderText("Write your note here... (Markdown supported)")
+    fireEvent.change(textarea, { target: { value: text } })
+    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText("Generate flashcards"))
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledTimes(1))
+    const route = mockNavigate.mock.calls[0][0]
+    expect(route).not.toContain("Private")
+    const token = new URL(route, "https://app.test").searchParams.get("generate_handoff")!
+    const snapshot = await loadServicePromptSnapshot([])
+    try { expect(await consumeFlashcardsGenerateHandoff(token, flashcardsHandoffAuthority(snapshot))).toMatchObject({ text, sourceType: "note" }) }
+    finally { snapshot.release() }
+    expect(textarea).toHaveValue(text)
+  })
+
+  it("keeps the unsaved Note and reports unavailable shared transfer storage", async () => {
+    renderPage()
+    const textarea = screen.getByPlaceholderText("Write your note here... (Markdown supported)")
+    fireEvent.change(textarea, { target: { value: "Keep my draft" } })
+    vi.stubGlobal("navigator", new Proxy(window.navigator, { get: (target, key) => key === "locks" ? undefined : Reflect.get(target, key, target) }))
+    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText("Generate flashcards"))
+    await waitFor(() => expect(mockMessageError).toHaveBeenCalled())
+    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(textarea).toHaveValue("Keep my draft")
+  })
+
 })

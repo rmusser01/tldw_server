@@ -33,6 +33,7 @@ import {
   exportFlashcardsFile,
   getFlashcardsImportLimits,
   type Deck,
+  type FlashcardsRequestOptions,
   type DeckCreateInput,
   type DeckUpdate,
   type Flashcard,
@@ -681,7 +682,8 @@ export function useCreateFlashcardMutation() {
 
   return useMutation({
     mutationKey: ["flashcards:create"],
-    mutationFn: (payload: FlashcardCreate) => createFlashcard(payload),
+    mutationFn: ({ requestOptions, ...payload }: FlashcardCreate & { requestOptions?: FlashcardsRequestOptions }) =>
+      createFlashcard(payload, requestOptions),
     onSuccess: () => {
       invalidateFlashcardsQueries(qc)
     },
@@ -724,6 +726,7 @@ export function useCreateDeckMutation() {
       review_prompt_side?: Deck["review_prompt_side"]
       scheduler_type?: Deck["scheduler_type"]
       scheduler_settings?: Deck["scheduler_settings"]
+      requestOptions?: FlashcardsRequestOptions
     }) => {
       const input: DeckCreateInput = {
         name: params.name.trim()
@@ -744,7 +747,7 @@ export function useCreateDeckMutation() {
       if (params.scheduler_settings !== undefined) {
         input.scheduler_settings = params.scheduler_settings
       }
-      return createDeck(input)
+      return createDeck(input, params.requestOptions)
     },
     onSuccess: () => {
       invalidateFlashcardsQueries(qc)
@@ -1014,6 +1017,7 @@ export function useGenerateFlashcardsMutation() {
       focusTopics?: string[]
       provider?: string
       model?: string
+      requestOptions?: FlashcardsRequestOptions
     }) => {
       const hasCardPlan = Array.isArray(params.cardPlan) && params.cardPlan.length > 0
       return generateFlashcards({
@@ -1025,7 +1029,7 @@ export function useGenerateFlashcardsMutation() {
         focus_topics: params.focusTopics,
         provider: params.provider,
         model: params.model
-      })
+      }, params.requestOptions)
     },
     onError: (error) => {
       console.error("Failed to generate flashcards:", error)

@@ -4,6 +4,7 @@ import { emitSplashAfterLoginSuccess } from "@/services/splash-events"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import { clearSourceReviewHandoffs } from "@/services/tldw/source-review-handoff"
+import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-generate-handoff"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { clearStandaloneHtmlSessionRecords } from "@/services/tldw/standalone-html-session-records"
 import { deriveScopedUserId } from "@/utils/media-navigation-scope"
@@ -40,6 +41,7 @@ const API_KEY_PROFILE_PATH = "/api/v1/users/me/profile"
 const API_KEY_VALIDATION_TIMEOUT_MS = 30000
 
 const emitLogoutPrincipalBoundary = (): void => {
+  void clearFlashcardsGenerateHandoffs().catch(() => console.warn("Could not clear private Flashcards transfers during sign-out."))
   if (typeof window === "undefined") return
   window.dispatchEvent(
     new CustomEvent("tldw:auth-principal-changed", {

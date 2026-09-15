@@ -1,5 +1,6 @@
 import { bgRequest, bgUpload } from "@/services/background-proxy"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
+import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import {
   buildQuery,
   createResourceClient
@@ -22,6 +23,10 @@ const flashcardTagsClient = createResourceClient({
 })
 
 export const FLASHCARD_GENERATION_TIMEOUT_MS = 180000
+export type FlashcardsRequestOptions = {
+  signal?: AbortSignal
+  requestScope?: ServicePromptRequestScope
+}
 
 export type DeckSchedulerSettings = {
   new_steps_minutes: number[]
@@ -680,8 +685,17 @@ export async function listDecks(options?: DeckListParams): Promise<Deck[]> {
 
 export async function createDeck(
   input: DeckCreateInput,
-  options?: { signal?: AbortSignal }
+  options?: FlashcardsRequestOptions
 ): Promise<Deck> {
+  if (options?.requestScope) {
+    return bgRequest<Deck, AllowedPath, "POST">({
+      path: "/api/v1/flashcards/decks",
+      method: "POST",
+      ...requestScopeFields(options.requestScope),
+      body: input,
+      abortSignal: options.signal
+    })
+  }
   return await decksClient.create<Deck>(input, {
     abortSignal: options?.signal
   })
@@ -788,8 +802,17 @@ export async function listFlashcardTagSuggestions(params?: {
 
 export async function createFlashcard(
   input: FlashcardCreate,
-  options?: { signal?: AbortSignal }
+  options?: FlashcardsRequestOptions
 ): Promise<Flashcard> {
+  if (options?.requestScope) {
+    return bgRequest<Flashcard, AllowedPath, "POST">({
+      path: "/api/v1/flashcards",
+      method: "POST",
+      ...requestScopeFields(options.requestScope),
+      body: input,
+      abortSignal: options.signal
+    })
+  }
   return await flashcardsClient.create<Flashcard>(input, {
     abortSignal: options?.signal
   })
@@ -935,12 +958,14 @@ export async function endFlashcardReviewSession(
 
 export async function generateFlashcards(
   input: FlashcardsGenerateRequest,
-  options?: { signal?: AbortSignal }
+  options?: FlashcardsRequestOptions
 ): Promise<FlashcardsGenerateResponse> {
+  const scope = requestScopeFields(options?.requestScope)
   return await bgRequest<FlashcardsGenerateResponse, AllowedPath, "POST">({
     path: "/api/v1/flashcards/generate",
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    ...scope,
+    headers: { "Content-Type": "application/json", ...scope.headers },
     body: input,
     timeoutMs: FLASHCARD_GENERATION_TIMEOUT_MS,
     abortSignal: options?.signal

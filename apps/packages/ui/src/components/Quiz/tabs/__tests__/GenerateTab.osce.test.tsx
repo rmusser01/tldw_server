@@ -264,3 +264,5 @@ describe("OSCE Generate and Create controls", () => {
     expect(useCreateOsceStationMutation().mutateAsync).not.toHaveBeenCalled()
   })
 })
+
+vi.mock("@/services/tldw-server", () => ({ getWebSearchPrompt: vi.fn(), promptForRag: vi.fn(), LEGACY_SERVICE_PROMPT_DEFAULTS: {} }));

@@ -68,6 +68,7 @@ const ADVANCED_MIX_ERROR_ID = "flashcards-generate-plan-error"
  * Generate panel for LLM-assisted card generation from free text.
  */
 export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporterProps> = ({
+  generationScope,
   initialIntent,
   sourceReviewIntent,
   onTransferAction
@@ -80,6 +81,22 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   const createMutation = useCreateFlashcardMutation()
   const createDeckMutation = useCreateDeckMutation()
   const decks = decksQuery.data || []
+  const mounted = React.useRef(false)
+  const currentScope = React.useRef(generationScope)
+  currentScope.current = generationScope
+  React.useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const assertCurrentScope = React.useCallback(() => {
+    if (!mounted.current || currentScope.current !== generationScope || generationScope === null || generationScope?.scopeSignal.aborted) {
+      throw new DOMException("The source account changed.", "AbortError")
+    }
+  }, [generationScope])
+  const requestOptions = React.useMemo(() => generationScope ? {
+    signal: generationScope.scopeSignal,
+    requestScope: generationScope.requestScope
+  } : undefined, [generationScope])
 
   const llmProvidersQuery = useQuery({
     queryKey: ["flashcards", "llm-providers"],
@@ -192,6 +209,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   )
   const advancedPlanInvalid = advancedMixEnabled && (plannedCardTotal < 1 || plannedCardTotal > 100)
   const generationDisabled =
+    generationScope === null || Boolean(generationScope?.scopeSignal.aborted) ||
     !sourceText.trim() ||
     !hasLlmProviders ||
     advancedPlanInvalid
@@ -248,9 +266,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
 
   const handleGenerate = React.useCallback(async () => {
     try {
+      assertCurrentScope()
       setGenerationError(null)
       setSaveStatus(null)
       const result = await generateMutation.mutateAsync({
+        requestOptions,
         text: sourceText,
         ...(advancedMixEnabled
           ? {
@@ -269,6 +289,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         provider: provider.trim() || undefined,
         model: model.trim() || undefined
       })
+      assertCurrentScope()
       const drafts = normalizeGeneratedCards(result.flashcards)
       setGeneratedCards(drafts)
       if (drafts.length === 0) {
@@ -295,6 +316,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         message: successCopy
       })
     } catch (e: unknown) {
+      if (!mounted.current || currentScope.current !== generationScope || generationScope?.scopeSignal.aborted) return
       const errorCopy = mapFlashcardsUiError(e, {
         operation: "generating cards",
         fallback: "Generation failed. Check provider/model settings and try shorter source text."
@@ -307,6 +329,9 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
       })
     }
   }, [
+    assertCurrentScope,
+    generationScope,
+    requestOptions,
     activeCardPlan,
     advancedMixEnabled,
     cardType,
@@ -324,6 +349,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   ])
 
   const resolveTargetDeckId = React.useCallback(async (): Promise<number> => {
+    assertCurrentScope()
     if (typeof targetDeckId === "number") return targetDeckId
     if (targetDeckId === undefined && decks.length > 0) return decks[0].id
     if (targetDeckId === NEW_DECK_OPTION_VALUE || (targetDeckId == null && decks.length === 0)) {
@@ -344,11 +370,13 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         )
       }
       const createdDeck = await createDeckMutation.mutateAsync({
+        requestOptions,
         name,
         review_prompt_side: reviewPromptSide,
         scheduler_type: schedulerSettings.scheduler_type,
         scheduler_settings: schedulerSettings.scheduler_settings
       })
+      assertCurrentScope()
       setTargetDeckId(createdDeck.id)
       return createdDeck.id
     }
@@ -358,20 +386,24 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         defaultValue: "Enter a deck name."
       })
     )
-  }, [createDeckMutation, decks, generatedDeckSchedulerDraft, newDeckName, reviewPromptSide, t, targetDeckId])
+  }, [assertCurrentScope, requestOptions, createDeckMutation, decks, generatedDeckSchedulerDraft, newDeckName, reviewPromptSide, t, targetDeckId])
 
   const handleSaveGeneratedCards = React.useCallback(async () => {
     if (generatedCards.length === 0) return
     setIsSaving(true)
     setSaveStatus(null)
     try {
+      assertCurrentScope()
       const deckId = await resolveTargetDeckId()
+      assertCurrentScope()
       let created = 0
       let failed = 0
       const successfulDraftIds = new Set<string>()
       for (const card of generatedCards) {
         try {
+          assertCurrentScope()
           await createMutation.mutateAsync({
+            requestOptions,
             deck_id: deckId,
             front: card.front,
             back: card.back,
@@ -388,9 +420,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
                 }
               : {})
           })
+          assertCurrentScope()
           created += 1
           successfulDraftIds.add(card.id)
         } catch {
+          assertCurrentScope()
           failed += 1
         }
       }
@@ -401,6 +435,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
           typeof query.queryKey[0] === "string" &&
           query.queryKey[0].startsWith("flashcards:")
       })
+      assertCurrentScope()
 
       if (created > 0 && failed === 0) {
         const successCopy = t("option:flashcards.generateSaveSuccess", {
@@ -471,6 +506,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         message: errorCopy
       })
     } catch (e: unknown) {
+      if (!mounted.current || currentScope.current !== generationScope || generationScope?.scopeSignal.aborted) return
       const errorCopy =
         e instanceof Error && e.message
           ? e.message
@@ -493,9 +529,12 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         message: errorCopy
       })
     } finally {
-      setIsSaving(false)
+      if (mounted.current && currentScope.current === generationScope && !generationScope?.scopeSignal.aborted) setIsSaving(false)
     }
   }, [
+    assertCurrentScope,
+    generationScope,
+    requestOptions,
     createMutation,
     generatedCards,
     message,
@@ -510,6 +549,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
 
   return (
     <div className="flex flex-col gap-3">
+      {initialIntent?.truncated && <Alert variant="warning" title="Source text was limited to the first 12,000 characters. Review it before generating cards." />}
       <Typography.Text type="secondary">
         {t("option:flashcards.generateHelp", {
           defaultValue:

@@ -666,6 +666,7 @@ export const mediaMethods = {
       include_content?: boolean
       include_versions?: boolean
       include_version_content?: boolean
+      requestScope?: ServicePromptRequestScope
       signal?: AbortSignal
       suppressBackendUnavailableEvent?: boolean
     }
@@ -679,6 +680,7 @@ export const mediaMethods = {
     return await bgRequest<any>({
       path: `/api/v1/media/${id}${query}`,
       method: "GET",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal,
       suppressBackendUnavailableEvent: options?.suppressBackendUnavailableEvent
     })

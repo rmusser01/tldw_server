@@ -46,7 +46,9 @@ import {
   type FlashcardGeneratedDraft,
   type StudyPackSourceSelection,
 } from "@/services/flashcards";
-import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff";
+import { buildFlashcardsGenerateRoute, createFlashcardsGenerateHandoff, removeFlashcardsGenerateHandoff, type FlashcardsGenerateIntent } from "@/services/tldw/flashcards-generate-handoff";
+import type { ServicePromptSnapshot } from "@/services/service-prompts";
+import { flashcardsHandoffAuthority, loadFlashcardsTransferSnapshot } from "@/services/tldw/flashcards-generate-transfer";
 import { buildFlashcardsStudyRouteFromQuiz } from "@/services/tldw/quiz-flashcards-handoff";
 import type { SourceReviewHandoffPayload } from "@/services/tldw/source-review-handoff";
 import type { TakeTabNavigationIntent } from "../navigation";
@@ -500,20 +502,20 @@ const normalizeFlashcardListResponse = (
 const getFirstNonEmptyString = (...values: unknown[]): string => {
   for (const value of values) {
     if (typeof value === "string" && value.trim().length > 0) {
-      return value.trim();
+      return value;
     }
   }
   return "";
 };
 
 const extractMediaText = (details: unknown): string => {
-  if (typeof details === "string") return details.trim();
+  if (typeof details === "string") return details;
   const record = asRecord(details);
   if (!record) return "";
 
   const content = record.content;
   if (typeof content === "string" && content.trim().length > 0) {
-    return content.trim();
+    return content;
   }
   const contentRecord = asRecord(content);
   if (contentRecord) {
@@ -632,6 +634,31 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
   const debouncedMediaSearch = useDebounce(mediaSearchInput, 300);
   const debouncedNotesSearch = useDebounce(notesSearchInput, 300);
   const generateAbortRef = React.useRef<AbortController | null>(null);
+  const flashcardsTransferRef = React.useRef<{ token?: string; scopeSignal: AbortSignal; release: () => void } | null>(null);
+  const clearFlashcardsTransfer = React.useCallback(() => {
+    const previous = flashcardsTransferRef.current;
+    flashcardsTransferRef.current = null;
+    previous?.release();
+    if (previous?.token) void removeFlashcardsGenerateHandoff(previous.token).catch(() => console.warn("Could not remove an abandoned Flashcards transfer."));
+  }, []);
+  const continueFlashcards = () => {
+    const route = generatedPreview?.flashcardsSummary?.handoffRoute;
+    if (!route) return;
+    const transfer = flashcardsTransferRef.current;
+    if (transfer?.scopeSignal.aborted) return;
+    const token = transfer?.token;
+    // Explicit Continue transfers ownership to the destination. A normal router
+    // unmount must still release the lease, but must not delete its delivery.
+    if (transfer) transfer.token = undefined;
+    try {
+      navigate(route);
+      clearFlashcardsTransfer();
+    } catch {
+      if (transfer && flashcardsTransferRef.current === transfer) transfer.token = token;
+      else if (token) void removeFlashcardsGenerateHandoff(token).catch(() => console.warn("Could not remove an abandoned Flashcards transfer."));
+      void messageApi.error("Flashcards could not be opened. Your generation preview is still available.");
+    }
+  };
   const { data: serverGenerationProfiles } = useQuery<
     QuizGenerationProfileDefinition[]
   >({
@@ -860,8 +887,9 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
   React.useEffect(() => {
     return () => {
       generateAbortRef.current?.abort();
+      clearFlashcardsTransfer();
     };
-  }, []);
+  }, [clearFlashcardsTransfer]);
 
   const hasMoreMedia =
     mediaTotal != null
@@ -1188,9 +1216,12 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
       difficulty?: "easy" | "medium" | "hard" | "mixed";
       focusTopics: string[];
       signal?: AbortSignal;
+      snapshot: ServicePromptSnapshot;
     }): Promise<FlashcardsSummary> => {
       const fallbackRoute = "/flashcards?tab=importExport";
+      let sourceIntent: FlashcardsGenerateIntent | undefined;
       const throwIfAborted = () => {
+        params.snapshot.scopeSignal.throwIfAborted();
         if (params.signal?.aborted) {
           const abortError = new Error("aborted");
           abortError.name = "AbortError";
@@ -1198,6 +1229,14 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
         }
       };
 
+      const handoffRoute = async () => {
+        throwIfAborted();
+        if (!sourceIntent) return fallbackRoute;
+        const token = await createFlashcardsGenerateHandoff(sourceIntent, flashcardsHandoffAuthority(params.snapshot), params.snapshot.scopeSignal);
+        if (flashcardsTransferRef.current) flashcardsTransferRef.current.token = token;
+        throwIfAborted();
+        return buildFlashcardsGenerateRoute(token);
+      };
       throwIfAborted();
 
       try {
@@ -1205,14 +1244,13 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
           include_content: true,
           include_versions: false,
           include_version_content: false,
-          signal: params.signal,
+          signal: params.snapshot.scopeSignal,
+            requestScope: params.snapshot.requestScope,
         });
         throwIfAborted();
 
-        const sourceText = extractMediaText(details).slice(
-          0,
-          MAX_FLASHCARD_SOURCE_TEXT_CHARS,
-        );
+        const fullSourceText = extractMediaText(details);
+        const sourceText = fullSourceText.slice(0, MAX_FLASHCARD_SOURCE_TEXT_CHARS);
         if (!sourceText) {
           return {
             status: "failed",
@@ -1227,12 +1265,13 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
           };
         }
 
-        const handoffRoute = buildFlashcardsGenerateRoute({
+        sourceIntent = {
           text: sourceText,
           sourceType: "media",
           sourceId: String(params.mediaId),
           sourceTitle: params.mediaTitle,
-        });
+          truncated: fullSourceText.length > sourceText.length,
+        };
 
         const generated = await generateFlashcards(
           {
@@ -1243,7 +1282,8 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
               params.focusTopics.length > 0 ? params.focusTopics : undefined,
           },
           {
-            signal: params.signal,
+            signal: params.snapshot.scopeSignal,
+            requestScope: params.snapshot.requestScope,
           },
         );
         throwIfAborted();
@@ -1258,7 +1298,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
             errorDetail: t("option:quiz.studyMaterialsEmptyFlashcards", {
               defaultValue: "Flashcard generation returned no usable cards.",
             }),
-            handoffRoute,
+            handoffRoute: await handoffRoute(),
           };
         }
 
@@ -1271,7 +1311,8 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
             }),
           },
           {
-            signal: params.signal,
+            signal: params.snapshot.scopeSignal,
+            requestScope: params.snapshot.requestScope,
           },
         );
         throwIfAborted();
@@ -1293,7 +1334,8 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                 source_ref_id: String(params.mediaId),
               },
               {
-                signal: params.signal,
+                signal: params.snapshot.scopeSignal,
+                requestScope: params.snapshot.requestScope,
               },
             ),
           ),
@@ -1320,9 +1362,10 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                   defaultValue: "Unable to save generated flashcards.",
                 })
               : null,
-          handoffRoute,
+          handoffRoute: status === "success" ? fallbackRoute : await handoffRoute(),
         };
       } catch (error) {
+        throwIfAborted();
         if (isAbortError(error)) throw error;
         return {
           status: "failed",
@@ -1365,6 +1408,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     try {
       const values = await form.validateFields();
       setGeneratedPreview(null);
+      clearFlashcardsTransfer();
 
       const focusTopics = normalizeFocusTopics(values.focusTopics);
       const apiProvider = String(values.apiProvider ?? "").trim() || undefined;
@@ -1382,6 +1426,23 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
       requestAbortController = new AbortController();
       generateAbortRef.current = requestAbortController;
       setGenerationInFlight(true);
+      let flashcardsSnapshot: ServicePromptSnapshot | undefined;
+      if (shouldGenerateStudyMaterials) {
+        const controller = requestAbortController;
+        flashcardsSnapshot = await loadFlashcardsTransferSnapshot(controller.signal);
+        flashcardsSnapshot.scopeSignal.throwIfAborted();
+        const invalidate = () => {
+          controller.abort();
+          setGeneratedPreview(null);
+          clearFlashcardsTransfer();
+        };
+        flashcardsSnapshot.scopeSignal.addEventListener("abort", invalidate, { once: true });
+        const snapshot = flashcardsSnapshot;
+        flashcardsTransferRef.current = { scopeSignal: snapshot.scopeSignal, release: () => {
+          snapshot.scopeSignal.removeEventListener("abort", invalidate);
+          snapshot.release();
+        } };
+      }
 
       const generated = await generateMutation.mutateAsync({
         request: isOsceGeneration
@@ -1439,6 +1500,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
           };
         } else {
           flashcardsSummary = await generateStudyMaterialsFlashcards({
+            snapshot: flashcardsSnapshot!,
             mediaId: selectedMediaId,
             mediaTitle: selectedMedia?.title || `Media #${selectedMediaId}`,
             quizName: generatedQuizName,
@@ -2477,12 +2539,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                   generatedPreview.flashcardsSummary.status !== "success" ? (
                     <Button
                       data-testid="generate-continue-flashcards-button"
-                      onClick={() =>
-                        navigate(
-                          generatedPreview.flashcardsSummary
-                            ?.handoffRoute as string,
-                        )
-                      }
+                      onClick={continueFlashcards}
                     >
                       {t("option:quiz.continueFlashcardsGeneration", {
                         defaultValue: "Continue in Flashcards",

@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 import type { FlashcardsGenerateIntent } from "@/services/tldw/flashcards-generate-handoff"
 import type { StudyPackIntent } from "@/services/tldw/study-pack-handoff"
 import type { SourceReviewFlashcardsIntent } from "@/services/tldw/source-review-handoff"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
 
 import { StudyPackCreateDrawer } from "../components/StudyPackCreateDrawer"
 import { useImportLimitsQuery } from "../hooks"
@@ -65,6 +66,7 @@ const getExportHandoffToken = (
  * Import/Export tab for flashcards.
  */
 type ImportExportTabProps = {
+  generationScope?: ServicePromptSnapshot | null
   generateIntent?: FlashcardsGenerateIntent | null
   sourceReviewIntent?: SourceReviewFlashcardsIntent | null
   studyPackIntent?: StudyPackIntent | null
@@ -76,6 +78,7 @@ type ImportExportTabProps = {
 }
 
 export const ImportExportTab: React.FC<ImportExportTabProps> = ({
+  generationScope,
   generateIntent,
   sourceReviewIntent,
   studyPackIntent,
@@ -303,6 +306,7 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
             })}
           >
             <GeneratePanel
+              generationScope={generationScope}
               initialIntent={generateIntent || null}
               sourceReviewIntent={sourceReviewIntent || null}
               onTransferAction={handleTransferAction}
