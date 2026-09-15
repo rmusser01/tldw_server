@@ -5,6 +5,7 @@ import os
 import re
 import types
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
 from loguru import logger
@@ -324,6 +325,15 @@ def _normalize_research_event(event: Any) -> dict[str, Any]:
     return {"type": event_type, "data": data}
 
 
+@dataclass
+class _PrefetchedEvidence:
+    """Keep an early clarification alongside retrieved evidence until dispatch."""
+
+    documents: list[Any]
+    clarification_answer: str | None = None
+    security_filter: dict[str, int] | None = None
+
+
 async def _retrieve_standard_documents(
     *,
     resolved_request: ResolvedRAGRequest,
@@ -332,7 +342,7 @@ async def _retrieve_standard_documents(
     pipeline_kwargs: dict[str, Any],
     payload: dict[str, Any],
     progress_queue: asyncio.Queue[Any] | None = None,
-) -> list[Any]:
+) -> _PrefetchedEvidence:
     kwargs = dict(pipeline_kwargs)
     kwargs.setdefault("query", resolved_request.query)
     kwargs.setdefault("top_k", retrieval_plan.top_k)
@@ -342,6 +352,7 @@ async def _retrieve_standard_documents(
     kwargs["enable_generation"] = False
 
     if progress_queue is not None and bool(payload.get("enable_research_progress", False)):
+
         async def _stream_research_progress(event: Any) -> None:
             await progress_queue.put(_normalize_research_event(event))
 
@@ -349,7 +360,33 @@ async def _retrieve_standard_documents(
         kwargs["enable_research_progress"] = True
 
     retrieval_result = await standard_pipeline(**kwargs)
-    return normalize_documents_for_generation(_documents_from_result(retrieval_result))
+    metadata = (
+        retrieval_result.get("metadata", {})
+        if isinstance(retrieval_result, dict)
+        else getattr(retrieval_result, "metadata", {})
+    )
+    clarification = metadata.get("clarification") if isinstance(metadata, dict) else None
+    answer = None
+    if isinstance(clarification, dict) and clarification.get("required") is True:
+        answer = (
+            retrieval_result.get("generated_answer")
+            if isinstance(retrieval_result, dict)
+            else getattr(retrieval_result, "generated_answer", None)
+        )
+        if not isinstance(answer, str) or not answer.strip():
+            answer = "Could you clarify your request?"
+    filter_outcome = metadata.get("security_filter") if isinstance(metadata, dict) else None
+    safe_filter_outcome = None
+    if isinstance(filter_outcome, dict) and all(
+        type(filter_outcome.get(key)) is int and filter_outcome[key] >= 0
+        for key in ("excluded_count", "retained_count")
+    ):
+        safe_filter_outcome = {key: filter_outcome[key] for key in ("excluded_count", "retained_count")}
+    return _PrefetchedEvidence(
+        documents=normalize_documents_for_generation(_documents_from_result(retrieval_result)),
+        clarification_answer=answer,
+        security_filter=safe_filter_outcome,
+    )
 
 
 async def _retrieve_with_progress_events(
@@ -359,7 +396,7 @@ async def _retrieve_with_progress_events(
     standard_pipeline: PipelineCallable,
     pipeline_kwargs: dict[str, Any],
     payload: dict[str, Any],
-) -> AsyncIterator[RAGStreamEvent | list[Any]]:
+) -> AsyncIterator[RAGStreamEvent | _PrefetchedEvidence]:
     progress_queue: asyncio.Queue[Any] = asyncio.Queue()
     done_marker = object()
     error_marker = object()
@@ -381,7 +418,7 @@ async def _retrieve_with_progress_events(
             await progress_queue.put(done_marker)
 
     retrieval_task = asyncio.create_task(_runner())
-    docs: list[Any] = []
+    docs = _PrefetchedEvidence(documents=[])
     pending_error: Exception | None = None
     try:
         while True:
@@ -391,7 +428,7 @@ async def _retrieve_with_progress_events(
             if isinstance(queued, tuple) and len(queued) == 2 and queued[0] is error_marker:
                 pending_error = queued[1]
                 continue
-            if isinstance(queued, list):
+            if isinstance(queued, _PrefetchedEvidence):
                 docs = queued
                 continue
             yield queued
@@ -415,7 +452,7 @@ async def _prefetch_documents(
     standard_pipeline: PipelineCallable,
     pipeline_kwargs: dict[str, Any],
     payload: dict[str, Any],
-) -> AsyncIterator[RAGStreamEvent | list[Any]]:
+) -> AsyncIterator[RAGStreamEvent | _PrefetchedEvidence]:
     if bool(payload.get("enable_research_progress", False)):
         async for item in _retrieve_with_progress_events(
             resolved_request=resolved_request,
@@ -499,6 +536,7 @@ def _context_events(
     docs: list[Any],
     payload: dict[str, Any],
     request_defaults: dict[str, Any],
+    security_filter: dict[str, int] | None = None,
 ) -> list[RAGStreamEvent]:
     top_k_requested = _value(payload, request_defaults, "top_k", 10)
     top_k_limit = min(10, _to_int(top_k_requested, 10))
@@ -506,23 +544,41 @@ def _context_events(
     top_contexts = []
     for doc in (docs or [])[:top_k_limit]:
         metadata = _metadata_for_doc(doc)
-        top_contexts.append(
-            {
-                "id": _id_for_doc(doc),
-                "title": metadata.get("title"),
-                "score": _score_for_doc(doc),
-                "url": metadata.get("url"),
-                "source": metadata.get("source"),
-            }
-        )
+        source = doc.get("source") if isinstance(doc, dict) else getattr(doc, "source", None)
+        content = doc.get("content") if isinstance(doc, dict) else getattr(doc, "content", None)
+        context = {
+            "id": _id_for_doc(doc),
+            "title": metadata.get("title"),
+            "score": _score_for_doc(doc),
+            "url": metadata.get("url"),
+            "source": metadata.get("source_type") or metadata.get("source") or getattr(source, "value", source),
+        }
+        if isinstance(content, str) and content:
+            context["excerpt"] = content[:4000]
+        # Retain only public evidence fields from already-authorized retrieval.
+        # Never forward the whole metadata dictionary or invent source provenance.
+        for key in (
+            "source_id",
+            "source_type",
+            "chunk_id",
+            "evidence_origin",
+            "source_status",
+            "unavailable_reason",
+            "page_number",
+        ):
+            value = metadata.get(key)
+            if key == "source_id" and value is None:
+                value = metadata.get("media_id") or metadata.get("note_id")
+            if isinstance(value, (str, int, float)):
+                context[key] = str(value) if key in ("source_id", "chunk_id") else value
+        top_contexts.append(context)
 
     scores = [_score_for_doc(doc) for doc in (docs or [])]
     topicality = 0.0
     if scores:
         score_min, score_max = min(scores), max(scores)
         topicality = sum(
-            (score - score_min) / (score_max - score_min) if score_max > score_min else 1.0
-            for score in scores
+            (score - score_min) / (score_max - score_min) if score_max > score_min else 1.0 for score in scores
         ) / len(scores)
 
     why = {
@@ -538,10 +594,18 @@ def _context_events(
             "Synthesize final answer",
         ]
     }
-    return [
-        {"type": "contexts", "contexts": top_contexts, "why": why},
+    events = [
+        {
+            "type": "contexts",
+            "contexts": top_contexts,
+            "why": why,
+            **({"security_filter": security_filter} if security_filter is not None else {}),
+        },
         {"type": "reasoning", **rationale},
     ]
+    if not docs and security_filter and security_filter["excluded_count"] > 0:
+        return events[:1]
+    return events
 
 
 def _generation_config(
@@ -587,6 +651,7 @@ def _generation_config(
         "provider": provider,
         "model": model,
         "max_tokens": max_tokens,
+        "enable_citations": bool(_value(payload, request_defaults, "enable_citations", False)),
     }
     prompt_template = _value(payload, request_defaults, "generation_prompt")
     if isinstance(prompt_template, str) and prompt_template:
@@ -666,6 +731,7 @@ async def stream_rag_events(
             sync_retriever_overrides()
 
         docs: list[Any] = []
+        security_filter = None
         if str(resolved_request.strategy).strip().lower() == "agentic":
             try:
                 docs, agentic_events = await _run_agentic_prefetch(
@@ -698,8 +764,14 @@ async def stream_rag_events(
                     pipeline_kwargs=pipeline_kwargs,
                     payload=payload,
                 ):
-                    if isinstance(item, list):
-                        docs = item
+                    if isinstance(item, _PrefetchedEvidence):
+                        if item.clarification_answer:
+                            yield {"type": "clarification", "required": True, "stage": "pre_retrieval"}
+                            yield {"type": "delta", "text": item.clarification_answer}
+                            yield rag_complete_event(output_emitted=True)
+                            return
+                        docs = item.documents
+                        security_filter = item.security_filter
                     else:
                         yield item
             except asyncio.CancelledError:
@@ -713,12 +785,21 @@ async def stream_rag_events(
                 )
                 docs = []
 
+        # Numbered citations can reference only the contexts exposed to the client.
+        if bool(_value(payload, request_defaults, "enable_citations", False)):
+            visible_limit = min(10, _to_int(_value(payload, request_defaults, "top_k", 10), 10))
+            docs = docs[:visible_limit]
         for event in _context_events(
             docs=docs,
             payload=payload,
             request_defaults=request_defaults,
+            security_filter=security_filter,
         ):
             yield event
+
+        if not docs and security_filter and security_filter["excluded_count"] > 0:
+            yield rag_complete_event(output_emitted=False)
+            return
 
         generation_events = _stream_generation_events(
             resolved_request=resolved_request,

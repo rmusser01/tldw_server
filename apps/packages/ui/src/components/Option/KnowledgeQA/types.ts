@@ -93,6 +93,8 @@ export type RagResult = {
     [key: string]: unknown
   }
   score?: number
+  // Untyped retrieval scores are ranking values, not measured relevance.
+  score_kind?: "ranking" | "relevance_probability"
   excerpt?: string
 }
 
@@ -116,6 +118,7 @@ export type RagContextData = {
     source_type?: string
     title?: string
     score?: number
+    score_kind?: RagResult["score_kind"]
     chunk_id?: string
     excerpt?: string
     evidence_origin?: EvidenceOrigin

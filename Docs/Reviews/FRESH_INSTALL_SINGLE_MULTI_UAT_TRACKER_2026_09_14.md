@@ -2,17 +2,17 @@
 
 ## Run status
 
-- Status: **In progress — initial live pass recorded; A/B/C definitions still required**.
+- Status: **In progress — repairing identified issues before the next full workflow UAT**, per the user's follow-up. Initial failures below remain historical evidence; repair verification is tracked separately.
 - Requested scope: fresh single-user and multi-user setup, then core workflow loops A, B, and C; record every observed bug, failure, and UX issue.
 - Backlog record: `backlog/tasks/task-13260 - Run-fresh-single-user-and-multi-user-UAT-across-core-workflow-loops.md` (see ENV-003).
 - Checkout: `codex/email-offline-validation-13250`, commit `54ecc7e7735fc082b711d922a27e97ee9999e5ae`.
 - Host: macOS; existing project Python environment and frontend dependencies; about 17 GiB free at preflight.
 - Existing backend on port 8000 was left running. Test runtimes use separate ports, configuration, databases, and browser state. Unrelated source files were not edited; a task-record collision and recovery are detailed in ENV-003.
-- Installation path: awaiting user preference; current-checkout fresh data is the provisional default. This does **not** certify installation of dependencies into a clean machine/environment.
-- Loop definitions A/B/C: clarification requested; labels were not found in the repository documentation search. Do not invent their meaning or count unspecified workflows as passed.
+- Installation path: current-checkout fresh configuration/data with existing dependencies. This does **not** certify installation of dependencies into a clean machine/environment.
+- Workflow source: frontend E2E/UAT and shared integration tests, as clarified by the user. Exact named journeys and coverage limitations are recorded below; no literal A/B/C loop mapping was found.
 - AI provider: existing llama.cpp on port 9099; `/v1/models` verified with model `../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf`. No mock response counts as real model acceptance.
 
-## Coverage
+## Initial-run coverage (before repairs)
 
 | Scenario | Single-user | Multi-user | Evidence / issue |
 | --- | --- | --- | --- |
@@ -23,9 +23,7 @@
 | Normal chat and reload persistence | Pass with local Qwen | Not exercised | Direct Chat navigation works; response persists after reload |
 | Text ingestion and persisted search | Pass through visible Quick Ingest and API search | Pass through API for Alice and Bob | Synthetic fixtures; no embeddings requested for multi-user isolation |
 | Knowledge QA with cited answer | Fail: provider configuration rejected | Pending | UAT-009; RAG/storage setup had been deferred |
-| Loop A | Awaiting definition | Awaiting definition | User clarification requested |
-| Loop B | Awaiting definition | Awaiting definition | User clarification requested |
-| Loop C | Awaiting definition | Awaiting definition | User clarification requested |
+| Workflow loops | Deferred until repairs | Deferred until repairs | Use the executable workflow inventory below; letter labels are not authoritative |
 | Admin + two ordinary accounts | N/A | Pass via documented CLI/admin API | Users & roles UI lacks account creation; UAT-011 |
 | Cross-account data isolation | N/A | Pass for note reads, media searches, and admin access denial | API-level checks; other resource types not certified |
 | Logout and session recovery | N/A: API-key mode | Pass: admin logout, Alice login, identity survives navigation | Alice's Notes UI blocked by UAT-014 |
@@ -265,13 +263,13 @@ Screenshots were visually reviewed. Text artifacts and this tracker are checked 
 
 ## Continuation and remaining coverage
 
-1. Obtain the user's definitions/expected outcomes for loops A, B, and C, and confirm whether the desired install target is this checkout with fresh data or a clean dependency/Docker install.
-2. Add one step-by-step matrix for each defined loop, in both modes. Keep existing failures open and distinguish successful workarounds from fixes.
+1. Complete repairs and targeted verification of the 15 findings before another full UAT, as requested by the user.
+2. Build both-mode acceptance matrices from the executable named workflows below. Preserve original failure evidence and distinguish regression verification from a full fresh-install sign-off.
 3. Configure optional RAG prerequisites through the intended user path before any fully configured Knowledge QA retest; record configuration friction. Multi-user provider/chat setup is still untested.
 4. Complete browser workflows for ordinary users after recording or resolving the health-gate blocker. API isolation does not substitute for browser workflow acceptance.
 5. Remaining independent checks include Bob's browser login, token revocation/expiry, note editing/export/recovery, cross-user writes/direct media reads, clean dependency install, Docker/Postgres, audio, and any other steps named by A/B/C. They are not marked passed.
 
-The isolated services are retained for continuation at this checkpoint: single-user WebUI `http://127.0.0.1:18080` / API `http://127.0.0.1:18000`; multi-user WebUI `http://127.0.0.1:18081` / API `http://127.0.0.1:18001`. Runtime launcher and configuration are under `/private/tmp/tldw-fresh-uat-launch.mjs` and the two runtime directories listed above. Browser sessions are `fresh-single-20260914` and `fresh-multi-20260914`. The single-user browser is on the persisted chat; the multi-user browser is Alice on the blocked Notes screen.
+The isolated services are retained for continuation: single-user WebUI `http://127.0.0.1:18080` / API `http://127.0.0.1:18000`; multi-user WebUI `http://127.0.0.1:18081` / API `http://127.0.0.1:18001`. Runtime launcher and configuration are under `/private/tmp/tldw-fresh-uat-launch.mjs` and the two runtime directories listed above. Browser sessions are `fresh-single-20260914` and `fresh-multi-20260914`. After repair verification, the single-user browser displays the cited Cedar answer; the multi-user browser is Alice on the working Notes screen.
 
 Only these UAT frontend build directories belong to this run: `apps/tldw-frontend/.next-live-tier-fresh-single-20260914/` and `apps/tldw-frontend/.next-live-tier-fresh-multi-20260914/`. Keep them while the services run. Cleanup after the final pass should stop only the UAT runtimes, then remove their build directories and synthetic data when no longer needed. Do not stop port 8000 or the user's model server on 9099.
 
@@ -285,4 +283,62 @@ Only these UAT frontend build directories belong to this run: `apps/tldw-fronten
 - [x] Tracker checked for secrets and accuracy at checkpoint.
 - [x] Backlog record updated with checkpoint results; overall task remains In Progress.
 
-Bandit: not applicable to this documentation-only UAT record unless executable repository files are added or changed.
+Bandit was not applicable to the initial documentation-only UAT checkpoint. Touched Python code in the subsequent repair pass is checked below.
+
+## Repair pass — 2026-09-15 UTC (2026-09-14 local)
+
+Branch: `codex/fresh-install-uat-fixes`; baseline `cb8335cf8d`. Tracking: TASK-13260.1 (setup), .2 (accounts), .3 (Home/source continuity), .4 (QA/chat). Design: [fresh-install repair design](../Design/2026-09-15-fresh-install-uat-repairs.md). This pass uses failing regressions, focused suites, independent code review, and narrow live reproductions. A full UAT has **not** been rerun.
+
+| Finding | Repair / current verification |
+| --- | --- |
+| UAT-001 | Local-provider opaque model IDs survive save, first-chat verification, and public-state reload. Hosted arbitrary paths and credential-shaped values remain rejected. Setup regression suite: 157 passed. |
+| UAT-002 | Exact first-run readiness endpoints use unauthenticated setup transport; admin endpoints retain auth. Client regression passes. |
+| UAT-003 | First-chat deadline is 180 seconds; abort/timeout has actionable recovery text. Request and component regressions pass. |
+| UAT-004 | Multi-user metadata selects sign-in handoff, saves auth mode before navigation, and suppresses solo writes/readiness requests. Focused regressions pass. |
+| UAT-005 | Provider loading, absent configuration, and fetch failure are distinct. First-chat and saved-ingest milestones are scoped to the initiating server/account, including normal Chat and Quick Ingest; delayed results cannot credit a replacement account. Focused regressions pass. |
+| UAT-006 | Copy distinguishes local eligibility from browser credential exposure and explains manual operator key configuration. Exposure policy remains intentional. |
+| UAT-007 | Password login default, credential-aware mode confirmation, neutral copy, and WebUI controls corrected. Focused tests and synthetic Alice login pass. |
+| UAT-008 | Saved sessions use `/api/v1/auth/sessions`; edited foreign targets receive no saved credentials. Live Alice and the active, unverified bootstrap admin both report Core reachable / RAG healthy. No verification or operator-health permissions were changed. |
+| UAT-009 | Canonical provider/model selection, clarification handling, failed-turn exclusion, progress cleanup, streaming evidence mapping, and source IDs corrected. Public Cedar control produces the correct date/owner and an inspectable source excerpt. Security exclusions are explained using aggregate counts; an entirely filtered result skips generation. See UAT-017 for the citation prompt follow-up. |
+| UAT-010 | Empty optional assistant profiles no longer block `/knowledge` or `/chat`; unavailable profiles are not treated as empty. No privileged setup probe or globally cached completion bypass is used. Personalization links its guide. |
+| UAT-011 | Admin Create user form calls the existing protected API. Live creation succeeded with default user role after visible reserved-email validation. Strict Mode config loading and unverified-admin diagnostics were corrected during retest. |
+| UAT-012 | Billing controls and loaders require advertised OpenAPI capability. Missing-capability regression passes. |
+| UAT-013 | Home awaits an owned persisted media handoff before Chat navigation; consumer verifies account/server ownership, media ID, prompt, and clearing. Stale clicks cannot navigate after identity changes. Legacy unowned Review handoffs remain usable under cookie authentication. Live initial handoff and consumer/race regressions pass. |
+| UAT-014 | Connection gate uses `/api/v1/auth/sessions` rather than privileged operator health. Alice's live Notes page loads its private note and editor. Operator health permission is unchanged. |
+| UAT-015 | Ephemeral chat IDs no longer become persisted server conversation links. Focused stream/history regressions pass. |
+| UAT-016 (new) | Notes reads admin title policy only for an active administrator, with account-scoped caching and before/after-await identity checks. Fourteen focused Notes tests pass. Live ordinary-user Notes renders with no title-settings request or403. |
+| UAT-017 (new) | Streaming passes the explicit citation option to generation, numbers sources consistently with the visible evidence, and instructs supported inline citations. Disabled citations retain prior full-context behavior. Actual-provider-prompt and invalid-reference regressions pass. Live Cedar answer shows Cited answer, one source / one citation, and a working `[1]` jump to its evidence. |
+| UAT-018 (new) | Raw ranking remains unchanged for ordering. Only explicit bounded relevance probabilities drive percentages or low-relevance warnings; unknown relevance is labeled “Relevance not measured” consistently across cards, details, and exports. Raw candidate scores such as 25 and -2.5 remain intact. 159 focused tests pass; live Cedar retains its correct cited answer without a false percentage/confidence warning. |
+| UAT-019 (new) | Selecting Alice's private note triggers two unauthorized neighbors requests (`notes.graph.read` missing). Editor remains usable. Capability-aware graph loading repair in progress under reopened TASK-13260.2; preserve backend permissions. |
+
+### Additional observations during repair verification
+
+- **UAT-016 — P3:** Open `/notes` as ordinary user Alice. Expected: default title behavior without an admin request. Actual: `GET /api/v1/admin/notes/title-settings` returns403 and logs an access-denied warning. The list/editor remain usable. Keep backend admin permissions; correct client capability/role handling.
+- **UAT-009 security diagnosis:** The Juniper fixture contains the literal word `token`, which the existing content classifier marks confidential; `credits` raises another classification. The standalone RAG access controller defaults an unconfigured principal to guest/public-only. Keyword retrieval worked; later security filtering removed the document. Preserve this policy and its independent ACL model: do not silently promote AuthNZ roles or relax classification. The repair explains exclusions without exposing removed source IDs/text. A separate public Cedar fixture was added through the normal ingestion API (not a UI-ingestion pass) to verify retrieval, generation, excerpt mapping, and source inspection.
+- **UAT-017 — P2:** Ask “When does Project Cedar launch, and who leads it? Cite the source.” with Llama.cpp / the catalog model. Actual answer gives 22 November 2026 and Mira Chen, then a prose source title; the UI correctly reports one source and zero mapped citations. Investigation confirms `enable_citations` is lost in streaming generation config and its source labels do not match `[1]` syntax. Repair the prompt contract; never infer citations from arbitrary prose.
+- Live admin validation rejected a reserved `.test` email with an actionable server message; a synthetic `example.com` address succeeded. No email was sent.
+- **UAT-018 — P2:** The correct cited Cedar answer shows “0% match” and “Low answer confidence.” Its wire score is an uncalibrated hybrid ranking value; the UI multiplies it by 100 and compares it to a probability threshold. Preserve raw ranking for sorting, distinguish calibrated relevance, and show relevance unavailable when no such measure exists. Do not invent confidence.
+- **UAT-019 — P3:** Select Alice's existing note in `/notes`. The editor opens, but two `GET /api/v1/notes/<id>/neighbors` requests return403, missing `notes.graph.read`. An ordinary note-open should not eagerly request unavailable graph data or retry a denied capability. Preserve the permission boundary and expose the unavailable state honestly.
+- Development hot reload temporarily reset browser UI references/provider selection and emitted an Ant Design unconnected-form warning. Refreshing and selecting the model again recovered. Treat the warning as unconfirmed outside hot reload; do not label it a stable product regression without reproduction.
+
+QA closure checkpoint: combined changed/new frontend regressions **487 passed across 41 suites**; combined setup/provider/RAG Python regressions **248 passed**. Bandit on all six touched Python production modules reports **zero findings**. ESLint across 92 touched frontend files reports **zero errors** and 1,086 warnings. Frontend `tsc --noEmit --incremental false` reports 90 diagnostics, exactly matching a compiler-host baseline overlay of `cb8335cf8d` (**zero additions/removals**). These pre-existing presentation/prompt/E2E errors are not a passing typecheck. The initial baseline overlay exceeded Node's 4 GiB heap; the 8 GiB rerun completed. Notes offline/denied-reconnect follow-up verification is pending separately.
+
+Adjacent-suite limits: Notes content-assist has one missing-fixture-button failure reproduced against its baseline implementation. The generation prompt-loader suite has 11 passes and one concurrent-resolver file-read-barrier failure reproduced with baseline `generation.py`. Neither suite is represented as fully passing. No fixes to unrelated fixtures/loaders are included.
+
+Live security negative control: a normal streaming request restricted to Juniper media ID 1 completed in 414 ms with HTTP 200, empty contexts, `{excluded_count: 1, retained_count: 0}`, then terminal `output_emitted: false`. It emitted no answer or excluded source IDs/text.
+
+Repair screenshots (visually inspected): [Cedar cited answer](../../output/playwright/fresh-install-repairs-2026-09-15/cedar-cited-answer.png), [Alice Notes](../../output/playwright/fresh-install-repairs-2026-09-15/alice-notes-after-repair.png), [Alice connection](../../output/playwright/fresh-install-repairs-2026-09-15/alice-connection-success.png).
+
+### Executable workflow inventory for the next UAT
+
+- Primary guide: `apps/Testing_Guide.md:23`; shared implementation registered by `apps/tldw-frontend/e2e/real-server-workflows.spec.ts:131`.
+- Journey project: `apps/tldw-frontend/playwright.config.ts:112`.
+- `e2e/workflows/journeys/ingest-search-chat.spec.ts:12`: Ingest → Search → Chat.
+- `e2e/workflows/journeys/notes-flashcards.spec.ts:27`: Notes → generate/save flashcards.
+- `e2e/workflows/journeys/prompts-chat.spec.ts:16`: Prompts → Chat.
+- Additional journeys: Ingest → Evaluate → Review, Watchlist → Ingest → Notify, Create character → Chat.
+- Shared real-server workflows in `apps/test-utils/real-server-workflows.ts`: Chat → save note → linked conversation (3512), Chat → save flashcards → review (3970), Media → delete → restore (4266), Media ingestion → analysis → review → re-analysis (4417).
+
+There is no verified source assigning A/B/C to three loops. `Docs/Plans/2026-03-12-e2e-test-coverage-expansion-design.md` uses A/B/C for **coverage tiers**; current config uses numeric tiers 1–5. Onboarding UAT defines only `tierAScenarios`.
+
+Acceptance gaps to account for in the next full run: shared/journey fixtures seed single-user API-key mode and completed onboarding, so they cannot certify fresh multi-user setup unchanged. The ingest journey does not assert citation provenance; the prompt journey does not prove the saved prompt was applied; Notes→Flashcards has skip branches that must not count as passes. Use their named steps with explicit fresh-install, multi-user, provenance, and no-skip acceptance checks.

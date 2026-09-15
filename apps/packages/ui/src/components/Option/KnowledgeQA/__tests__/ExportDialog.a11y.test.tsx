@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ExportDialog } from "../ExportDialog"
+import type { RagResult } from "../types"
 
 const {
   messageOpenMock,
@@ -20,7 +21,7 @@ const {
 const state = {
   messages: [] as Array<{ role: string; content: string }>,
   currentThreadId: "thread-1" as string | null,
-  results: [] as Array<{ id: string }>,
+  results: [] as RagResult[],
   citations: [] as Array<{ index: number }>,
   answer: "Test answer" as string | null,
   answerTrustState: "cited_answer" as
@@ -475,6 +476,16 @@ describe("ExportDialog accessibility", () => {
         content: "Saved to Notes.",
       })
     )
+  })
+
+  it("exports an uncalibrated RRF score without inventing a relevance percentage", async () => {
+    state.results = [{ id: "late_chunk:2:0", score: 0.004838709677419355 }]
+    render(<ExportDialog open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Export" }))
+    await waitFor(() => expect(screen.getByText("Preview")).toBeInTheDocument())
+    const preview = screen.getByText((_, element) => element?.tagName.toLowerCase() === "pre" && Boolean(element.textContent?.includes("## Sources")))
+    expect(preview).not.toHaveTextContent("Relevance: 0%")
+    expect(preview).toHaveTextContent("Relevance: not measured")
   })
 
   it("exports citation mappings and optional settings snapshot for grounded review", async () => {

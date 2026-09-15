@@ -5493,6 +5493,11 @@ async def unified_rag_pipeline(
                                 filtered_docs.append(doc_ref)
 
                     if filtered_docs is not None:
+                        # Expose only aggregate outcomes, never excluded evidence.
+                        result.metadata["security_filter"] = {
+                            "excluded_count": max(0, len(result.documents) - len(filtered_docs)),
+                            "retained_count": len(filtered_docs),
+                        }
                         result.documents = filtered_docs
                     result.timings["security_filter"] = time.time() - security_start
 

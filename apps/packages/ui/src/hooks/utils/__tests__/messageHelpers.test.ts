@@ -88,6 +88,17 @@ describe("message helper wrappers", () => {
     expect(onServerConversationLinked).toHaveBeenCalledWith("server-chat-42")
   })
 
+  it("preserves local history without linking an explicitly nonpersisted conversation", async () => {
+    const linked = vi.fn()
+    const wrapped = createSaveMessageOnSuccess(false, vi.fn(), { onServerConversationLinked: linked })
+    const historyId = await wrapped({ conversationId: "ephemeral", saveToDb: false, fullText: "Answer" })
+    expect(historyId).toBe("history-success")
+    expect(linked).not.toHaveBeenCalled()
+    expect(mocks.saveSuccess).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId: undefined, fullText: "Answer",
+    }))
+  })
+
   it("preserves the active server chat while assigning its local mirror id", async () => {
     const setHistoryId = vi.fn()
     const wrapped = createSaveMessageOnSuccess(false, setHistoryId)

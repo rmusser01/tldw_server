@@ -47,3 +47,8 @@ Add behavior-level failing tests before each implementation, run the focused fro
 ## Citation contract follow-up (UAT-017)
 
 The narrow public-source live retest found that streaming generation drops the requested citation option and labels contexts incompatibly with the numeric citation parser. Carry the explicit option into generation and request inline numbered citations against correspondingly numbered sources. Preserve operator prompt text and uncited behavior when disabled; never fabricate citation mappings from prose titles or out-of-range IDs. Verify the actual prompt passed to the provider and then repeat one live source-grounded question.
+
+## Final targeted UX follow-ups (UAT-018–019)
+
+- Preserve raw hybrid ranking scores for ordering, but do not display reciprocal-rank fusion as a calibrated percentage or use it to infer low answer confidence. Explicitly distinguish ranking-only evidence from calibrated relevance and retain valid warnings when a calibrated score exists.
+- Opening an ordinary note should not automatically request graph data when `notes.graph.read` is unavailable. Use existing identity/capability mechanisms, preserve backend permissions, and avoid retries for authorization denials. Keep ordinary note editing usable.

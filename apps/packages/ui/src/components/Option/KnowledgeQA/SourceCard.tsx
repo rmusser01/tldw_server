@@ -35,6 +35,7 @@ import {
   formatSourceDate,
   getFreshnessDescriptor,
   getRelevanceDescriptor,
+  getMeasuredRelevance,
   getSourceTypeLabel,
   type CitationUsageAnchor,
   splitTextByHighlights,
@@ -152,7 +153,6 @@ export function SourceCard({
   )
   const canExpand = displayExcerptText.length > excerptLength
   const url = result.metadata?.url
-  const score = result.score
   const sourceType =
     result.sourceType || result.metadata?.source_type || "media_db"
   const sourceTypeLabel = getSourceTypeLabel(sourceType)
@@ -167,7 +167,7 @@ export function SourceCard({
   const chunkPosition = formatChunkPosition(chunkId ?? result.metadata?.chunk_id)
   const sourceDate = formatSourceDate(result)
   const freshnessDescriptor = getFreshnessDescriptor(result)
-  const relevanceDescriptor = getRelevanceDescriptor(score)
+  const relevanceDescriptor = getRelevanceDescriptor(getMeasuredRelevance(result))
   const compactMetaItems = compactDensity
     ? [sourceKindLabel, chunkPosition, freshnessDescriptor?.label ?? sourceDate].filter(
         (value): value is string => Boolean(value)
@@ -381,7 +381,9 @@ export function SourceCard({
                       >
                         {relevanceDescriptor.percent}% match
                       </span>
-                    ) : null}
+                    ) : (
+                      <span className="shrink-0 text-[10px] text-text-muted">Relevance not measured</span>
+                    )}
                     {evidenceOriginLabel ? (
                       <span className="shrink-0 truncate">{evidenceOriginLabel}</span>
                     ) : null}
@@ -434,7 +436,7 @@ export function SourceCard({
                     {title}
                   </h4>
                   <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-text-muted sm:gap-2 sm:text-xs">
-                    {relevanceDescriptor && (
+                    {relevanceDescriptor ? (
                       <span
                         className={cn(
                           "rounded px-1.5 py-0.5",
@@ -444,7 +446,7 @@ export function SourceCard({
                       >
                         {relevanceDescriptor.label} ({relevanceDescriptor.percent}%)
                       </span>
-                    )}
+                    ) : <span>Relevance not measured</span>}
                     <span className="inline-flex items-center gap-0.5">
                       {sourceType === "web" ? (
                         <Globe className="h-3 w-3" />

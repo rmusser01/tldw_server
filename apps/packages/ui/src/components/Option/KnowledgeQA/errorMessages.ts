@@ -66,6 +66,9 @@ export const mapKnowledgeQaSearchErrorMessage = (
 ): string => {
   const providerCode = getPublicProviderCode(error)
   if (providerCode) {
+    if (providerCode === "provider_configuration_invalid" || providerCode === "missing_provider_credentials") {
+      return `${PUBLIC_RAG_PROVIDER_ERROR_MESSAGES[providerCode]} Choose an answer provider and model in the AI menu, or configure the server's RAG defaults.`
+    }
     return PUBLIC_RAG_PROVIDER_ERROR_MESSAGES[providerCode]
   }
 

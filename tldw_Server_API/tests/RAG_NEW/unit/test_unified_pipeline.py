@@ -533,6 +533,10 @@ class TestUnifiedPipeline:
                     security_report = getattr(result, 'security_report', None) if not isinstance(result, dict) else result.get('security_report', {})
 
                     assert len(docs) == 1
+                    assert result.metadata["security_filter"] == {
+                        "excluded_count": 1,
+                        "retained_count": 1,
+                    }
                     content = docs[0].get("content") if isinstance(docs[0], dict) else getattr(docs[0], "content", "")
                     assert "[REDACTED]" in content
                     assert not any("Security filter failed" in err for err in (errors or []))
@@ -656,6 +660,10 @@ class TestUnifiedPipeline:
                     docs = getattr(result, 'documents', None) if not isinstance(result, dict) else result.get('documents', [])
 
                     assert docs == []
+                    assert result.metadata["security_filter"] == {
+                        "excluded_count": 1,
+                        "retained_count": 0,
+                    }
 
     @pytest.mark.asyncio
     async def test_unified_pipeline_with_citations(self, sample_documents):

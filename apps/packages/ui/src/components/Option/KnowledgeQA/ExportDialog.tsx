@@ -2,6 +2,8 @@
  * ExportDialog - Export conversations as markdown/PDF with citations
  */
 
+import { getMeasuredRelevance } from "./sourceListUtils"
+
 import React, { useState, useCallback, useEffect, useRef } from "react"
 import {
   Download,
@@ -1214,7 +1216,7 @@ function generateMarkdown(
     results.forEach((result, index) => {
       const title = getSourceTitle(result, index)
       const url = result.metadata?.url
-      const score = result.score
+      const score = getMeasuredRelevance(result)
       const content = result.content || result.text || ""
 
       lines.push(`### [${index + 1}] ${title}`)
@@ -1225,6 +1227,9 @@ function generateMarkdown(
       }
       if (score !== undefined) {
         lines.push(`Relevance: ${Math.round(score * 100)}%`)
+        lines.push("")
+      } else {
+        lines.push("Relevance: not measured")
         lines.push("")
       }
       if (options.includeSourceExcerpts && content) {

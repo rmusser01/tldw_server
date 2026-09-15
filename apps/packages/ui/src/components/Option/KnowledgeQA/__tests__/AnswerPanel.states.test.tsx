@@ -525,6 +525,27 @@ describe("AnswerPanel state guardrails", () => {
     expect(feedbackRow).not.toHaveTextContent("Need a different answer length?")
   })
 
+  it.each([undefined, "ranking"] as const)("does not call an RRF rank low confidence (%s)", (scoreKind) => {
+    state.answerTrustState = "cited_answer"
+    state.answer = "Project Cedar launches on 22 November 2026; Mira Chen leads it [1]."
+    state.citations = [{ index: 1 }]
+    state.results = [{ id: "late_chunk:2:0", score: 0.004838709677419355, score_kind: scoreKind, metadata: { title: "Cedar public launch brief" } }]
+
+    render(<AnswerPanel />)
+
+    expect(screen.queryByText("Low answer confidence")).not.toBeInTheDocument()
+    expect(screen.queryByText(/scored below your current relevance threshold/)).not.toBeInTheDocument()
+  })
+
+  it("retains the warning for explicitly measured low relevance", () => {
+    state.answerTrustState = "cited_answer"
+    state.answer = "Cedar launches in November [1]."
+    state.citations = [{ index: 1 }]
+    state.results = [{ id: "r1", score: 0.1, score_kind: "relevance_probability" }]
+    render(<AnswerPanel />)
+    expect(screen.getByText(/scored below your current relevance threshold/)).toBeInTheDocument()
+  })
+
   it("surfaces integrated recovery actions when answer confidence is weak", () => {
     state.answerTrustState = "uncited_degraded_answer"
     state.answer = "This answer is not grounded."

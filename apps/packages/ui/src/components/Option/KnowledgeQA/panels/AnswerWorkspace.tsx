@@ -1,3 +1,4 @@
+import { hasLowMeasuredRelevance } from "../sourceListUtils"
 import React, { useEffect, useMemo, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { cn } from "@/libs/utils"
@@ -45,6 +46,7 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
   const {
     results = [],
     error = null,
+    queryWarning = null,
     messages = [],
     citations = [],
     settings,
@@ -99,10 +101,10 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
   )
   const displayedTurnCount = turnPreviews.length
   const priorTurnPreviews = useMemo(
-    () => (turnPreviews.length > 1 ? turnPreviews.slice(0, -1) : []),
+    () => (turnPreviews.length > 1 ? turnPreviews.slice(0, -1).filter((turn) => turn.answer) : []),
     [turnPreviews]
   )
-  const hasThreadContext = displayedTurnCount > 1
+  const hasThreadContext = priorTurnPreviews.length > 0
   const contextSummary = useMemo(() => {
     if (priorTurnPreviews.length === 0) {
       return "The next question starts from the current answer context."
@@ -117,15 +119,7 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
     if (queryStage !== "complete") return false
     if (results.length === 0) return false
     const threshold = settings?.strip_min_relevance ?? 0.3
-    const hasScoredResults = results.some(
-      (result: { score?: number }) => typeof result.score === "number"
-    )
-    const allLowRelevance =
-      hasScoredResults &&
-      results.every(
-        (result: { score?: number }) =>
-          typeof result.score === "number" && result.score < threshold
-      )
+    const allLowRelevance = hasLowMeasuredRelevance(results, threshold)
     const noCitations = (citations?.length ?? 0) === 0
     return allLowRelevance || (noCitations && results.length > 0)
   }, [queryStage, results, citations, settings?.strip_min_relevance])
@@ -137,18 +131,19 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
     if (queryStage === "complete") {
       const count = results.length
       setPoliteAnnouncement(
-        `Search complete. ${count} source${count === 1 ? "" : "s"} found.`
+        queryWarning || `Search complete. ${count} source${count === 1 ? "" : "s"} found.`
       )
       return
     }
     if (queryStage === "error") {
+      setPoliteAnnouncement("")
       return
     }
     const stageMessage = LIVE_STAGE_COPY[queryStage]
     if (stageMessage) {
       setPoliteAnnouncement(stageMessage)
     }
-  }, [queryStage, results.length])
+  }, [queryStage, results.length, queryWarning])
 
   useEffect(() => {
     if (!error) return

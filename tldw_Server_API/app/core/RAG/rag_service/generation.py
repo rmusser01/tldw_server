@@ -101,6 +101,7 @@ class GenerationConfig:
     timeout: int = 60
     retry_attempts: int = 3
     retry_delay: int = 2
+    enable_citations: bool = False
 
 
 @dataclass
@@ -377,7 +378,8 @@ class BaseGenerator(ABC):
             source = doc.metadata.get("source", "Unknown")
             title = doc.metadata.get("title", f"Document {i}")
 
-            context_parts.append(f"[Source {i}: {title} ({source})]")
+            label = f"[{i}] {title} ({source})" if self.config.enable_citations else f"[Source {i}: {title} ({source})]"
+            context_parts.append(label)
             context_parts.append(doc.content)
             context_parts.append("")  # Empty line between documents
 
@@ -385,10 +387,15 @@ class BaseGenerator(ABC):
 
     def build_prompt(self, context_text: str, query: str) -> str:
         """Build the final prompt from template."""
-        return self.prompt_template.format(
-            context=context_text,
-            question=query
-        )
+        prompt = self.prompt_template.format(context=context_text, question=query)
+        if self.config.enable_citations:
+            prompt += (
+                "\n\nUse inline numbered citations such as [1] or [1][2] immediately "
+                "after claims supported by the sources. Only cite the provided source numbers, "
+                "and only when that source supports the claim. A source title alone is not a "
+                "citation. If the sources do not support an answer, say so without inventing citations."
+            )
+        return prompt
 
     @abstractmethod
     async def generate(

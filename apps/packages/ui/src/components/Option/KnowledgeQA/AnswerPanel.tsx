@@ -2,6 +2,8 @@
  * AnswerPanel - Displays generated answer with inline citations
  */
 
+import { hasLowMeasuredRelevance } from "./sourceListUtils"
+
 import React, { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { Sparkles, AlertCircle, Loader2, ThumbsUp, ThumbsDown } from "lucide-react"
 import { useKnowledgeQA } from "./KnowledgeQAProvider"
@@ -322,15 +324,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     }
 
     const threshold = settings?.strip_min_relevance ?? 0.3
-    const hasScoredResults = results.some(
-      (result: { score?: number }) => typeof result.score === "number"
-    )
-    const allLowRelevance =
-      hasScoredResults &&
-      results.every(
-        (result: { score?: number }) =>
-          typeof result.score === "number" && result.score < threshold
-      )
+    const allLowRelevance = hasLowMeasuredRelevance(results, threshold)
     const uncitedAnswer = citations.length === 0 || groundingCoverage?.percent === 0
     const weakVerification = faithfulnessDescriptor?.label === "Weak"
 

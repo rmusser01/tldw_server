@@ -20,6 +20,18 @@ import { ChatTldw } from "@/models/ChatTldw"
 import { HumanMessage } from "@/types/messages"
 
 describe("ChatTldw stream metadata handoff", () => {
+  it("keeps ephemeral stream IDs out of saved conversation linking", async () => {
+    mocks.streamMessage.mockImplementation(async function* (_messages, _options, onChunk) {
+      onChunk?.({ event: "tldw_metadata", tldw_conversation_id: "ephemeral-id" })
+      yield "Local answer"
+    })
+    const model = new ChatTldw({ model: "tldw:gpt-test", streaming: true, saveToDb: false })
+    const tokens: string[] = []
+    for await (const token of await model.stream([new HumanMessage("Hi")])) tokens.push(token)
+    expect({ tokens, conversationId: model.conversationId, saveToDb: model.saveToDb }).toEqual({
+      tokens: ["Local answer"], conversationId: undefined, saveToDb: false,
+    })
+  })
   it("captures streamed conversation metadata without yielding it as assistant text", async () => {
     mocks.streamMessage.mockImplementation(
       async function* (

@@ -5,6 +5,7 @@ import { AnswerWorkspace } from "../panels/AnswerWorkspace"
 const state = {
   results: [] as Array<{ id: string; score?: number }>,
   error: null as string | null,
+  queryWarning: null as string | null,
   messages: [] as Array<{
     id: string
     role: "user" | "assistant" | "system"
@@ -19,6 +20,7 @@ vi.mock("../KnowledgeQAProvider", () => ({
   useKnowledgeQA: () => ({
     results: state.results,
     error: state.error,
+    queryWarning: state.queryWarning,
     messages: state.messages,
     currentThreadId: state.currentThreadId,
     citations: state.citations,
@@ -44,6 +46,7 @@ describe("AnswerWorkspace accessibility announcements", () => {
   beforeEach(() => {
     state.results = []
     state.error = null
+    state.queryWarning = null
     state.messages = []
     state.currentThreadId = null
     state.citations = []
@@ -67,6 +70,26 @@ describe("AnswerWorkspace accessibility announcements", () => {
     render(<AnswerWorkspace queryStage="error" />)
 
     expect(screen.getByText("Search error. Search timed out")).toBeInTheDocument()
+  })
+
+  it("announces the security outcome instead of claiming no sources were found", () => {
+    state.queryWarning = "Security settings excluded all retrieved sources."
+    render(<AnswerWorkspace queryStage="complete" />)
+    expect(screen.getByText(state.queryWarning)).toBeInTheDocument()
+    expect(screen.queryByText("Search complete. 0 sources found.")).not.toBeInTheDocument()
+  })
+
+  it("clears the active announcement on failure and does not reuse failed turns", () => {
+    const { rerender } = render(<AnswerWorkspace queryStage="ranking" />)
+    state.error = "Provider unavailable"
+    state.messages = [
+      { id: "failed", role: "user", content: "Failed question" },
+      { id: "retry", role: "user", content: "Retry question" },
+    ]
+    rerender(<AnswerWorkspace queryStage="error" />)
+    expect(screen.queryByText("Ranking retrieved sources.")).not.toBeInTheDocument()
+    expect(screen.queryByText("Using context from turn 1.")).not.toBeInTheDocument()
+    expect(screen.queryByText("No answer recorded.")).not.toBeInTheDocument()
   })
 
   it("shows persistent thread context summary", () => {

@@ -60,9 +60,10 @@ function buildConversationTurns(
     const message = messages[index]
     if (message.role !== "user") continue
 
-    const assistantMessage = messages
+    const nextMessage = messages
       .slice(index + 1)
-      .find((candidate) => candidate.role === "assistant")
+      .find((candidate) => candidate.role === "assistant" || candidate.role === "user")
+    const assistantMessage = nextMessage?.role === "assistant" ? nextMessage : undefined
     const ragCitations = assistantMessage?.ragContext?.citations
     const explicitRagCitationIndices = Array.isArray(ragCitations)
       ? ragCitations

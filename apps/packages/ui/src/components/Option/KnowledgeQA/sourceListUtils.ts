@@ -367,6 +367,22 @@ export function getFreshnessDescriptor(
   }
 }
 
+/** Only explicitly identified, bounded probabilities support relevance claims. */
+export function getMeasuredRelevance(result: RagResult): number | undefined {
+  const score = result.score
+  return result.score_kind === "relevance_probability" &&
+    typeof score === "number" && Number.isFinite(score) && score >= 0 && score <= 1
+    ? score
+    : undefined
+}
+
+export function hasLowMeasuredRelevance(results: RagResult[], threshold = 0.3): boolean {
+  return results.length > 0 && results.every((result) => {
+    const relevance = getMeasuredRelevance(result)
+    return relevance !== undefined && relevance < threshold
+  })
+}
+
 export function getRelevanceDescriptor(
   score: number | undefined
 ): RelevanceDescriptor | null {

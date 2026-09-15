@@ -72,6 +72,8 @@ import {
 } from "@/services/rag/stream-contract"
 import {
   getEvidenceOrigin,
+  getMeasuredRelevance,
+  hasLowMeasuredRelevance,
   getResultChunkId,
   getResultEvidenceText,
   getResultSourceId,
@@ -615,6 +617,7 @@ function mapRagContextDocumentsToResults(
       sourceStatus,
       unavailableReason,
       score: typeof doc?.score === "number" ? doc.score : undefined,
+      score_kind: doc?.score_kind === "relevance_probability" ? "relevance_probability" : "ranking",
       content:
         typeof doc?.excerpt === "string"
           ? doc.excerpt
@@ -825,27 +828,40 @@ function extractKnowledgeTrustMetadata(
 }
 
 function mapStreamingContextsToResults(contexts: any[]): RagResult[] {
-  return contexts.map((context, index) => ({
-    id:
-      typeof context?.id === "string" && context.id.length > 0
-        ? context.id
-        : `stream-source-${index + 1}`,
-    metadata: {
+  return mapRagContextDocumentsToResults(
+    contexts.map((context, index) => ({
+      ...context,
+      id:
+        typeof context?.id === "string" && context.id.length > 0
+          ? context.id
+          : `stream-source-${index + 1}`,
       title:
         typeof context?.title === "string" && context.title.length > 0
           ? context.title
           : `Source ${index + 1}`,
-      source:
-        typeof context?.source === "string" ? context.source : undefined,
-      url: typeof context?.url === "string" ? context.url : undefined,
-    },
-    score: typeof context?.score === "number" ? context.score : undefined,
-  }))
+    }))
+  )
+}
+
+function getSecurityFilterWarning(outcome: unknown): string | null {
+  if (!outcome || typeof outcome !== "object") return null
+  const { excluded_count, retained_count } = outcome as Record<string, unknown>
+  if (
+    typeof excluded_count !== "number" ||
+    !Number.isInteger(excluded_count) ||
+    excluded_count <= 0 ||
+    typeof retained_count !== "number" ||
+    !Number.isInteger(retained_count) ||
+    retained_count < 0
+  ) return null
+  return retained_count === 0
+    ? "Security settings excluded all retrieved sources. Review Knowledge QA's security settings with your server operator."
+    : "Some retrieved sources were excluded by security settings. Only the remaining sources are shown."
 }
 
 function calculateAverageRelevance(results: RagResult[]): number | null {
   const numericScores = results
-    .map((result) => result.score)
+    .map(getMeasuredRelevance)
     .filter((score): score is number => typeof score === "number")
   if (numericScores.length === 0) return null
   const sum = numericScores.reduce((acc, value) => acc + value, 0)
@@ -855,12 +871,7 @@ function calculateAverageRelevance(results: RagResult[]): number | null {
 function hasWeakEvidence(results: RagResult[], threshold: number | undefined): boolean {
   const normalizedThreshold =
     typeof threshold === "number" && Number.isFinite(threshold) ? threshold : 0.3
-  const scoredResults = results.filter(
-    (result): result is RagResult & { score: number } =>
-      typeof result.score === "number" && Number.isFinite(result.score)
-  )
-  if (scoredResults.length === 0) return false
-  return scoredResults.every((result) => result.score < normalizedThreshold)
+  return hasLowMeasuredRelevance(results, normalizedThreshold)
 }
 
 function normalizeMetric(value: unknown): number | null {
@@ -1063,7 +1074,7 @@ function normalizeAlsoConsideredCandidate(
       ? titleRaw.trim()
       : `Candidate ${fallbackIndex + 1}`
   const score =
-    normalizeProbabilityMetric(candidate.score ?? candidate.relevance)
+    normalizeMetric(candidate.score ?? candidate.relevance)
   const reasonRaw = candidate.reason ?? candidate.exclusion_reason
   const reason =
     typeof reasonRaw === "string" && reasonRaw.trim().length > 0
@@ -2155,6 +2166,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
         source_type: r.sourceType || r.metadata?.source_type,
         title: r.metadata?.title,
         score: r.score,
+        score_kind: r.score_kind,
         chunk_id: getResultChunkId(r) ?? undefined,
         excerpt: getResultEvidenceText(r) || undefined,
         evidence_origin: getEvidenceOrigin(r),
@@ -2283,6 +2295,29 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           query: trimmedQuery,
           enable_web_fallback: effectiveSettings.enable_web_fallback,
         })
+        // Only completed turns supply follow-up context. Failed/cancelled user
+        // messages remain in history, but must not acquire a later retry's answer.
+        const chatHistory: Array<{
+          role: "user" | "assistant"
+          content: string
+        }> = []
+        let previousQuestion: KnowledgeQAMessage | null = null
+        for (const message of state.messages) {
+          if (message.role === "user") previousQuestion = message
+          else if (message.role === "assistant" && previousQuestion) {
+            if (
+              message.content?.trim() &&
+              message.ragContext?.trust_state !== "failed_search"
+            ) {
+              chatHistory.push(
+                { role: "user", content: previousQuestion.content },
+                { role: "assistant", content: message.content },
+              )
+            }
+            previousQuestion = null
+          }
+        }
+        if (chatHistory.length > 0) options.chat_history = chatHistory
 
         const canAttemptStreaming =
           streamingFeatureEnabled &&
@@ -2350,6 +2385,10 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
 
               if (eventType === "contexts" && Array.isArray(event?.contexts)) {
                 dispatch({ type: "SET_QUERY_STAGE", payload: "ranking" })
+                const securityWarning = getSecurityFilterWarning(event.security_filter)
+                if (securityWarning) {
+                  dispatch({ type: "SET_QUERY_WARNING", payload: securityWarning })
+                }
                 streamResults = mapStreamingContextsToResults(event.contexts)
                 streamWhyPayload = event?.why
                 streamSourceStatusPayload =
@@ -2504,6 +2543,10 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
             results,
             effectiveSettings
           )
+          const securityWarning = getSecurityFilterWarning(extracted.metadata?.security_filter)
+          if (securityWarning) {
+            dispatch({ type: "SET_QUERY_WARNING", payload: securityWarning })
+          }
         }
 
         if (isStaleSearchRequest()) {
@@ -2717,6 +2760,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
     },
     [
       state.currentThreadId,
+      state.messages,
       state.settings,
       state.preset,
       state.pinnedSourceFilters,

@@ -48,11 +48,13 @@ export const createSaveMessageOnSuccess = (
   return async (e: any): Promise<string | null> => {
     if (!temporaryChat) {
       const conversationId =
-        typeof e?.conversationId === "string"
-          ? e.conversationId.trim()
-          : e?.conversationId != null
-            ? String(e.conversationId).trim()
-            : ""
+        e?.saveToDb === false
+          ? ""
+          : typeof e?.conversationId === "string"
+            ? e.conversationId.trim()
+            : e?.conversationId != null
+              ? String(e.conversationId).trim()
+              : ""
       const setHistoryIdTarget =
         typeof e?.setHistoryId === "function" ? e.setHistoryId : setHistoryId
       const resolvedSetHistoryId = conversationId
@@ -61,6 +63,7 @@ export const createSaveMessageOnSuccess = (
         : setHistoryIdTarget
       const historyId = await saveSuccess({
         ...e,
+        ...(e?.saveToDb === false ? { conversationId: undefined } : {}),
         setHistoryId: resolvedSetHistoryId
       })
       if (conversationId.length > 0) {

@@ -169,7 +169,9 @@ export class ChatTldw {
               chunk.conversation_id.trim().length > 0
             ? chunk.conversation_id.trim()
             : null
-      if (streamedConversationId) {
+      // Nonpersisted completions also carry a request-scoped conversation UUID.
+      // It must not turn local history into a link to a nonexistent server chat.
+      if (streamedConversationId && this.saveToDb !== false) {
         this.conversationId = streamedConversationId
         this.saveToDb = true
       }
