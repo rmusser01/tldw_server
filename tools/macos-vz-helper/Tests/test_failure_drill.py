@@ -294,3 +294,42 @@ def test_negative_control_requires_actual_fault_execution(
         or (profile != "protocol" and fault == "wire_version")
     )
     assert drill.negative_execution(tmp_path, profile)["ok"] is accepted
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "fault",
+    [None, "root", "capability", "unknown_capabilities", "metadata", "cancelled", "output", "dispatch", "cleanup"],
+)
+def test_workspace_negative_control_requires_supported_metadata_and_execution(
+    drill: ModuleType, tmp_path: Path, fault: str | None
+) -> None:
+    """A root-only control must execute with supported metadata, not bypass admission."""
+    packet = tmp_path / "pytest/test_case0"
+    packet.mkdir(parents=True)
+    guest = {"workspace_root": "/workspace", "capabilities_known": True, "capabilities": ["exec", "output_cap_v1"]}
+    data = {
+        "runs": [{"phase": "completed", "exit_code": 0, "stdout": "workspace-drill-first\n"}],
+        "created_vms": [{"vm_id": "fault-vm", "guest_agent": guest}],
+        "exec_vm_ids": ["fault-vm"],
+        "cleanup_errors": [],
+        "remaining_owned_vms": [],
+    }
+    if fault == "root":
+        guest["workspace_root"] = "/workspace-mismatch/nonce"
+    elif fault == "capability":
+        guest["capabilities"] = ["output_cap_v1"]
+    elif fault == "unknown_capabilities":
+        guest["capabilities_known"] = False
+    elif fault == "metadata":
+        data["created_vms"][0].pop("guest_agent")
+    elif fault == "cancelled":
+        data["runs"][0].update(phase="killed", exit_code=None)
+    elif fault == "output":
+        data["runs"][0]["stdout"] = ""
+    elif fault == "dispatch":
+        data["exec_vm_ids"] = ["other-vm"]
+    elif fault == "cleanup":
+        data["cleanup_errors"] = ["VM remains"]
+    (packet / "guest-workspace.json").write_text(json.dumps(data))
+    assert drill.negative_execution(tmp_path, "workspace")["ok"] is (fault is None)

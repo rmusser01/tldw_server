@@ -165,7 +165,8 @@ plist before any manual cleanup. Do not add this opt-in to scheduled CI.
 ### Reproducible Guest Failure Workflow
 
 Use this explicit, manual-only command to prepare and run the capability-mismatch,
-acknowledged-handshake readiness-timeout, and guest protocol-version mismatch drills.
+acknowledged-handshake readiness-timeout, guest protocol-version mismatch, and
+advertised-workspace mismatch drills.
 It also runs a negative control for each drill. Production guest code, normal
 smoke behavior, and scheduled CI are unchanged.
 
@@ -189,7 +190,7 @@ python tools/macos-vz-helper/scripts/vz-failure-drill.py \
 ```
 
 The evidence directory must be new and its parent must already exist. The
-workflow builds three **test-only Go overlays** from the checkout, failing closed
+workflow builds four **test-only Go overlays** from the checkout, failing closed
 if the source anchors have changed. A separate disposable healthy VM installs
 each binary into an **offline image-store clone**, verifies the installed bytes,
 and checks the filesystem. Each test attempt gets fresh healthy/fault clones;
@@ -197,7 +198,7 @@ neither canonical nor prepared fault sources are booted. The command manages
 its own direct helper with a unique private socket and PID file. It never
 attaches to an existing helper, installs launchd services, or reboots the host.
 
-Exit zero requires three passing live tests, three negative controls failing at
+Exit zero requires four passing live tests, four negative controls failing at
 their specific execution assertions, no skipped tests, no cleanup errors, empty
 VM inventory, closed disposable disks, helper shutdown, and unchanged source
 boot-artifact/manifest/build-provenance hashes. This is not a full directory
@@ -212,6 +213,15 @@ rejection before any exec dispatch. Its negative control changes only the test
 challenge back to the supported guest version. The real helper validation stays
 enabled, and completed execution with exact stdout is required to accept that
 control. Each positive drill then proves healthy recovery and same-session reuse.
+
+The workspace fixture changes only the handshake's advertised root to
+`/workspace-mismatch/<nonce>`. Its actual workspace remains `/workspace`, and
+protocol/capabilities remain valid. The helper's real returned metadata must
+match that run's nonce; the runner must reject with only
+`vz_linux_guest_agent_workspace_mismatch` before exec. The negative control
+restores only the advertised root, with real admission still enabled, and must
+execute successfully. This tests metadata admission, not mount isolation or
+path-escape resistance.
 
 Retained artifacts include `receipt.json` (including hashes of helperctl and
 the image-store materializer), per-case `result.json`, JUnit and
@@ -248,6 +258,20 @@ diagnostic instead of the older `helper_internal_error`. The retained
 `guest-protocol.json` records the challenged version/VM, failure, exec dispatches,
 recovery/reuse output, and cleanup. Proof written before a handshake alone is
 not acceptance: the specific helper rejection must also be observed.
+
+### Guest Workspace Metadata Mismatch Drill
+
+The workflow prepares this fixture and runs both controls. The standalone
+entrypoint is
+`tldw_Server_API/tests/sandbox/test_vz_linux_workspace_host_gated.py::test_vz_linux_workspace_mismatch_then_healthy_session_reuse`.
+It requires `TLDW_SANDBOX_VZ_LINUX_WORKSPACE_DRILL=1`, normal real-E2E opt-in,
+a fresh disposable overlay bundle in `TLDW_SANDBOX_VZ_LINUX_WORKSPACE_BASE_IMAGE`,
+a separate healthy disposable bundle in `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE`,
+and an explicit isolated helper socket. The test writes a fresh challenge into
+the fault VM's workspace before boot. `guest-workspace.json` retains helper
+metadata, rejection, exec dispatches, public reconciliation and cleanup evidence.
+Do not change the actual guest mount or remove `exec` capability to create this
+fault: either would test a different failure or mask a broken workspace gate.
 
 ### Guest Capability Mismatch Drill
 

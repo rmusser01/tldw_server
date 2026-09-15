@@ -103,6 +103,51 @@ triage issue.
 
 ## Latest Evidence
 
+### 2026-09-14: Real advertised workspace mismatch and recovery (TASK-13243.7)
+
+- Local operator run on the same Apple Silicon host: macOS `26.5.2` (`25F84`),
+  `arm64`. Checkout `codex/vz-workspace-mismatch-drill` at `c18b1e06eb` plus
+  the uncommitted workspace-drill changes. Receipt input hashes identify the
+  exact sources and were rechecked against the checkout after acceptance.
+- Ran the existing `vz-failure-drill.py --allow-fault-injection` with
+  `--source-bundle ~/Library/Logs/tldw/vz-launchd-recovery/20260913-1905/source-bundle-final`,
+  `--helper /private/tmp/task-13243-6-swift-diagnostic/debug/macos-vz-helper`,
+  and `--evidence-dir ~/Library/Logs/tldw/vz-workspace-workflow-20260914-r1`.
+  The helper was rebuilt and ad-hoc signed with the checked-in entitlements;
+  signature and `com.apple.security.virtualization=true` preflight passed.
+  Canonical Debian arm64 images, shared helpers and launchd were untouched.
+- All eight cases accepted: four positive tests passed without skips/errors;
+  four negative controls reached their intended assertion failures after real,
+  completed, exit-zero execution with exact stdout. Capability, readiness and
+  protocol cases were rerun rather than inferred from older evidence.
+- Workspace-positive VM `1c36b7eb-f7f6-4436-9f3a-d68009b2edf6` advertised
+  `/workspace-mismatch/88c2fc7cf92740c69dcd5a9fc2a5d85e`, with supported
+  protocol and both `exec` and `output_cap_v1` intact. The runner rejected with
+  only `vz_linux_guest_agent_workspace_mismatch`; no exec reached that VM.
+  Recovery printed `workspace-drill-first` and `workspace-drill-reuse`, both
+  exit zero in replacement VM `087b5173-e345-44a5-93ab-554abd2c5dd0`.
+- Workspace-negative VM `071cd606-8c7b-4269-b2b6-515b59e36b5f` advertised
+  `/workspace` and executed `workspace-drill-first` successfully. Only the
+  advertised root was restored; real admission remained enabled. Both controls
+  retain returned helper metadata and dispatch evidence in `guest-workspace.json`.
+- Final receipt: `ok=true`, `errors=[]`, canonical and all four fault-source
+  hashes unchanged, empty VM inventory, closed disposable disks, helper stopped,
+  socket/PID absent, private runtime removed. Public reconciliation was empty
+  after workspace rejection and final cleanup. Evidence/clones are retained.
+  `receipt.json` SHA-256:
+  `9a87be75caab1a23f4d7b057719e50e5adcd59d31625d8520e181e45e09b4261`;
+  exact signed `helper-used` SHA-256:
+  `049ab407cf4e0cb9b858f1b877d9f1df5bdb2c90c048230c2ff16eee9f486638`.
+- Verification: **419 portable Python tests passed, 3 live drills deselected**;
+  **95 Swift tests** and the normal Go agent suite passed. Workspace overlay
+  compiled; workflow/receipt regressions were observed RED then GREEN. Ruff,
+  touched-scope Black and diff checks passed. Bandit found no new issues;
+  five existing B108 literals remain in untouched runner tests (B101 test
+  assertions excluded). Independent review found no actionable issues.
+- This proves advertised-metadata admission, not mount isolation or path-escape
+  resistance. Full server tests, reboot, missing-agent and early boot hangs were
+  not run. These and broader residual gaps remain tracked by #1442.
+
 ### 2026-09-14: PR #2964 review-fix real workflow verification
 
 - Repeated all six cases with the rebuilt, ad-hoc-signed helper after mapping
@@ -1275,7 +1320,7 @@ triage issue.
 | Launchd-drill evidence | Recorded real VM smoke on 2026-09-13 (3 tests, no skips), plus a separate live-session restart test (1 passed, no skips/errors) proving changed helper generation, stale-VM replacement, replacement reuse, and cleanup. The latter exposed and fixed guest capped-output loss before acceptance. Durable artifacts and failed attempts are recorded above. | Repeat both bounded drills when helper lifecycle, signing, guest transport, or image preparation changes. Keep launchd validation explicitly operator-requested; host reboot remains separate. |
 | Host reboot recovery | Manual `host-reboot-drill pre/post` procedure only and out of scheduled CI. | Record results when a maintainer explicitly runs the reboot drill on a prepared host that can tolerate disruptive reboot testing and preserve logs. |
 | Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver and guest-readiness failure cleanup. Manual real acknowledged-handshake readiness withholding, timeout cleanup, and healthy session reuse passed twice on 2026-09-13 with a normal-ready negative control. The default smoke still does not inject faults. | Repeat the opt-in readiness drill when the handshake or lifecycle changes. Kernel boot hangs and missing-agent live injection remain separate; preserve stable reasons and artifact pointers rather than exposing raw serial logs. |
-| Guest-agent mismatch | Manual missing-`exec` capability rejection passed on 2026-09-13. The checked-in six-case workflow on 2026-09-14 additionally proved guest wire protocol-version rejection, cleanup, healthy recovery and session reuse; its negative control kept the helper gate enabled and changed only the injected version. Not part of default smoke. | Repeat the opted-in workflow when the guest handshake or runner admission changes. Missing-agent and workspace-mismatch live injection remain separate evidence cases under the lifecycle-drill contract. |
+| Guest-agent mismatch | The checked-in eight-case workflow on 2026-09-14 proved missing-`exec`, guest wire protocol and advertised workspace mismatch rejection, cleanup, healthy recovery and session reuse. Protocol/workspace negative controls retained real admission and changed only the injected field. Not part of default smoke. | Repeat the opted-in workflow when handshake or admission changes. Missing-agent live injection and actual mount/path-escape isolation remain separate evidence cases under the lifecycle-drill contract. |
 | Stale socket handling | Manual stale-socket prepared-host evidence was recorded locally on 2026-07-03 with controlled inactive socket recovery, helper start/status verification, and explicit stop cleanup passing. | Repeat when helper socket-safety behavior or the operator drill command changes; keep it manual-only and out of PR/push/scheduled destructive triggers. |
 | Direct-bundle smoke mutability | Closed for the default smoke path by the 2026-06-16 disposable-clone evidence and repeated on 2026-06-20 after host reboot: source bundle hashes stayed identical before/after while the disposable run bundle rootfs hash changed after execution. | Repeat periodically when the smoke wrapper, image-store materializer, or helper VM write path changes. |
 
