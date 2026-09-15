@@ -441,10 +441,20 @@ const NotesManagerPage: React.FC = () => {
   }, [defaultStudioPaperSize, ed.selectedId])
 
   // ---- Note graph neighbors ----
+  const noteNeighborsOwner = JSON.stringify([notesGraphAuthorityScope, authoritySelectedId])
+  const noteNeighborsOwnerRef = React.useRef(noteNeighborsOwner)
+  noteNeighborsOwnerRef.current = noteNeighborsOwner
+  const [neighborsIntent, setNeighborsIntent] = React.useState({ owner: noteNeighborsOwner, requested: false, denied: false })
+  if (neighborsIntent.owner !== noteNeighborsOwner) {
+    setNeighborsIntent({ owner: noteNeighborsOwner, requested: false, denied: false })
+  }
+  const noteNeighborsRequested = neighborsIntent.owner === noteNeighborsOwner && neighborsIntent.requested
   const {
-    data: noteNeighborsData,
+    data: requestedNoteNeighborsData,
+    error: noteNeighborsFailure,
     isLoading: noteNeighborsLoading,
     isError: noteNeighborsError,
+    isSuccess: noteNeighborsSuccess,
     refetch: refetchNoteNeighbors
   } = useQuery({
     queryKey: [
@@ -455,17 +465,38 @@ const NotesManagerPage: React.FC = () => {
     ],
     enabled:
       isOnline &&
+      noteNeighborsRequested &&
+      !neighborsIntent.denied &&
       notesGraphAuthorityScope != null &&
       authoritySelectedId != null,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
     queryFn: async () => {
       const noteId = encodeURIComponent(String(authoritySelectedId))
-      const graph = await bgRequest<any>({
-        path: `/api/v1/notes/${noteId}/neighbors?edge_types=manual,wikilink,backlink,source_membership&max_nodes=80&max_edges=200` as any,
-        method: 'GET' as any
-      })
-      return graph
+      try {
+        const graph = await bgRequest<any>({
+          path: `/api/v1/notes/${noteId}/neighbors?edge_types=manual,wikilink,backlink,source_membership&max_nodes=80&max_edges=200` as any,
+          method: 'GET' as any
+        })
+        return noteNeighborsOwnerRef.current === noteNeighborsOwner ? graph : null
+      } catch (error) {
+        if (Number((error as { status?: number } | null)?.status) === 403) {
+          setNeighborsIntent((current) => current.owner === noteNeighborsOwner
+            ? { ...current, denied: true }
+            : current)
+        }
+        throw error
+      }
     }
   })
+  const noteNeighborsData = noteNeighborsRequested && noteNeighborsSuccess ? requestedNoteNeighborsData : null
+  const noteNeighborsUnavailable = Number((noteNeighborsFailure as { status?: number } | null)?.status) === 403
+  const noteNeighborsState = noteNeighborsError ? 'error'
+    : noteNeighborsLoading ? 'loading'
+    : noteNeighborsSuccess && noteNeighborsData != null ? 'success'
+    : 'not_loaded'
 
   const unavailableStateLabel =
     getDesignSystemState('unavailable')?.label ?? UNAVAILABLE_STATE_LABEL
@@ -2443,7 +2474,11 @@ const NotesManagerPage: React.FC = () => {
         noteRelations={noteRelations}
         noteNeighborsLoading={noteNeighborsLoading}
         noteNeighborsError={noteNeighborsError}
-        onRetryNeighbors={() => {
+        noteNeighborsUnavailable={noteNeighborsUnavailable}
+        noteNeighborsState={noteNeighborsState}
+        noteNeighborsRequestKey={noteNeighborsOwner}
+        onRequestNeighbors={() => setNeighborsIntent((current) => ({ ...current, requested: true }))}
+        onRetryNeighbors={noteNeighborsUnavailable ? undefined : () => {
           void refetchNoteNeighbors()
         }}
         selectedNotePinned={ed.selectedNotePinned}

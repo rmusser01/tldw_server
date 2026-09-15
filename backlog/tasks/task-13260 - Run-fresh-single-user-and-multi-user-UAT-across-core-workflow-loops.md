@@ -9,7 +9,7 @@ labels:
 - documentation
 documentation:
 - Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md
-updated_date: 2026-09-15 01:36
+updated_date: 2026-09-15 03:55
 ---
 
 ## Description
@@ -36,6 +36,7 @@ Prepare isolated configurations, SQLite databases, ports, and browser sessions; 
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Checkpoint: 15 product findings recorded in Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md (five P1, six P2, four P3), with six environment/tooling observations. Fresh isolated single-user and multi-user SQLite state initialized using existing dependencies; no clean dependency/Docker/Postgres certification. Single-user real local chat and reload persistence pass; source ingestion and media search pass. Admin plus Alice/Bob authenticate, and API note/media isolation and ordinary-user admin denial pass. Multi-user onboarding skip fails CSRF; Alice's Notes UI is blocked by /api/v1/health/live requiring system.logs. Knowledge QA fails provider validation after optional RAG setup was deferred. User definitions for A/B/C remain outstanding, so neither loop coverage nor overall UAT is complete. Selected screenshots, snapshots, and API results retained under output/playwright/fresh-install-2026-09-14; private credentials/raw logs excluded. UAT services and synthetic state retained on ports 18000/18080 and 18001/18081 for continuation; original 8000 and model 9099 untouched. Backlog CLI collision replaced original untracked 13259; semantic content restored through MCP from task history, with original timestamp values documented in its recovery note. This UAT uses explicit 13260. No product code modified; Bandit/application tests are not applicable to the documentation/evidence checkpoint.
+Repair pass completed on codex/fresh-install-uat-fixes. All19 recorded product findings have verified repairs/dispositions; children13260.1-.4 Done. Final focused verification488frontend tests/248Python tests; touchedBandit0findings; ESLint0errors; same90baselineTypeScript diagnostics. Live ordinary Notes, unverified-admin diagnostics and UI user creation, cited Cedar QA with honest relevance, and all-security-filtered no-generation control verified. Existing Notes fixture and prompt-loader baseline failures documented. Full fresh-install workflow UAT has not been rerun; authoritative named frontend journeys/shared real-server workflows and fixture/provenance/no-skip gaps are in the tracker. Next full pass needs fresh single/multi profiles and explicit acceptance matrices; no invented A/B/C mapping. All runtime data remains isolated on18000/18001 and18080/18081; original8000/model9099 unchanged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

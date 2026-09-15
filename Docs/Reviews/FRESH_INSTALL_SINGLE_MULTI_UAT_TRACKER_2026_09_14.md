@@ -2,10 +2,10 @@
 
 ## Run status
 
-- Status: **In progress — repairing identified issues before the next full workflow UAT**, per the user's follow-up. Initial failures below remain historical evidence; repair verification is tracked separately.
+- Status: **Repair pass complete — 19 product findings addressed; full workflow UAT deferred.** Initial failures below remain historical evidence; current repairs, intentional permission/configuration boundaries, and verification limits appear in the repair table.
 - Requested scope: fresh single-user and multi-user setup, then core workflow loops A, B, and C; record every observed bug, failure, and UX issue.
 - Backlog record: `backlog/tasks/task-13260 - Run-fresh-single-user-and-multi-user-UAT-across-core-workflow-loops.md` (see ENV-003).
-- Checkout: `codex/email-offline-validation-13250`, commit `54ecc7e7735fc082b711d922a27e97ee9999e5ae`.
+- Initial checkout: `codex/email-offline-validation-13250`, commit `54ecc7e7735fc082b711d922a27e97ee9999e5ae`. Repairs are on `codex/fresh-install-uat-fixes`.
 - Host: macOS; existing project Python environment and frontend dependencies; about 17 GiB free at preflight.
 - Existing backend on port 8000 was left running. Test runtimes use separate ports, configuration, databases, and browser state. Unrelated source files were not edited; a task-record collision and recovery are detailed in ENV-003.
 - Installation path: current-checkout fresh configuration/data with existing dependencies. This does **not** certify installation of dependencies into a clean machine/environment.
@@ -31,7 +31,7 @@
 
 Statuses: **Pass** means directly observed and verified; **Fail** means an observed product defect; **Blocked** means a dependency prevents execution; **Pending** means not yet attempted. Workarounds never erase the original failure.
 
-## Checkpoint summary
+## Initial checkpoint summary (before repairs)
 
 - **15 product findings:** five P1, six P2, four P3. P1 denotes a blocked core step, P2 a significant defect or friction, and P3 a lower-impact UX/diagnostic observation. Priorities are provisional triage assessments, not confirmed root-cause diagnoses.
 - Passing observations: both empty SQLite databases initialize; single-user real local chat succeeds and persists; text ingestion/search succeeds; admin and two ordinary accounts authenticate; ordinary-user note/media API isolation checks pass.
@@ -263,7 +263,7 @@ Screenshots were visually reviewed. Text artifacts and this tracker are checked 
 
 ## Continuation and remaining coverage
 
-1. Complete repairs and targeted verification of the 15 findings before another full UAT, as requested by the user.
+1. Repairs and targeted verification are complete for the original 15 findings and four additional findings discovered during retest. Begin the next full UAT from fresh profiles, following the named workflows below.
 2. Build both-mode acceptance matrices from the executable named workflows below. Preserve original failure evidence and distinguish regression verification from a full fresh-install sign-off.
 3. Configure optional RAG prerequisites through the intended user path before any fully configured Knowledge QA retest; record configuration friction. Multi-user provider/chat setup is still untested.
 4. Complete browser workflows for ordinary users after recording or resolving the health-gate blocker. API isolation does not substitute for browser workflow acceptance.
@@ -306,10 +306,10 @@ Branch: `codex/fresh-install-uat-fixes`; baseline `cb8335cf8d`. Tracking: TASK-1
 | UAT-013 | Home awaits an owned persisted media handoff before Chat navigation; consumer verifies account/server ownership, media ID, prompt, and clearing. Stale clicks cannot navigate after identity changes. Legacy unowned Review handoffs remain usable under cookie authentication. Live initial handoff and consumer/race regressions pass. |
 | UAT-014 | Connection gate uses `/api/v1/auth/sessions` rather than privileged operator health. Alice's live Notes page loads its private note and editor. Operator health permission is unchanged. |
 | UAT-015 | Ephemeral chat IDs no longer become persisted server conversation links. Focused stream/history regressions pass. |
-| UAT-016 (new) | Notes reads admin title policy only for an active administrator, with account-scoped caching and before/after-await identity checks. Fourteen focused Notes tests pass. Live ordinary-user Notes renders with no title-settings request or403. |
+| UAT-016 (new) | Notes reads admin title policy only for an active administrator, with account-scoped caching and before/after-await identity checks. Fourteen focused Notes tests pass. Live ordinary-user Notes renders without a title-settings request or corresponding403. |
 | UAT-017 (new) | Streaming passes the explicit citation option to generation, numbers sources consistently with the visible evidence, and instructs supported inline citations. Disabled citations retain prior full-context behavior. Actual-provider-prompt and invalid-reference regressions pass. Live Cedar answer shows Cited answer, one source / one citation, and a working `[1]` jump to its evidence. |
 | UAT-018 (new) | Raw ranking remains unchanged for ordering. Only explicit bounded relevance probabilities drive percentages or low-relevance warnings; unknown relevance is labeled “Relevance not measured” consistently across cards, details, and exports. Raw candidate scores such as 25 and -2.5 remain intact. 159 focused tests pass; live Cedar retains its correct cited answer without a false percentage/confidence warning. |
-| UAT-019 (new) | Selecting Alice's private note triggers two unauthorized neighbors requests (`notes.graph.read` missing). Editor remains usable. Capability-aware graph loading repair in progress under reopened TASK-13260.2; preserve backend permissions. |
+| UAT-019 (new) | Selecting a note sends no graph request; Connections starts collapsed per note/account. Explicit expansion loads once and shows an unavailable state after403, without retries, false empty-link claims, or stale cached chips. Offline/reconnect and identity-race regressions pass. Live Alice note-open sends no graph/title request; explicit Connections expansion yields one denied request and the intended message. Backend permissions are unchanged. |
 
 ### Additional observations during repair verification
 
@@ -321,7 +321,13 @@ Branch: `codex/fresh-install-uat-fixes`; baseline `cb8335cf8d`. Tracking: TASK-1
 - **UAT-019 — P3:** Select Alice's existing note in `/notes`. The editor opens, but two `GET /api/v1/notes/<id>/neighbors` requests return403, missing `notes.graph.read`. An ordinary note-open should not eagerly request unavailable graph data or retry a denied capability. Preserve the permission boundary and expose the unavailable state honestly.
 - Development hot reload temporarily reset browser UI references/provider selection and emitted an Ant Design unconnected-form warning. Refreshing and selecting the model again recovered. Treat the warning as unconfirmed outside hot reload; do not label it a stable product regression without reproduction.
 
-QA closure checkpoint: combined changed/new frontend regressions **487 passed across 41 suites**; combined setup/provider/RAG Python regressions **248 passed**. Bandit on all six touched Python production modules reports **zero findings**. ESLint across 92 touched frontend files reports **zero errors** and 1,086 warnings. Frontend `tsc --noEmit --incremental false` reports 90 diagnostics, exactly matching a compiler-host baseline overlay of `cb8335cf8d` (**zero additions/removals**). These pre-existing presentation/prompt/E2E errors are not a passing typecheck. The initial baseline overlay exceeded Node's 4 GiB heap; the 8 GiB rerun completed. Notes offline/denied-reconnect follow-up verification is pending separately.
+Final verification: combined changed/new frontend regressions **488 passed across 41 suites**; combined setup/provider/RAG Python regressions **248 passed**. Bandit on all six touched Python production modules reports **zero findings**. ESLint across 92 touched frontend files reports **zero errors** and 1,086 warnings. Frontend `tsc --noEmit --incremental false` reports 90 diagnostics, exactly matching a compiler-host baseline overlay of `cb8335cf8d` (**zero additions/removals**). These pre-existing presentation/prompt/E2E errors are not a passing typecheck. The initial baseline overlay exceeded Node's 4 GiB heap; the 8 GiB rerun completed. Notes offline/denied-reconnect follow-ups pass their 21-test focused sweep and are included in the final combined frontend run.
+
+Independent review and subsequent re-review closed the identified integration gaps: scoped handoff consumption, legacy cookie-auth handoff compatibility, normal-success milestone producers, Notes policy identity races, citation-disabled context preservation, raw candidate score preservation, and Notes offline/reconnect/cache handling. The repair pass has no remaining actionable review finding.
+
+Validation logs retained locally: `/private/tmp/uat-repairs-vitest-final-verified.log`, `/private/tmp/uat-repairs-pytest-citation-final.log`, `/private/tmp/bandit_uat_repairs_final.json`, `/private/tmp/uat-repairs-typecheck-final-verified.log`. Test-file manifest: `/private/tmp/uat-repair-vitest-all-final.json`. Backend coverage comprises the unified first-run setup integration suite, provider registry defaults, clarification gate, streaming executor, unified pipeline, security-filter sanitizers, generation controls, and stream parity. This is targeted regression verification, not another full UAT.
+
+Runtime observation: Next development servers briefly retained stale shared-module exports during hot reload. Restarting only the two isolated UAT frontends restored normal compilation. Both UAT backends and frontends now run current repairs; production port8000 and the user's model on9099 were untouched.
 
 Adjacent-suite limits: Notes content-assist has one missing-fixture-button failure reproduced against its baseline implementation. The generation prompt-loader suite has 11 passes and one concurrent-resolver file-read-barrier failure reproduced with baseline `generation.py`. Neither suite is represented as fully passing. No fixes to unrelated fixtures/loaders are included.
 
