@@ -110,6 +110,147 @@
       "name": "uat-enospc-research-runs-recovered.json",
       "sha256": "461a886b165b7e88a74fd6dec3ed2d060fe0f2efbd09e47e41030a1ed5781457",
       "bytes": 51
+    },
+    {
+      "name": "uat048-final-alice-offline-draft.txt",
+      "sha256": "872754d5b84b46d93fc430da99d1b1bfdd26590782c7225d35ce09c9d2187de4",
+      "bytes": 13063,
+      "stage": "UAT048 intermediate retest; cross-tab failure retained"
+    },
+    {
+      "name": "uat048-final-offline-logout.txt",
+      "sha256": "d2b3d4174f69039235a8f383ac2bb8a25143374d02cbe114cc63b57489f48cbe",
+      "bytes": 10815,
+      "stage": "UAT048 intermediate retest; cross-tab failure retained"
+    },
+    {
+      "name": "uat048-final-local-clear-booleans.txt",
+      "sha256": "924ce6614e9ff9531c3a4cb893efd9fd4b979080de8ab6452a550285d572c4cb",
+      "bytes": 763,
+      "stage": "UAT048 intermediate retest; cross-tab failure retained"
+    },
+    {
+      "name": "uat048-final-notes-tab-logout-error.txt",
+      "sha256": "656fb0e08b7e7d75496f481652c19849b88f05df01034d351ba3530097839127",
+      "bytes": 662,
+      "stage": "UAT048 intermediate retest; cross-tab failure retained"
+    },
+    {
+      "name": "uat048-final-bob-notes.txt",
+      "sha256": "d3fe2488a7c84e693e31574a29205df6b389ff8c8c6ac6ffbde849413277862a",
+      "bytes": 11553,
+      "stage": "UAT048 intermediate retest; cross-tab failure retained"
+    },
+    {
+      "name": "uat048-final-alice-recovered.txt",
+      "sha256": "7663e584fc7646dd0614e3661d2ecb21c23cc13af62398b978bbf1a6633c0dac",
+      "bytes": 13971,
+      "stage": "UAT048 intermediate retest; cross-tab failure retained"
+    },
+    {
+      "name": "uat048-final-alice-persisted.txt",
+      "sha256": "ee1b68cb14740cdd42b776f127e2954885fff18eab5cae407e299e6ace0720bc",
+      "bytes": 798,
+      "stage": "UAT048 intermediate retest; cross-tab failure retained"
+    },
+    {
+      "name": "uat048-final-multi-report.md",
+      "sha256": "4744a4e65fc63c5987244f7e65c27293c07f6e61e8dede32d22607c1c0293ed9",
+      "bytes": 4018,
+      "stage": "UAT048 intermediate retest; cross-tab failure retained"
+    },
+    {
+      "name": "uat048-final-offline-logout.png",
+      "sha256": "1c97cdaa901c5a5011790371f4a3776b608d8a8cf39b966a32430bf43c950263",
+      "bytes": 90375,
+      "verification": "Visually inspected: login form empty; no credentials shown",
+      "stage": "UAT048 intermediate retest; cross-tab failure retained"
+    },
+    {
+      "name": "uat048-boundary-alice-offline-draft.txt",
+      "sha256": "eef3b85e10f71f000900b40e908724ab14df4354bfbeeaf0c167e7902f94dd80",
+      "bytes": 12335,
+      "stage": "UAT048 final targeted pass"
+    },
+    {
+      "name": "uat048-boundary-alice-sync.txt",
+      "sha256": "500ec1e1628199fd372bad818a1408a1e38202a4cc1580554ec7167359f308ae",
+      "bytes": 841,
+      "stage": "UAT048 final targeted pass"
+    },
+    {
+      "name": "uat048-boundary-alice-synced.txt",
+      "sha256": "1fb868a305bef0a0c077dca8bcb5c3adec1176dbf42364f7b986a6bde6e98426",
+      "bytes": 15086,
+      "stage": "UAT048 final targeted pass"
+    },
+    {
+      "name": "uat048-boundary-auto-login.txt",
+      "sha256": "0cdded5f8de66610beeb23125fd1d2dfc82f641b948b4245898a1c98de675451",
+      "bytes": 660,
+      "stage": "UAT048 final targeted pass"
+    },
+    {
+      "name": "uat048-boundary-bob-foreign-note.json",
+      "sha256": "10aed5b603cd23a02bee61d86056b36737ba9964afad3454da963b68bc751422",
+      "bytes": 162,
+      "stage": "UAT048 final targeted pass"
+    },
+    {
+      "name": "uat048-boundary-bob-notes.txt",
+      "sha256": "7a8d7578976a06a894ad9600a0dd67658a1a76490740acf5a2d940fb9bae7f65",
+      "bytes": 11547,
+      "stage": "UAT048 final targeted pass"
+    },
+    {
+      "name": "uat048-boundary-final-online.txt",
+      "sha256": "51b362d39a73e8afdfde8f07d87e5f73426f4ffbd204e2a251e07ef0103cd724",
+      "bytes": 725,
+      "stage": "UAT048 final targeted pass"
+    },
+    {
+      "name": "uat048-boundary-final-report.md",
+      "sha256": "ff45560f7c4ae28731c87eff3938da0d27a4ffe3fc50727cb4c6ac19bcc4cb42",
+      "bytes": 3676,
+      "stage": "UAT048 final targeted pass"
+    },
+    {
+      "name": "uat048-boundary-final-signed-out.png",
+      "sha256": "4afd2c93e303af1f56fe71dbf6f03370949dea682b398e4c8fb024183b8b2887",
+      "bytes": 11955,
+      "stage": "UAT048 final targeted pass",
+      "verification": "Visually inspected: native signed-out screen only; no private content or credentials shown"
+    },
+    {
+      "name": "uat048-boundary-final-signed-out.txt",
+      "sha256": "d02cdbfc451e812d69a2df82ca620f469442f131ae37f00562eff53250a73f13",
+      "bytes": 507,
+      "stage": "UAT048 final targeted pass"
+    },
+    {
+      "name": "uat048-boundary-final-title.txt",
+      "sha256": "919450a1434f8514a49e3c3db3cbd06d190e05ecfba41d8b7b06da650ba4b9a5",
+      "bytes": 1240,
+      "stage": "UAT048 final targeted pass"
+    },
+    {
+      "name": "uat048-boundary-notes-signed-out.png",
+      "sha256": "4afd2c93e303af1f56fe71dbf6f03370949dea682b398e4c8fb024183b8b2887",
+      "bytes": 11955,
+      "stage": "UAT048 final targeted pass",
+      "verification": "Visually inspected: native signed-out screen only; no private content or credentials shown"
+    },
+    {
+      "name": "uat048-boundary-notes-signed-out.txt",
+      "sha256": "b6147fc0f09f2123ba846e5a4853ef9f1cb50bcb1e6bcb67d93350269f4287d8",
+      "bytes": 462,
+      "stage": "UAT048 final targeted pass"
+    },
+    {
+      "name": "uat048-boundary-offline-booleans.txt",
+      "sha256": "77e366c514e766138767fd32d83da17565a9269df339c6c3b41f270f2e2d2a1b",
+      "bytes": 633,
+      "stage": "UAT048 final targeted pass"
     }
   ]
 }

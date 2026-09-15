@@ -1,0 +1,6 @@
+Project Aster is a fictional community garden used for acceptance testing.
+The garden opens on 18 December 2026.
+Mira Chen coordinates the garden.
+The garden has seven raised beds.
+Volunteers meet every Saturday at 09:30.
+The tool shed is beside the east gate.

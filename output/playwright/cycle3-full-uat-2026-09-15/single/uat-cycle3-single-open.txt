@@ -1,0 +1,11 @@
+### Browser `cycle3-single-20260915` opened with pid 97468.
+### Ran Playwright code
+```js
+await page.goto('http://127.0.0.1:18280');
+```
+### Page
+- Page URL: http://127.0.0.1:18280/
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-15T07-46-34-704Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T07-46-17-961Z.log#L1-L2

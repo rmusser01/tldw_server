@@ -1,0 +1,217 @@
+### Page
+- Page URL: http://127.0.0.1:18280/media?id=1&q=Aster
+### Snapshot
+```yaml
+- generic [ref=e1402]:
+  - generic [ref=e1404]:
+    - generic [ref=e1405]:
+      - generic [ref=e1406]:
+        - heading "Media Inspector" [level=1] [ref=e1407]
+        - generic [ref=e1408]:
+          - generic [ref=e1409]: 1 / 1
+          - button "Trash" [ref=e1410] [cursor=pointer]
+          - button "Bulk" [ref=e1414] [cursor=pointer]
+      - generic [ref=e1417]:
+        - button "Show media only" [pressed] [ref=e1418] [cursor=pointer]:
+          - generic [ref=e1419]: Media
+          - generic [ref=e1420]: "1"
+        - button "Show notes only" [ref=e1421] [cursor=pointer]:
+          - generic [ref=e1422]: Notes
+          - generic [ref=e1423]: "0"
+    - generic [ref=e1425]:
+      - generic [ref=e1426]:
+        - generic [ref=e1427]: Find media
+        - button "Collapse find media panel" [expanded] [ref=e1429] [cursor=pointer]
+      - generic [ref=e1432]:
+        - generic [ref=e1433]:
+          - generic [ref=e1434]:
+            - textbox "Search media (title/content)" [ref=e1438]: Aster
+            - button "Clear search" [ref=e1774] [cursor=pointer]
+          - button "Search syntax help" [ref=e1440] [cursor=pointer]: "?"
+        - button "Search" [active] [ref=e1441] [cursor=pointer]
+        - generic [ref=e1442]:
+          - generic [ref=e1443]:
+            - generic [ref=e1444]: Filters
+            - button "Clear all" [ref=e1448] [cursor=pointer]
+          - generic [ref=e1449]:
+            - generic [ref=e1450]: Search mode
+            - generic [ref=e1451]:
+              - button "Full-text search" [pressed] [ref=e1452] [cursor=pointer]: Full-text
+              - button "Metadata search" [ref=e1453] [cursor=pointer]: Metadata
+          - generic [ref=e1454]:
+            - generic [ref=e1455]: Sort by
+            - generic [ref=e1456] [cursor=pointer]:
+              - generic [ref=e1457]:
+                - generic "Relevance" [ref=e1458]
+                - combobox [ref=e1459]
+              - img "down" [ref=e1461]
+          - generic [ref=e1464]:
+            - generic [ref=e1465]: Date range
+            - generic [ref=e1466]:
+              - generic [ref=e1467]:
+                - text: Start date
+                - textbox "Start date" [ref=e1468]
+              - generic [ref=e1469]:
+                - text: End date
+                - textbox "End date" [ref=e1470]
+          - button "Advanced search" [ref=e1472] [cursor=pointer]
+          - generic [ref=e1476] [cursor=pointer]:
+            - checkbox "Favorites only" [ref=e1477]
+            - generic [ref=e1480]: Favorites only
+          - generic [ref=e1481]:
+            - button "Media types" [ref=e1482] [cursor=pointer]
+            - generic [ref=e1488] [cursor=pointer]:
+              - checkbox "Filter by Document" [ref=e1489]
+              - generic [ref=e1490]: Document
+          - button "Keywords" [ref=e1492] [cursor=pointer]
+          - generic [ref=e1497]:
+            - generic [ref=e1498]: Exclude keywords
+            - generic [ref=e1500]:
+              - generic [ref=e1501]:
+                - generic: Exclude keyword
+                - combobox "Exclude keyword" [ref=e1503]
+              - img "down" [ref=e1505]
+            - generic [ref=e1508]: Use excluded keywords to remove items containing those terms.
+            - generic [ref=e1509]: 0 exclude keyword suggestions available
+        - generic [ref=e1510]:
+          - generic [ref=e1511]:
+            - generic [ref=e1512]: Collection
+            - combobox "Collection" [ref=e1513]:
+              - option "All items" [selected]
+          - paragraph [ref=e1514]: Create collections from bulk selection to organize related items.
+    - generic [ref=e1515]:
+      - generic [ref=e1517]:
+        - generic [ref=e1518]:
+          - generic [ref=e1519]:
+            - generic [ref=e1520]: Results
+            - generic [ref=e1521]: 1 / 1
+          - generic [ref=e1522]:
+            - button "Standard view" [pressed] [ref=e1523] [cursor=pointer]
+            - button "Compact view" [ref=e1529] [cursor=pointer]
+        - 'button "Select media: pasted-text" [ref=e1778] [cursor=pointer]':
+          - generic [ref=e1779]:
+            - button "Add to favorites" [ref=e1784]
+            - generic [ref=e1787]:
+              - generic [ref=e1788]:
+                - generic [ref=e1789]: MEDIA
+                - generic [ref=e1790]: document
+                - generic [ref=e1791]: 1m ago
+              - generic [ref=e1792]: pasted-text
+      - generic [ref=e1547]:
+        - generic [ref=e1548]:
+          - generic [ref=e1549]: 1 of 1 results
+          - generic [ref=e1793]:
+            - generic [ref=e1794]: "Per page:"
+            - combobox "Per page:" [ref=e1795]:
+              - option "20" [selected]
+              - option "50"
+              - option "100"
+        - button "? for shortcuts" [ref=e1554] [cursor=pointer]:
+          - generic [ref=e1555]: "?"
+          - generic [ref=e1556]: for shortcuts
+    - button "Library tools" [ref=e1558] [cursor=pointer]
+  - button "Collapse sidebar" [ref=e1563] [cursor=pointer]
+  - generic [ref=e1567]:
+    - generic [ref=e1569]:
+      - generic [ref=e1570] [cursor=pointer]:
+        - checkbox "Show chapters/sections panel" [checked] [ref=e1571]
+        - generic [ref=e1572]: Show chapters/sections panel
+      - generic [ref=e1573] [cursor=pointer]:
+        - checkbox "Allow generated fallback structure" [checked] [ref=e1574]
+        - generic [ref=e1575]: Allow generated fallback structure
+      - generic [ref=e1576]: "Generated sections: 1"
+    - generic [ref=e1577]:
+      - complementary "Chapters and sections" [ref=e1578]:
+        - generic [ref=e1579]:
+          - generic [ref=e1580]: Chapters/Sections
+          - textbox "Jump to 12.5 or title" [ref=e1585]
+          - generic [ref=e1586]: Project Aster is a fictional community garden used for acceptance testing. The garden opens on 1...
+        - tree [ref=e1587]:
+          - button "1 Project Aster is a fictional community garden used for acceptance testing. The garden opens on 1..." [ref=e1591] [cursor=pointer]:
+            - generic [ref=e1592]: "1"
+            - generic [ref=e1593]: Project Aster is a fictional community garden used for acceptance testing. The garden opens on 1...
+      - generic [ref=e1594]:
+        - button "Create study pack" [ref=e1596] [cursor=pointer]
+        - generic [ref=e1597]:
+          - generic [ref=e1598]: Showing pasted-text
+          - generic [ref=e1600]:
+            - generic [ref=e1601]:
+              - button "Previous" [disabled] [ref=e1602]
+              - generic [ref=e1605]: 1/1
+              - button "Next" [disabled] [ref=e1606]
+            - heading "pasted-text" [level=3] [ref=e1609]
+            - generic [ref=e1610]:
+              - button "Chat with this media" [ref=e1611] [cursor=pointer]
+              - button "Analyze" [ref=e1614] [cursor=pointer]
+              - button "Actions" [ref=e1618] [cursor=pointer]
+          - generic [ref=e1624]:
+            - generic [ref=e1625]:
+              - generic [ref=e1626]: 43 Words
+              - generic [ref=e1630]: 1 min read
+              - generic "Reading progress" [ref=e1631]: 0% read
+              - generic [ref=e1632]: "Chunking: Completed"
+              - generic [ref=e1633]: "Vector: Pending"
+            - button "Metadata details Show" [ref=e1635] [cursor=pointer]:
+              - generic [ref=e1636]: Metadata details
+              - generic [ref=e1637]: Show
+            - generic [ref=e1639]:
+              - generic [ref=e1640]:
+                - generic: Add keywords...
+                - combobox [ref=e1642]
+              - img "down" [ref=e1644]
+            - generic [ref=e1647]:
+              - generic [ref=e1648]:
+                - button "Content" [ref=e1649] [cursor=pointer]
+                - generic [ref=e1653]:
+                  - generic [ref=e1654]: Chars 0-260
+                  - generic [ref=e1655] [cursor=pointer]:
+                    - generic [ref=e1656]:
+                      - generic "Auto" [ref=e1657]
+                      - combobox "Display mode" [ref=e1658]
+                    - img "down" [ref=e1660]
+                  - group "Text size" [ref=e1663]:
+                    - button "Text size S" [ref=e1664] [cursor=pointer]: S
+                    - button "Text size M" [pressed] [ref=e1665] [cursor=pointer]: M
+                    - button "Text size L" [ref=e1666] [cursor=pointer]: L
+                  - button "Edit content" [ref=e1667] [cursor=pointer]
+                  - button "Find in content" [ref=e1670] [cursor=pointer]
+              - region "Media content" [ref=e1677]:
+                - paragraph [ref=e1797]: Project Aster is a fictional community garden used for acceptance testing. The garden opens on 18 December 2026. Mira Chen coordinates the garden. The garden has seven raised beds. Volunteers meet every Saturday at 09:30. The tool shed is beside the east gate.
+            - generic [ref=e1680]:
+              - generic [ref=e1681]:
+                - button "Analysis" [ref=e1682] [cursor=pointer]
+                - generic [ref=e1686]:
+                  - button "Generate" [ref=e1687] [cursor=pointer]
+                  - button "Send analysis to chat" [ref=e1691] [cursor=pointer]
+                  - button "Copy analysis" [ref=e1695] [cursor=pointer]
+                  - button "Edit analysis" [ref=e1699] [cursor=pointer]
+              - generic [ref=e1703]:
+                - generic [ref=e1704]:
+                  - generic [ref=e1705]: Analysis
+                  - generic [ref=e1706] [cursor=pointer]:
+                    - generic [ref=e1707]:
+                      - generic "Analysis" [ref=e1708]
+                      - combobox "Analysis" [ref=e1709]
+                    - img "down" [ref=e1711]
+                - generic [ref=e1714]:
+                  - generic [ref=e1715]:
+                    - generic [ref=e1716]: Analysis
+                    - button "Copy analysis to clipboard" [ref=e1718] [cursor=pointer]
+                  - generic [ref=e1722]: "**Overview** - **Project Aster** is a **fictional community garden** used for **acceptance testing**. **Opening** - The garden opens on **18 December 2026**. **Coordination** - **Mira Chen** coordinates the garden. **Garden Layout** - The garden has **seven raised beds**. **Volunteer Meetings** - Volunteers meet every **Saturday** at **09:30**. **Tool Shed Location** - The **tool shed** is beside the **east gate**."
+            - generic [ref=e1723]:
+              - button "Statistics" [ref=e1724] [cursor=pointer]
+              - generic [ref=e1729]:
+                - generic [ref=e1730]:
+                  - generic [ref=e1731]: Words
+                  - generic [ref=e1732]: "43"
+                - generic [ref=e1733]:
+                  - generic [ref=e1734]: Characters
+                  - generic [ref=e1735]: "260"
+                - generic [ref=e1736]:
+                  - generic [ref=e1737]: Paragraphs
+                  - generic [ref=e1738]: "1"
+            - button "Metadata" [ref=e1740] [cursor=pointer]
+            - button "Document Intelligence" [ref=e1745] [cursor=pointer]
+            - button "Version History" [ref=e1751] [cursor=pointer]
+            - button "Delete item" [ref=e1761] [cursor=pointer]
+```

@@ -1,0 +1,66 @@
+### Page
+- Page URL: http://127.0.0.1:18280/notes
+- Page Title: Notes | tldw
+### Snapshot
+```yaml
+- region "Note editor" [ref=f1e772]:
+  - generic [ref=f1e773]:
+    - generic [ref=f1e774]:
+      - generic [ref=f1e775]:
+        - 'heading "Snippet: Helpful AI Assistant (20260915_080249)" [level=5] [ref=f1e904]'
+        - status [ref=f1e777]: No server save status yet
+      - generic [ref=f1e905]: "Linked to conversation: Helpful AI Assistant (20260915_080249) · msg f5253553-f660-4f5a-b6ad-7bf7c8d7b9f9"
+    - generic [ref=f1e778]:
+      - button "Save note" [ref=f1e779] [cursor=pointer]:
+        - generic [ref=f1e911]: Save
+      - button "Save and start another note" [ref=f1e780] [cursor=pointer]:
+        - generic [ref=f1e916]: Save & new
+      - group "Editor mode" [ref=f1e781]:
+        - button "Edit" [pressed] [ref=f1e782] [cursor=pointer]
+        - button "Split" [ref=f1e787] [cursor=pointer]
+        - button "Preview" [ref=f1e792] [cursor=pointer]
+      - button "Create study pack" [ref=f1e798] [cursor=pointer]
+      - button "More actions" [ref=f1e799] [cursor=pointer]
+  - generic [ref=f1e805]:
+    - generic [ref=f1e812]:
+      - textbox "Note title" [ref=f1e813]:
+        - /placeholder: Title
+        - text: "Snippet: Helpful AI Assistant (20260915_080249)"
+      - button "Generate title from content" [ref=f1e814] [cursor=pointer]:
+        - generic [ref=f1e922]: Generate title
+      - button "Keyboard shortcuts" [ref=f1e815] [cursor=pointer]
+    - generic [ref=f1e818]:
+      - generic [ref=f1e819]:
+        - generic: Tags
+        - combobox "Note tags" [ref=f1e821]
+      - img "down" [ref=f1e823]
+    - generic [ref=f1e924]:
+      - button "Connections" [ref=f1e925] [cursor=pointer]
+      - button "Connections help" [ref=f1e931] [cursor=pointer]:
+        - img "question-circle" [ref=f1e932]
+    - generic [ref=f1e826]:
+      - group "Input mode" [ref=f1e827]:
+        - button "Markdown" [ref=f1e828] [cursor=pointer]
+        - button "WYSIWYG" [ref=f1e830] [cursor=pointer]
+      - generic [ref=f1e832]: Formatting
+      - button "Bold" [ref=f1e833] [cursor=pointer]
+      - button "Italic" [ref=f1e837] [cursor=pointer]
+      - button "Heading" [ref=f1e841] [cursor=pointer]
+      - button "List" [ref=f1e845] [cursor=pointer]
+      - button "Link" [ref=f1e848] [cursor=pointer]
+      - button "Attachment" [ref=f1e853] [cursor=pointer]
+      - button "Code" [ref=f1e857] [cursor=pointer]
+      - generic [ref=f1e864]: Assist
+      - button "Summarize" [ref=f1e865] [cursor=pointer]
+      - button "Expand outline" [ref=f1e866] [cursor=pointer]
+      - button "Suggest tags" [ref=f1e867] [cursor=pointer]
+    - generic [ref=f1e869]:
+      - textbox "Note content" [ref=f1e870]:
+        - /placeholder: Write your note here... (Markdown supported)
+        - text: The garden opens on 18 December 2026, and Mira Chen coordinates it.
+      - generic [ref=f1e871]: Markdown + LaTeX supported
+    - generic [ref=f1e872]:
+      - text: 12 words · 67 chars · 1 min read
+      - generic [ref=f1e873]: Version 1 · Last saved 9/15/2026, 1:06:36 AM
+      - generic [ref=f1e874]: "Origin: Saved from Chat"
+```

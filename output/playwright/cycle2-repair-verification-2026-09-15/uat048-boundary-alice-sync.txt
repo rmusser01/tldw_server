@@ -1,0 +1,14 @@
+### Result
+{"status":201,"id":"f6d2d7cd-a29a-4014-be48-b338d71633e9","title":"Alice UAT048 signed-out boundary 20260915","version":1}
+### Ran Playwright code
+```js
+await (async (page) => { const saved = page.waitForResponse(r => r.request().method() === "POST" && /\/api\/v1\/notes\/?$/.test(r.url().split("?")[0]), {timeout:25000}); await page.goto("http://127.0.0.1:18181/notes"); const response = await saved; const data = await response.json(); return {status:response.status(),id:data.id,title:data.title,version:data.version}; })(page);
+```
+### Open tabs
+- 0: [](http://127.0.0.1:18181/settings/tldw)
+- 1: (current) [Notes | tldw](http://127.0.0.1:18181/notes)
+### Page
+- Page URL: http://127.0.0.1:18181/notes
+- Page Title: Notes | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T07-25-25-356Z.log#L164-L166

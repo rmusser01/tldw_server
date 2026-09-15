@@ -1,0 +1,232 @@
+### Page
+- Page URL: http://127.0.0.1:18280/chat
+- Page Title: Helpful AI Assistant (20260915_080249)
+### Snapshot
+```yaml
+- generic [ref=f1e1]:
+  - generic [ref=f1e4]:
+    - link "Skip to main content" [ref=f1e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f1e6]:
+      - button "Expand sidebar" [ref=f1e7] [cursor=pointer]
+      - button "New Chat" [ref=f1e11] [cursor=pointer]
+      - generic [ref=f1e14]:
+        - button "Quick Ingest" [ref=f1e15] [cursor=pointer]
+        - button "Chat" [ref=f1e19] [cursor=pointer]
+        - button "Prompts" [ref=f1e22] [cursor=pointer]
+        - button "Characters" [ref=f1e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f1e31] [cursor=pointer]
+        - button "World Books" [ref=f1e35] [cursor=pointer]
+        - button "Notes" [ref=f1e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f1e42] [cursor=pointer]
+        - button "Media" [ref=f1e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f1e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f1e59] [cursor=pointer]
+        - button "Kanban" [ref=f1e65] [cursor=pointer]
+        - button "Watchlists" [ref=f1e67] [cursor=pointer]
+      - generic [ref=f1e72]:
+        - button "Open Notes Dock" [ref=f1e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f1e78] [cursor=pointer]
+        - button "Settings" [ref=f1e81] [cursor=pointer]
+    - main [ref=f1e85]:
+      - generic [ref=f1e86]:
+        - generic [ref=f1e89]:
+          - generic [ref=f1e90]:
+            - button "Expand sidebar" [ref=f1e91] [cursor=pointer]
+            - generic [ref=f1e93]:
+              - img "tldw Assistant" [ref=f1e94]
+              - generic [ref=f1e95]: tldw Assistant
+              - button "Companion Home" [ref=f1e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f1e100] [cursor=pointer]
+            - button "Untitled" [ref=f1e1018] [cursor=pointer]
+            - generic [ref=f1e1019]:
+              - generic "Saved chat. History is persisted." [ref=f1e1020]: Saved
+              - generic "Character mode is active." [ref=f1e1021]: "Character: Helpful AI Assistant"
+          - generic [ref=f1e113]:
+            - button "Search - Open command palette" [ref=f1e114] [cursor=pointer]:
+              - generic [ref=f1e118]: Search
+              - generic [ref=f1e119]: ⌘K
+            - button "New saved chat" [ref=f1e1027] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f1e1031] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f1e1032] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f1e1033] [cursor=pointer]
+            - button "Open settings" [ref=f1e133] [cursor=pointer]
+            - generic [ref=f1e145]:
+              - button "Notifications, 0 unread" [ref=f1e146] [cursor=pointer]
+              - status [ref=f1e150]: Notifications are active
+            - button "Switch to light theme" [ref=f1e151] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f1e158] [cursor=pointer]:
+              - generic [ref=f1e159]: "?"
+        - generic [ref=f1e160]:
+          - heading "Chat" [level=1] [ref=f1e1040]
+          - generic [ref=f1e1043]:
+            - paragraph [ref=f1e1044]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f1e1045]:
+              - main [ref=f1e1046]:
+                - generic [ref=f1e1047]:
+                  - generic [ref=f1e1049]:
+                    - generic [ref=f1e1050]:
+                      - generic [ref=f1e1051]:
+                        - text: Character Chat
+                        - generic [ref=f1e1052]: Helpful AI Assistant
+                      - generic [ref=f1e1053]: Conversation timeline
+                    - generic [ref=f1e1054]:
+                      - button "Switch to light theme" [ref=f1e1055] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f1e1062] [cursor=pointer]:
+                        - generic [ref=f1e1068]: Focus
+                      - button "Shortcuts" [ref=f1e1069] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f1e1073]
+                  - log "Chat messages" [ref=f1e1075]:
+                    - generic [ref=f1e1077]:
+                      - article "System message 1 of 5" [ref=f1e1078]:
+                        - generic [ref=f1e1084]:
+                          - generic [ref=f1e1086]:
+                            - generic [ref=f1e1087]: System prompt
+                            - generic [ref=f1e1088]: • 1:02 AM
+                          - paragraph [ref=f1e1090]: You are a helpful AI assistant.
+                          - generic [ref=f1e1091]:
+                            - generic [ref=f1e1092]:
+                              - generic [ref=f1e1093]: Was this helpful?
+                              - generic [ref=f1e1094]:
+                                - button "Helpful" [ref=f1e1095] [cursor=pointer]
+                                - button "Not helpful" [ref=f1e1098] [cursor=pointer]
+                                - button "More feedback" [ref=f1e1101] [cursor=pointer]
+                            - button "More actions" [ref=f1e1107] [cursor=pointer]: •••
+                      - article "User message 2 of 5" [ref=f1e1108]:
+                        - generic [ref=f1e1111]:
+                          - generic [ref=f1e1113]:
+                            - generic [ref=f1e1114]: You
+                            - generic [ref=f1e1115]: • 1:02 AM
+                          - paragraph [ref=f1e1117]: "Chat with this media: pasted-text Project Aster is a fictional community garden used for acceptance testing. The garden opens on 18 December 2026. Mira Chen coordinates the garden. The garden has seven raised beds. Volunteers meet every Saturday at 09:30. The tool shed is beside the east gate."
+                          - button "More actions" [ref=f1e1120] [cursor=pointer]: •••
+                      - article "Assistant message 3 of 5" [ref=f1e1124]:
+                        - generic [ref=f1e1130]:
+                          - generic [ref=f1e1132]:
+                            - generic [ref=f1e1133]: Helpful AI Assistant
+                            - generic [ref=f1e1134]: • 1:03 AM
+                          - generic [ref=f1e1136]:
+                            - paragraph [ref=f1e1376]: "Got it. I can chat using the Project Aster details you provided:"
+                            - list [ref=f1e1138]:
+                              - listitem [ref=f1e1377]:
+                                - strong [ref=f1e1378]: Project
+                                - text: is a fictional community garden for acceptance testing.
+                              - listitem [ref=f1e1379]:
+                                - text: It
+                                - strong [ref=f1e1380]: opens on 18 December 2026
+                                - text: .
+                              - listitem [ref=f1e1381]:
+                                - strong [ref=f1e1382]: Mira Chen
+                                - text: coordinates the garden.
+                              - listitem [ref=f1e1383]:
+                                - text: There are
+                                - strong [ref=f1e1384]: seven raised beds
+                                - text: .
+                              - listitem [ref=f1e1385]:
+                                - strong [ref=f1e1386]: Volunteers meet every Saturday at 09:30
+                                - text: .
+                              - listitem [ref=f1e1387]:
+                                - text: The
+                                - strong [ref=f1e1388]: tool shed is beside the east gate
+                                - text: .
+                            - paragraph [ref=f1e1389]: What would you like to do with this? For example, I can help draft an announcement, create a volunteer schedule, write acceptance-test questions, or roleplay a conversation about the garden.
+                          - generic [ref=f1e1152]:
+                            - generic [ref=f1e1153]:
+                              - generic [ref=f1e1154]: Was this helpful?
+                              - generic [ref=f1e1155]:
+                                - button "Helpful" [ref=f1e1156] [cursor=pointer]
+                                - button "Not helpful" [ref=f1e1159] [cursor=pointer]
+                                - button "More feedback" [ref=f1e1162] [cursor=pointer]
+                            - button "More actions" [ref=f1e1168] [cursor=pointer]: •••
+                      - article "User message 4 of 5" [ref=f1e1169]:
+                        - generic [ref=f1e1172]:
+                          - generic [ref=f1e1174]:
+                            - generic [ref=f1e1175]: You
+                            - generic [ref=f1e1176]: • 1:03 AM
+                          - paragraph [ref=f1e1178]: When does the garden open, and who coordinates it? Answer in one sentence.
+                          - button "More actions" [ref=f1e1181] [cursor=pointer]: •••
+                      - article "Assistant message 5 of 5" [ref=f1e1185]:
+                        - generic [ref=f1e1191]:
+                          - generic [ref=f1e1193]:
+                            - generic [ref=f1e1194]: Helpful AI Assistant
+                            - generic [ref=f1e1195]: • 1:03 AM
+                          - paragraph [ref=f1e1390]: The garden opens on 18 December 2026, and Mira Chen coordinates it.
+                          - generic [ref=f1e1199]:
+                            - generic [ref=f1e1200]:
+                              - generic [ref=f1e1201]: Was this helpful?
+                              - generic [ref=f1e1202]:
+                                - button "Helpful" [ref=f1e1203] [cursor=pointer]
+                                - button "Not helpful" [ref=f1e1206] [cursor=pointer]
+                                - button "More feedback" [ref=f1e1209] [cursor=pointer]
+                            - button "More actions" [ref=f1e1215] [cursor=pointer]: •••
+                  - generic [ref=f1e1216]:
+                    - generic [ref=f1e1217]: Composer
+                    - button "Scroll to latest messages" [ref=f1e1219] [cursor=pointer]
+                    - generic [ref=f1e1228]:
+                      - button [aria-hidden] [ref=f1e1229]
+                      - button [aria-hidden] [ref=f1e1230]
+                      - generic [ref=f1e1231]:
+                        - generic [ref=f1e1233]:
+                          - button "Hide composer options" [expanded] [ref=f1e1234] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f1e1239]
+                          - generic [ref=f1e1240]:
+                            - button "Improve prompt" [ref=f1e1243] [cursor=pointer]
+                            - generic [ref=f1e1248]:
+                              - button "Send message" [ref=f1e1249] [cursor=pointer]:
+                                - generic [ref=f1e1250]: Send
+                              - button "Open message delivery options" [ref=f1e1255] [cursor=pointer]
+                        - generic [ref=f1e1260]:
+                          - generic [ref=f1e1262]:
+                            - group "Mode and context controls" [ref=f1e1263]:
+                              - button "Modes" [ref=f1e1264] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f1e1271] [cursor=pointer]':
+                                - generic [ref=f1e1272]:
+                                  - generic [ref=f1e1273]: MCP
+                                  - generic [ref=f1e1274]: None
+                              - button "Search & Context" [ref=f1e1277] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f1e1282] [cursor=pointer]:
+                                - generic [ref=f1e1285]: Prompt
+                              - button "Helpful AI Assistant" [ref=f1e1286] [cursor=pointer]
+                              - button "Role-play setup" [ref=f1e1291] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f1e1298] [cursor=pointer]
+                            - group "Run input controls" [ref=f1e1304]:
+                              - button "OpenUI" [ref=f1e1305] [cursor=pointer]
+                              - button "Start dictation" [ref=f1e1311] [cursor=pointer]
+                              - generic [ref=f1e1315]:
+                                - button "Attach image" [ref=f1e1317] [cursor=pointer]
+                                - button "More attachments" [ref=f1e1321] [cursor=pointer]
+                              - button "More tools" [ref=f1e1324] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f1e1327] [cursor=pointer]:
+                                - generic [ref=f1e1331]: Chat Settings
+                          - generic "Active context" [ref=f1e1332]:
+                            - button "LLaMa.cpp / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf" [ref=f1e1334] [cursor=pointer]:
+                              - generic "Provider status" [ref=f1e1338]: Healthy
+                            - button "Character Helpful AI Assistant" [ref=f1e1339] [cursor=pointer]:
+                              - generic [ref=f1e1340]: Character
+                              - generic [ref=f1e1341]: Helpful AI Assistant
+                            - 'generic "Character context: Included" [ref=f1e1342]':
+                              - generic [ref=f1e1343]: Character context
+                              - generic [ref=f1e1344]: Included
+                            - button "Chat 5 messages" [ref=f1e1345] [cursor=pointer]:
+                              - generic [ref=f1e1346]: Chat
+                              - generic [ref=f1e1347]: 5 messages
+                            - button "Configure context window size" [ref=f1e1349] [cursor=pointer]:
+                              - generic [ref=f1e1350]: 252 + ~0 = 252 tokens
+                            - button "Saved" [ref=f1e1352] [cursor=pointer]
+                            - button "Advanced controls" [ref=f1e1354] [cursor=pointer]
+                        - status [ref=f1e1358]:
+                          - generic [ref=f1e1359]: Add expression images for Helpful AI Assistant.
+                          - generic [ref=f1e1360]:
+                            - link "Edit expressions" [ref=f1e1361] [cursor=pointer]:
+                              - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=3
+                            - button "Dismiss expression image setup" [ref=f1e1362] [cursor=pointer]: Dismiss
+              - generic [ref=f1e1364]:
+                - button "Restore context sidechannel" [ref=f1e1365] [cursor=pointer]:
+                  - generic [ref=f1e1369]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f1e1370]:
+                - button "Restore runtime sidechannel" [ref=f1e1371] [cursor=pointer]:
+                  - generic [ref=f1e1372]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f1e471] [cursor=pointer]
+  - alert [ref=f1e475]: Chat
+```

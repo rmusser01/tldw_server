@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-15 07:25'
+updated_date: '2026-09-15 08:12'
 labels:
   - uat
   - testing
@@ -53,6 +53,10 @@ Cycle2 repair commits:88ecef4a56 Chat;2a76d5ac81 Notes;6bbe8bda64 Prompt;4566479
 Continuation2026-09-15T07:22UTC:052 repaired/reviewed/real persistence+Notes/card exports+review verified and committed26f35ae81d;055Study warning repaired/reviewed/live0console and committed2651047438.047disconnect privatepolling,053Buddy passive errors and054implicit feedback now targeted live pass.048multi offlineLogout final live check underway sequentially. Parent166shared+145web regressions pass; final unchanged-baseline typecheck in progress. Preserve targeted evidence in output/playwright/cycle2-repair-verification-2026-09-15; new full fresh acceptance pending.
 
 Reviewed auth/passive activity fixes committed7dc8db2efb. Current product code freeze2651047438+7dc8db2efb (latestHEAD7dc8db2efb); only048live pending. Both cycle3 profile audits confirm users.dbabsent,0600privateconfig, zero test/mock/provider env overrides, RAGinheritsconfiguredChat and visibleprovider setup required. Ten follow-up findings046-055 recorded; original full matrix remains awaiting new run.
+
+Alltargetedrepairs nowimplemented/reviewed with048newdraftcross-taboffline→reconnect→Bobisolation→AlicePOST201sync andBobforeignGET404passing; static signedouttitlelastvisualprobe underway. Productfreeze d40e17dc81 forcycle3. Begin newempty profileinitialization with /private/tmp/tldw-cycle3-uat-launch.mjs; APIs18200/18201, UIs18280/18281 sequential. Fullnamedjourneys+sharedworkflows real9099; no mocks/skips/workarounds count aspasses. Trackeverynewfinding beforefixing; fullfreshnotyetaccepted.
+
+Cycle3 fresh single setup/provider discovery/first chat passes on d40e17dc81. Source ingest with real analysis succeeds50s, content search and Media-to-Chat handoff pass. New findings056-063 recorded in tracker;055 expanded to Manage deprecation,058 includes Flashcards. First saved Chat duplicates its first pair into an extra conversation and silently changes mode062; actual both replies persist. Note/backlink and reviewed Chat-derived Flashcard succeed, Good review persists1 repetition/version2/10-minute due. Frozen matrix continues before repairs.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

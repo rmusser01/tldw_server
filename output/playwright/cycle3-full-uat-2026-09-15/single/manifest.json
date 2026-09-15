@@ -1,0 +1,166 @@
+{
+  "scope": "In-progress cycle 3 single-user UAT evidence; contains successes and open findings, not full acceptance",
+  "productRevision": "d40e17dc81",
+  "sourceInventoryCapturedAt": "2026-09-15T08:15:17.394Z",
+  "selection": "Top-level /private/tmp uat-cycle3-single-* files with .json/.txt/.png extensions present at capture, plus uat056-ingest-late-validation.txt, uat055-cycle3-manage-console.txt, and uat062-first-saved-chat.txt",
+  "verification": {
+    "privateRuntimeManifestsScanned": 2,
+    "knownCredentialValuesChecked": 28,
+    "knownCredentialMatches": 0,
+    "authValuePatternMatches": 0,
+    "pngsVisuallyInspected": 1
+  },
+  "files": [
+    {
+      "name": "uat-cycle3-single-biology-saved.txt",
+      "bytes": 14405,
+      "sha256": "92c7c06a205790f0a67899127b936d0be2e84c9f5ab2cd83a3d0bf7a05f95952",
+      "sourceModifiedAt": "2026-09-15T08:13:22.498Z"
+    },
+    {
+      "name": "uat-cycle3-single-card-answer.txt",
+      "bytes": 2797,
+      "sha256": "92c472303243f132e3d2f19e8d7f7d231d4ec1add8dffa08491d8babb5366444",
+      "sourceModifiedAt": "2026-09-15T08:12:01.052Z"
+    },
+    {
+      "name": "uat-cycle3-single-card-review-dialog.txt",
+      "bytes": 924,
+      "sha256": "5bbee244c5e7b82dd1907c47438a94b2e2aeff8a6761fcff381dc204cfb0dd2d",
+      "sourceModifiedAt": "2026-09-15T08:09:51.253Z"
+    },
+    {
+      "name": "uat-cycle3-single-chat-final-requests.txt",
+      "bytes": 37470,
+      "sha256": "6dca1991bca8b06569567ea23df5517223b6c673ef41e4ec93c34ccc8854f937",
+      "sourceModifiedAt": "2026-09-15T08:04:27.982Z"
+    },
+    {
+      "name": "uat-cycle3-single-chat-requests.txt",
+      "bytes": 35033,
+      "sha256": "455da274713ce5b4a9687fc639fc863bd4a67979d3eec6070b6ec464a0a467d6",
+      "sourceModifiedAt": "2026-09-15T08:03:34.610Z"
+    },
+    {
+      "name": "uat-cycle3-single-extra-chat-server.json",
+      "bytes": 2061,
+      "sha256": "e1edc5b87a715c625fb019b7d411ca40f313c3970370f39c805c33c97524bb4d",
+      "sourceModifiedAt": "2026-09-15T08:05:10.851Z"
+    },
+    {
+      "name": "uat-cycle3-single-first-chat.json",
+      "bytes": 247,
+      "sha256": "82a11fdac74c931134eee1e0b5a26b4aca6e815354b7a05c78c466c536ceedca",
+      "sourceModifiedAt": "2026-09-15T07:58:04.083Z"
+    },
+    {
+      "name": "uat-cycle3-single-flashcards-reviewed-server.json",
+      "bytes": 1598,
+      "sha256": "63f713baff98dd7ae93fd0d7ca4b65cc91c0c0e6f6f3c3c265832c3a01e7917e",
+      "sourceModifiedAt": "2026-09-15T08:12:15.675Z"
+    },
+    {
+      "name": "uat-cycle3-single-flashcards-server.json",
+      "bytes": 1552,
+      "sha256": "5564eaa1429bf66788905720ef28da885a65f66bd015b41f0ff3970d41b7c085",
+      "sourceModifiedAt": "2026-09-15T08:10:27.774Z"
+    },
+    {
+      "name": "uat-cycle3-single-ingest-complete.txt",
+      "bytes": 2437,
+      "sha256": "064a571d5f7918e461bcba35df1fb0fae68ebcf3ad5142f0d9914526812cfb04",
+      "sourceModifiedAt": "2026-09-15T08:00:46.250Z"
+    },
+    {
+      "name": "uat-cycle3-single-ingest-requests.txt",
+      "bytes": 20300,
+      "sha256": "e486fed04f62e214adb8cf60a44f27f8ed21950f19c96bb60864888d32513cda",
+      "sourceModifiedAt": "2026-09-15T07:59:58.213Z"
+    },
+    {
+      "name": "uat-cycle3-single-media-source.png",
+      "bytes": 129782,
+      "sha256": "0d30d1e337e3b3ead45f3a368d6b1faccf9efeb0af309377551d8767673e1936",
+      "sourceModifiedAt": "2026-09-15T08:01:26.239Z",
+      "verification": "Visually inspected: fictional Aster source and Media analysis; raw Markdown visible; no credentials shown"
+    },
+    {
+      "name": "uat-cycle3-single-media-source.txt",
+      "bytes": 11300,
+      "sha256": "7bd8fb99fb13f409a3c5f030b3453bd507317950d44753edc78ce20c571a4c68",
+      "sourceModifiedAt": "2026-09-15T08:01:29.644Z"
+    },
+    {
+      "name": "uat-cycle3-single-note-backlink.txt",
+      "bytes": 15417,
+      "sha256": "1675e91b0f03f9b7acf634bead97b18178f863b1a1334c274858929cfe6a7e95",
+      "sourceModifiedAt": "2026-09-15T08:08:11.541Z"
+    },
+    {
+      "name": "uat-cycle3-single-note-open.txt",
+      "bytes": 3142,
+      "sha256": "28a95e1f4fa27763f28d4649b9bad21d21abf4bd7b96d19562fcc135fa6f1f44",
+      "sourceModifiedAt": "2026-09-15T08:07:40.119Z"
+    },
+    {
+      "name": "uat-cycle3-single-note-save-requests.txt",
+      "bytes": 46090,
+      "sha256": "1cb17d03f57dc6025f79cbf2d60102e7a04f1f79c149d3b092d8797690b84928",
+      "sourceModifiedAt": "2026-09-15T08:06:40.829Z"
+    },
+    {
+      "name": "uat-cycle3-single-note-save.json",
+      "bytes": 233,
+      "sha256": "5c01879edd85d514992b90ca6af53e14518864639e2d36583d5b9b694c3b1b05",
+      "sourceModifiedAt": "2026-09-15T08:07:19.514Z"
+    },
+    {
+      "name": "uat-cycle3-single-notes-start.txt",
+      "bytes": 12638,
+      "sha256": "c38c443478d415a3a9fae868ac165c9c9b621c8c42f1bd31f12901d49c8fe161",
+      "sourceModifiedAt": "2026-09-15T08:12:39.232Z"
+    },
+    {
+      "name": "uat-cycle3-single-open.txt",
+      "bytes": 352,
+      "sha256": "51d3b95ba361f85f3bb7633536f8f050b613f4699c9e05c5ecd2c850199f9466",
+      "sourceModifiedAt": "2026-09-15T07:46:34.722Z"
+    },
+    {
+      "name": "uat-cycle3-single-original-chat-server.json",
+      "bytes": 3464,
+      "sha256": "620f521451af8792935c1c6a9442579a7859d92b954830f396d67c517d9db35a",
+      "sourceModifiedAt": "2026-09-15T08:05:07.369Z"
+    },
+    {
+      "name": "uat-cycle3-single-source.txt",
+      "bytes": 261,
+      "sha256": "5ad28e0cd4091ba063b7856104622f976110129a09e2f4523540f226386b9793",
+      "sourceModifiedAt": "2026-09-15T07:30:05.456Z"
+    },
+    {
+      "name": "uat-cycle3-single-study-reloaded.txt",
+      "bytes": 7558,
+      "sha256": "d1e437911f21544a31466f1a22a8ad1b8074dbf3bf234dcf3abf27029038aec9",
+      "sourceModifiedAt": "2026-09-15T08:12:12.572Z"
+    },
+    {
+      "name": "uat055-cycle3-manage-console.txt",
+      "bytes": 283,
+      "sha256": "546a8d0ea984a5c109f0cc01504742a44448be4702aa524f39bfc0d976788bfe",
+      "sourceModifiedAt": "2026-09-15T08:11:40.124Z"
+    },
+    {
+      "name": "uat056-ingest-late-validation.txt",
+      "bytes": 5421,
+      "sha256": "a0b27f1d716aa3ad2b4a08b55cbf8ef0b04b56f3812ddab45dc209ac9604e461",
+      "sourceModifiedAt": "2026-09-15T07:58:42.057Z"
+    },
+    {
+      "name": "uat062-first-saved-chat.txt",
+      "bytes": 12983,
+      "sha256": "3293ed7b3d2253088c076d7a3d96f7130fc3bbf186b7b71a8695c3076587c3c3",
+      "sourceModifiedAt": "2026-09-15T08:05:58.049Z"
+    }
+  ]
+}

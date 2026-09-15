@@ -16,7 +16,7 @@
 
 The user requested an ongoing UAT → review → fix loop until a complete fresh single/multi run encounters no issues. Repairs for UAT-020–045 are in progress under TASK-13260.5–.11 and `IMPLEMENTATION_PLAN_uat_cycle_2.md`. The findings below remain open pending integrated review and real-runtime verification; targeted tests do not replace the next full run.
 
-Targeted follow-up found ten additional issues046–055 (twoP1, sixP2, twoP3). All except048 now have targeted live verification;048 multi-user offline logout is being retested. Recent committed fixes include052 `26f35ae81d` and055 `2651047438`. Parent verification after the follow-ups:166shared and145web tests pass. Final TypeScript check retains the same90 baseline diagnostic signatures with none added/removed; it does not pass outright. [Retained targeted evidence](../../output/playwright/cycle2-repair-verification-2026-09-15/README.md) is credential-scanned and hash-indexed. Full fresh acceptance remains pending.
+Targeted follow-up found ten additional issues046–055 (twoP1, sixP2, twoP3). All now have targeted live verification, including the remaining cross-tab logout repair in `d40e17dc81`. Recent committed fixes include052 `26f35ae81d`,055 `2651047438` and private activity handling `7dc8db2efb`. Parent verification after the follow-ups:166shared,155web and59app/login controls pass (overlapping suites are not summed). Final TypeScript check retains the same90 baseline diagnostic signatures with none added/removed; it does not pass outright. [Retained targeted evidence](../../output/playwright/cycle2-repair-verification-2026-09-15/README.md) is credential-scanned and hash-indexed. Full fresh acceptance remains pending.
 
 - **Notes/account state:** Recent history, pinned IDs and offline drafts use verified server/account storage scopes. Notes/login titles and manual-key Disconnect are repaired. Review found offline transport and delayed A→B→A detail races; guarded transport, expected-user API checks, cancellation and stale-result handling now cover them. Final checks: 105 Notes/policy/worker tests, 52 web transport tests and 58 backend tests passed. Live account-switch verification remains pending.
 - **Chat:** Repairs address neutral sampling rejection before provider dispatch, first-turn Saved persistence, retained server message/conversation linkage on failure, and explicit character context replacement. Agent verification: 69 backend and 152 frontend tests; independent parent repeats: 69 backend and 140 frontend tests. Production diff reviewed without remaining findings.
@@ -54,7 +54,7 @@ Combined parent verification: 60 backend boundary regressions passed; Bandit sca
 - Expected: clear the local session, preserve Alice's draft under Alice's storage scope, and recover sign-in cleanly when online again.
 - Actual: Settings shows a `Failed to fetch (POST /api/v1/auth/logout)` runtime error, with a separate uncached PageHelpModal chunk failure. The other Notes tab navigates to a browser error page. Credential/draft isolation checks continue after reconnect; these errors do not count as passing logout UX.
 - Evidence: `/private/tmp/uat-round2-offline-logout.txt` and the multi-user agent's saved snapshot.
-- Status: **partially repaired; cross-tab navigation still fails** under TASK-13260.5. Repair committed in `7dc8db2efb` preserves local logout and uses a bounded warning for unavailable remote revocation. The fresh targeted retest shows Settings Logout clearing the session and rendering Login Required/login form without a runtime overlay or optional Help chunk error. However, the newly active Notes tab (created07:24:46UTC and holding the new queued draft) automatically navigates to a browser error page while offline. This was part of the original finding and remains open; it is not dismissed as an expected offline limitation. Evidence: `/private/tmp/uat048-final-alice-offline-draft.txt`, `/private/tmp/uat048-final-offline-logout.txt`; redirect trace and account/draft recovery checks are in progress.
+- Status: **targeted live pass**, repairs `7dc8db2efb` and `d40e17dc81`, TASK-13260.5. The intermediate retest fixed the Settings overlay but retained the other-tab browser error; that failed evidence remains in `uat048-final-multi-report.md`. The final repair replaces protected content with an already loaded signed-out screen and defers only automatic offline navigation; stale auth completions cannot restore identity or perform another logout. Final two-tab retest: Notes stays on `/notes`, title Signed out | tldw, private draft/list/editor unmounted, no browser error, optional Help failure, or runtime overlay. Reconnect opens `/login`. Bob sees only his own note; Alice's queued draft syncs with observed POST201 (`f6d2d7cd-a29a-4014-be48-b338d71633e9`,version1), and independent Bob login200 → foreign-note GET404 → verifier logout200 confirms ownership. Offline remote revocation is not claimed. Evidence: `/private/tmp/uat048-boundary-final-report.md`, `/private/tmp/uat048-boundary-final-title.txt`, `/private/tmp/uat048-boundary-bob-foreign-note.json`.
 
 #### UAT-049 — P2: Closed Help modal can break an offline app remount
 
@@ -92,7 +92,7 @@ Combined parent verification: 60 backend boundary regressions passed; Bandit sca
 #### UAT-053 — P2: Background Buddy polling opens a blocking offline error dialog
 
 - Mode / step: single-user Chat, set the browser offline while checking optional Help loading; no Buddy action requested.
-- Expected: the shell's offline state updates and optional background polling stops quietly; Help/draft interactions remain available.
+- Expected: passive polling failures remain nonblocking with honest connection status; Help/draft interactions remain available. Credential removal separately requires polling to stop (UAT-047).
 - Actual: an unsolicited modal "Can't reach your tldw server" blocks toolbar interaction and names `GET /api/v1/buddies/attachment?client_slot=default`. The page already reports offline and offers settings. Dismissing this unrelated background error is required before continuing the intended action.
 - Evidence: `/private/tmp/uat049-overlay-current.txt`; no user Buddy request preceded this modal.
 - Status: **targeted live pass** under TASK-13260.5. Passive Buddy reads suppress only the global unavailable event; failed reads still reject and explicit GET/DELETE controls still notify. 49 tests pass across the real service/client/proxy chain in web and extension modes; independent review clear, lint no new findings. After required Chat loading completed, a33second offline observation showed no blocking dialog; notifications reported reconnecting. Evidence: `/private/tmp/uat053-buddy-final.log`, `/private/tmp/uat054-settled-offline-start.txt`, `/private/tmp/uat053-settled-offline-final.txt`. Taking the browser offline during its initial settings load still reports that active request's failure; that is not a background-polling pass or suppression.
@@ -109,6 +109,8 @@ Tooling/environment follow-up: a sandboxed Playwright CLI list operation removed
 
 Environment interruption (2026-09-15T07:06Z): simultaneous single/multi Next caches exhausted disk space. Evidence writes/npm and two research-run polls failed (HTTP500); backend log buffer reported OSError. Multi frontend80042/80047 was retired and only its generated cache removed. Disk space recovered; independent research-runs GET returned200 with runs:[] and continued UI polling recovered. No test database was removed. Evidence: `/private/tmp/uat-enospc-research-runs-recovered.json`. Remaining WebUI runs are sequential.
 
+Validation follow-up: the broader UAT048 login regression run passed58tests and exposed one stale navigation-test fixture. It directly imports the unchanged Login page, expects a superseded heading synchronously, and lacks deterministic configuration for asynchronous login-target resolution. The repaired test awaits the existing unconfigured-server redirect panel and retains target/query and hosted-login controls; final59/59parent app/login tests pass. This is a test maintenance finding, not a newly observed product failure. Evidence: `/private/tmp/uat048-parent-login-regression.log`, `/private/tmp/uat048-parent-login-final.log`; TASK-13260.5.
+
 #### UAT-055 — P3: Flashcards Study emits a deprecated List console error
 
 - Mode / step: single-user Flashcards → Study, existing recent study session and due queue.
@@ -116,6 +118,104 @@ Environment interruption (2026-09-15T07:06Z): simultaneous single/multi Next cac
 - Expected: current supported rendering without a console error from visiting Study.
 - Evidence: `/private/tmp/uat052-study-card.txt`, browser console on2026-09-15T07:13Z.
 - Status: **targeted live pass** under TASK-13260.6. RecentStudySessions uses a labeled native list with the same controls/content and state branches. 26 regressions pass; lint0; independent review clear. Fresh Flashcards navigation renders Recent study sessions and View completed session with0console errors/warnings. Evidence: `/private/tmp/uat055-study-fixed.txt`, `/private/tmp/uat055-recent-sessions-final-20260915T071600Z.log`.
+
+## Cycle 3 full fresh UAT — started 2026-09-15T07:43Z
+
+- Frozen product revision: `d40e17dc81`. New findings during this run will be recorded before another repair pass.
+- Empty profiles: `/private/tmp/tldw-onboarding-uat-cycle3-single-20260915` and `/private/tmp/tldw-onboarding-uat-cycle3-multi-20260915`; audits confirmed no users database before initialization, no test/mock/provider overrides, and blank RAG defaults inheriting Chat.
+- Both AuthNZ initializations succeeded through migration98. Only the multi-user bootstrap admin was provisioned through the documented CLI. Alice/Bob creation remains a UI acceptance step.
+- New APIs18200/18201 and WebUIs18280/18281; WebUIs run sequentially for disk space. New persistent browser profiles will contain no previous configuration or account state.
+- Existing dependencies are reused; this certifies fresh configuration/data workflows, not clean-machine dependency installation. Real llama.cpp9099 and the exact Wikipedia journey URL remain required; no substitute or mocked answer certifies that URL.
+
+| Required workflow | Single-user | Multi-user |
+| --- | --- | --- |
+| Fresh setup, provider discovery, real first Chat | PASS: blank-model discovery, selected-model validation/save, real first response200; manual key UI recovery succeeds | Pending |
+| Normal saved Chat, second turn, reload/persistence | FAIL062: both real replies persist, but first turn is duplicated in another conversation and mode switches to Character | Pending |
+| Public file ingest → content search → Chat/QA with citations | Pending | Pending |
+| Exact Wikipedia URL → search → grounded Chat | Pending | Pending |
+| Notes → generated Flashcards → save/review/reload | Functional PASS: exact five facts generate5grounded cards, all saved/linked/reviewed and persisted; UX/privacy055/058/063/064 remain | Pending |
+| Create/save/back/apply Prompt → actual request and real answer | Pending | Pending |
+| Tracked character Chat, context replacement, saved history | Pending | Pending |
+| Chat → Note/backlink and reviewed Flashcard → study | Pending | Pending |
+| Media analysis → Review → re-analysis → reload | Pending | Pending |
+| Permission-aware delete → Trash date → restore | Pending | Pending |
+| Auth/disconnect/offline logout/reconnect | Pending | Pending |
+| Admin creates Alice/Bob; owned/foreign API and browser isolation | N/A | Pending |
+
+### Cycle 3 observations
+
+Single-user setup: Chat readiness explains that provider verification/first chat is required. Blank-model Validate discovers the exact local model; selecting, saving, and validating succeeds. First-chat request154 returns200 with `Hello, it's great to meet you!` from the actual configured model, then completion157 returns200. The manual-key access screen accepts the isolated key and opens Home/first-source onboarding. Audio, advanced paths and MCP remain deferred within the documented scope. Evidence: `/private/tmp/uat-cycle3-single-first-chat.json` and browser session `cycle3-single-20260915`.
+
+#### UAT-056 — P3: Ingest review claims readiness before validating required analysis provider
+
+- Mode / step: fresh single-user Home → first source → Paste → queue260B Aster text → Configure → Standard preset → Next.
+- Expected: validate required analysis configuration before the Review step claims readiness; preserve an actionable provider choice.
+- Actual: Review displays Ready to Process, Standard · OCR + Extract + Analyze + Chunk, and enabled Start Processing. Clicking it returns to Configure, focuses the blank Analysis provider, and reports Choose an analysis provider before running ingest analysis. No ingest request was sent in this failed attempt; no stored-content failure is claimed.
+- Status: open, frozen cycle3; continue with explicit provider selection to exercise downstream steps. Evidence: review snapshot `/private/tmp/.playwright-cli/page-2026-09-15T07-57-42-450Z.yml`, `/private/tmp/uat056-ingest-late-validation.txt`.
+
+Harness observation: clicking the visually hidden Paste radio input timed out because its visible icon intercepted the pointer. Clicking the visible Paste label selected it normally. This is a locator correction, not a product defect or skipped workflow.
+
+#### UAT-057 — P3: Ingest duration estimate ignores actual analysis cost
+
+- Single-user260B document with Standard analysis/chunking reports about3seconds; actual successful run reports50seconds. The processing view changes to generic advice about large files even though this source is tiny.
+- Read-only trace confirms the estimate uses media type/file bytes/preset only, without provider/model/inference cost. Expected: avoid a precise misleading estimate for unmeasured model work, or show a defensible range/uncertainty.
+- Status: open. Evidence: same Review snapshot as056 and `/private/tmp/uat-cycle3-single-ingest-complete.txt`. Actual ingestion succeeds; no failure is inferred from duration alone.
+
+#### UAT-058 — P3: Fresh Home/setup browser title is blank
+
+- Fresh root onboarding and subsequent Companion Home have no Page Title in the browser snapshots. Direct `document.title` inspection while Home's ingestion modal is open returns an empty string.
+- Read-only trace confirms Home/setup routes, shared layouts and document shell supply no title; signed-out and several other routes own theirs separately. Expected: useful current-route title on fresh setup and Home.
+- Status: open; no prior-account title leak is claimed in this fresh browser. Session `cycle3-single-20260915`, observed08:00UTC.
+
+#### UAT-059 — P3: Disabled Reading Queue is presented as a temporary outage
+
+- After successful setup/key entry, Home correctly explains personalization is unavailable. Other dependent cards show Setup required, but Reading Queue says Temporarily unavailable / Reading queue data is temporarily unavailable.
+- No reading-list request occurred. Read-only trace: `CompanionHome/hooks.ts` initializes reading as degraded then skips fetching without personalization; `CompanionHomePage.tsx` renders that as a failed fetch without checking the prerequisite.
+- Expected: distinguish feature setup/unavailability from an actual transient request failure. Status: open. Home snapshots07:55–07:56UTC; first-ingest request inventory has no reading-list call.
+
+Single-user source control: explicit llama.cpp selection after056 starts ingest job1. Results report1succeeded/0failed/50seconds; Open in Media directly opens `/media?id=1` on the first try. Media contains the exact260characters/43words and a correct real generated summary of all six fixture facts. Full-text Aster search returns that item. Evidence: `/private/tmp/uat-cycle3-single-ingest-complete.txt`, `/private/tmp/uat-cycle3-single-media-source.txt/.png` (PNG visually inspected). Source→Chat/QA/citations remain in progress.
+
+#### UAT-060 — P3: Media analysis displays raw Markdown formatting
+
+- The real ingest analysis contains Markdown headings, bold facts and bullets. The default Media Analysis display shows literal `**Overview**` and `**Project Aster**` rather than rendered formatting; the screenshot confirms this visually.
+- Expected: readable rendered analysis by default, or a clearly labeled raw/source view. Status: open. Content is complete/correct; this is a presentation finding. Evidence: `/private/tmp/uat-cycle3-single-media-source.png`.
+
+#### UAT-061 — P3: Ingestion progress reports unconfirmed processing stages
+
+- During job1, UI snapshots show50–55% while the recorded actual job response reports20%, progress_message:process. Read-only inspection confirms an interval fabricates increasing percentages and transitions through Analyze/Store without server confirmation.
+- Expected: use actual progress or honest indeterminate activity when backend stages are unavailable. Completion remains tied to actual results and is not falsely reported in this run.
+- Status: open. Evidence: processing snapshots07:59:29–07:59:54UTC and browser response391; `QuickIngestWizardModal.tsx` interval beginning1088.
+
+#### UAT-062 — P2: First saved Chat duplicates history and silently changes to Character mode
+
+- Fresh single-user Media → Chat correctly opens `/chat` with the source in the composer, Standard chat, Saved, no character selection. First request617 sends the exact local model, save_to_db:true and no conversation/character ID. A second factual question is queued while the first response generates.
+- Both answers succeed: the first summarizes the supplied fixture; the second says the garden opens18December2026 and Mira Chen coordinates it. Independent server GET200 confirms both turns in `d77f1ba1-2de6-4fbe-b9b4-f39c50baab95`.
+- Unexpectedly, browser POST632 creates `ada6a95c-7e4b-4580-ac1b-065183de8e8b` and POST634/643 copies the first user/assistant pair there. Independent GET200 confirms the duplicate. The visible workspace changes from Standard chat to Character Chat / Assistant with no user selection; title becomes Helpful AI Assistant(timestamp), while its header says Untitled.
+- Expected: a fresh saved standard conversation has one canonical history and preserves its selected mode. Status: open; root cause under read-only investigation. No loss of the actual replies is claimed. This differs from052's existing-neutral-conversation fork.
+- Evidence: `/private/tmp/uat062-first-saved-chat.txt`, `/private/tmp/uat-cycle3-single-original-chat-server.json`, `/private/tmp/uat-cycle3-single-extra-chat-server.json`, request inventory `/private/tmp/uat-cycle3-single-chat-final-requests.txt`.
+- Harness detail: typing a newline pressed Enter and submitted the source-only first turn. The factual question was then queued through the visible Queue request control; both actual requests were inspected. No claim that the first request already contained that question.
+
+UAT-055 scope follow-up: fresh Study initially renders without the deprecated List error and truthfully offers Choose a study path with1available card. Opening Manage emits the same AntD List deprecation as a console error. The prior RecentStudySessions repair remains verified; **055 is open for the newly exercised Manage list**. Evidence: `/private/tmp/uat055-cycle3-manage-console.txt`.
+
+UAT-058 scope follow-up: fresh navigation to `/flashcards` also has an empty document title. Include this required route in the title repair rather than treating it as a Home-only issue.
+
+#### UAT-063 — P3: Loaded saved Note has conflicting save status
+
+- Open the newly Chat-derived note from its server-loaded Notes list. Header status says No server save status yet, while the footer correctly says Version1 / Last saved and Origin: Saved from Chat. The user has made no edits.
+- Expected: distinguish a saved, loaded note from a new unsaved draft and display consistent status. The artifact exists on the server; no persistence failure is claimed.
+- Status: open. Evidence: `/private/tmp/uat-cycle3-single-note-open.txt`, note `5724dbeb-4613-463f-8fbc-895e1f114ebe`.
+
+Single Chat-derived control: Save to Notes request950 returns201; Note body is exactly the visible answer, origin Saved from Chat, backlink restores the original server conversation including both real answers. Save to Flashcards requires a Question before enabling Save; the reviewed pair is independently persisted as card `72e26812-c23c-45a2-a97d-178502008af6`, linked to original conversation/reply and supporting note `661e7b26-f149-4110-a041-16744c61348e`. Evidence: `/private/tmp/uat-cycle3-single-note-save.json`, `/private/tmp/uat-cycle3-single-note-backlink.txt`, `/private/tmp/uat-cycle3-single-card-review-dialog.txt`, `/private/tmp/uat-cycle3-single-flashcards-server.json`. Study scheduling/reload remains underway.
+
+Study follow-up: Show Answer displays the correct pair. Good persists repetitions1/version2 at08:12:04.690Z with due08:22:04.690Z; browser reload shows Reviewed today1, completed session and next review in10minutes. Evidence: `/private/tmp/uat-cycle3-single-card-answer.txt`, `/private/tmp/uat-cycle3-single-study-reloaded.txt`, `/private/tmp/uat-cycle3-single-flashcards-reviewed-server.json`.
+
+#### UAT-064 — P2: Notes-to-Flashcards puts the entire Note body in the URL
+
+- Save/reload exact biology fixture, then Notes → More actions → Generate flashcards. The destination URL includes the full plaintext body in `generate_text`, plus source title/ID. The route announcer also repeats that full URL. The source arrives correctly in the form.
+- Expected: transfer owned source context without exposing the full private Note in navigation URLs/browser history; use the owned source identifier or a scoped transient handoff. This synthetic source is non-sensitive; no external disclosure is claimed. Multi-user account-switch behavior of this handoff remains to be exercised.
+- Status: open. Evidence: Notes-to-generation navigation snapshot `/private/tmp/.playwright-cli/page-2026-09-15T08-13-58-922Z.yml`, biology note `7d92dc41-0c91-469c-a246-1b414c76485d`.
+
+Single Notes→Flashcards result: exact five-fact Note saves/reloads. Generate uses blank optional provider/model inputs and real server defaults; request434 returns5correct cards with grounded verdict, verified5/refuted0/unverified0, and actual source snippets. No draft editing or verification bypass was needed. All five save to Cycle3 Biology Cards with the original Note source ID. Their Study Show Answer/Good actions finish successfully; independent server reads show each repetitions1/version3 and a10minute due interval. Reloaded Study retains the completed session. Evidence: `/private/tmp/uat-cycle3-single-generated-cards.json`, `/private/tmp/uat-cycle3-single-generated-cards-review.txt`, `/private/tmp/uat-cycle3-single-all-cards-saved-server.json`, `/private/tmp/uat-cycle3-single-all-cards-reviewed-server.json`, `/private/tmp/uat-cycle3-single-biology-study-reloaded.txt`. The action harness read each front/back but did not print its collected text; persisted pairs and the separately inspected generation draft supply the content evidence. This is functional success with recorded route/status/privacy issues, not issue-free acceptance.
 
 ## Initial-run coverage (before repairs)
 

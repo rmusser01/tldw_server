@@ -1,0 +1,47 @@
+{
+  "path": "/api/v1/chats/ada6a95c-7e4b-4580-ac1b-065183de8e8b/messages",
+  "status": 200,
+  "body": {
+    "messages": [
+      {
+        "id": "fce06985-d1a8-4ff8-84d7-fa1fb48e2dc6",
+        "conversation_id": "ada6a95c-7e4b-4580-ac1b-065183de8e8b",
+        "parent_message_id": null,
+        "sender": "user",
+        "content": "Chat with this media: pasted-text\n\nProject Aster is a fictional community garden used for acceptance testing.\nThe garden opens on 18 December 2026.\nMira Chen coordinates the garden.\nThe garden has seven raised beds.\nVolunteers meet every Saturday at 09:30.\nThe tool shed is beside the east gate.",
+        "timestamp": "2026-09-15T08:03:16.610000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": null
+      },
+      {
+        "id": "8c5de2a2-45f9-4849-bc6c-84f716b70297",
+        "conversation_id": "ada6a95c-7e4b-4580-ac1b-065183de8e8b",
+        "parent_message_id": null,
+        "sender": "assistant",
+        "content": "Got it. I can chat using the Project Aster details you provided:\n\n- **Project** is a fictional community garden for acceptance testing.  \n- It **opens on 18 December 2026**.  \n- **Mira Chen** coordinates the garden.  \n- There are **seven raised beds**.  \n- **Volunteers meet every Saturday at 09:30**.  \n- The **tool shed is beside the east gate**.\n\nWhat would you like to do with this? For example, I can help draft an announcement, create a volunteer schedule, write acceptance-test questions, or roleplay a conversation about the garden.",
+        "timestamp": "2026-09-15T08:03:16.721000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": null
+      }
+    ],
+    "total": 2,
+    "limit": 50,
+    "offset": 0,
+    "pagination": {
+      "mode": "offset",
+      "limit": 50,
+      "offset": 0,
+      "total": 2,
+      "has_more": false,
+      "next_offset": null
+    },
+    "has_more": false,
+    "next_offset": null
+  }
+}

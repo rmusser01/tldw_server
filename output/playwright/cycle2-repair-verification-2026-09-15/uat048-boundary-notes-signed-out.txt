@@ -1,0 +1,15 @@
+### Open tabs
+- 0: [](http://127.0.0.1:18181/settings/tldw)
+- 1: (current) [](http://127.0.0.1:18181/notes)
+### Page
+- Page URL: http://127.0.0.1:18181/notes
+- Console: 16 errors, 10 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f7e1]:
+  - main [ref=f7e543]:
+    - heading "Signed out" [level=1] [ref=f7e544]
+    - paragraph [ref=f7e545]: Reconnect to sign in.
+  - button "Open Next.js Dev Tools" [ref=f7e508] [cursor=pointer]
+  - alert [ref=f7e512]
+```

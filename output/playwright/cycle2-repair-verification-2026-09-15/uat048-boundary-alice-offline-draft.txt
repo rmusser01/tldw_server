@@ -1,0 +1,218 @@
+### Open tabs
+- 0: [](http://127.0.0.1:18181/settings/tldw)
+- 1: (current) [Notes | tldw](http://127.0.0.1:18181/notes)
+### Page
+- Page URL: http://127.0.0.1:18181/notes
+- Page Title: Notes | tldw
+- Console: 12 errors, 7 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f7e1]:
+  - generic [ref=f7e4]:
+    - link "Skip to main content" [ref=f7e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f7e6]:
+      - button "Expand sidebar" [ref=f7e7] [cursor=pointer]
+      - button "New Chat" [ref=f7e11] [cursor=pointer]
+      - generic [ref=f7e14]:
+        - button "Quick Ingest" [ref=f7e15] [cursor=pointer]
+        - button "Chat" [ref=f7e19] [cursor=pointer]
+        - button "Prompts" [ref=f7e22] [cursor=pointer]
+        - button "Characters" [ref=f7e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f7e31] [cursor=pointer]
+        - button "World Books" [ref=f7e35] [cursor=pointer]
+        - button "Notes" [ref=f7e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f7e42] [cursor=pointer]
+        - button "Media" [ref=f7e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f7e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f7e59] [cursor=pointer]
+        - button "Kanban" [ref=f7e65] [cursor=pointer]
+        - button "Watchlists" [ref=f7e67] [cursor=pointer]
+      - generic [ref=f7e72]:
+        - button "Open Notes Dock" [ref=f7e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f7e78] [cursor=pointer]
+        - button "Settings" [ref=f7e81] [cursor=pointer]
+    - main [ref=f7e85]:
+      - generic [ref=f7e86]:
+        - generic [ref=f7e89]:
+          - generic [ref=f7e90]:
+            - button "Expand sidebar" [ref=f7e91] [cursor=pointer]
+            - generic [ref=f7e93]:
+              - img "tldw Assistant" [ref=f7e94]
+              - generic [ref=f7e95]: tldw Assistant
+              - button "Companion Home" [ref=f7e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f7e100] [cursor=pointer]
+          - generic [ref=f7e103]:
+            - button "Search - Open command palette" [ref=f7e104] [cursor=pointer]:
+              - generic [ref=f7e108]: Search
+              - generic [ref=f7e109]: ⌘K
+            - button "Open settings" [ref=f7e110] [cursor=pointer]
+            - generic [ref=f7e122]:
+              - button "Notifications, sign-in required" [ref=f7e513] [cursor=pointer]
+              - status [ref=f7e127]: Notifications require sign in
+            - button "Switch to light theme" [ref=f7e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f7e135] [cursor=pointer]:
+              - generic [ref=f7e136]: "?"
+        - generic [ref=f7e138]:
+          - link "Skip to notes list" [ref=f7e139] [cursor=pointer]:
+            - /url: "#notes-list-region"
+          - link "Skip to editor" [ref=f7e140] [cursor=pointer]:
+            - /url: "#notes-editor-region"
+          - paragraph [ref=f7e141]: "Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs."
+          - region "Notes list" [ref=f7e142]:
+            - generic [ref=f7e143]:
+              - generic [ref=f7e144]:
+                - generic [ref=f7e145]:
+                  - generic [ref=f7e146]:
+                    - generic [ref=f7e147]: Notes
+                    - generic [ref=f7e148]: 3 total
+                  - button "New note" [ref=f7e149] [cursor=pointer]
+                - generic [ref=f7e152]:
+                  - generic [ref=f7e153]:
+                    - button "Views" [expanded] [ref=f7e155] [cursor=pointer]
+                    - generic [ref=f7e160]:
+                      - generic [ref=f7e161]:
+                        - button "Notes" [ref=f7e162] [cursor=pointer]
+                        - button "Trash" [ref=f7e164] [cursor=pointer]
+                      - generic [ref=f7e166]:
+                        - button "List" [ref=f7e167] [cursor=pointer]
+                        - button "Timeline" [ref=f7e169] [cursor=pointer]
+                        - button "Inbox" [ref=f7e171] [cursor=pointer]
+                        - button "Collection" [ref=f7e173] [cursor=pointer]
+                        - button "Graph" [ref=f7e175] [cursor=pointer]
+                      - generic [ref=f7e184]:
+                        - button "Organize" [ref=f7e185] [cursor=pointer]
+                        - button "Organize help" [ref=f7e191] [cursor=pointer]:
+                          - img "question-circle" [ref=f7e192]
+                  - generic [ref=f7e196]:
+                    - textbox "Search notes" [ref=f7e203]:
+                      - /placeholder: Search titles and contents
+                    - generic [ref=f7e205] [cursor=pointer]:
+                      - generic [ref=f7e206]:
+                        - generic "Date modified (newest first)" [ref=f7e207]
+                        - combobox "Sort notes" [ref=f7e208]
+                      - img "down" [ref=f7e210]
+                  - generic [ref=f7e213]:
+                    - button "Filters" [expanded] [ref=f7e215] [cursor=pointer]
+                    - generic [ref=f7e220]:
+                      - generic [ref=f7e221]:
+                        - button "Captured" [ref=f7e222] [cursor=pointer]
+                        - button "Search tips" [ref=f7e224] [cursor=pointer]
+                      - generic [ref=f7e226]:
+                        - generic [ref=f7e227]:
+                          - generic: Filter by tag
+                          - combobox "Filter by tag" [ref=f7e229]
+                        - img "down" [ref=f7e231]
+                      - generic [ref=f7e234]:
+                        - generic [ref=f7e235]:
+                          - button "Browse tags" [disabled] [ref=f7e236]
+                          - button "Tags help" [ref=f7e238] [cursor=pointer]:
+                            - img "question-circle" [ref=f7e239]
+                        - generic [ref=f7e243]: 1 available
+                      - generic [ref=f7e244]: For in-note search, use browser Ctrl/Cmd+F.
+                  - generic [ref=f7e245]:
+                    - generic [ref=f7e246]: Recent notes
+                    - generic [ref=f7e247]:
+                      - button "Alice UAT048 offline retest 20260915-0725" [ref=f7e248] [cursor=pointer]
+                      - button "Alice offline privacy cycle2 20260915" [ref=f7e249] [cursor=pointer]
+                      - button "Alice Cell Study fullmulti20260915" [ref=f7e250] [cursor=pointer]
+              - generic:
+                - generic:
+                  - generic [ref=f7e252]:
+                    - generic [ref=f7e253]: Results
+                    - generic [ref=f7e254]:
+                      - button "Import" [disabled] [ref=f7e255]
+                      - button "Sync folder" [disabled] [ref=f7e257]
+                      - button "Export" [disabled] [ref=f7e259]
+                  - generic [ref=f7e517]:
+                    - generic [ref=f7e518]:
+                      - generic [ref=f7e519]: Unavailable
+                      - generic [ref=f7e520]:
+                        - heading "Not connected Connect to use Notes" [level=2] [ref=f7e521]:
+                          - generic [ref=f7e522]:
+                            - generic [ref=f7e523]: Not connected
+                            - generic [ref=f7e524]: Connect to use Notes
+                        - generic [ref=f7e525]: To use Notes, first connect to your tldw server.
+                    - list [ref=f7e526]:
+                      - listitem [ref=f7e527]: Open Settings → tldw server to add your server URL.
+                    - generic [ref=f7e528]:
+                      - button "Set up server" [ref=f7e529] [cursor=pointer]
+                      - button "Retry connection" [ref=f7e530] [cursor=pointer]
+                  - generic [ref=f7e314]:
+                    - generic [ref=f7e315]: Showing 1-3 of 3
+                    - list [ref=f7e316]:
+                      - listitem "Previous Page" [ref=f7e317]:
+                        - button [disabled] [ref=f7e318]:
+                          - img "left" [ref=f7e319]
+                      - listitem "1" [ref=f7e322] [cursor=pointer]
+                      - listitem "Next Page" [ref=f7e324]:
+                        - button [disabled] [ref=f7e325]:
+                          - img "right" [ref=f7e326]
+                      - listitem [ref=f7e329]:
+                        - generic [ref=f7e330]:
+                          - generic [ref=f7e331]:
+                            - generic "20 / page" [ref=f7e332]
+                            - combobox "Page Size" [ref=f7e333]
+                          - img "down" [ref=f7e335]
+              - generic [ref=f7e531]: 1 draft(s) pending sync
+          - button "Collapse sidebar" [ref=f7e338] [cursor=pointer]
+          - region "Note editor" [ref=f7e342]:
+            - generic [ref=f7e343]:
+              - generic [ref=f7e345]:
+                - heading "New note" [level=5] [ref=f7e346]
+                - status [ref=f7e347]: No server save status yet
+              - generic [ref=f7e351]:
+                - button "Save note" [ref=f7e352] [cursor=pointer]:
+                  - generic [ref=f7e358]: Save
+                - button "Save and start another note" [ref=f7e359] [cursor=pointer]:
+                  - generic [ref=f7e364]: Save & new
+                - group "Editor mode" [ref=f7e365]:
+                  - button "Edit" [pressed] [ref=f7e366] [cursor=pointer]
+                  - button "Split" [ref=f7e371] [cursor=pointer]
+                  - button "Preview" [ref=f7e376] [cursor=pointer]
+                - button "Create study pack" [disabled] [ref=f7e382]
+                - button "More actions" [ref=f7e383] [cursor=pointer]
+            - generic [ref=f7e389]:
+              - generic [ref=f7e390]:
+                - textbox "Note title" [ref=f7e391]:
+                  - /placeholder: Title
+                  - text: Alice UAT048 signed-out boundary 20260915
+                - button "Generate title from content" [disabled] [ref=f7e392]:
+                  - generic: Generate title
+                - button "Keyboard shortcuts" [ref=f7e398] [cursor=pointer]
+              - generic [ref=f7e400]:
+                - generic [ref=f7e401]:
+                  - generic [ref=f7e402]:
+                    - generic: Tags
+                    - combobox "Note tags" [ref=f7e404]
+                  - img "down" [ref=f7e406]
+                - generic [ref=f7e541]: "Offline: changes stored locally and queued for sync."
+              - generic [ref=f7e414]:
+                - group "Input mode" [ref=f7e415]:
+                  - button "Markdown" [ref=f7e416] [cursor=pointer]
+                  - button "WYSIWYG" [ref=f7e418] [cursor=pointer]
+                - generic [ref=f7e420]: Formatting
+                - button "Bold" [ref=f7e421] [cursor=pointer]
+                - button "Italic" [ref=f7e425] [cursor=pointer]
+                - button "Heading" [ref=f7e429] [cursor=pointer]
+                - button "List" [ref=f7e433] [cursor=pointer]
+                - button "Link" [ref=f7e436] [cursor=pointer]
+                - button "Attachment" [ref=f7e441] [cursor=pointer]
+                - button "Code" [ref=f7e445] [cursor=pointer]
+                - generic [ref=f7e452]: Assist
+                - button "Summarize" [ref=f7e453] [cursor=pointer]
+                - button "Expand outline" [ref=f7e459] [cursor=pointer]
+                - button "Suggest tags" [ref=f7e465] [cursor=pointer]
+              - generic [ref=f7e472]:
+                - textbox "Note content" [ref=f7e473]:
+                  - /placeholder: Write your note here... (Markdown supported)
+                  - text: Alice private offline boundary draft. This content must disappear from the Notes tab immediately after logout and remain unavailable to Bob.
+                - generic [ref=f7e474]: Markdown + LaTeX supported
+              - generic [ref=f7e475]:
+                - text: 21 words · 140 chars · 1 min read
+                - generic [ref=f7e476]: Version pending · Not saved yet
+                - generic [ref=f7e477]: "Origin: Typed manually"
+                - generic [ref=f7e542]: "Queued offline drafts: 1"
+  - button "Open Next.js Dev Tools" [ref=f7e508] [cursor=pointer]
+  - alert [ref=f7e512]
+```

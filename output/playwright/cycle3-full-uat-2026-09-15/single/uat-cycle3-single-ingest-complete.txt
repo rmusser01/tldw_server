@@ -1,0 +1,50 @@
+### Page
+- Page URL: http://127.0.0.1:18280/
+### Snapshot
+```yaml
+- generic [ref=e875]:
+  - dialog "Quick Ingest":
+    - generic [ref=e876]:
+      - button "Close" [ref=e877] [cursor=pointer]:
+        - generic "Close" [ref=e878]:
+          - img "close" [ref=e879]
+      - generic [ref=e882]: Quick Ingest
+      - generic [ref=e884]:
+        - navigation "Ingest wizard progress" [ref=e885]:
+          - list [ref=e886]:
+            - listitem [ref=e887]:
+              - 'button "Step 1: Add (completed)" [ref=e972] [cursor=pointer]':
+                - generic [ref=e892]: Add
+                - generic [ref=e975]: 1 items
+            - listitem [ref=e894]:
+              - 'button "Step 2: Configure (completed)" [ref=e1255] [cursor=pointer]':
+                - generic [ref=e899]: Configure
+                - generic [ref=e1258]: Custom
+            - listitem [ref=e901]:
+              - 'button "Step 3: Review (completed)" [ref=e1282] [cursor=pointer]':
+                - generic [ref=e906]: Review
+                - generic [ref=e1285]: Reviewed
+            - listitem [ref=e908]:
+              - 'button "Step 4: Processing (completed)" [ref=e1366] [cursor=pointer]':
+                - generic [ref=e913]: Processing
+            - listitem [ref=e915]:
+              - 'button "Step 5: Results (current)" [disabled] [ref=e1369]':
+                - generic [ref=e920]: Results
+        - generic [ref=e1370]:
+          - generic [ref=e1371]:
+            - region "Completed items" [ref=e1372]:
+              - heading "Succeeded (1)" [level=3] [ref=e1373]
+              - generic [ref=e1377]:
+                - generic "pasted-text.txt" [ref=e1380]
+                - button "Open pasted-text.txt in Media" [ref=e1382] [cursor=pointer]: Open in Media
+            - generic [ref=e1387]:
+              - paragraph [ref=e1388]: What's next?
+              - generic [ref=e1389]:
+                - button "Search your ingested content in Knowledge QA" [ref=e1390] [cursor=pointer]: Search in Knowledge
+                - button "Open document in Document Workspace" [ref=e1394] [cursor=pointer]: Open in Workspace
+          - generic [ref=e1397]:
+            - paragraph [ref=e1398]: "Total: 1 succeeded, 0 failed · 50s elapsed"
+            - generic [ref=e1399]:
+              - button "Start a new ingest" [ref=e1400] [cursor=pointer]: Ingest More
+              - button "Close the ingest wizard" [ref=e1401] [cursor=pointer]: Done
+```

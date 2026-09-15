@@ -1,0 +1,19 @@
+### Open tabs
+- 0: (current) [127.0.0.1](chrome-error://chromewebdata/)
+- 1: [Sign in | tldw](http://127.0.0.1:18181/login)
+### Page
+- Page URL: chrome-error://chromewebdata/
+- Page Title: 127.0.0.1
+### Snapshot
+```yaml
+- generic [ref=f1e3]:
+  - generic [ref=f1e5]:
+    - heading "Press space to play" [level=1] [ref=f1e6]
+    - generic [ref=f1e7]:
+      - paragraph [ref=f1e8]: "Try:"
+      - list [ref=f1e9]:
+        - listitem [ref=f1e10]: Checking the network cables, modem, and router
+        - listitem [ref=f1e11]: Reconnecting to Wi-Fi
+    - generic [ref=f1e12]: ERR_INTERNET_DISCONNECTED
+  - application "Dino game, press space to play" [ref=f1e14]
+```

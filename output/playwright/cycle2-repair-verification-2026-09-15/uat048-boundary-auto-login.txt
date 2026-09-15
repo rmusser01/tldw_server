@@ -1,0 +1,14 @@
+### Result
+{"url":"http://127.0.0.1:18181/login","title":"Sign in | tldw"}
+### Ran Playwright code
+```js
+await (async (page) => { await page.context().setOffline(false); await page.waitForURL("http://127.0.0.1:18181/login"); await page.getByRole("textbox", {name:"Username",exact:true}).waitFor(); return {url:page.url(),title:await page.title()}; })(page);
+```
+### Open tabs
+- 0: [](http://127.0.0.1:18181/settings/tldw)
+- 1: (current) [Sign in | tldw](http://127.0.0.1:18181/login)
+### Page
+- Page URL: http://127.0.0.1:18181/login
+- Page Title: Sign in | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T07-25-25-356Z.log#L133-L140

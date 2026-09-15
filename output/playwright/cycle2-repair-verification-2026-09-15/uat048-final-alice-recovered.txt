@@ -1,0 +1,233 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18181/login)
+- 1: (current) [Notes | tldw](http://127.0.0.1:18181/notes)
+### Page
+- Page URL: http://127.0.0.1:18181/notes
+- Page Title: Notes | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f5e1]:
+  - generic [ref=f5e4]:
+    - link "Skip to main content" [ref=f5e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f5e6]:
+      - button "Expand sidebar" [ref=f5e7] [cursor=pointer]
+      - button "New Chat" [ref=f5e11] [cursor=pointer]
+      - generic [ref=f5e14]:
+        - button "Quick Ingest" [ref=f5e15] [cursor=pointer]
+        - button "Chat" [ref=f5e19] [cursor=pointer]
+        - button "Prompts" [ref=f5e22] [cursor=pointer]
+        - button "Characters" [ref=f5e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f5e31] [cursor=pointer]
+        - button "World Books" [ref=f5e35] [cursor=pointer]
+        - button "Notes" [ref=f5e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f5e42] [cursor=pointer]
+        - button "Media" [ref=f5e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f5e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f5e59] [cursor=pointer]
+        - button "Kanban" [ref=f5e65] [cursor=pointer]
+        - button "Watchlists" [ref=f5e67] [cursor=pointer]
+      - generic [ref=f5e72]:
+        - button "Open Notes Dock" [ref=f5e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f5e78] [cursor=pointer]
+        - button "Settings" [ref=f5e81] [cursor=pointer]
+    - main [ref=f5e85]:
+      - generic [ref=f5e86]:
+        - generic [ref=f5e89]:
+          - generic [ref=f5e90]:
+            - button "Expand sidebar" [ref=f5e91] [cursor=pointer]
+            - generic [ref=f5e93]:
+              - img "tldw Assistant" [ref=f5e94]
+              - generic [ref=f5e95]: tldw Assistant
+              - button "Companion Home" [ref=f5e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f5e100] [cursor=pointer]
+          - generic [ref=f5e103]:
+            - button "Search - Open command palette" [ref=f5e104] [cursor=pointer]:
+              - generic [ref=f5e108]: Search
+              - generic [ref=f5e109]: ⌘K
+            - button "Open settings" [ref=f5e110] [cursor=pointer]
+            - generic [ref=f5e122]:
+              - button "Notifications, 0 unread" [ref=f5e123] [cursor=pointer]
+              - status [ref=f5e127]: Notifications are active
+            - button "Switch to light theme" [ref=f5e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f5e135] [cursor=pointer]:
+              - generic [ref=f5e136]: "?"
+        - generic [ref=f5e138]:
+          - link "Skip to notes list" [ref=f5e139] [cursor=pointer]:
+            - /url: "#notes-list-region"
+          - link "Skip to editor" [ref=f5e140] [cursor=pointer]:
+            - /url: "#notes-editor-region"
+          - paragraph [ref=f5e141]: "Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs."
+          - region "Notes list" [ref=f5e142]:
+            - generic [ref=f5e143]:
+              - generic [ref=f5e144]:
+                - generic [ref=f5e145]:
+                  - generic [ref=f5e146]:
+                    - generic [ref=f5e147]: Notes
+                    - generic [ref=f5e148]: 3 total
+                  - button "New note" [ref=f5e149] [cursor=pointer]
+                - generic [ref=f5e152]:
+                  - generic [ref=f5e153]:
+                    - button "Views" [expanded] [ref=f5e155] [cursor=pointer]
+                    - generic [ref=f5e160]:
+                      - generic [ref=f5e161]:
+                        - button "Notes" [ref=f5e162] [cursor=pointer]
+                        - button "Trash" [ref=f5e164] [cursor=pointer]
+                      - generic [ref=f5e166]:
+                        - button "List" [ref=f5e167] [cursor=pointer]
+                        - button "Timeline" [ref=f5e169] [cursor=pointer]
+                        - button "Inbox" [ref=f5e171] [cursor=pointer]
+                        - button "Collection" [ref=f5e173] [cursor=pointer]
+                        - button "Graph" [ref=f5e175] [cursor=pointer]
+                      - generic [ref=f5e184]:
+                        - button "Organize" [ref=f5e185] [cursor=pointer]
+                        - button "Organize help" [ref=f5e191] [cursor=pointer]:
+                          - img "question-circle" [ref=f5e192]
+                  - generic [ref=f5e196]:
+                    - textbox "Search notes" [ref=f5e203]:
+                      - /placeholder: Search titles and contents
+                    - generic [ref=f5e205] [cursor=pointer]:
+                      - generic [ref=f5e206]:
+                        - generic "Date modified (newest first)" [ref=f5e207]
+                        - combobox "Sort notes" [ref=f5e208]
+                      - img "down" [ref=f5e210]
+                  - generic [ref=f5e213]:
+                    - button "Filters" [expanded] [ref=f5e215] [cursor=pointer]
+                    - generic [ref=f5e220]:
+                      - generic [ref=f5e221]:
+                        - button "Captured" [ref=f5e222] [cursor=pointer]
+                        - button "Search tips" [ref=f5e224] [cursor=pointer]
+                      - generic [ref=f5e226]:
+                        - generic [ref=f5e227]:
+                          - generic: Filter by tag
+                          - combobox "Filter by tag" [ref=f5e229]
+                        - img "down" [ref=f5e231]
+                      - generic [ref=f5e234]:
+                        - generic [ref=f5e235]:
+                          - button "Browse tags" [ref=f5e236] [cursor=pointer]
+                          - button "Tags help" [ref=f5e238] [cursor=pointer]:
+                            - img "question-circle" [ref=f5e239]
+                        - generic [ref=f5e243]: 1 available
+                      - generic [ref=f5e244]: For in-note search, use browser Ctrl/Cmd+F.
+                  - generic [ref=f5e245]:
+                    - generic [ref=f5e246]: Recent notes
+                    - generic [ref=f5e247]:
+                      - button "Alice UAT048 offline retest 20260915-0725" [ref=f5e248] [cursor=pointer]
+                      - button "Alice offline privacy cycle2 20260915" [ref=f5e249] [cursor=pointer]
+                      - button "Alice Cell Study fullmulti20260915" [ref=f5e250] [cursor=pointer]
+              - generic:
+                - generic:
+                  - generic [ref=f5e252]:
+                    - generic [ref=f5e253]: Results
+                    - generic [ref=f5e254]:
+                      - button "Import" [ref=f5e255] [cursor=pointer]
+                      - button "Sync folder" [disabled] [ref=f5e257]
+                      - button "Export" [ref=f5e259] [cursor=pointer]
+                  - list "Notes" [ref=f5e262]:
+                    - listitem [ref=f5e263]:
+                      - generic [ref=f5e264]:
+                        - checkbox "Select note Alice Cell Study fullmulti20260915 for bulk actions" [ref=f5e265]
+                        - button "Unpin note Alice Cell Study fullmulti20260915" [ref=f5e266] [cursor=pointer]
+                        - button "Open note Alice Cell Study fullmulti20260915" [ref=f5e269] [cursor=pointer]:
+                          - generic [ref=f5e270]:
+                            - generic [ref=f5e271]: Alice Cell Study fullmulti20260915
+                            - generic [ref=f5e279]: Mitochondria produce energy in cells. DNA stands for deoxyribonucleic acid. Photosynthesis converts light energy into chemical energy. The a...
+                            - generic [ref=f5e280]: 9/14/2026, 9:08:11 PM
+                    - listitem [ref=f5e281]:
+                      - generic [ref=f5e282]:
+                        - checkbox "Select note Alice UAT048 offline retest 20260915-0725 for bulk actions" [ref=f5e283]
+                        - button "Pin note Alice UAT048 offline retest 20260915-0725" [ref=f5e284] [cursor=pointer]
+                        - button "Open note Alice UAT048 offline retest 20260915-0725" [ref=f5e287] [cursor=pointer]:
+                          - generic [ref=f5e288]:
+                            - generic [ref=f5e289]: Alice UAT048 offline retest 20260915-0725
+                            - generic [ref=f5e295]: Alice-only draft created offline during the final logout recovery retest. Bob must never see this content.
+                            - generic [ref=f5e296]: 9/15/2026, 12:32:03 AM
+                    - listitem [ref=f5e297]:
+                      - generic [ref=f5e298]:
+                        - checkbox "Select note Alice offline privacy cycle2 20260915 for bulk actions" [ref=f5e299]
+                        - button "Pin note Alice offline privacy cycle2 20260915" [ref=f5e300] [cursor=pointer]
+                        - button "Open note Alice offline privacy cycle2 20260915" [ref=f5e303] [cursor=pointer]:
+                          - generic [ref=f5e304]:
+                            - generic [ref=f5e305]: Alice offline privacy cycle2 20260915
+                            - generic [ref=f5e311]: Alice-only offline content for the bounded account-isolation check.
+                            - generic [ref=f5e312]: 9/14/2026, 11:14:30 PM
+                  - generic [ref=f5e314]:
+                    - generic [ref=f5e315]: Showing 1-3 of 3
+                    - list [ref=f5e316]:
+                      - listitem "Previous Page" [ref=f5e317]:
+                        - button [disabled] [ref=f5e318]:
+                          - img "left" [ref=f5e319]
+                      - listitem "1" [ref=f5e322] [cursor=pointer]
+                      - listitem "Next Page" [ref=f5e324]:
+                        - button [disabled] [ref=f5e325]:
+                          - img "right" [ref=f5e326]
+                      - listitem [ref=f5e329]:
+                        - generic [ref=f5e330]:
+                          - generic [ref=f5e331]:
+                            - generic "20 / page" [ref=f5e332]
+                            - combobox "Page Size" [ref=f5e333]
+                          - img "down" [ref=f5e335]
+          - button "Collapse sidebar" [ref=f5e338] [cursor=pointer]
+          - region "Note editor" [ref=f5e342]:
+            - generic [ref=f5e343]:
+              - generic [ref=f5e345]:
+                - heading "Alice UAT048 offline retest 20260915-0725" [level=5] [ref=f5e346]
+                - status [ref=f5e347]: No server save status yet
+              - generic [ref=f5e348]:
+                - button "Save note" [ref=f5e349] [cursor=pointer]:
+                  - generic [ref=f5e355]: Save
+                - button "Save and start another note" [ref=f5e356] [cursor=pointer]:
+                  - generic [ref=f5e361]: Save & new
+                - group "Editor mode" [ref=f5e362]:
+                  - button "Edit" [pressed] [ref=f5e363] [cursor=pointer]
+                  - button "Split" [ref=f5e368] [cursor=pointer]
+                  - button "Preview" [ref=f5e373] [cursor=pointer]
+                - button "Create study pack" [ref=f5e379] [cursor=pointer]
+                - button "More actions" [ref=f5e381] [cursor=pointer]
+            - generic [ref=f5e387]:
+              - generic [ref=f5e388]:
+                - textbox "Note title" [ref=f5e389]:
+                  - /placeholder: Title
+                  - text: Alice UAT048 offline retest 20260915-0725
+                - button "Generate title from content" [ref=f5e390] [cursor=pointer]:
+                  - generic [ref=f5e395]: Generate title
+                - button "Keyboard shortcuts" [ref=f5e396] [cursor=pointer]
+              - generic [ref=f5e399]:
+                - generic [ref=f5e400]:
+                  - generic: Tags
+                  - combobox "Note tags" [ref=f5e402]
+                - img "down" [ref=f5e404]
+              - generic [ref=f5e408]:
+                - button "Connections" [ref=f5e409] [cursor=pointer]
+                - button "Connections help" [ref=f5e415] [cursor=pointer]:
+                  - img "question-circle" [ref=f5e416]
+              - generic [ref=f5e420]:
+                - group "Input mode" [ref=f5e421]:
+                  - button "Markdown" [ref=f5e422] [cursor=pointer]
+                  - button "WYSIWYG" [ref=f5e424] [cursor=pointer]
+                - generic [ref=f5e426]: Formatting
+                - button "Bold" [ref=f5e427] [cursor=pointer]
+                - button "Italic" [ref=f5e431] [cursor=pointer]
+                - button "Heading" [ref=f5e435] [cursor=pointer]
+                - button "List" [ref=f5e439] [cursor=pointer]
+                - button "Link" [ref=f5e442] [cursor=pointer]
+                - button "Attachment" [ref=f5e447] [cursor=pointer]
+                - button "Code" [ref=f5e451] [cursor=pointer]
+                - generic [ref=f5e458]: Assist
+                - button "Summarize" [ref=f5e459] [cursor=pointer]
+                - button "Expand outline" [ref=f5e465] [cursor=pointer]
+                - button "Suggest tags" [ref=f5e471] [cursor=pointer]
+              - generic [ref=f5e478]:
+                - textbox "Note content" [ref=f5e479]:
+                  - /placeholder: Write your note here... (Markdown supported)
+                  - text: Alice-only draft created offline during the final logout recovery retest. Bob must never see this content.
+                - generic [ref=f5e480]: Markdown + LaTeX supported
+              - generic [ref=f5e481]:
+                - text: 16 words · 106 chars · 1 min read
+                - generic [ref=f5e482]: Version 1 · Last saved 9/15/2026, 12:32:03 AM
+                - generic [ref=f5e483]: "Origin: Typed manually"
+  - button "Open Next.js Dev Tools" [ref=f5e489] [cursor=pointer]
+  - alert [ref=f5e493]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T07-25-25-356Z.log#L93-L94
