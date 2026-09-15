@@ -208,12 +208,26 @@ export function CompanionHomePage({
   )
 
   const readingState =
-    resolvedSnapshot.readingQueue.length === 0 && readingUnavailable
-      ? {
-          label: "Temporarily unavailable",
-          description: "Reading queue data is temporarily unavailable."
-        }
-      : undefined
+    resolvedSnapshot.readingQueue.length > 0
+      ? undefined
+      : !hasPersonalization
+        ? {
+            label: SETUP_REQUIRED_LABEL,
+            description:
+              "Connect your tldw server and enable personalization to unlock your reading queue."
+          }
+        : profileLoaded && !profile?.enabled
+          ? {
+              label: "Enable Companion",
+              description:
+                "Turn on personalized recommendations to populate your reading queue."
+            }
+          : readingUnavailable
+            ? {
+                label: "Temporarily unavailable",
+                description: "Reading queue data is temporarily unavailable."
+              }
+            : undefined
 
   const topBand =
     !hasPersonalization

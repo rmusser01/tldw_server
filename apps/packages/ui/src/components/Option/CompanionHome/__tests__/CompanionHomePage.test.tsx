@@ -415,6 +415,25 @@ describe("CompanionHomePage", () => {
     expect(within(summary).getByText("Resume")).toBeInTheDocument()
   })
 
+  it.each([
+    [false, false, true, "Registry setup required"],
+    [true, false, true, "Enable Companion"],
+    [true, true, true, "Temporarily unavailable"],
+    [true, true, false, "Reading queue is clear"]
+  ])("classifies an empty reading queue by its actual prerequisites (%s, %s, %s)", async (available, enabled, degraded, label) => {
+    mocks.capabilitiesState.capabilities = { hasPersonalization: available, hasPersona: true }
+    mocks.fetchPersonalizationProfile.mockResolvedValue({ enabled })
+    mocks.fetchCompanionHomeSnapshot.mockResolvedValue(buildSnapshot({
+      readingQueue: [],
+      degradedSources: degraded ? ["reading"] : []
+    }))
+    renderPage()
+    const heading = await screen.findByRole("heading", { name: "Reading Queue" })
+    const card = within(heading.closest("section")!)
+    expect(card.getAllByText(label).length).toBeGreaterThan(0)
+    if (!available) expect(mocks.fetchCompanionHomeSnapshot).not.toHaveBeenCalled()
+  })
+
   it("renders scheduled-task result and failure signals in Automation Inbox", async () => {
     mocks.listScheduledTasks.mockResolvedValueOnce({
       items: [

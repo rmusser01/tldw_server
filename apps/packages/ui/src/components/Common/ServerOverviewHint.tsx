@@ -5,11 +5,10 @@ export const ServerOverviewHint: React.FC = () => {
   const { t } = useTranslation("settings")
 
   const openDocs = () => {
-      const fallbackUrl =
-        t(
-          "onboarding.serverDocsUrl",
-          "https://github.com/rmusser01/tldw_browser_assistant"
-        ) || "https://github.com/rmusser01/tldw_browser_assistant"
+    const serverGuide =
+      "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md"
+    const fallbackUrl =
+      t("onboarding.serverDocsUrl", serverGuide) || serverGuide
     const docsUrl =
       t("serverOverview.docsUrl", fallbackUrl) || fallbackUrl
     window.open(docsUrl, "_blank", "noopener,noreferrer")

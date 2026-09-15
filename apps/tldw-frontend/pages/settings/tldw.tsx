@@ -1,6 +1,7 @@
 import dynamic from "next/dynamic"
+import Head from "next/head"
 
-export default dynamic(async () => {
+const ServerSettings = dynamic(async () => {
   const { SettingsRoute } = await import("@/routes/settings-route")
   const mod = await import("@/components/Option/Settings/tldw")
   const Component = mod.TldwSettings
@@ -11,3 +12,7 @@ export default dynamic(async () => {
   )
   return { default: Page }
 }, { ssr: false })
+
+export default function ServerSettingsPage() {
+  return <><Head><title>Server Settings | tldw</title></Head><ServerSettings /></>
+}
