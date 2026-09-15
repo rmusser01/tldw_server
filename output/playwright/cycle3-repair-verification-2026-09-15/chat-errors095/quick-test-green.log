@@ -1,0 +1,11 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:5903) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Prompt/__tests__/usePromptInteractions.quick-test-errors.test.tsx (2 tests) 19ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  14:53:14
+   Duration  1.31s (transform 456ms, setup 73ms, import 904ms, tests 19ms, environment 223ms)

@@ -1,7 +1,6 @@
 import { browser } from "wxt/browser"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { formatErrorMessage } from "@/utils/format-error-message"
-import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import {
   isUnsafeMethod,
   parseRetryAfter,
@@ -236,18 +235,14 @@ const isSensitiveKey = (key: string): boolean => {
 // Redact known sensitive fields (stack/trace/sql/query/secret/headers/etc.) recursively.
 export const sanitizeResponseData = (
   value: unknown,
-  seen: WeakSet<object> = new WeakSet(),
-  sanitizeErrorStrings = false
+  seen: WeakSet<object> = new WeakSet()
 ): unknown => {
-  if (sanitizeErrorStrings && typeof value === "string") {
-    return sanitizeServerErrorMessage(value, "")
-  }
   if (value == null || typeof value !== "object") return value
   if (seen.has(value as object)) return REDACTED_VALUE
   seen.add(value as object)
 
   if (Array.isArray(value)) {
-    return value.map((entry) => sanitizeResponseData(entry, seen, sanitizeErrorStrings))
+    return value.map((entry) => sanitizeResponseData(entry, seen))
   }
 
   const result: Record<string, unknown> = {}
@@ -256,7 +251,7 @@ export const sanitizeResponseData = (
       result[key] = REDACTED_VALUE
       return
     }
-    result[key] = sanitizeResponseData(entry, seen, sanitizeErrorStrings)
+    result[key] = sanitizeResponseData(entry, seen)
   })
   return result
 }
@@ -998,8 +993,6 @@ async function bgRequestImpl<
     }
   }
   const path = normalizeKnownPathQuirks(rawPath)
-  const sanitizeChatCompletionError = String(method).toUpperCase() === "POST" &&
-    /^\/api\/v1\/chat\/completions\/?(?:[?#]|$)/.test(String(path))
   const expectedStatusSet = normalizeExpectedStatuses(expectedStatuses)
   const isExpectedStatus = (status: unknown): boolean =>
     typeof status === "number" && expectedStatusSet.has(Math.trunc(status))
@@ -1142,16 +1135,10 @@ async function bgRequestImpl<
             data: resp?.data
           })
       : {
-          message: sanitizeChatCompletionError
-            ? explicitCancellation
-              ? "Aborted"
-              : sanitizeServerErrorMessage(rawMessage, "Chat completion failed.")
-            : rawMessage,
+          message: rawMessage,
           status: resp?.status,
           code: resp?.code,
-          details: sanitizeChatCompletionError
-            ? sanitizeResponseData(resp?.data, new WeakSet(), true)
-            : resp?.data
+          details: resp?.data
         }
     const diagnosticEntry = {
       method: String(method),
@@ -1203,7 +1190,7 @@ async function bgRequestImpl<
         sanitized.details,
         sanitized.code
       ), { headers: resp.headers, retryAfterMs: resp.retryAfterMs }),
-      response: sanitizeRagProviderError || sanitizeChatCompletionError || scopedError
+      response: sanitizeRagProviderError || scopedError
         ? {
             ...resp,
             error: sanitized.message,

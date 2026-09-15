@@ -1,0 +1,32 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:6390) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Option/Prompt/__tests__/usePromptInteractions.quick-test-errors.test.tsx (2 tests | 1 failed) 22ms
+   × shows an actionable Quick Test notification without raw failed-transport paths 19ms
+   ✓ retains successful Quick Test output that explains errors and filesystem paths 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Prompt/__tests__/usePromptInteractions.quick-test-errors.test.tsx > shows an actionable Quick Test notification without raw failed-transport paths
+AssertionError: expected 'Provider unavailable at /Users/privat…' not to contain '/Users/private'
+
+Expected: "/Users/private"
+Received: "Provider unavailable at /Users/private/provider.conf. Choose another model. (POST /api/v1/chat/completions)"
+
+ ❯ src/components/Option/Prompt/__tests__/usePromptInteractions.quick-test-errors.test.tsx:87:55
+     85|       description: expect.stringContaining("Choose another model")
+     86|     }))
+     87|     expect(notify.mock.calls[0]?.[0].description).not.toContain("/User…
+       |                                                       ^
+     88|     expect(result.current.localQuickTestOutput).toBeNull()
+     89|     expect(result.current.isRunningLocalQuickTest).toBe(false)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  14:54:12
+   Duration  1.76s (transform 543ms, setup 116ms, import 1.23s, tests 22ms, environment 299ms)

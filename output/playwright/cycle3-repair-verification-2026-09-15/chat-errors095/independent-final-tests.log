@@ -1,0 +1,99 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:10235) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > invalidates a revoked rotated session without replaying its stale raw JWT (scoped=false)
+[tldw:request] GET /api/v1/notes/private-note 401 Session expired. Please log in again.
+
+stderr | src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > invalidates a revoked rotated session without replaying its stale raw JWT (scoped=true)
+[tldw:request] GET /api/v1/notes/private-note 401 Session expired. Please log in again.
+
+stderr | src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > invalidates only the current session after an actual refresh401 (scoped=false)
+[tldw:request] GET /api/v1/notes/private-note 401 Session expired. Please log in again.
+
+stderr | src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > invalidates only the current session after an actual refresh401 (scoped=true)
+[tldw:request] GET /api/v1/notes/private-note 401 Session expired. Please log in again.
+
+stderr | src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > still reports an actual request deadline as a connection failure
+[tldw:request] GET /api/v1/notes/ 0 Request timed out. REQUEST_TIMEOUT
+
+stderr | src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > retains retryable refresh failure details and does not replay a write (scoped=false)
+[tldw:request] POST /api/v1/notes/ 503 Authentication service is busy
+
+stderr | src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > retains retryable refresh failure details and does not replay a write (scoped=true)
+[tldw:request] POST /api/v1/notes/ 503 Authentication service is busy
+
+stderr | src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > signals refresh failure when /auth/refresh returns no access_token (no masking with stale token)
+[tldw:request] POST /api/v1/notes/search/ 502 Token refresh returned no access token. Please try again.
+
+stderr | src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > signals refresh failure when /auth/refresh itself returns 401
+[tldw:request] POST /api/v1/notes/search/ 401 Session expired. Please log in again.
+
+ ✓ src/services/__tests__/background-proxy.web-refresh.test.ts (60 tests) 6403ms
+     ✓ invalidates a revoked rotated session without replaying its stale raw JWT (scoped=false)  1109ms
+     ✓ invalidates a revoked rotated session without replaying its stale raw JWT (scoped=true)  1016ms
+     ✓ invalidates only the current session after an actual refresh401 (scoped=false)  1013ms
+     ✓ invalidates only the current session after an actual refresh401 (scoped=true)  1014ms
+     ✓ retains retryable refresh failure details and does not replay a write (scoped=true)  1017ms
+     ✓ signals refresh failure when /auth/refresh itself returns 401  1018ms
+(node:10306) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > preserves a scoped RAG rejection while redacting provider diagnostics
+[tldw:request] POST /api/v1/rag/search 412 The server or authenticated account changed before the request was sent.
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > emits backend-unreachable event when API request fails with network status 0
+[tldw:request] GET /api/v1/llm/models/metadata 0 NetworkError when attempting to fetch resource.
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps workspace migration chunk network failures scoped out of the global backend-unreachable modal
+[tldw:request] PUT /api/v1/workspaces/migrations/mig-1/chunks/chunk-1 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps workspace source refresh network failures scoped out of the global backend-unreachable modal
+[tldw:request] GET /api/v1/workspaces/ws-1/sources 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps workspace upsert reconciliation failures scoped out of the global backend-unreachable modal
+[tldw:request] PUT /api/v1/workspaces/ws-1 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps Research Workspace chat command bootstrap failures scoped out of the global backend-unreachable modal
+[tldw:request] GET /api/v1/chat/commands 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps optional audio voice bootstrap failures scoped out of the global backend-unreachable modal
+[tldw:request] GET /api/v1/audio/voices/catalog?provider=kitten_tts 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps optional audio voice bootstrap failures scoped out of the global backend-unreachable modal
+[tldw:request] GET /api/v1/audio/voices 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps optional ingestion-source capability bootstrap failures scoped out of the global backend-unreachable modal
+[tldw:request] GET /api/v1/ingestion-sources/capabilities 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps caller-handled best-effort failures scoped out of the global backend-unreachable modal
+[tldw:request] PATCH /api/v1/media/3/keywords 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy GET coalescing > does not reuse a principal's 429 cooldown for another principal
+[tldw:request] GET /api/v1/persona/profiles 429 rate_limited
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy GET coalescing > reuses a recent rate-limited GET failure instead of bursting
+[tldw:request] GET /api/v1/persona/profiles 429 rate_limited
+
+ ✓ src/services/__tests__/background-proxy.test.ts (123 tests) 2011ms
+       ✓ redacts genuine direct non-2xx errors before rejection, warnings and stored diagnostics  1019ms
+(node:10340) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Prompt/__tests__/usePromptInteractions.quick-test-errors.test.tsx (2 tests) 39ms
+(node:10352) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/background-proxy.monitoring-scope.test.ts (13 tests) 17ms
+(node:10358) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/tldw-api-client.chat-mutations.test.ts (5 tests) 9ms
+(node:10364) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/utils/__tests__/server-error-message.test.ts (9 tests) 19ms
+(node:10428) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/tldw-api-client.chat-sanitization-regression.test.ts (5 tests) 7ms
+
+ Test Files  7 passed (7)
+      Tests  217 passed (217)
+   Start at  15:00:14
+   Duration  18.86s (transform 1.24s, setup 1.42s, import 2.83s, tests 8.51s, environment 4.65s)

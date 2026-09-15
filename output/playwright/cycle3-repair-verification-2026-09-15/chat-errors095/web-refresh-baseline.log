@@ -1,0 +1,96 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:7509) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > rejects a checked target on non-allowlisted route /api/v1/chats/chat-123/messages GET
+[tldw:request] GET /api/v1/chats/chat-123/messages 0 Cannot read properties of undefined (reading 'status')
+
+ ❯ src/services/__tests__/background-proxy.web-refresh.test.ts (60 tests | 1 failed | 52 skipped) 766ms
+     ↓ invalidates a revoked rotated session without replaying its stale raw JWT (scoped=false)
+     ↓ invalidates a revoked rotated session without replaying its stale raw JWT (scoped=true)
+     ↓ invalidates only the current session after an actual refresh401 (scoped=false)
+     ↓ invalidates only the current session after an actual refresh401 (scoped=true)
+     ↓ keeps cancellation during refresh out of the backend-unreachable modal
+     ↓ still reports an actual request deadline as a connection failure
+     ↓ retains retryable refresh failure details and does not replay a write (scoped=false)
+     ↓ retains retryable refresh failure details and does not replay a write (scoped=true)
+     ↓ does not dispatch a scoped Notes POST after credential loading switches accounts
+     ↓ does not dispatch a scoped Notes PUT after credential loading switches accounts
+     ↓ never retries a scoped Notes write as the account selected during refresh
+     ↓ retries a scoped Notes write with refreshed credentials for the same principal
+     ↓ rejects a changed runtime key before a scoped Notes write
+     ↓ dispatches the scoped manuscript read /api/v1/writing/manuscripts/scenes/scene-a through the real transport
+     ↓ dispatches the scoped manuscript read /api/v1/writing/manuscripts/projects/project-a/characters?role=protagonist through the real transport
+     ↓ dispatches the scoped manuscript read /api/v1/writing/manuscripts/projects/project-a/world-info?kind=location through the real transport
+     ↓ prefers an active exact-origin cookie marker and adds current CSRF for POST
+     ↓ prefers an active exact-origin cookie marker and adds current CSRF for PATCH
+     ↓ keeps exact page-origin absolute POST requests on cookie auth
+     ↓ keeps exact page-origin absolute PATCH requests on cookie auth
+     ↓ refreshes the access token and retries after a 401 in the browser direct path
+     ↓ replaces a prior scoped rotation during an ordinary direct refresh
+     ↓ does not overwrite or retry under an account selected during ordinary refresh
+     ↓ does not dispatch a direct request after storage changes
+     ↓ does not dispatch a legacy catalog request after a same-target account switch
+     ↓ allows a checked target for the exact execution route /api/v1/chat/completions
+     ↓ allows a checked target for the exact execution route /api/v1/chats/chat-123/messages
+     ↓ allows a checked target for the exact execution route /api/v1/rag/search
+     ↓ allows a checked target for the exact execution route /api/v1/research/websearch
+     ✓ rejects a checked target on non-allowlisted route /api/v1/notes/search/ POST  748ms
+     ✓ rejects a checked target on non-allowlisted route /api/v1/chat/completions/extra POST 3ms
+     ✓ rejects a checked target on non-allowlisted route /api/v1/chats//messages POST 1ms
+     ✓ rejects a checked target on non-allowlisted route /api/v1/chats/%2e%2e/messages POST 1ms
+     ✓ rejects a checked target on non-allowlisted route /api/v1/chats/chat%2fid/messages POST 1ms
+     ✓ rejects a checked target on non-allowlisted route /api/v1/chats/chat%5cid/messages POST 1ms
+     ✓ rejects a checked target on non-allowlisted route /api/v1/chats/chat-123/messages/search POST 1ms
+     × rejects a checked target on non-allowlisted route /api/v1/chats/chat-123/messages GET 9ms
+     ↓ does not dispatch a direct stream after the checked target changes
+     ↓ does not stream after a same-target single-user runtime key change
+     ↓ streams with the validated runtime key without reading a later override
+     ↓ rejects a checked target on non-allowlisted direct stream route /api/v1/chat/completions/extra
+     ↓ rejects a checked target on non-allowlisted direct stream route /api/v1/chats/%2e%2e/messages
+     ↓ rejects a checked target on non-allowlisted direct stream route /api/v1/chats/chat%2fid/messages
+     ↓ binds a direct stream to the checked target and expected user
+     ↓ refreshes a checked direct stream without dropping the expected user
+     ↓ discards a checked direct stream refresh after the account token changes
+     ↓ uses the current direct credential while preserving the checked user binding
+     ↓ refreshes a scoped direct request without dropping the checked user binding
+     ↓ reuses a completed scoped rotation for a delayed same-user request
+     ↓ recovers when another context wins the rotating refresh token
+     ↓ reuses an ordinary raw-config refresh that wins before scoped refresh starts
+     ↓ discards a scoped direct refresh after the 'target' changes
+     ↓ discards a scoped direct refresh after the 'account token' changes
+     ↓ does not refresh a scoped direct request with a token changed by the initial request
+     ↓ uses the captured single-user runtime override when its scope still matches
+     ↓ rejects a changed single-user runtime override before direct fetch
+     ↓ fails a scoped direct request closed after same-target logout
+     ↓ signals refresh failure when /auth/refresh returns no access_token (no masking with stale token)
+     ↓ signals refresh failure when /auth/refresh itself returns 401
+     ↓ single-flights concurrent 401 refreshes into one refresh call
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > rejects a checked target on non-allowlisted route /api/v1/chats/chat-123/messages GET
+AssertionError: expected [Function] to throw error matching /Service Prompt config/i but got 'Cannot read properties of undefined (…'
+
+- Expected:
+/Service Prompt config/i
+
++ Received:
+"Cannot read properties of undefined (reading 'status') (GET /api/v1/chats/chat-123/messages)"
+
+ ❯ src/services/__tests__/background-proxy.web-refresh.test.ts:708:5
+    706|
+    707|     const { bgRequest } = await importProxy()
+    708|     await expect(bgRequest({
+       |     ^
+    709|       path: path as `/${string}`,
+    710|       method,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 passed | 52 skipped (60)
+   Start at  14:56:06
+   Duration  3.01s (transform 951ms, setup 420ms, import 470ms, tests 766ms, environment 915ms)

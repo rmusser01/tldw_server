@@ -1,0 +1,12 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:10234) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/background-proxy.test.ts (125 tests | 123 skipped) 513ms
+       ✓ independent cancellation: preserves direct classified text-only aborts after sanitization  505ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 123 skipped (125)
+   Start at  15:00:14
+   Duration  1.07s (transform 491ms, setup 82ms, import 99ms, tests 513ms, environment 271ms)

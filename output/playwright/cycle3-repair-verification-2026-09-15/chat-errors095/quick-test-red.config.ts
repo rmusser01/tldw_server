@@ -1,0 +1,3 @@
+import { readFileSync } from 'node:fs'
+import base from '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/vitest.config'
+export default { ...base, plugins: [{ name: 'uat036-original-proxy', enforce: 'pre' as const, transform(code: string, id: string) { if (id === '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts') return { code: readFileSync('/private/tmp/uat036-before-proxy.ts', 'utf8'), map: null } } }], test: { ...base.test, setupFiles: ['/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/vitest.setup.ts'], include: ['/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Prompt/__tests__/usePromptInteractions.quick-test-errors.test.tsx'] } }

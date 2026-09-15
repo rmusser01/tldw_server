@@ -1,0 +1,38 @@
+{
+  "frozenAt": "2026-09-15T21:59:38.149Z",
+  "productionPaths": [
+    "apps/packages/ui/src/services/background-proxy.ts"
+  ],
+  "files": [
+    {
+      "path": "apps/packages/ui/src/services/background-proxy.ts",
+      "sha256": "46993de9aee712d92f365e3e1d1a1cf5d868f4378bfbb14d67797c7fa0c1e74a"
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/background-proxy.test.ts",
+      "sha256": "cd1b49910a6e5143088a401980101a73ea0763902f3a71f260799e456096b941"
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/background-proxy.web-refresh.test.ts",
+      "sha256": "fcb3471761167a07c12f3c385eb0aeb50bd3c2a6640293691247b74a2c61775f"
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/tldw-api-client.chat-mutations.test.ts",
+      "sha256": "6851540d69ab41f475e948cb6d154261d5f244de37edbbb192613937b0a5d237"
+    },
+    {
+      "path": "apps/packages/ui/src/utils/__tests__/server-error-message.test.ts",
+      "sha256": "7e78417f6d5ca8dba643841be147d7d31bc7b656430bb986dc821fa370df23b0"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Prompt/__tests__/usePromptInteractions.quick-test-errors.test.tsx",
+      "sha256": "e0ea9de3bce56753c41d8a47f0c021540f1d2baf9c9ea96b5e85cd56fbca15e6"
+    },
+    {
+      "path": "backlog/tasks/task-13260.36 - Align-Chat-completion-error-handling-and-stale-regression-coverage.md",
+      "sha256": "e82c65f9134246da45fc72616df4b282388b318a6e07f30e541c46a06dcf2457"
+    }
+  ],
+  "taskRecordRefreshedAt": "2026-09-15T22:06:15.817Z",
+  "taskRecordRefreshReason": "Tracking-only independent review and durable evidence notes; original production/test freeze and hashes unchanged."
+}
