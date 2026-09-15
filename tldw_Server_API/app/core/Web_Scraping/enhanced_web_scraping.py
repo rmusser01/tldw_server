@@ -1670,7 +1670,15 @@ class EnhancedWebScraper:
 
         try:
             # Navigate with timeout
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            response = await page.goto(url, wait_until="networkidle", timeout=30000)
+            if response is None:
+                raise ArticleRetrievalError(
+                    "Article retrieval failed: no navigation response (expected terminal 2xx response)"
+                )
+            if not 200 <= response.status < 300:
+                raise ArticleRetrievalError(
+                    f"Article retrieval failed: HTTP {response.status} (expected terminal 2xx response)"
+                )
 
             # Wait for content to load
             await page.wait_for_load_state("domcontentloaded")

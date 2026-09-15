@@ -15,6 +15,77 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import PolicyDecision, Runtim
 HTTP_BACKEND = "httpx"
 
 
+def _browser_navigation_scraper(monkeypatch, status):
+    body = (
+        "The fictional Cedar Archive opens at 09:40 on Tuesdays. "
+        "Its public reading room has eleven blue telescopes and serves apricot tea."
+    )
+    page = SimpleNamespace(
+        goto=AsyncMock(return_value=None if status is None else SimpleNamespace(status=status)),
+        wait_for_load_state=AsyncMock(),
+        content=AsyncMock(return_value=f"<html><body><article><p>{body}</p></article></body></html>"),
+        title=AsyncMock(return_value="Cedar Archive"),
+        query_selector_all=AsyncMock(return_value=[]),
+        inner_text=AsyncMock(return_value=body),
+        evaluate=AsyncMock(return_value=""),
+        close=AsyncMock(),
+    )
+    context = SimpleNamespace(new_page=AsyncMock(return_value=page), close=AsyncMock())
+    scraper = ews.EnhancedWebScraper(config={})
+    scraper._browser = SimpleNamespace(new_context=AsyncMock(return_value=context))
+    monkeypatch.setattr(
+        ews, "resolve_browser_transport_decision",
+        lambda *args, **kwargs: SimpleNamespace(allowed=True),
+    )
+    return scraper, page, context
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [302, 403, 429, 500, None])
+async def test_browser_navigation_rejects_non_success_before_reading_body(monkeypatch, status):
+    scraper, page, context = _browser_navigation_scraper(monkeypatch, status)
+
+    result = await scraper._scrape_with_playwright(
+        "https://example.com/article", strategy_order=["trafilatura"], allow_llm_extraction=False,
+    )
+
+    assert result["extraction_successful"] is False
+    assert "content" not in result
+    assert result["error"].startswith("Article retrieval failed:")
+    assert ("no navigation response" if status is None else f"HTTP {status}") in result["error"]
+    page.content.assert_not_awaited()
+    page.inner_text.assert_not_awaited()
+    page.close.assert_awaited_once()
+    context.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_browser_navigation_preserves_200_article_and_closes_resources(monkeypatch):
+    scraper, page, context = _browser_navigation_scraper(monkeypatch, 200)
+
+    result = await scraper._scrape_with_playwright(
+        "https://example.com/article", strategy_order=["trafilatura"], allow_llm_extraction=False,
+    )
+
+    assert result["extraction_successful"] is True
+    assert "eleven blue telescopes" in result["content"]
+    page.content.assert_awaited_once()
+    page.close.assert_awaited_once()
+    context.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_browser_navigation_body_cancellation_propagates_with_cleanup(monkeypatch):
+    scraper, page, context = _browser_navigation_scraper(monkeypatch, 200)
+    page.content.side_effect = asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await scraper._scrape_with_playwright("https://example.com/article")
+
+    page.close.assert_awaited_once()
+    context.close.assert_awaited_once()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", ["_scrape_with_trafilatura", "_scrape_with_beautifulsoup"])
 @pytest.mark.parametrize("classification", ["timeout", None])
