@@ -113,7 +113,7 @@ const shouldAutoResolveConversationLabel = (conversationId: string): boolean =>
 const CONVERSATION_LABEL_MAX_RETRIES = 3
 const CONVERSATION_LABEL_RETRY_DELAY_MS = 1500
 
-const NotesManagerPage: React.FC = () => {
+const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNoteId = null }) => {
   const transferFlashcards = useFlashcardsGenerateTransfer()
   const { t } = useTranslation(['option', 'common'])
   const isOnline = useServerOnline()
@@ -2132,18 +2132,37 @@ const NotesManagerPage: React.FC = () => {
 
   // Deep-link support
   const [pendingNoteId, setPendingNoteId] = React.useState<string | null>(null)
+  const [sourceRetry, setSourceRetry] = React.useState(0)
+  const [sourceResult, setSourceResult] = React.useState<{ id: string; scope: string | null; status: 'opened' | 'cancelled' | 'unavailable' } | null>(null)
+  const openSourceNoteRef = React.useRef(ed.openSourceNote)
+  openSourceNoteRef.current = ed.openSourceNote
 
   React.useEffect(() => {
+    if (sourceNoteId == null || !isOnline || !notesGraphAuthorityScope) return
+    const controller = new AbortController()
+    const id = sourceNoteId.trim()
+    setSourceResult(null)
+    void (async () => {
+      const status = await openSourceNoteRef.current(id, controller.signal)
+      if (!controller.signal.aborted) setSourceResult({ id: sourceNoteId, scope: notesGraphAuthorityScope, status })
+    })()
+    return () => controller.abort()
+  }, [sourceNoteId, isOnline, notesGraphAuthorityScope, sourceRetry])
+
+  const sourceUnavailable = sourceResult?.id === sourceNoteId && sourceResult.scope === notesGraphAuthorityScope && sourceResult.status === 'unavailable' && ed.selectedId == null
+
+  React.useEffect(() => {
+    if (sourceNoteId != null) return
     let cancelled = false
     void (async () => {
       const lastNoteId = await getSetting(LAST_NOTE_ID_SETTING)
       if (!cancelled && lastNoteId) setPendingNoteId(lastNoteId)
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [sourceNoteId])
 
   React.useEffect(() => {
-    if (!isOnline || list.listMode !== 'active' || !pendingNoteId || !Array.isArray(list.data) || ed.selectedId != null) return
+    if (sourceNoteId != null || !isOnline || list.listMode !== 'active' || !pendingNoteId || !Array.isArray(list.data) || ed.selectedId != null) return
     let cancelled = false
     ;(async () => {
       const opened = await ed.handleSelectNote(pendingNoteId)
@@ -2153,7 +2172,7 @@ const NotesManagerPage: React.FC = () => {
       void clearSetting(LAST_NOTE_ID_SETTING)
     })()
     return () => { cancelled = true }
-  }, [list.data, ed, isOnline, list.listMode, pendingNoteId])
+  }, [list.data, ed, isOnline, list.listMode, pendingNoteId, sourceNoteId])
 
   // Sidebar layout
   React.useEffect(() => {
@@ -2448,7 +2467,14 @@ const NotesManagerPage: React.FC = () => {
           </div>
         </button>
       )}
-      {list.listMode === 'active' && list.listViewMode === 'graph' ? (
+      {sourceUnavailable ? (
+        <section className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center" aria-label="Linked note unavailable">
+          <div role="alert">This linked note is unavailable. It may have been deleted or may belong to another account.</div>
+          <p>Choose a note from the list, or retry opening this source.</p>
+          <Button onClick={() => setSourceRetry(value => value + 1)}>Retry source</Button>
+          <Button onClick={() => { setSourceResult(null); void handleNewNote() }}>Create note</Button>
+        </section>
+      ) : list.listMode === 'active' && list.listViewMode === 'graph' ? (
         <NotesGraphWorkspace
           authorityScope={notesGraphAuthorityScope}
           isOnline={isOnline}

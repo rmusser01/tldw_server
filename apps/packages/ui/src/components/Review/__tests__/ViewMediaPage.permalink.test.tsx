@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import ViewMediaPage from '../ViewMediaPage'
+import { getFlashcardSourceMeta } from '@/components/Flashcards/utils/source-reference'
 
 const mocks = vi.hoisted(() => ({
   canDelete: true,
@@ -458,6 +459,15 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
     expect(mocks.bgRequest).toHaveBeenCalledWith(
       expect.objectContaining({ path: '/api/v1/media/900', method: 'GET' })
     )
+  })
+
+  it('opens the saved Flashcard media source through its actual permalink consumer', async () => {
+    mocks.queryData = []
+    mocks.detailById['900'] = { id: 900, title: 'Flashcard source', type: 'document', content: { text: 'Exact original source' } }
+    const source = getFlashcardSourceMeta({ source_ref_type: 'media', source_ref_id: '900' })!
+    renderMediaPage(source.href!)
+    await waitFor(() => expect(screen.getByTestId('selected-media-id')).toHaveTextContent('900'))
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/media/900', method: 'GET' }))
   })
 
   it('falls back to LAST_MEDIA_ID_SETTING when URL has no id and clears legacy setting', async () => {

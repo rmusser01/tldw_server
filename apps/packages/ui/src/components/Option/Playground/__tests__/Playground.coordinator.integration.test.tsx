@@ -14,6 +14,7 @@ import {
 } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import { SETTINGS_SERVER_CHAT_ID_PARAM } from "@/utils/settings-return"
 import type { PlaygroundSessionRestoreOutcome } from "@/hooks/usePlaygroundSessionPersistence"
+import { getFlashcardSourceMeta } from "@/components/Flashcards/utils/source-reference"
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -470,6 +471,14 @@ describe("Playground coordinator integration", () => {
       )
     })
     expect(restoreSession).not.toHaveBeenCalled()
+  })
+
+  it("selects the saved Flashcard source conversation through the actual neutral Chat route consumer", async () => {
+    const source = getFlashcardSourceMeta({ source_ref_type: "message", source_ref_id: "source-message", conversation_id: "source-chat" })!
+    window.history.pushState({}, "", source.href!)
+    render(<Playground />)
+    await waitFor(() => expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith("source-chat"))
+    expect(tldwClientState.getCharacter).not.toHaveBeenCalled()
   })
 
   it("applies a sidepanel handoff before persisted session restore", async () => {

@@ -193,7 +193,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     React.useState<NoteStudioDocumentSummary | null>(null)
   const [selectedVersion, setSelectedVersion] = React.useState<number | null>(null)
   const [selectedLastSavedAt, setSelectedLastSavedAt] = React.useState<string | null>(null)
-  const [isDirty, setIsDirty] = React.useState(false)
+  const [isDirty, setIsDirtyState] = React.useState(false)
+  const dirtyRevisionRef = React.useRef(0)
+  const setIsDirty = React.useCallback((value: React.SetStateAction<boolean>) => {
+    if (value !== false) dirtyRevisionRef.current += 1
+    setIsDirtyState(value)
+  }, [])
   const [backlinkConversationId, setBacklinkConversationId] = React.useState<string | null>(null)
   const [backlinkMessageId, setBacklinkMessageId] = React.useState<string | null>(null)
   const [remoteVersionInfo, setRemoteVersionInfo] = React.useState<RemoteVersionInfo | null>(null)
@@ -368,7 +373,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setWysiwygHtml(markdownToWysiwygHtml(String(draft.content || '')))
     setWysiwygSessionDirty(false)
     markdownBeforeWysiwygRef.current = String(draft.content || '')
-  }, [setEditorKeywords, setMonitoringNotice, setSaveIndicator])
+  }, [setEditorKeywords, setIsDirty, setMonitoringNotice, setSaveIndicator])
 
   const upsertOfflineDraft = React.useCallback(
     (
@@ -443,7 +448,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         markManualEdit()
       }
     },
-    [markGeneratedEdit, markManualEdit, setMonitoringNotice, setSaveIndicator]
+    [markGeneratedEdit, markManualEdit, setIsDirty, setMonitoringNotice, setSaveIndicator]
   )
 
   const clearTaskState = React.useCallback(() => {
@@ -453,35 +458,39 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setTaskConflictNotice(null)
   }, [])
 
-  const loadTaskActivityForNote = React.useCallback(async (noteId: string | number) => {
+  const loadTaskActivityForNote = React.useCallback(async (noteId: string | number, ownedRequest?: NotesOwnedRequestOptions) => {
     const requestEpoch = authorityEpochRef.current
+    const selectionEpoch = noteSelectionEpochRef.current
     try {
-      const response = await listTaskActivity({ note_id: noteId, limit: 50 })
-      if (authorityEpochRef.current !== requestEpoch) return
+      if (ownedRequest?.abortSignal.aborted) return
+      const response = await listTaskActivity({ note_id: noteId, limit: 50 }, ownedRequest)
+      if (authorityEpochRef.current !== requestEpoch || noteSelectionEpochRef.current !== selectionEpoch || ownedRequest?.abortSignal.aborted) return
       const noteIdText = String(noteId)
       const events = Array.isArray(response.events)
         ? response.events.filter((event) => String(event.note_id || '') === noteIdText)
         : []
       setTaskActivityEvents(events)
     } catch {
-      if (authorityEpochRef.current !== requestEpoch) return
+      if (authorityEpochRef.current !== requestEpoch || noteSelectionEpochRef.current !== selectionEpoch || ownedRequest?.abortSignal.aborted) return
       setTaskActivityEvents([])
     }
   }, [])
 
-  const refreshTaskStateForNote = React.useCallback(async (noteId: string | number) => {
+  const refreshTaskStateForNote = React.useCallback(async (noteId: string | number, ownedRequest?: NotesOwnedRequestOptions) => {
     const requestEpoch = authorityEpochRef.current
+    const selectionEpoch = noteSelectionEpochRef.current
     try {
-      const response = await listNoteTasks(noteId, { limit: 500 })
-      if (authorityEpochRef.current !== requestEpoch) return
+      if (ownedRequest?.abortSignal.aborted) return
+      const response = await listNoteTasks(noteId, { limit: 500 }, ownedRequest)
+      if (authorityEpochRef.current !== requestEpoch || noteSelectionEpochRef.current !== selectionEpoch || ownedRequest?.abortSignal.aborted) return
       setNoteTasks(Array.isArray(response.tasks) ? response.tasks : [])
       setTaskReconciliation(response.reconciliation ?? null)
     } catch {
-      if (authorityEpochRef.current !== requestEpoch) return
+      if (authorityEpochRef.current !== requestEpoch || noteSelectionEpochRef.current !== selectionEpoch || ownedRequest?.abortSignal.aborted) return
       setNoteTasks([])
       setTaskReconciliation(null)
     }
-    await loadTaskActivityForNote(noteId)
+    await loadTaskActivityForNote(noteId, ownedRequest)
   }, [loadTaskActivityForNote])
 
   const toggleTaskCheckboxLocal = React.useCallback(
@@ -552,7 +561,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     const requestEpoch = authorityEpochRef.current
     const noteEpoch = ++noteSelectionEpochRef.current
     const editRevision = savedEditRevision ?? editRevisionRef.current.revision
-    const isCurrent = () => authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === noteEpoch
+    const isCurrent = () => !ownedRequest?.abortSignal.aborted && authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === noteEpoch
     if (requestAuthorityScope === null) return false
     clearAssistUndoState()
     setLoadingDetail(true)
@@ -595,13 +604,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (queuedDraft) {
         applyOfflineDraftToEditor(queuedDraft)
       }
-      await refreshTaskStateForNote(id)
+      await refreshTaskStateForNote(id, ownedRequest)
       return isCurrent()
     } catch {
       if (isCurrent()) message.error('Failed to load note')
       return false
     } finally { if (isCurrent()) setLoadingDetail(false) }
-  }, [applyOfflineDraftToEditor, authorityScope, clearAssistUndoState, clearTaskState, isOnline, message, refreshTaskStateForNote, rememberRecentNote, setEditorKeywords, setLoadingDetail, setSaveIndicator, setMonitoringNotice])
+  }, [applyOfflineDraftToEditor, authorityScope, clearAssistUndoState, clearTaskState, isOnline, message, refreshTaskStateForNote, rememberRecentNote, setEditorKeywords, setIsDirty, setLoadingDetail, setSaveIndicator, setMonitoringNotice])
 
   const dismissTaskActivity = React.useCallback(async (eventId: string) => {
     const normalizedEventId = String(eventId || '').trim()
@@ -649,14 +658,14 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setWysiwygHtml('<p><br/></p>')
     setWysiwygSessionDirty(false)
     markdownBeforeWysiwygRef.current = null
-  }, [clearAssistUndoState, clearTaskState, setEditorKeywords, setMonitoringNotice, setSaveIndicator])
+  }, [clearAssistUndoState, clearTaskState, setEditorKeywords, setIsDirty, setMonitoringNotice, setSaveIndicator])
 
-  const confirmDiscardIfDirty = React.useCallback(async () => {
+  const confirmDiscardIfDirty = React.useCallback(async (onSaved?: () => void) => {
     if (!isDirty) return true
     if (!saving && (content.trim() || title.trim()) && saveNoteRef.current) {
       try {
         const saved = await saveNoteRef.current({ showSuccessMessage: false })
-        if (saved) return true
+        if (saved) { onSaved?.(); return true }
       } catch {
         // Fall through to the retry/discard/cancel dialog below.
       }
@@ -678,6 +687,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
                   resolve('cancel')
                   return
                 }
+                onSaved?.()
               }
               resolve('saved')
             } catch {
@@ -734,6 +744,66 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     },
     [confirmDiscardIfDirty, listMode, resetEditor, setListMode, setPage, setQuery, setQueryInput, setKeywordTokens, setSelectedNotebookId]
   )
+
+  const openSourceNote = React.useCallback(async (id: string, signal: AbortSignal): Promise<'opened' | 'cancelled' | 'unavailable'> => {
+    const requestEpoch = authorityEpochRef.current
+    const requestAuthorityScope = authorityScope
+    const capturedConfig = connectionConfig ? { ...connectionConfig } : null
+    let selectionEpoch = noteSelectionEpochRef.current
+    let editRevision = editRevisionRef.current.revision
+    const dirtyRevision = dirtyRevisionRef.current
+    const controller = new AbortController()
+    const abort = () => controller.abort()
+    signal.addEventListener('abort', abort, { once: true })
+    authorityRequestsRef.current.add(controller)
+    const isCurrent = () => !signal.aborted && !controller.signal.aborted && authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestAuthorityScope
+    try {
+      const confirmed = await confirmDiscardIfDirty(() => {
+        selectionEpoch = noteSelectionEpochRef.current
+      })
+      if (!confirmed || !isCurrent() || dirtyRevisionRef.current !== dirtyRevision || noteSelectionEpochRef.current !== selectionEpoch) return 'cancelled'
+      if (!requestAuthorityScope || !capturedConfig) return 'unavailable'
+      editRevision = editRevisionRef.current.revision
+      if (!id || id.length > 200) {
+        resetEditor()
+        return 'unavailable'
+      }
+      const user = await tldwAuth.getCurrentUser()
+      if (!isCurrent() || noteSelectionEpochRef.current !== selectionEpoch || editRevisionRef.current.revision !== editRevision) return 'cancelled'
+      if (!user?.is_active || user.id == null || createNotesGraphAuthorityScope(capturedConfig.serverUrl, user.id) !== requestAuthorityScope) {
+        resetEditor()
+        return 'unavailable'
+      }
+      selectionEpoch += 1
+      const opened = await loadDetail(id, {
+        servicePromptConfig: {
+          serverUrl: capturedConfig.serverUrl,
+          authMode: capturedConfig.authMode,
+          authSource: capturedConfig.authSource,
+          orgId: capturedConfig.orgId,
+          expectedUserId: user.id,
+          expectedSingleUserApiKeyScope: capturedConfig.authMode === 'single-user'
+            ? deriveSingleUserApiKeyCredentialScope('single-user', capturedConfig.apiKey) : undefined
+        },
+        headers: { 'X-TLDW-Expected-User-ID': String(user.id) },
+        abortSignal: controller.signal
+      })
+      if (!isCurrent()) return 'cancelled'
+      if (!opened) {
+        if (noteSelectionEpochRef.current !== selectionEpoch || editRevisionRef.current.revision !== editRevision) return 'cancelled'
+        resetEditor()
+      }
+      if (opened && isMobileViewport) setMobileSidebarOpen(false)
+      return opened ? 'opened' : 'unavailable'
+    } catch {
+      if (isCurrent() && noteSelectionEpochRef.current === selectionEpoch && editRevisionRef.current.revision === editRevision) resetEditor()
+      return isCurrent() ? 'unavailable' : 'cancelled'
+    } finally {
+      if (authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === selectionEpoch) setLoadingDetail(false)
+      signal.removeEventListener('abort', abort)
+      authorityRequestsRef.current.delete(controller)
+    }
+  }, [authorityScope, connectionConfig, confirmDiscardIfDirty, isMobileViewport, loadDetail, resetEditor, setLoadingDetail, setMobileSidebarOpen])
 
   const handleSelectNote = React.useCallback(
     async (id: string | number): Promise<boolean> => {
@@ -1311,6 +1381,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       saving,
       selectedId,
       selectedVersion,
+      setIsDirty,
       setMonitoringNotice,
       setOfflineDraftQueue,
       setSaveIndicator,
@@ -1720,6 +1791,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     content,
     editorDisabled,
     effectiveTitleSuggestStrategy,
+    setIsDirty,
     setMonitoringNotice,
     setSaveIndicator,
     message,
@@ -2351,6 +2423,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     confirmDiscardIfDirty,
     switchListMode,
     handleSelectNote,
+    openSourceNote,
     saveNote,
     reloadNotes,
     reloadSelectedNoteAfterConflict,
