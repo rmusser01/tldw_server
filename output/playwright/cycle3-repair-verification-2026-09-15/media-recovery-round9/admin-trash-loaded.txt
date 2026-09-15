@@ -1,0 +1,89 @@
+### Open tabs
+- 0: (current) [](http://127.0.0.1:18281/media-trash)
+- 1: [](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/media-trash
+- Console: 2 errors, 2 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f51e1]:
+  - generic [ref=f51e4]:
+    - link "Skip to main content" [ref=f51e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f51e6]:
+      - button "Expand sidebar" [ref=f51e7] [cursor=pointer]
+      - button "New Chat" [ref=f51e11] [cursor=pointer]
+      - generic [ref=f51e14]:
+        - button "Quick Ingest" [ref=f51e15] [cursor=pointer]
+        - button "Chat" [ref=f51e19] [cursor=pointer]
+        - button "Prompts" [ref=f51e22] [cursor=pointer]
+        - button "Characters" [ref=f51e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f51e31] [cursor=pointer]
+        - button "World Books" [ref=f51e35] [cursor=pointer]
+        - button "Notes" [ref=f51e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f51e42] [cursor=pointer]
+        - button "Media" [ref=f51e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f51e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f51e59] [cursor=pointer]
+        - button "Kanban" [ref=f51e65] [cursor=pointer]
+        - button "Watchlists" [ref=f51e67] [cursor=pointer]
+      - generic [ref=f51e72]:
+        - button "Open Notes Dock" [ref=f51e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f51e78] [cursor=pointer]
+        - button "Settings" [ref=f51e81] [cursor=pointer]
+    - main [ref=f51e85]:
+      - generic [ref=f51e86]:
+        - generic [ref=f51e89]:
+          - generic [ref=f51e90]:
+            - button "Expand sidebar" [ref=f51e91] [cursor=pointer]
+            - generic [ref=f51e93]:
+              - img "tldw Assistant" [ref=f51e94]
+              - generic [ref=f51e95]: tldw Assistant
+              - button "Companion Home" [ref=f51e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f51e100] [cursor=pointer]
+          - generic [ref=f51e103]:
+            - button "Search - Open command palette" [ref=f51e104] [cursor=pointer]:
+              - generic [ref=f51e108]: Search
+              - generic [ref=f51e109]: ⌘K
+            - button "Open settings" [ref=f51e110] [cursor=pointer]
+            - generic [ref=f51e122]:
+              - button "Notifications, 0 unread" [ref=f51e123] [cursor=pointer]
+              - status [ref=f51e127]: Notifications are active
+            - button "Switch to light theme" [ref=f51e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f51e135] [cursor=pointer]:
+              - generic [ref=f51e136]: "?"
+        - generic [ref=f51e184]:
+          - generic [ref=f51e185]:
+            - generic [ref=f51e186]:
+              - heading "Trash" [level=1] [ref=f51e187]
+              - paragraph [ref=f51e188]: Items moved to trash stay here until you restore or permanently delete them.
+              - paragraph [ref=f51e189]: Auto-purge policy is not configured or not reported by this server.
+              - searchbox "Search trash" [ref=f51e191]
+            - generic [ref=f51e192]:
+              - button "Refresh" [ref=f51e193] [cursor=pointer]
+              - button "Empty trash" [ref=f51e199] [cursor=pointer]
+          - generic [ref=f51e203]:
+            - generic [ref=f51e204]:
+              - checkbox "Select all visible" [ref=f51e205]
+              - generic [ref=f51e206]: Select all visible
+            - generic [ref=f51e207]:
+              - generic [ref=f51e208]: 0 selected
+              - button "Restore selected" [disabled] [ref=f51e209]
+              - button "Delete selected" [disabled] [ref=f51e213]
+          - generic [ref=f51e219]:
+            - generic [ref=f51e220]:
+              - checkbox "Select item 1" [ref=f51e221]
+              - generic [ref=f51e222]:
+                - generic [ref=f51e223]: uat-cycle3-multi-bob-admin-source
+                - generic [ref=f51e224]:
+                  - generic [ref=f51e225]: document
+                  - generic [ref=f51e226]: "#1"
+                  - generic [ref=f51e227]: "Deleted: Sep 15, 2026, 2:55 PM"
+            - generic [ref=f51e228]:
+              - button "Restore" [ref=f51e229] [cursor=pointer]
+              - button "Delete permanently" [ref=f51e233] [cursor=pointer]
+          - generic [ref=f51e237]: 1 of 1 results
+  - button "Open Next.js Dev Tools" [ref=f51e179] [cursor=pointer]
+  - alert [ref=f51e183]: /media-trash
+```

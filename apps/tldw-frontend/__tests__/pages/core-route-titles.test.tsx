@@ -15,6 +15,7 @@ vi.mock("next/dynamic", () => ({
 import Home from "@web/pages/index"
 import Setup from "@web/pages/setup"
 import Media from "@web/pages/media"
+import MediaTrash from "@web/pages/media-trash"
 import Analysis from "@web/pages/media-multi"
 import Knowledge from "@web/pages/knowledge"
 import Flashcards from "@web/pages/flashcards"
@@ -32,6 +33,7 @@ describe("core route title ownership", () => {
     [Home, "Home | tldw"],
     [Setup, "Setup | tldw"],
     [Media, "Media | tldw"],
+    [MediaTrash, "Trash | tldw"],
     [Analysis, "Media Analysis | tldw"],
     [Knowledge, "Knowledge | tldw"],
     [Flashcards, "Flashcards | tldw"],

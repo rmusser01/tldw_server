@@ -1,0 +1,265 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:13419) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ __tests__/pages/core-route-titles.test.tsx (10 tests | 1 failed) 1075ms
+     ✓ replaces previous private metadata with function HomePage() {
+  return /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_0__.Fragment), { children: [
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_2__.default), { children: /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)("title", { children: "Home | tldw" }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/index.tsx",
+      lineNumber: 7,
+      columnNumber: 18
+    }, this) }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/index.tsx",
+      lineNumber: 7,
+      columnNumber: 12
+    }, this),
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)(Home, {}, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/index.tsx",
+      lineNumber: 7,
+      columnNumber: 51
+    }, this)
+  ] }, void 0, true, {
+    fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/index.tsx",
+    lineNumber: 7,
+    columnNumber: 10
+  }, this);
+} 23ms
+     ✓ replaces previous private metadata with function SetupPage() {
+  return /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_0__.Fragment), { children: [
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_2__.default), { children: /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)("title", { children: "Setup | tldw" }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/setup.tsx",
+      lineNumber: 7,
+      columnNumber: 18
+    }, this) }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/setup.tsx",
+      lineNumber: 7,
+      columnNumber: 12
+    }, this),
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)(Setup, {}, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/setup.tsx",
+      lineNumber: 7,
+      columnNumber: 52
+    }, this)
+  ] }, void 0, true, {
+    fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/setup.tsx",
+    lineNumber: 7,
+    columnNumber: 10
+  }, this);
+} 6ms
+     ✓ replaces previous private metadata with function MediaPage() {
+  return /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_0__.Fragment), { children: [
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_2__.default), { children: /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)("title", { children: "Media | tldw" }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/media.tsx",
+      lineNumber: 7,
+      columnNumber: 18
+    }, this) }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/media.tsx",
+      lineNumber: 7,
+      columnNumber: 12
+    }, this),
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)(Media, {}, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/media.tsx",
+      lineNumber: 7,
+      columnNumber: 52
+    }, this)
+  ] }, void 0, true, {
+    fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/media.tsx",
+    lineNumber: 7,
+    columnNumber: 10
+  }, this);
+} 6ms
+     × replaces previous private metadata with () => /* @__PURE__ */ __vi_import_0__.jsxDEV("main", { children: "Shared route" }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/pages/core-route-titles.test.tsx",
+      lineNumber: 11,
+      columnNumber: 18
+    }, this) 1007ms
+     ✓ replaces previous private metadata with function MediaAnalysisPage() {
+  return /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_0__.Fragment), { children: [
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_2__.default), { children: /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)("title", { children: "Media Analysis | tldw" }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/media-multi.tsx",
+      lineNumber: 7,
+      columnNumber: 18
+    }, this) }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/media-multi.tsx",
+      lineNumber: 7,
+      columnNumber: 12
+    }, this),
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)(MediaAnalysis, {}, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/media-multi.tsx",
+      lineNumber: 7,
+      columnNumber: 61
+    }, this)
+  ] }, void 0, true, {
+    fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/media-multi.tsx",
+    lineNumber: 7,
+    columnNumber: 10
+  }, this);
+} 6ms
+     ✓ replaces previous private metadata with function KnowledgePage() {
+  return /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_0__.Fragment), { children: [
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_2__.default), { children: /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)("title", { children: "Knowledge | tldw" }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/knowledge.tsx",
+      lineNumber: 7,
+      columnNumber: 18
+    }, this) }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/knowledge.tsx",
+      lineNumber: 7,
+      columnNumber: 12
+    }, this),
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)(Knowledge, {}, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/knowledge.tsx",
+      lineNumber: 7,
+      columnNumber: 56
+    }, this)
+  ] }, void 0, true, {
+    fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/knowledge.tsx",
+    lineNumber: 7,
+    columnNumber: 10
+  }, this);
+} 5ms
+     ✓ replaces previous private metadata with function FlashcardsPage() {
+  return /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_0__.Fragment), { children: [
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_2__.default), { children: /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)("title", { children: "Flashcards | tldw" }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/flashcards.tsx",
+      lineNumber: 7,
+      columnNumber: 18
+    }, this) }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/flashcards.tsx",
+      lineNumber: 7,
+      columnNumber: 12
+    }, this),
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)(Flashcards, {}, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/flashcards.tsx",
+      lineNumber: 7,
+      columnNumber: 57
+    }, this)
+  ] }, void 0, true, {
+    fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/flashcards.tsx",
+    lineNumber: 7,
+    columnNumber: 10
+  }, this);
+} 6ms
+     ✓ replaces previous private metadata with function ServerSettingsPage() {
+  return /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_0__.Fragment), { children: [
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_2__.default), { children: /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)("title", { children: "Server Settings | tldw" }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/settings/tldw.tsx",
+      lineNumber: 17,
+      columnNumber: 18
+    }, this) }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/settings/tldw.tsx",
+      lineNumber: 17,
+      columnNumber: 12
+    }, this),
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)(ServerSettings, {}, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/settings/tldw.tsx",
+      lineNumber: 17,
+      columnNumber: 62
+    }, this)
+  ] }, void 0, true, {
+    fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/settings/tldw.tsx",
+    lineNumber: 17,
+    columnNumber: 10
+  }, this);
+} 4ms
+     ✓ replaces previous private metadata with function ProviderKeysPage() {
+  return /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_0__.Fragment), { children: [
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_2__.default), { children: /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)("title", { children: "Provider Keys | tldw" }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/settings/provider-keys.tsx",
+      lineNumber: 17,
+      columnNumber: 18
+    }, this) }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/settings/provider-keys.tsx",
+      lineNumber: 17,
+      columnNumber: 12
+    }, this),
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)(ProviderKeys, {}, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/settings/provider-keys.tsx",
+      lineNumber: 17,
+      columnNumber: 60
+    }, this)
+  ] }, void 0, true, {
+    fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/settings/provider-keys.tsx",
+    lineNumber: 17,
+    columnNumber: 10
+  }, this);
+} 5ms
+     ✓ replaces previous private metadata with function NotesPage() {
+  return /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_0__.Fragment), { children: [
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)((0,__vite_ssr_import_2__.default), { children: /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)("title", { children: "Notes | tldw" }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/notes.tsx",
+      lineNumber: 7,
+      columnNumber: 18
+    }, this) }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/notes.tsx",
+      lineNumber: 7,
+      columnNumber: 12
+    }, this),
+    /* @__PURE__ */ (0,__vite_ssr_import_0__.jsxDEV)(Notes, {}, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/notes.tsx",
+      lineNumber: 7,
+      columnNumber: 52
+    }, this)
+  ] }, void 0, true, {
+    fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/notes.tsx",
+    lineNumber: 7,
+    columnNumber: 10
+  }, this);
+} 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/pages/core-route-titles.test.tsx > core route title ownership > replaces previous private metadata with () => /* @__PURE__ */ __vi_import_0__.jsxDEV("main", { children: "Shared route" }, void 0, false, {
+      fileName: "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/pages/core-route-titles.test.tsx",
+      lineNumber: 11,
+      columnNumber: 18
+    }, this)
+AssertionError: expected '' to be 'Trash | tldw' // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head>[39m
+    [36m<title />[39m
+    [36m<meta[39m
+      [33mcharset[39m=[32m"utf-8"[39m
+      [33mdata-next-head[39m=[32m""[39m
+    [36m/>[39m
+    [36m<meta[39m
+      [33mcontent[39m=[32m"width=device-width"[39m
+      [33mdata-next-head[39m=[32m""[39m
+      [33mname[39m=[32m"viewport"[39m
+    [36m/>[39m
+  [36m</head>[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<main>[39m
+        [0mShared route[0m
+      [36m</main>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+- Expected
++ Received
+
+- Trash | tldw
+
+ ❯ __tests__/pages/core-route-titles.test.tsx:52:48
+     50|     await waitFor(() => expect(document.title).toBe("Private Chat"))
+     51|     rerender(<HeadManagerContext.Provider value={manager}><Page /></He…
+     52|     await waitFor(() => expect(document.title).toBe(title))
+       |                                                ^
+     53|     expect(document.querySelector('meta[name="description"]')).toBeNul…
+     54|     rerender(
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 passed (10)
+   Start at  15:05:33
+   Duration  1.62s (transform 69ms, setup 109ms, import 50ms, tests 1.07s, environment 275ms)

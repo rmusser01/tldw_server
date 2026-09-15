@@ -1,0 +1,53 @@
+{
+  "checkedAt": "2026-09-15T22:04:21.633Z",
+  "identity": "admin",
+  "verifierAuth": "reuse",
+  "method": "GET",
+  "path": "/api/v1/media/1",
+  "status": 200,
+  "body": {
+    "media_id": 1,
+    "source": {
+      "url": "uat-cycle3-multi-bob-admin-source.txt",
+      "title": "uat-cycle3-multi-bob-admin-source",
+      "duration": null,
+      "type": "document"
+    },
+    "processing": {
+      "prompt": null,
+      "analysis": null,
+      "safe_metadata": {
+        "title": "uat-cycle3-multi-bob-admin-source",
+        "author": "Unknown"
+      },
+      "model": "Imported",
+      "timestamp_option": null,
+      "chunking_status": "pending",
+      "vector_processing_status": 0
+    },
+    "content": {
+      "metadata": {},
+      "text": "Cycle3 Admin recovery source\n\nThe fictional Silver Wren reading room contains four green lamps. It opens at 08:15 on Wednesdays. This synthetic item belongs only to the admin UAT library and tests soft deletion and restoration.\n\nAdmin recovery sentinel: ADMIN-SILVER-WREN-20260915.",
+      "word_count": 40
+    },
+    "keywords": [],
+    "timestamps": [],
+    "versions": [
+      {
+        "uuid": "6717c126-767e-4e90-97d7-f841e2fb4c00",
+        "media_id": 1,
+        "version_number": 1,
+        "created_at": "2026-09-15T10:38:18.234000Z",
+        "prompt": null,
+        "analysis_content": null,
+        "safe_metadata": {
+          "title": "uat-cycle3-multi-bob-admin-source",
+          "author": "Unknown"
+        },
+        "content": null
+      }
+    ],
+    "has_original_file": false,
+    "original_file_url": null
+  }
+}

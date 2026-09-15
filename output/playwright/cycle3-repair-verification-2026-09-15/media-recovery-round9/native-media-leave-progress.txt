@@ -1,0 +1,15 @@
+### Result
+{"checkedAt":"2026-09-15T21:48:00.796Z","url":"http://127.0.0.1:18281/media?id=1","progress":null}
+### Ran Playwright code
+```js
+await (async(page)=>{const response=page.waitForResponse(r=>r.url()==="http://127.0.0.1:18201/api/v1/media/1/progress"&&r.request().method()==="PUT",{timeout:12000}).then(async r=>({status:r.status(),request:r.request().postDataJSON(),response:await r.json()})).catch(()=>null);await page.getByRole("button",{name:"Notes",exact:true}).click();return {checkedAt:new Date().toISOString(),url:page.url(),progress:await response};})(page);
+```
+### Open tabs
+- 0: (current) [Notes | tldw](http://127.0.0.1:18281/notes)
+- 1: [](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/notes
+- Page Title: Notes | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T21-10-19-087Z.log#L112-L115

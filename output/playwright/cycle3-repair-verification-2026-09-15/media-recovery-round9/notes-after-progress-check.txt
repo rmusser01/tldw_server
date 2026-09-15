@@ -1,0 +1,266 @@
+### Open tabs
+- 0: (current) [Notes | tldw](http://127.0.0.1:18281/notes)
+- 1: [](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/notes
+- Page Title: Notes | tldw
+### Snapshot
+```yaml
+- generic [ref=f49e1]:
+  - generic [ref=f49e2]:
+    - generic [ref=f49e4]:
+      - link "Skip to main content" [ref=f49e5] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f49e6]:
+        - button "Expand sidebar" [ref=f49e7] [cursor=pointer]
+        - button "New Chat" [ref=f49e11] [cursor=pointer]
+        - generic [ref=f49e14]:
+          - button "Quick Ingest" [ref=f49e15] [cursor=pointer]
+          - button "Chat" [ref=f49e19] [cursor=pointer]
+          - button "Prompts" [ref=f49e22] [cursor=pointer]
+          - button "Characters" [ref=f49e26] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f49e31] [cursor=pointer]
+          - button "World Books" [ref=f49e35] [cursor=pointer]
+          - button "Notes" [active] [ref=f49e38] [cursor=pointer]
+          - button "Knowledge QA" [ref=f49e42] [cursor=pointer]
+          - button "Media" [ref=f49e50] [cursor=pointer]
+          - button "Document Workspace" [ref=f49e53] [cursor=pointer]
+          - button "Research Workspace" [ref=f49e59] [cursor=pointer]
+          - button "Kanban" [ref=f49e65] [cursor=pointer]
+          - button "Watchlists" [ref=f49e67] [cursor=pointer]
+        - generic [ref=f49e72]:
+          - button "Open Notes Dock" [ref=f49e73] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f49e78] [cursor=pointer]
+          - button "Settings" [ref=f49e81] [cursor=pointer]
+      - main [ref=f49e85]:
+        - generic [ref=f49e86]:
+          - generic [ref=f49e89]:
+            - generic [ref=f49e90]:
+              - button "Expand sidebar" [ref=f49e91] [cursor=pointer]
+              - generic [ref=f49e93]:
+                - img "tldw Assistant" [ref=f49e94]
+                - generic [ref=f49e95]: tldw Assistant
+                - button "Companion Home" [ref=f49e96] [cursor=pointer]
+                - button "Show shortcuts" [ref=f49e100] [cursor=pointer]
+            - generic [ref=f49e113]:
+              - button "Search - Open command palette" [ref=f49e114] [cursor=pointer]:
+                - generic [ref=f49e118]: Search
+                - generic [ref=f49e119]: ⌘K
+              - button "Open settings" [ref=f49e133] [cursor=pointer]
+              - generic [ref=f49e145]:
+                - button "Notifications, 0 unread" [ref=f49e146] [cursor=pointer]
+                - status [ref=f49e150]: Notifications are active
+              - button "Switch to light theme" [ref=f49e151] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f49e158] [cursor=pointer]:
+                - generic [ref=f49e159]: "?"
+          - generic [ref=f49e833]:
+            - link "Skip to notes list" [ref=f49e834] [cursor=pointer]:
+              - /url: "#notes-list-region"
+            - link "Skip to editor" [ref=f49e835] [cursor=pointer]:
+              - /url: "#notes-editor-region"
+            - paragraph [ref=f49e836]: "Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs."
+            - region "Notes list" [ref=f49e837]:
+              - generic [ref=f49e838]:
+                - generic [ref=f49e839]:
+                  - generic [ref=f49e840]:
+                    - generic [ref=f49e841]:
+                      - generic [ref=f49e842]: Notes
+                      - generic [ref=f49e843]: 5 total
+                    - button "New note" [ref=f49e844] [cursor=pointer]
+                  - generic [ref=f49e847]:
+                    - generic [ref=f49e848]:
+                      - button "Views" [expanded] [ref=f49e850] [cursor=pointer]
+                      - generic [ref=f49e855]:
+                        - generic [ref=f49e856]:
+                          - button "Notes" [ref=f49e857] [cursor=pointer]
+                          - button "Trash" [ref=f49e859] [cursor=pointer]
+                        - generic [ref=f49e861]:
+                          - button "List" [ref=f49e862] [cursor=pointer]
+                          - button "Timeline" [ref=f49e864] [cursor=pointer]
+                          - button "Inbox" [ref=f49e866] [cursor=pointer]
+                          - button "Collection" [ref=f49e868] [cursor=pointer]
+                          - button "Graph" [ref=f49e870] [cursor=pointer]
+                        - generic [ref=f49e878]:
+                          - generic [ref=f49e879]:
+                            - button "Organize" [expanded] [ref=f49e880] [cursor=pointer]
+                            - button "Organize help" [ref=f49e886] [cursor=pointer]:
+                              - img "question-circle" [ref=f49e887]
+                          - generic [ref=f49e892]:
+                            - generic [ref=f49e893]: Saved filter
+                            - generic [ref=f49e894]:
+                              - generic [ref=f49e895] [cursor=pointer]:
+                                - generic [ref=f49e896]:
+                                  - generic: All saved filters
+                                  - combobox "Saved filter" [ref=f49e897]
+                                - img "down" [ref=f49e899]
+                              - button "Save" [disabled] [ref=f49e902]
+                              - button "Remove" [disabled] [ref=f49e903]
+                            - generic [ref=f49e904]: Save current tag filters as saved filters.
+                    - generic [ref=f49e905]:
+                      - textbox "Search notes" [ref=f49e912]:
+                        - /placeholder: Search titles and contents
+                      - generic [ref=f49e914] [cursor=pointer]:
+                        - generic [ref=f49e915]:
+                          - generic "Date modified (newest first)" [ref=f49e916]
+                          - combobox "Sort notes" [ref=f49e917]
+                        - img "down" [ref=f49e919]
+                    - generic [ref=f49e922]:
+                      - button "Filters" [expanded] [ref=f49e924] [cursor=pointer]
+                      - generic [ref=f49e929]:
+                        - generic [ref=f49e930]:
+                          - button "Captured" [ref=f49e931] [cursor=pointer]
+                          - button "Search tips" [ref=f49e933] [cursor=pointer]
+                        - generic [ref=f49e935]:
+                          - generic [ref=f49e936]:
+                            - generic: Filter by tag
+                            - combobox "Filter by tag" [ref=f49e938]
+                          - img "down" [ref=f49e940]
+                        - generic [ref=f49e943]:
+                          - generic [ref=f49e944]:
+                            - button "Browse tags" [ref=f49e945] [cursor=pointer]
+                            - button "Tags help" [ref=f49e947] [cursor=pointer]:
+                              - img "question-circle" [ref=f49e948]
+                          - generic [ref=f49e952]: 10 available
+                        - generic [ref=f49e953]: For in-note search, use browser Ctrl/Cmd+F.
+                    - generic [ref=f49e954]:
+                      - generic [ref=f49e955]: Recent notes
+                      - generic [ref=f49e956]:
+                        - 'button "Snippet: Cycle3 Cedar Guide Chat (20260915_103705)" [ref=f49e957] [cursor=pointer]'
+                        - button "Cycle3 Alice offline private draft" [ref=f49e958] [cursor=pointer]
+                        - 'button "Snippet: Helpful AI Assistant (20260915_094950)" [ref=f49e959] [cursor=pointer]'
+                - generic [ref=f49e961]:
+                  - generic [ref=f49e963]:
+                    - generic [ref=f49e964]: Results
+                    - generic [ref=f49e965]:
+                      - button "Import" [ref=f49e966] [cursor=pointer]
+                      - button "Sync folder" [disabled] [ref=f49e968]
+                      - button "Export" [ref=f49e970] [cursor=pointer]
+                  - list "Notes" [ref=f49e973]:
+                    - listitem [ref=f49e974]:
+                      - generic [ref=f49e975]:
+                        - 'checkbox "Select note Snippet: Cycle3 Cedar Guide Chat (20260915_103705) for bulk actions" [ref=f49e976]'
+                        - 'button "Pin note Snippet: Cycle3 Cedar Guide Chat (20260915_103705)" [ref=f49e977] [cursor=pointer]'
+                        - 'button "Open note Snippet: Cycle3 Cedar Guide Chat (20260915_103705)" [ref=f49e980] [cursor=pointer]':
+                          - generic [ref=f49e981]:
+                            - generic [ref=f49e982]: "Snippet: Cycle3 Cedar Guide Chat (20260915_103705)"
+                            - generic [ref=f49e991]: Jonah Patel coordinates Project Cedar, and volunteers meet every Tuesday at 18:15.
+                            - generic [ref=f49e992]: "Linked to conversation: 812385d9-f19b-4bdf-82a0-1d850884a4b3 · msg pa_eb5c-ce9c-231-88fd"
+                            - generic [ref=f49e993]: 9/15/2026, 2:09:42 PM
+                    - listitem [ref=f49e994]:
+                      - generic [ref=f49e995]:
+                        - checkbox "Select note Cycle3 Alice offline private draft for bulk actions" [ref=f49e996]
+                        - button "Pin note Cycle3 Alice offline private draft" [ref=f49e997] [cursor=pointer]
+                        - button "Open note Cycle3 Alice offline private draft" [ref=f49e1000] [cursor=pointer]:
+                          - generic [ref=f49e1001]:
+                            - generic [ref=f49e1002]: Cycle3 Alice offline private draft
+                            - generic [ref=f49e1008]: "Alice-only fictional draft. The Juniper Lantern reading circle meets at 07:25 on Fridays. Private boundary sentinel: ALICE-JUNIPER-LANTERN-2..."
+                            - generic [ref=f49e1009]: 9/15/2026, 4:08:28 AM
+                    - listitem [ref=f49e1010]:
+                      - generic [ref=f49e1011]:
+                        - 'checkbox "Select note Snippet: Cycle3 Cedar Guide Chat (20260915_103705) for bulk actions" [ref=f49e1012]'
+                        - 'button "Pin note Snippet: Cycle3 Cedar Guide Chat (20260915_103705)" [ref=f49e1013] [cursor=pointer]'
+                        - 'button "Open note Snippet: Cycle3 Cedar Guide Chat (20260915_103705)" [ref=f49e1016] [cursor=pointer]':
+                          - generic [ref=f49e1017]:
+                            - generic [ref=f49e1018]: "Snippet: Cycle3 Cedar Guide Chat (20260915_103705)"
+                            - generic [ref=f49e1027]: Jonah Patel coordinates Project Cedar, and volunteers meet every Tuesday at 18:15.
+                            - generic [ref=f49e1028]: "Linked to conversation: 812385d9-f19b-4bdf-82a0-1d850884a4b3 · msg pa_eb5c-ce9c-231-88fd"
+                            - generic [ref=f49e1029]: 9/15/2026, 3:38:51 AM
+                    - listitem [ref=f49e1030]:
+                      - generic [ref=f49e1031]:
+                        - 'checkbox "Select note Snippet: Helpful AI Assistant (20260915_094950) for bulk actions" [ref=f49e1032]'
+                        - 'button "Pin note Snippet: Helpful AI Assistant (20260915_094950)" [ref=f49e1033] [cursor=pointer]'
+                        - 'button "Open note Snippet: Helpful AI Assistant (20260915_094950)" [ref=f49e1036] [cursor=pointer]':
+                          - generic [ref=f49e1037]:
+                            - generic [ref=f49e1038]: "Snippet: Helpful AI Assistant (20260915_094950)"
+                            - generic [ref=f49e1047]: Jonah Patel coordinates the library, it opens on 22 November 2026, and the book return is beside the north entrance.
+                            - generic [ref=f49e1048]: "Linked to conversation: a68ad772-d28d-43f1-b948-2b97119788e0 · msg ea6cd8f1-b52a-4c18-a912-339847e75453"
+                            - generic [ref=f49e1049]: 9/15/2026, 3:06:27 AM
+                    - listitem [ref=f49e1050]:
+                      - generic [ref=f49e1051]:
+                        - 'checkbox "Select note Snippet: Helpful AI Assistant (20260915_094950) for bulk actions" [ref=f49e1052]'
+                        - 'button "Pin note Snippet: Helpful AI Assistant (20260915_094950)" [ref=f49e1053] [cursor=pointer]'
+                        - 'button "Open note Snippet: Helpful AI Assistant (20260915_094950)" [ref=f49e1056] [cursor=pointer]':
+                          - generic [ref=f49e1057]:
+                            - generic [ref=f49e1058]: "Snippet: Helpful AI Assistant (20260915_094950)"
+                            - generic [ref=f49e1067]: Jonah Patel coordinates the library, it opens on 22 November 2026, and the book return is beside the north entrance.
+                            - generic [ref=f49e1068]: "Linked to conversation: a68ad772-d28d-43f1-b948-2b97119788e0 · msg ea6cd8f1-b52a-4c18-a912-339847e75453"
+                            - generic [ref=f49e1069]: 9/15/2026, 3:05:43 AM
+                  - generic [ref=f49e1071]:
+                    - generic [ref=f49e1072]: Showing 1-5 of 5
+                    - list [ref=f49e1073]:
+                      - listitem "Previous Page" [ref=f49e1074]:
+                        - button [disabled] [ref=f49e1075]:
+                          - img "left" [ref=f49e1076]
+                      - listitem "1" [ref=f49e1079] [cursor=pointer]
+                      - listitem "Next Page" [ref=f49e1081]:
+                        - button [disabled] [ref=f49e1082]:
+                          - img "right" [ref=f49e1083]
+                      - listitem [ref=f49e1086]:
+                        - generic [ref=f49e1087]:
+                          - generic [ref=f49e1088]:
+                            - generic "20 / page" [ref=f49e1089]
+                            - combobox "Page Size" [ref=f49e1090]
+                          - img "down" [ref=f49e1092]
+            - button "Collapse sidebar" [ref=f49e1095] [cursor=pointer]
+            - region "Note editor" [ref=f49e1099]:
+              - generic [ref=f49e1100]:
+                - generic [ref=f49e1102]:
+                  - heading "New note" [level=5] [ref=f49e1103]
+                  - status [ref=f49e1104]: No server save status yet
+                - generic [ref=f49e1105]:
+                  - button "Save note" [disabled] [ref=f49e1106]:
+                    - generic: Save
+                  - button "Save and start another note" [disabled] [ref=f49e1107]:
+                    - generic: Save & new
+                  - group "Editor mode" [ref=f49e1108]:
+                    - button "Edit" [pressed] [ref=f49e1109] [cursor=pointer]
+                    - button "Split" [ref=f49e1114] [cursor=pointer]
+                    - button "Preview" [ref=f49e1119] [cursor=pointer]
+                  - button "Create study pack" [disabled] [ref=f49e1125]
+                  - button "More actions" [ref=f49e1126] [cursor=pointer]
+              - generic [ref=f49e1132]:
+                - generic [ref=f49e1133]:
+                  - generic [ref=f49e1134]: Select or create a note
+                  - generic [ref=f49e1135]: Choose a note from the list to start editing, or create a new one.
+                  - button "Create note" [ref=f49e1136] [cursor=pointer]
+                  - generic [ref=f49e1138]: "Tip: Type [[ in a note to link to another note."
+                - generic [ref=f49e1139]:
+                  - textbox "Note title" [ref=f49e1140]:
+                    - /placeholder: Title
+                  - button "Generate title from content" [disabled] [ref=f49e1141]:
+                    - generic: Generate title
+                  - button "Keyboard shortcuts" [ref=f49e1142] [cursor=pointer]
+                - generic [ref=f49e1145]:
+                  - generic [ref=f49e1146]:
+                    - generic: Tags
+                    - combobox "Note tags" [ref=f49e1148]
+                  - img "down" [ref=f49e1150]
+                - generic [ref=f49e1153]:
+                  - group "Input mode" [ref=f49e1154]:
+                    - button "Markdown" [ref=f49e1155] [cursor=pointer]
+                    - button "WYSIWYG" [ref=f49e1157] [cursor=pointer]
+                  - generic [ref=f49e1159]: Formatting
+                  - button "Bold" [ref=f49e1160] [cursor=pointer]
+                  - button "Italic" [ref=f49e1164] [cursor=pointer]
+                  - button "Heading" [ref=f49e1168] [cursor=pointer]
+                  - button "List" [ref=f49e1172] [cursor=pointer]
+                  - button "Link" [ref=f49e1175] [cursor=pointer]
+                  - button "Attachment" [ref=f49e1180] [cursor=pointer]
+                  - button "Code" [ref=f49e1184] [cursor=pointer]
+                  - generic [ref=f49e1191]: Assist
+                  - button "Summarize" [disabled] [ref=f49e1192]
+                  - button "Expand outline" [disabled] [ref=f49e1193]
+                  - button "Suggest tags" [disabled] [ref=f49e1194]
+                - generic [ref=f49e1196]:
+                  - textbox "Note content" [ref=f49e1197]:
+                    - /placeholder: Write your note here... (Markdown supported)
+                  - generic [ref=f49e1198]: Markdown + LaTeX supported
+                - generic [ref=f49e1199]:
+                  - text: 0 words · 0 chars · 0 mins read
+                  - generic [ref=f49e1200]: Version pending · Not saved yet
+                  - generic [ref=f49e1201]: "Origin: Typed manually"
+    - tooltip "Notes" [ref=f49e1203]
+  - button "Open Next.js Dev Tools" [ref=f49e360] [cursor=pointer]
+  - alert [ref=f49e364]: Notes | tldw
+```

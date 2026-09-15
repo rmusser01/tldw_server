@@ -1,0 +1,2 @@
+2026-09-15 14:55:25.523 | INFO     | trace= span= tp= req=f160fdfd-361d-4f8d-995e-4fb65beb1f55 job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP DELETE /api/v1/media/1 -> 204 in 39ms
+2026-09-15 15:00:00.628 | INFO     | trace= span= tp= req=86c83a36-70a7-475b-bb83-ab1d9480c409 job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP POST /api/v1/media/1/restore -> 200 in 52ms

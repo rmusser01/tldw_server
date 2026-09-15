@@ -1,0 +1,16 @@
+### Result
+{"checkedAt":"2026-09-15T21:59:05.705Z","url":"http://127.0.0.1:18281/media","trashVisible":true,"sourceRows":0,"undoButtons":0,"body":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nMedia Inspector\nTrash\nRESULTS\n0 / 0\nGet started — ingest your first content\n\nPaste a YouTube URL, or use Quick Ingest to upload PDFs, audio, EPUB, and more.\n\nIngest\nSkip for now"}
+### Ran Playwright code
+```js
+await (async(page)=>{await page.screenshot({path:"/private/tmp/uat017-admin-empty-trash-visible.png"});return {checkedAt:new Date().toISOString(),url:page.url(),trashVisible:await page.getByRole("button",{name:"Trash",exact:true}).isVisible(),sourceRows:await page.getByRole("button",{name:/^Select media:/}).count(),undoButtons:await page.getByRole("button",{name:"Undo",exact:true}).count(),body:await page.locator("body").innerText()};})(page);
+```
+### Open tabs
+- 0: (current) [Media | tldw](http://127.0.0.1:18281/media)
+- 1: [](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/media
+- Page Title: Media | tldw
+- Console: 2 errors, 2 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T21-53-30-506Z.log#L158-L159
