@@ -180,6 +180,7 @@ from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
 from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
     discover_openrouter_models as _discover_openrouter_models_shared,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
@@ -1641,22 +1642,42 @@ def infer_provider_from_model_catalog(
     return current_provider, debug
 
 
-def _split_inline_provider_model(model_str: str) -> tuple[str | None, str | None, str | None]:
-    """Split frontend provider-qualified model ids into provider/model parts."""
+def _split_inline_provider_model(
+    model_str: str, api_provider: str | None = None
+) -> tuple[str | None, str | None, str | None]:
+    """Split recognized provider prefixes without changing opaque model IDs."""
     model_value = (model_str or "").strip()
     if not model_value:
         return None, None, None
+    explicit_provider = (
+        canonical_provider_name(normalize_catalog_provider_for_chat(api_provider))
+        if api_provider else None
+    )
+    preserve_local_namespace = (
+        explicit_provider in _adapter_registry.ChatProviderRegistry.DEFAULT_LOCAL_PROVIDERS
+    )
 
     if "/" in model_value:
         model_provider, model_name = model_value.split("/", 1)
-        return model_provider.strip(), model_name.strip(), "/"
+        normalized_provider = canonical_provider_name(
+            normalize_catalog_provider_for_chat(model_provider)
+        )
+        if normalized_provider in _INLINE_MODEL_PROVIDER_NAMES and (
+            not preserve_local_namespace or normalized_provider == explicit_provider
+        ):
+            return model_provider.strip(), model_name.strip(), "/"
+        # Model identifiers can be paths or repository names. Only registered
+        # provider prefixes qualify for stripping; a colon prefix may precede
+        # a path (for example, "llamacpp:../../models/model.gguf").
 
     if ":" not in model_value:
         return None, None, None
 
     model_provider, model_name = model_value.split(":", 1)
-    normalized_provider = normalize_catalog_provider_for_chat(model_provider.strip().lower())
-    if normalized_provider not in _INLINE_MODEL_PROVIDER_NAMES:
+    normalized_provider = canonical_provider_name(normalize_catalog_provider_for_chat(model_provider))
+    if normalized_provider not in _INLINE_MODEL_PROVIDER_NAMES or (
+        preserve_local_namespace and normalized_provider != explicit_provider
+    ):
         return None, None, None
     return model_provider.strip(), model_name.strip(), ":"
 
@@ -1792,7 +1813,7 @@ def parse_provider_model_for_metrics(
         else "unknown"
     )
     api_provider = getattr(request_data, "api_provider", None)
-    model_provider, model_name, _ = _split_inline_provider_model(model_str)
+    model_provider, model_name, _ = _split_inline_provider_model(model_str, api_provider)
     if model_provider is not None and model_name is not None:
         raw_provider = api_provider or model_provider
         provider = normalize_catalog_provider_for_chat((raw_provider or "").strip().lower())
@@ -1829,7 +1850,7 @@ def normalize_request_provider_and_model(
         inline_provider: str | None = None
         inline_model_part: str | None = None
         inline_separator: str | None = None
-        inline_provider, inline_model_part, inline_separator = _split_inline_provider_model(model_str)
+        inline_provider, inline_model_part, inline_separator = _split_inline_provider_model(model_str, api_provider)
         provider_for_mapping = normalize_catalog_provider_for_chat(
             ((inline_provider or api_provider or default_provider) or "").strip().lower()
         )
@@ -1898,7 +1919,7 @@ def normalize_request_provider_and_model(
     provider = normalize_catalog_provider_for_chat(
         ((api_provider or default_provider) or "").strip().lower()
     )
-    model_provider, actual_model, inline_separator = _split_inline_provider_model(model_str)
+    model_provider, actual_model, inline_separator = _split_inline_provider_model(model_str, api_provider)
     if model_provider is not None and actual_model is not None:
         inline_provider_lower = normalize_catalog_provider_for_chat(
             model_provider.strip().lower()
