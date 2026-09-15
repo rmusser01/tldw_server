@@ -827,6 +827,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
           ? normalizeImageVariantsForMessage(
               updateActiveVariant(msg, {
                 message: fullText,
+                serverMessageId: modelClient.serverMessageId,
                 sources,
                 generationInfo: finalGenerationInfo,
                 toolCalls,
@@ -926,6 +927,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       reasoning_time_taken: timetaken,
       saveToDb: Boolean(modelClient.saveToDb),
       conversationId: modelClient.conversationId,
+      assistantServerMessageId: modelClient.serverMessageId,
       imageEventSyncPolicy,
       scopeSignal: params.servicePromptSnapshot?.scopeSignal,
       scopeInvalidatedSignal:

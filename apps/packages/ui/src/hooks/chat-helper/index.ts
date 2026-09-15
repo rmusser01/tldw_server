@@ -474,6 +474,7 @@ export const saveMessageOnSuccess = async ({
   userModelId,
   userMessageId,
   assistantMessageId,
+  assistantServerMessageId,
   userParentMessageId,
   assistantParentMessageId,
   generationInfo,
@@ -511,6 +512,7 @@ export const saveMessageOnSuccess = async ({
   userModelId?: string
   userMessageId?: string
   assistantMessageId?: string
+  assistantServerMessageId?: string
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
   generationInfo?: any
@@ -577,6 +579,7 @@ export const saveMessageOnSuccess = async ({
       } else {
         await saveMessage({
           id: assistantMessageId,
+          serverMessageId: assistantServerMessageId,
           history_id: targetHistoryId,
           name: selectedModel,
           role: "assistant",

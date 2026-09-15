@@ -33,6 +33,7 @@ export interface SaveMessageBase {
 }
 
 export interface SaveMessageData extends SaveMessageBase {
+  assistantServerMessageId?: string
   isRegenerate: boolean
   message: string
   fullText: string

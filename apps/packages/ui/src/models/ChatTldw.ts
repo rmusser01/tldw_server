@@ -67,6 +67,7 @@ export class ChatTldw {
   supportsMultimodal: boolean
   saveToDb?: boolean
   conversationId?: string
+  serverMessageId?: string
   historyMessageLimit?: number
   historyMessageOrder?: string
   slashCommandInjectionMode?: string
@@ -122,6 +123,7 @@ export class ChatTldw {
     }
   ): Promise<AsyncGenerator<any, void, unknown>> {
     const { signal, callbacks } = options || {}
+    this.serverMessageId = undefined
 
     const tldwMessages = this.convertToTldwMessages(messages)
     const toolCalls: ToolCall[] = []
@@ -161,6 +163,7 @@ export class ChatTldw {
     }
 
     const handleChunk = (chunk: any) => {
+      if (signal?.aborted) return
       const streamedConversationId =
         typeof chunk?.tldw_conversation_id === "string" &&
         chunk.tldw_conversation_id.trim().length > 0
@@ -174,6 +177,10 @@ export class ChatTldw {
       if (streamedConversationId && this.saveToDb !== false) {
         this.conversationId = streamedConversationId
         this.saveToDb = true
+      }
+      if (this.saveToDb !== false && typeof chunk?.tldw_message_id === "string") {
+        const savedMessageId = chunk.tldw_message_id.trim()
+        if (savedMessageId) this.serverMessageId = savedMessageId
       }
 
       const loopEvent = extractChatLoopEvent(chunk)

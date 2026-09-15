@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import patch
 
 import pytest
@@ -81,7 +82,10 @@ def persona_chat_client(persona_chat_db):
     }
 
     with (
-        patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "sk-test-key"}),
+        patch(
+            "tldw_Server_API.app.core.AuthNZ.provider_credential_runtime.load_server_config_snapshot",
+            return_value={"openai_api": {"api_key": "sk-test-key"}},
+        ),
         patch(
             "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
             return_value=mock_response,
@@ -184,6 +188,41 @@ def _chat_completion_body(conversation_id: str) -> dict[str, object]:
         "save_to_db": True,
         "messages": [{"role": "user", "content": "Remember this and reply."}],
     }
+
+
+@pytest.mark.parametrize("retry_failed_turn", [False, True])
+def test_normal_chat_saves_reply_in_existing_neutral_conversation(
+    persona_chat_client, persona_chat_db, retry_failed_turn
+):
+    client, auth_headers, provider_call = persona_chat_client
+    conversation_id = persona_chat_db.add_conversation(
+        {"title": "Workspace research", "client_id": "1"}
+    )
+    failed_content = '__tldw_error__:{"summary":"Failed","hint":"Retry","detail":"Provider failed"}'
+    if retry_failed_turn:
+        persona_chat_db.add_message({
+            "conversation_id": conversation_id, "sender": "user", "content": "Remember this and reply."
+        })
+        persona_chat_db.add_message({
+            "conversation_id": conversation_id, "sender": "assistant", "content": failed_content
+        })
+
+    response = client.post(
+        "/api/v1/chat/completions",
+        json=_chat_completion_body(conversation_id),
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    messages = persona_chat_db.get_messages_for_conversation(conversation_id)
+    assert any(message["content"] == "Persona reply from test" for message in messages)
+    assert sum(message["content"] == "Remember this and reply." for message in messages) == 1
+    assert "__tldw_error__:" not in json.dumps(provider_call.call_args.kwargs["messages_payload"])
+    if retry_failed_turn:
+        assert any(message["content"] == failed_content for message in messages)
+    saved_conversation = persona_chat_db.get_conversation_by_id(conversation_id)
+    assert saved_conversation["character_id"] is None
+    assert saved_conversation["assistant_id"] is None
 
 
 def test_persona_backed_chat_uses_persona_identity_when_loading_prompt(

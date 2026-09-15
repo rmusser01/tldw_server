@@ -3945,6 +3945,32 @@ async def _resolve_tldw_continuation_history(
     return ordered_chain, metadata
 
 
+def _is_saved_chat_error_envelope(message: dict[str, Any]) -> bool:
+    """Recognize the WebUI's assistant diagnostic envelope, never user text."""
+    if message.get("role") != "assistant":
+        return False
+    content = message.get("content")
+    if (
+        isinstance(content, list)
+        and len(content) == 1
+        and isinstance(content[0], dict)
+        and content[0].get("type") == "text"
+    ):
+        content = content[0].get("text")
+    prefix = "__tldw_error__:"
+    if not isinstance(content, str) or not content.startswith(prefix):
+        return False
+    try:
+        payload = _json.loads(content[len(prefix):])
+    except (ValueError, TypeError):
+        return False
+    return (
+        isinstance(payload, dict)
+        and isinstance(payload.get("summary"), str)
+        and isinstance(payload.get("hint"), str)
+    )
+
+
 async def build_context_and_messages(
     chat_db: Any,
     request_data: Any,
@@ -4005,6 +4031,17 @@ async def build_context_and_messages(
         and assistant_context.get("assistant_kind") == "persona"
         and assistant_context.get("assistant_id")
     )
+    # Workspace chats can intentionally have no saved assistant identity. An
+    # implicit default character supplies prompt context, not a request to fork.
+    is_owned_neutral_conversation = bool(
+        existing_conversation
+        and client_id_from_db is not None
+        and existing_conversation.get("client_id") == client_id_from_db
+        and getattr(request_data, "character_id", None) is None
+        and existing_conversation.get("character_id") is None
+        and existing_conversation.get("assistant_kind") is None
+        and existing_conversation.get("assistant_id") is None
+    )
     from tldw_Server_API.app.core.Buddy.publication import current_buddy_publication
 
     publication = current_buddy_publication.get()
@@ -4018,7 +4055,9 @@ async def build_context_and_messages(
         and str(client_id_from_db) == publication.repository.user_id
     )
     # Ensure a valid assistant identity is present before attempting persistence
-    if should_persist and character_db_id is None and not (is_existing_persona_conversation or is_accepted_buddy_conversation):
+    if should_persist and character_db_id is None and not (
+        is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation
+    ):
         logger.warning(
             'Persistence requested but no compatible assistant identity is available; disabling persistence for conversation {}.',
             final_conversation_id or "<new>",
@@ -4026,7 +4065,7 @@ async def build_context_and_messages(
         should_persist = False
 
     if should_persist:
-        if (is_existing_persona_conversation or is_accepted_buddy_conversation) and conv_id:
+        if (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation) and conv_id:
             conversation_created = False
         else:
             conv_id, conversation_created = await get_or_create_conversation(
@@ -4198,6 +4237,15 @@ async def build_context_and_messages(
                 historical_msgs.append(hist_entry)
         logger.info(f"Loaded {len(historical_msgs)} historical messages for conv_id '{conv_id}'.")
 
+    # Keep failure diagnostics in saved history, but never send them as model
+    # replies. Only a matching retry of the trailing failure can reuse its user
+    # turn; ordinary repeated user messages retain their existing semantics.
+    history_ended_with_error = bool(
+        historical_msgs
+        and _is_saved_chat_error_envelope(historical_msgs[0 if history_order == "desc" else -1])
+    )
+    historical_msgs = [message for message in historical_msgs if not _is_saved_chat_error_envelope(message)]
+
     # Process current turn messages (persist if needed)
     request_messages: list[dict[str, Any]] = []
     for msg_model in request_data.messages:
@@ -4279,7 +4327,8 @@ async def build_context_and_messages(
                 }
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 user_only_trim = False
-            if user_only_trim and all_user_roles:
+            retrying_failed_turn = history_ended_with_error and len(request_messages) == 1
+            if (user_only_trim or retrying_failed_turn) and all_user_roles:
                 hist_for_overlap = (
                     list(reversed(historical_msgs)) if history_order == "desc" else historical_msgs
                 )

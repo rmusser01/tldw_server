@@ -1,6 +1,6 @@
 import asyncio
 import json
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from typing import Any, Dict, Optional, List
 
 import pytest
@@ -60,6 +60,11 @@ class DummyChatDBWithMetadata(DummyChatDB):
                 "sender_name": "system-command",
             },
         }
+
+
+@pytest.mark.parametrize("content", [["literal"], [None]])
+def test_chat_error_envelope_leaves_malformed_content_parts_unchanged(content):
+    assert chat_service._is_saved_chat_error_envelope({"role": "assistant", "content": content}) is False
 
 
 @pytest.mark.asyncio
@@ -335,6 +340,93 @@ async def test_build_context_honors_sender_role_metadata():
     history = result[4]
     assert history
     assert history[0]["role"] == "system"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("history_order", ["asc", "desc"])
+@pytest.mark.parametrize(
+    "last_role,last_content,retry_content,expected_writes,expected_history_count",
+    [
+        ("assistant", '__tldw_error__:{"summary":"Failed","hint":"Retry"}', "question", 0, 1),
+        ("assistant", '__tldw_error__:{"summary":"Failed","hint":"Retry"}', "different", 1, 2),
+        ("assistant", "Successful answer", "question", 1, 3),
+        ("assistant", '__tldw_error__:{"summary":"Quoted example"}', "question", 1, 3),
+        ("assistant", "__tldw_error__:not-json", "question", 1, 3),
+        ("user", '__tldw_error__:{"summary":"Failed","hint":"Retry"}', "question", 1, 3),
+    ],
+)
+async def test_failed_turn_retry_preserves_history_without_replaying_diagnostics(
+    history_order, last_role, last_content, retry_content, expected_writes, expected_history_count, monkeypatch
+):
+    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+
+    monkeypatch.delenv("CHAT_TRIM_USER_ONLY_OVERLAP", raising=False)
+
+    class SavedChatDB(DummyChatDB):
+        def get_conversation_by_id(self, conversation_id):
+            return {"id": conversation_id, "character_id": 1, "client_id": "client"}
+
+    db = SavedChatDB([
+        {"id": "question", "sender": "user", "content": "question", "timestamp": 1},
+        {"id": "last", "sender": last_role, "content": last_content, "timestamp": 2},
+    ])
+    request = ChatCompletionRequest(
+        model="test-model", save_to_db=True, history_message_order=history_order,
+        messages=[{"role": "user", "content": retry_content}],
+    )
+    save = AsyncMock()
+    result = await chat_service.build_context_and_messages(
+        chat_db=db, request_data=request, loop=asyncio.get_running_loop(), metrics=MagicMock(),
+        default_save_to_db=False, final_conversation_id="conv", save_message_fn=save,
+    )
+
+    assert len(result[4]) == expected_history_count
+    assert save.await_count == expected_writes
+    assert db._records[-1]["content"] == last_content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "owner,requested_character,expected_id,expected_created",
+    [
+        ("client", None, "conv", False),
+        ("client", "2", "fork", True),
+        ("other-client", None, "fork", True),
+    ],
+)
+async def test_build_context_preserves_owned_neutral_conversation_only_for_implicit_assistant(
+    owner, requested_character, expected_id, expected_created
+):
+    class NeutralChatDB(DummyChatDB):
+        def get_conversation_by_id(self, conversation_id):
+            return {
+                "id": conversation_id,
+                "character_id": None,
+                "assistant_kind": None,
+                "assistant_id": None,
+                "client_id": owner,
+            }
+
+        def transaction(self):
+            return nullcontext()
+
+        def add_conversation(self, conversation):
+            return "fork"
+
+    request = DummyRequestData(save_to_db=True)
+    request.character_id = requested_character
+    result = await chat_service.build_context_and_messages(
+        chat_db=NeutralChatDB([]),
+        request_data=request,
+        loop=asyncio.get_running_loop(),
+        metrics=MagicMock(),
+        default_save_to_db=False,
+        final_conversation_id="conv",
+        save_message_fn=AsyncMock(),
+    )
+
+    assert (result[2], result[3], result[5]) == (expected_id, expected_created, True)
+    assert result[0]["system_prompt"] == "Prompt"
 
 
 @pytest.mark.asyncio
