@@ -706,7 +706,6 @@ describe("App layout routing", () => {
     mockGetCurrentUser.mockRejectedValueOnce(makeStatusError("Unauthorized", 401))
 
     renderApp("/media")
-    const layout = await screen.findByTestId("option-layout")
 
     await waitFor(() => {
       expect(mockGetCurrentUser).toHaveBeenCalled()
@@ -714,10 +713,125 @@ describe("App layout routing", () => {
     await waitFor(() => {
       expect(mockRouter.push).toHaveBeenCalledWith("/login")
     })
-    expect(layout).toHaveAttribute("data-hide-header", "true")
-    expect(layout).toHaveAttribute("data-hide-sidebar", "true")
+    expect(screen.getByRole("heading", { name: "Signed out" })).toBeInTheDocument()
+    expect(screen.queryByTestId("page-content")).toBeNull()
     expect(mockLogout).toHaveBeenCalled()
   })
+
+  it.each(["storage", "tldw:config-updated"])(
+    "replaces private content locally after offline logout via %s and preserves queued drafts",
+    async (eventName) => {
+      const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(true)
+      const queueKey = "tldw:notesOfflineDraftQueue:v1:alice"
+      const queuedDraft = JSON.stringify({ draft: { content: "Alice queued note" } })
+      currentConfig = {
+        serverUrl: "http://server.invalid",
+        authMode: "multi-user",
+        accessToken: "alice-token"
+      }
+      try {
+        renderApp("/notes")
+        await screen.findByTestId("page-content")
+        localStorage.setItem(queueKey, queuedDraft)
+        const oldValue = JSON.stringify(currentConfig)
+        currentConfig = { ...currentConfig, accessToken: undefined }
+        online.mockReturnValue(false)
+        act(() => {
+          window.dispatchEvent(eventName === "storage"
+            ? new StorageEvent("storage", {
+                key: "tldwConfig", oldValue, newValue: JSON.stringify(currentConfig)
+              })
+            : new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
+        })
+
+        await screen.findByRole("heading", { name: "Signed out" })
+        expect(screen.getByText(/reconnect to sign in/i)).toBeInTheDocument()
+        expect(screen.queryByTestId("page-content")).toBeNull()
+        expect(screen.queryByTestId("persistent-buddy")).toBeNull()
+        expect(screen.queryByTestId("server-readiness-gate")).toBeNull()
+        expect(screen.queryByTestId("first-run-gate")).toBeNull()
+        expect(mockRouter.push).not.toHaveBeenCalled()
+        expect(localStorage.getItem(queueKey)).toBe(queuedDraft)
+      } finally {
+        online.mockRestore()
+      }
+    }
+  )
+
+  it("resumes the normal login redirect when a signed-out tab comes online", async () => {
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false)
+    currentConfig = { serverUrl: "http://server.invalid", authMode: "multi-user" }
+    try {
+      renderApp("/notes")
+      await screen.findByRole("heading", { name: "Signed out" })
+      expect(mockRouter.push).not.toHaveBeenCalled()
+
+      online.mockReturnValue(true)
+      act(() => { window.dispatchEvent(new Event("online")) })
+      await waitFor(() => expect(mockRouter.push).toHaveBeenCalledWith("/login"))
+      expect(screen.queryByTestId("page-content")).toBeNull()
+    } finally {
+      online.mockRestore()
+    }
+  })
+
+  it.each(["success", "network-error", "unauthorized"])(
+    "ignores a late %s auth result after a newer offline logout",
+    async (outcome) => {
+      const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false)
+      currentConfig = {
+        serverUrl: "http://server.invalid", authMode: "multi-user", accessToken: "alice-token"
+      }
+      let resolveValidation!: (value: unknown) => void
+      let rejectValidation!: (reason: unknown) => void
+      const validation = new Promise((resolve, reject) => {
+        resolveValidation = resolve
+        rejectValidation = reject
+      })
+      try {
+        renderApp("/notes")
+        await screen.findByTestId("page-content")
+        mockGetCurrentUser.mockReturnValueOnce(validation)
+        act(() => { window.dispatchEvent(new Event("focus")) })
+        await waitFor(() => expect(mockGetCurrentUser).toHaveBeenCalledTimes(2))
+
+        currentConfig = { ...currentConfig, accessToken: undefined }
+        act(() => {
+          window.dispatchEvent(new StorageEvent("storage", {
+            key: "tldwConfig", newValue: JSON.stringify(currentConfig)
+          }))
+        })
+        await waitFor(() => expect(mockGetConfig).toHaveBeenCalledTimes(3))
+        await act(async () => {
+          if (outcome === "success") resolveValidation({ id: 2, username: "alice" })
+          else rejectValidation(makeStatusError(outcome, outcome === "unauthorized" ? 401 : 0))
+        })
+
+        expect(screen.getByRole("heading", { name: "Signed out" })).toBeInTheDocument()
+        expect(screen.queryByTestId("page-content")).toBeNull()
+        expect(mockLogout).not.toHaveBeenCalled()
+        expect(mockRouter.push).not.toHaveBeenCalled()
+      } finally {
+        online.mockRestore()
+      }
+    }
+  )
+
+  it.each(["/settings/tldw", "/login", "/setup", "/__debug__/sidepanel-chat"])(
+    "keeps the signed-out %s route available offline",
+    async (pathname) => {
+      const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false)
+      currentConfig = { serverUrl: "http://server.invalid", authMode: "multi-user" }
+      try {
+        renderApp(pathname)
+        await screen.findByTestId("page-content")
+        expect(screen.queryByRole("heading", { name: "Signed out" })).toBeNull()
+        expect(mockRouter.push).not.toHaveBeenCalled()
+      } finally {
+        online.mockRestore()
+      }
+    }
+  )
 
   it("redirects stale sessions when the auth provider has no logout method", async () => {
     mockLogoutAvailable = false
