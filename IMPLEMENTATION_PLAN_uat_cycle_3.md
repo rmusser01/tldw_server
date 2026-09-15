@@ -100,7 +100,7 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 - [x] Preserve same-account close/resume, reconnect and valid source actions; verify different servers and colliding numeric IDs.
 - [ ] Independently review, run scoped frontend checks, and exercise the exact same-browser account transition before the next full UAT.
 
-- Reviewed checkpoint `af1e7bb08b`: parent61/5 and implementer480/32 tests pass; independent re-review clears all three expiry/marker probes. Lint0 errors/878 unchanged warnings; compiler90 exact baseline. Native account-switch and resume acceptance remains pending. Existing MV3 foreground preference remains; worker-only controls do not certify popup destruction.
+- Reviewed checkpoint `af1e7bb08b`: parent61/5 and implementer480/32 tests pass; independent re-review clears all three expiry/marker probes. Lint0 errors/878 unchanged warnings; compiler90 exact baseline. Targeted Bob completed-result close/reopen and normal logout/admin empty-wizard acceptance pass in private-ingest-round7. Full fresh runs remain pending. Existing MV3 foreground preference remains; worker-only controls do not certify popup destruction.
 
 ### TASK-13260.27 — UAT086 QA account history
 
@@ -220,7 +220,13 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 **Goal:** Establish complete acceptance on the repaired application.
 **Success criteria:** Every required single/multi workflow completes with no encountered product issue; explicit blocks remain visible and cannot qualify as success.
 **Tests:** Combined touched frontend/backend regressions, scoped lint/Bandit, TypeScript baseline comparison, independent review, targeted live controls and fresh full workflow matrices.
-**Status:** Not Started
+**Status:** In Progress
+
+### TASK-13260.32 — reconcile verified dev baseline
+
+- [x] Record the missed latest-dev check and exact branch/ref ancestry; fresh fetch confirms `origin/dev` at `2e1a5e58d3`, with 32 commits missing at branch creation. Committed-repair integration preview is conflict-free.
+- [ ] Finish and preserve the active reviewed Chat correction; integrate verified origin/dev while retaining unrelated work.
+- [ ] Resolve integration failures, rerun affected regressions/static/Bandit checks and restart isolated runtimes before the next full fresh matrices.
 
 - [ ] Resolve independent review findings and run combined relevant checks once all changed interfaces settle; record baseline failures separately.
 - [ ] Keep the tracker current for each repaired, verified or blocked finding, with commit and evidence links.

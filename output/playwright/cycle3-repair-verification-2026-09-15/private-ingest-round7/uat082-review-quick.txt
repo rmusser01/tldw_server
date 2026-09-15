@@ -1,0 +1,6 @@
+### Result
+{"checkedAt":"2026-09-15T20:01:08.792Z","dialog":"Quick Ingest (1)\nAdd\n1 items\nConfigure\nQuick\nReview\nProcessing\nResults\nReady to Process\n\n1 items | Quick preset\n\nProcessing time depends on the content, selected options, and server.\n\nonboarding-uat-note.md\nQuick · Extract\n\nStorage: Server\n\nBack to Settings\nStart Processing"}
+### Ran Playwright code
+```js
+await (async(page)=>{const d=page.getByRole("dialog",{name:"Quick Ingest (1)",exact:true});await d.getByRole("button",{name:"Quick preset",exact:true}).click();await d.getByRole("button",{name:"Next",exact:true}).click();return{checkedAt:new Date().toISOString(),dialog:await d.innerText()};})(page);
+```

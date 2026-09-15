@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-15 19:59'
+updated_date: '2026-09-15 20:13'
 labels:
   - uat
   - testing
@@ -105,6 +105,8 @@ QA ownership repair integratedd05c13ecc0 after final independent review; parent1
 Repair checkpoint: Quick Ingest af1e7bb08b committed after61 focused parent tests, corrected480/32 and independent review clear; native account-switch acceptance pending. Generator092 f9b0dd2f53 committed with24 regressions and actual existing/new selector passes. Multi mixed Study now passes five decked+two undecked, same completed global session2/count7 and reload; retained mixed-study-round6. Flashcard Note transfer/generation/save retained in round5. Disk exhaustion blocked first staging and caused Next panic; only task-owned inactive original compiled static/server bundles removed after no-open/no-tracked checks, keeping evidence and runtime data. Current Next serves200 again. Remaining Chat .15 frozen for independent review; full fresh matrices not started.
 
 Independent round5/round6 evidence review clear:34 hashes (14+20),10 JSON parse. Original reload command retained; final three-rating/error details explicitly runner-reported while terminal UI, per-card timestamps/versions and one completed session7 corroborate result. Chat .15 parent52/6 and independent303/25 tests pass, but review found P2 existing-mirror display rollback/hidden persistent draft; repair remains frozen pending final review and correction. No full fresh run started.
+
+User latest-dev clarification exposed missed baseline check: branch based on existing email checkout, shareddevc703;32 commits already in remote2e1a were absent at creation. Freshfetch confirms same remote;13260.32 tracks merge+revalidation, conflict-free preview only so far. Tracker explicitly limits older evidence. Native private Quick Ingest now passes Bob completed/resume then normal logout/admin emptywizard, retainedround7. No further native UAT until pending Chat review correction and dev integration are complete.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

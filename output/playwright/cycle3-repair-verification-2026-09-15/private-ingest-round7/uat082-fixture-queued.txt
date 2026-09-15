@@ -1,0 +1,254 @@
+### Open tabs
+- 0: (current) [Flashcards | tldw](http://127.0.0.1:18281/flashcards?tab=importExport)
+- 1: [](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+### Snapshot
+```yaml
+- generic [ref=f33e11]:
+  - generic [ref=f33e14]:
+    - link "Skip to main content" [ref=f33e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f33e16]:
+      - button "Expand sidebar" [ref=f33e17] [cursor=pointer]
+      - button "New Chat" [ref=f33e21] [cursor=pointer]
+      - generic [ref=f33e24]:
+        - button "Quick Ingest" [ref=f33e25] [cursor=pointer]
+        - button "Chat" [ref=f33e29] [cursor=pointer]
+        - button "Prompts" [ref=f33e32] [cursor=pointer]
+        - button "Characters" [ref=f33e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f33e41] [cursor=pointer]
+        - button "World Books" [ref=f33e45] [cursor=pointer]
+        - button "Notes" [ref=f33e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f33e52] [cursor=pointer]
+        - button "Media" [ref=f33e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f33e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f33e69] [cursor=pointer]
+        - button "Kanban" [ref=f33e75] [cursor=pointer]
+        - button "Watchlists" [ref=f33e77] [cursor=pointer]
+      - generic [ref=f33e82]:
+        - button "Open Notes Dock" [ref=f33e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f33e88] [cursor=pointer]
+        - button "Settings" [ref=f33e91] [cursor=pointer]
+    - main [ref=f33e95]:
+      - generic [ref=f33e96]:
+        - generic [ref=f33e99]:
+          - generic [ref=f33e100]:
+            - button "Expand sidebar" [ref=f33e101] [cursor=pointer]
+            - generic [ref=f33e103]:
+              - img "tldw Assistant" [ref=f33e104]
+              - generic [ref=f33e105]: tldw Assistant
+              - button "Companion Home" [ref=f33e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f33e110] [cursor=pointer]
+          - generic [ref=f33e113]:
+            - button "Search - Open command palette" [ref=f33e114] [cursor=pointer]:
+              - generic [ref=f33e118]: Search
+              - generic [ref=f33e119]: ⌘K
+            - button "Open settings" [ref=f33e120] [cursor=pointer]
+            - generic [ref=f33e132]:
+              - button "Notifications, 0 unread" [ref=f33e133] [cursor=pointer]
+              - status [ref=f33e137]: Notifications are active
+            - button "Switch to light theme" [ref=f33e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f33e145] [cursor=pointer]:
+              - generic [ref=f33e146]: "?"
+        - generic [ref=f33e148]:
+          - generic [ref=f33e150]:
+            - generic [ref=f33e152]:
+              - generic [ref=f33e153]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f33e154]
+            - navigation "Flashcards modes" [ref=f33e155]:
+              - generic [ref=f33e156]: Study
+              - generic [ref=f33e157]: Manage
+              - generic [ref=f33e158]: Import / Export
+              - generic [ref=f33e159]: Templates
+              - generic [ref=f33e160]: Scheduler
+          - generic [ref=f33e163]:
+            - tablist [ref=f33e164]:
+              - generic [ref=f33e166]:
+                - tab "Study" [ref=f33e168] [cursor=pointer]
+                - tab "Manage" [ref=f33e170] [cursor=pointer]
+                - tab "Import / Export" [selected] [ref=f33e172] [cursor=pointer]
+                - tab "Templates" [ref=f33e174] [cursor=pointer]
+                - tab "Scheduler" [ref=f33e176] [cursor=pointer]
+              - generic [ref=f33e178]:
+                - button "Test with Quiz" [disabled] [ref=f33e180]
+                - button "Keyboard Shortcuts" [ref=f33e181] [cursor=pointer]
+            - tabpanel "Import / Export" [ref=f33e188]:
+              - generic [ref=f33e189]:
+                - generic [ref=f33e190]:
+                  - generic [ref=f33e191]: Task
+                  - radiogroup "Create, import, or export task" [ref=f33e195]:
+                    - generic [ref=f33e196]:
+                      - generic [ref=f33e197] [cursor=pointer]:
+                        - radio "Create cards" [checked]
+                        - generic "Create cards" [ref=f33e198]
+                      - generic [ref=f33e199] [cursor=pointer]:
+                        - radio "Import file"
+                        - generic "Import file" [ref=f33e200]
+                      - generic [ref=f33e201] [cursor=pointer]:
+                        - radio "Export backup"
+                        - generic "Export backup" [ref=f33e202]
+                - region [ref=f33e203]:
+                  - generic [ref=f33e204]:
+                    - heading "Create and generate" [level=5] [ref=f33e205]
+                    - text: Start new study material from study packs, source text, or images.
+                  - generic [ref=f33e206]:
+                    - generic [ref=f33e207]:
+                      - generic [ref=f33e208]: Study packs
+                      - generic [ref=f33e212]:
+                        - generic [ref=f33e213]:
+                          - strong [ref=f33e215]: Turn media or notes into a review queue.
+                          - text: Create a study pack from supported sources, then review the generated deck in Flashcards.
+                        - button "Create study pack" [ref=f33e216] [cursor=pointer]
+                    - generic [ref=f33e218]:
+                      - generic [ref=f33e219]: Generate Flashcards
+                      - generic [ref=f33e223]:
+                        - generic [ref=f33e224]: Generate cards from pasted text, review/edit them, then save to a deck.
+                        - textbox "Paste transcript, notes, or study material..." [ref=f33e225]
+                        - generic [ref=f33e226]: "Tip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph."
+                        - generic [ref=f33e227]:
+                          - generic [ref=f33e228]:
+                            - switch "Advanced mix" [ref=f33e229] [cursor=pointer]
+                            - generic [ref=f33e232]: Advanced mix
+                          - generic [ref=f33e234]:
+                            - generic "Number of cards" [ref=f33e236]: "Number of cards :"
+                            - spinbutton [ref=f33e240]: "10"
+                          - generic [ref=f33e242]:
+                            - generic "Card type" [ref=f33e244]: "Card type :"
+                            - generic [ref=f33e248] [cursor=pointer]:
+                              - generic [ref=f33e249]:
+                                - generic "Basic" [ref=f33e250]
+                                - combobox [ref=f33e251]
+                              - img "down" [ref=f33e253]
+                          - generic [ref=f33e257]:
+                            - generic "Difficulty" [ref=f33e259]: "Difficulty :"
+                            - generic [ref=f33e263] [cursor=pointer]:
+                              - generic [ref=f33e264]:
+                                - generic "Mixed" [ref=f33e265]
+                                - combobox [ref=f33e266]
+                              - img "down" [ref=f33e268]
+                          - generic [ref=f33e272]:
+                            - generic "Deck" [ref=f33e274]: "Deck :"
+                            - generic [ref=f33e278] [cursor=pointer]:
+                              - generic [ref=f33e279]:
+                                - generic "Cycle3 Bob Biology" [ref=f33e280]
+                                - combobox [ref=f33e281]
+                              - img "down" [ref=f33e283]
+                          - generic [ref=f33e286]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                          - generic [ref=f33e288]:
+                            - generic "Provider (optional)" [ref=f33e290]: "Provider (optional) :"
+                            - textbox [ref=f33e294]
+                          - generic [ref=f33e296]:
+                            - generic "Model (optional)" [ref=f33e298]: "Model (optional) :"
+                            - textbox [ref=f33e302]
+                        - generic [ref=f33e304]:
+                          - generic "Focus topics (comma-separated)" [ref=f33e306]: "Focus topics (comma-separated) :"
+                          - textbox "exam 1, chapter 3, formulas" [ref=f33e310]
+                        - button "Generate cards" [disabled] [ref=f33e312]
+                    - generic [ref=f33e313]:
+                      - generic [ref=f33e314]: Image Occlusion
+                      - generic [ref=f33e318]:
+                        - generic [ref=f33e319]: Upload one image, draw labeled rectangular occlusions, generate drafts, then save them in bulk.
+                        - generic [ref=f33e320]:
+                          - generic [ref=f33e322]:
+                            - generic "Deck" [ref=f33e324]: "Deck :"
+                            - generic [ref=f33e328] [cursor=pointer]:
+                              - generic [ref=f33e329]:
+                                - generic "Cycle3 Bob Biology" [ref=f33e330]
+                                - combobox [ref=f33e331]
+                              - img "down" [ref=f33e333]
+                              - img "close-circle" [ref=f33e337]
+                          - generic [ref=f33e340]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                          - generic [ref=f33e342]:
+                            - generic "Tags" [ref=f33e344]: "Tags :"
+                            - textbox "tag-1, tag-2" [ref=f33e348]
+                        - generic [ref=f33e349]:
+                          - generic [ref=f33e350]: Upload one image, drag rectangular occlusions, label each region, then generate drafts.
+                          - generic [ref=f33e351]:
+                            - generic [ref=f33e352]: Source image
+                            - button "Upload image occlusion source" [ref=f33e353]
+                          - status [ref=f33e354]:
+                            - paragraph [ref=f33e359]: Choose an image to begin authoring occlusions.
+                        - button "Generate occlusion drafts" [ref=f33e360] [cursor=pointer]
+                - region [ref=f33e362]:
+                  - generic [ref=f33e363]:
+                    - heading "Import and export" [level=5] [ref=f33e364]
+                    - text: Move cards in and out without changing the flashcards route.
+                  - generic [ref=f33e365]:
+                    - generic [ref=f33e366]: Import/export summary
+                    - generic [ref=f33e370]:
+                      - generic [ref=f33e371]:
+                        - strong [ref=f33e373]: Supported formats
+                        - text: "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
+                      - generic [ref=f33e374]:
+                        - strong [ref=f33e376]: Current import limits
+                        - text: 10,000 lines / 32,768 bytes per line / 8,192 bytes per field
+                      - generic [ref=f33e377]:
+                        - strong [ref=f33e379]: Last action
+                        - text: No import/export actions yet in this session.
+                  - text: ": : : : : :"
+      - generic [ref=f33e389]:
+        - dialog "Quick Ingest (1)":
+          - generic [ref=f33e390]:
+            - button "Close" [ref=f33e391] [cursor=pointer]:
+              - generic "Close" [ref=f33e392]:
+                - img "close" [ref=f33e393]
+            - generic [ref=f33e396]: Quick Ingest (1)
+            - generic [ref=f33e398]:
+              - navigation "Ingest wizard progress" [ref=f33e399]:
+                - list [ref=f33e400]:
+                  - listitem [ref=f33e401]:
+                    - 'button "Step 1: Add (current)" [disabled] [ref=f33e402]':
+                      - generic [ref=f33e406]: Add
+                  - listitem [ref=f33e408]:
+                    - 'button "Step 2: Configure" [disabled] [ref=f33e409]':
+                      - generic [ref=f33e413]: Configure
+                  - listitem [ref=f33e415]:
+                    - 'button "Step 3: Review" [disabled] [ref=f33e416]':
+                      - generic [ref=f33e420]: Review
+                  - listitem [ref=f33e422]:
+                    - 'button "Step 4: Processing" [disabled] [ref=f33e423]':
+                      - generic [ref=f33e427]: Processing
+                  - listitem [ref=f33e429]:
+                    - 'button "Step 5: Results" [disabled] [ref=f33e430]':
+                      - generic [ref=f33e434]: Results
+              - generic [ref=f33e436]:
+                - generic [ref=f33e437]:
+                  - button "File upload zone. Drag and drop files or press Enter to browse." [ref=f33e438] [cursor=pointer]:
+                    - generic [ref=f33e439]:
+                      - paragraph [ref=f33e443]: Drag and drop files
+                      - paragraph [ref=f33e444]: Docs, PDFs, HTML/XML/JSON, audio, and video are all welcome.
+                      - button "Browse files" [active] [ref=f33e445]
+                  - text: "Supported: PDF, EPUB, DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, video. Max file size: 50 MB."
+                  - generic [ref=f33e448]: Add URLs or files. Stored items appear in Media; analyzed and chunked items become searchable in Knowledge.
+                  - generic [ref=f33e449]:
+                    - text: Paste URLs
+                    - generic [ref=f33e450]:
+                      - textbox "Paste URLs input" [ref=f33e451]:
+                        - /placeholder: https://example.com, https://...
+                      - button "Add URLs to queue" [disabled] [ref=f33e452]:
+                        - generic: Add URLs
+                - generic [ref=f33e455]:
+                  - generic [ref=f33e456]:
+                    - generic [ref=f33e458]:
+                      - text: Queue
+                      - generic [ref=f33e459]: (1 item)
+                    - button "Clear all queued items" [ref=f33e460] [cursor=pointer]:
+                      - generic [ref=f33e461]: Clear all
+                  - generic [ref=f33e463]:
+                    - generic [ref=f33e468]:
+                      - generic [ref=f33e469]: onboarding-uat-note.md
+                      - generic [ref=f33e470]:
+                        - generic [ref=f33e471]: 267 B
+                        - generic [ref=f33e472]: Document
+                        - generic [ref=f33e473]: (auto)
+                    - button "Remove this item from queue" [ref=f33e474] [cursor=pointer]
+                - generic [ref=f33e453]:
+                  - button "Use defaults & process" [ref=f33e478] [cursor=pointer]
+                  - button "Configure 1 items" [ref=f33e480] [cursor=pointer]:
+                    - generic [ref=f33e481]: Configure 1 items >
+  - button "Open Next.js Dev Tools" [ref=f33e385] [cursor=pointer]
+  - alert [ref=f33e10]
+```

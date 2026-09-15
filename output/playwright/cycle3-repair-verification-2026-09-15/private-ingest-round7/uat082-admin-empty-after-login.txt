@@ -1,0 +1,13 @@
+### Result
+{"checkedAt":"2026-09-15T20:08:41.038Z","dialog":"Quick Ingest\nAdd\nConfigure\nReview\nProcessing\nResults\n\nDrag and drop files\n\nDocs, PDFs, HTML/XML/JSON, audio, and video are all welcome.\n\nBrowse files\nSupported: PDF, EPUB, DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, video. Max file size: 50 MB.\nAdd URLs or files. Stored items appear in Media; analyzed and chunked items become searchable in Knowledge.\nPaste URLs\nAdd URLs\nConfigure 0 items >","bobFilenamePresent":false,"priorSourceActions":0}
+### Ran Playwright code
+```js
+await (async(page)=>{const button=page.getByRole("button",{name:/^Quick Ingest/});await button.waitFor({state:"visible",timeout:15000});await button.click();const d=page.getByRole("dialog",{name:"Quick Ingest",exact:true});await d.getByRole("button",{name:"Step 1: Add (current)",exact:true}).waitFor({state:"visible",timeout:15000});const content=await d.innerText();return{checkedAt:new Date().toISOString(),dialog:content,bobFilenamePresent:content.includes("onboarding-uat-note.md"),priorSourceActions:await d.getByRole("button",{name:"Open onboarding-uat-note.md in Media",exact:true}).count()};})(page);
+```
+### Open tabs
+- 0: (current) [Flashcards | tldw](http://127.0.0.1:18281/flashcards)
+- 1: [](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/flashcards
+- Page Title: Flashcards | tldw

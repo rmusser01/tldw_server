@@ -1,0 +1,14 @@
+{
+  "checkedAt": "2026-09-15T20:10:51.753Z",
+  "branch": "codex/fresh-install-uat-fixes",
+  "head": "c1b2cef1c24a371f3a223b1059bec6125bcd6d54",
+  "branchCreation": "2026-09-14T19:24:11-07:00",
+  "branchCreatedFrom": "cb8335cf8dc14c778d569a003e6950334a027ecc",
+  "initialCheckout": "54ecc7e7735fc082b711d922a27e97ee9999e5ae",
+  "sharedDevAncestor": "c70387f496d82fcee92926bf3715bf5cd240ba88",
+  "verifiedRemoteDev": "2e1a5e58d3344a1efd578efb4dbfb1c9465e8767",
+  "remoteFetchBeforeCreation": "2026-09-14T19:16:06-07:00",
+  "remoteBranchMissingAtCreation": 32,
+  "currentCounts": "32\t65",
+  "finding": "UAT branch was not based on latest fetched remote dev when created. Fresh dev fetch today confirms same remote tip. Integration pending TASK13260.32."
+}
