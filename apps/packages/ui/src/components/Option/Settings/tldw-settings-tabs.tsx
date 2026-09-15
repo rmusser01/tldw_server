@@ -7,6 +7,7 @@ type TldwSettingsTabKey = "connection" | "timeouts" | "billing"
 type TldwSettingsTabsProps = {
   authMode: "single-user" | "multi-user"
   isLoggedIn: boolean
+  billingAvailable?: boolean
 }
 
 const SECTION_IDS: Record<TldwSettingsTabKey, string> = {
@@ -17,18 +18,20 @@ const SECTION_IDS: Record<TldwSettingsTabKey, string> = {
 
 const getVisibleSectionKeys = (
   authMode: TldwSettingsTabsProps["authMode"],
-  isLoggedIn: boolean
+  isLoggedIn: boolean,
+  billingAvailable: boolean
 ): TldwSettingsTabKey[] =>
-  authMode === "multi-user" && isLoggedIn
+  authMode === "multi-user" && isLoggedIn && billingAvailable
     ? ["connection", "timeouts", "billing"]
     : ["connection", "timeouts"]
 
 export const TldwSettingsTabs = ({
   authMode,
-  isLoggedIn
+  isLoggedIn,
+  billingAvailable = false
 }: TldwSettingsTabsProps) => {
   const { t } = useTranslation()
-  const visibleSectionKeys = getVisibleSectionKeys(authMode, isLoggedIn)
+  const visibleSectionKeys = getVisibleSectionKeys(authMode, isLoggedIn, billingAvailable)
   const [activeKey, setActiveKey] = useState<TldwSettingsTabKey>(
     visibleSectionKeys[0]
   )
@@ -99,7 +102,7 @@ export const TldwSettingsTabs = ({
           key: "timeouts",
           label: t("settings:tldw.tabs.timeouts", "Timeouts")
         },
-        ...(authMode === "multi-user" && isLoggedIn
+        ...(authMode === "multi-user" && isLoggedIn && billingAvailable
           ? [
               {
                 key: "billing",

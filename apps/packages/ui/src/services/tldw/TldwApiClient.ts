@@ -1468,6 +1468,13 @@ export interface AdminUserUpdateRequest {
   storage_quota_mb?: number
 }
 
+export interface AdminUserCreateRequest {
+  username: string
+  email: string
+  password: string
+  role: 'user' | 'admin'
+}
+
 export interface AdminRole {
   id: number
   name: string

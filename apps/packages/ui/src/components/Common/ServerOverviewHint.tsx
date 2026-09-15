@@ -19,8 +19,8 @@ export const ServerOverviewHint: React.FC = () => {
     <div className="mt-2 w-full rounded-md border border-border bg-surface2 p-3 text-left text-xs text-text">
       <p className="mb-1 text-sm font-medium">
         {t(
-          "serverOverview.title",
-          "How tldw server fits into this extension"
+          "serverOverview.workspaceTitle",
+          "What your tldw server provides"
         )}
       </p>
       <ul className="mb-2 list-disc space-y-1 pl-4">

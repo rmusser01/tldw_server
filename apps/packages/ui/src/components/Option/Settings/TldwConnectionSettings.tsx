@@ -13,6 +13,7 @@ import type { FormInstance } from "antd"
 import React from "react"
 import type { TFunction } from "i18next"
 import { isFirefoxTarget } from "@/config/platform"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
 import { Alert } from "@/components/ui/primitives"
 import { shouldClearManualApiKeyForServerChange } from "@/components/Option/Onboarding/validation"
 import {
@@ -161,25 +162,31 @@ export const TldwConnectionSettings = ({
           ]}
           onChange={(value) => {
             if (authMode !== value) {
+              const changeMode = () => {
+                setAuthMode(value as 'single-user' | 'multi-user')
+                form.setFieldValue('authMode', value)
+                for (const field of ['apiKey', 'username', 'password', 'magicEmail', 'magicToken']) {
+                  form.setFieldValue(field, '')
+                }
+                setMagicEmail('')
+                setMagicToken('')
+                setMagicSent(false)
+                setIsLoggedIn(false)
+              }
+              const hasCredentials = isLoggedIn || authSource === 'cookie-session' || magicEmail || magicToken ||
+                ['apiKey', 'username', 'password'].some((field) => Boolean(form.getFieldValue?.(field)))
+              if (!hasCredentials) {
+                changeMode()
+                return
+              }
               Modal.confirm({
                 title: t('settings:tldw.authModeChangeWarning.title', 'Change authentication mode?'),
                 content: t('settings:tldw.authModeChangeWarning.content',
                   'Switching authentication modes will clear your current credentials. You will need to re-enter them after saving.'),
-                okText: t('common:continue', 'Continue'),
+                okText: t('settings:tldw.authModeChangeWarning.confirm', 'Change mode'),
                 cancelText: t('common:cancel', 'Cancel'),
                 centered: true,
-                onOk: () => {
-                  setAuthMode(value as 'single-user' | 'multi-user')
-                  form.setFieldValue('apiKey', '')
-                  form.setFieldValue('username', '')
-                  form.setFieldValue('password', '')
-                  form.setFieldValue('magicEmail', '')
-                  form.setFieldValue('magicToken', '')
-                  setMagicEmail('')
-                  setMagicToken('')
-                  setMagicSent(false)
-                  setIsLoggedIn(false)
-                },
+                onOk: changeMode,
                 onCancel: () => {
                   // Reset the Segmented back to current value
                   form.setFieldValue('authMode', authMode)
@@ -378,7 +385,7 @@ export const TldwConnectionSettings = ({
             {t('settings:tldw.buttons.testConnection', 'Test Connection')}
           </Button>
 
-          {!isFirefoxTarget && (
+          {isExtensionRuntime() && !isFirefoxTarget && (
             <Button onClick={onGrantSiteAccess}>
               {t('settings:tldw.buttons.grantSiteAccess', 'Grant Site Access')}
             </Button>

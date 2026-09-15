@@ -2,12 +2,13 @@
 
 import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   logout: vi.fn(),
   probeServerHealth: vi.fn(),
+  apiSend: vi.fn(),
   setFieldsValue: vi.fn(),
   messageSuccess: vi.fn()
 }))
@@ -73,7 +74,7 @@ vi.mock("@/components/Common/Settings/SettingsSkeleton", () => ({
   SettingsSkeleton: () => <div>Loading</div>
 }))
 vi.mock("@/services/tldw-server", () => ({ DEFAULT_TLDW_API_KEY: "default-key" }))
-vi.mock("@/services/api-send", () => ({ apiSend: vi.fn() }))
+vi.mock("@/services/api-send", () => ({ apiSend: mocks.apiSend }))
 vi.mock("@/hooks/useAntdMessage", () => ({
   useAntdMessage: () => ({
     success: mocks.messageSuccess,
@@ -123,7 +124,7 @@ vi.mock("../TldwTimeoutSettings", () => ({
   TldwTimeoutSettings: () => null
 }))
 vi.mock("../TldwBillingSettings", () => ({
-  TldwBillingSettings: () => null
+  TldwBillingSettings: () => <div>Billing controls</div>
 }))
 vi.mock("../TldwConnectionSettings", () => ({
   TldwConnectionSettings: (props: {
@@ -131,6 +132,7 @@ vi.mock("../TldwConnectionSettings", () => ({
     authSource?: string
     rememberApiKey: boolean
     authMode: string
+    loginMethod: string
     connectionStatus: string | null
     connectionDetail: string
     coreStatus: string
@@ -142,6 +144,7 @@ vi.mock("../TldwConnectionSettings", () => ({
       <span data-testid="server-url">{props.configuredServerUrl}</span>
       <span data-testid="auth-source">{props.authSource ?? "manual"}</span>
       <span data-testid="auth-mode">{props.authMode}</span>
+      <span data-testid="login-method">{props.loginMethod}</span>
       <span data-testid="remember-key">{String(props.rememberApiKey)}</span>
       <span data-testid="connection-status">{props.connectionStatus ?? "none"}</span>
       <span data-testid="connection-detail">{props.connectionDetail}</span>
@@ -157,6 +160,7 @@ vi.mock("../TldwConnectionSettings", () => ({
 import { TldwSettings } from "../tldw"
 
 describe("TldwSettings cookie logout", () => {
+  afterEach(() => vi.unstubAllGlobals())
   beforeEach(() => {
     vi.clearAllMocks()
     Object.keys(formValues).forEach((key) => delete formValues[key])
@@ -174,6 +178,7 @@ describe("TldwSettings cookie logout", () => {
       .mockResolvedValueOnce(null)
     mocks.logout.mockResolvedValue(undefined)
     mocks.probeServerHealth.mockResolvedValue({ ok: true })
+    mocks.apiSend.mockResolvedValue({ ok: true, status: 200, data: {} })
   })
 
   it("restores a clean manual single-user form after cookie-only logout", async () => {
@@ -211,5 +216,64 @@ describe("TldwSettings cookie logout", () => {
         rememberApiKey: true
       })
     )
+  })
+
+  it("tests an unverified authenticated session without profile permissions and defaults to password login", async () => {
+    mocks.getConfig.mockReset().mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 })))
+    mocks.apiSend.mockImplementation(async ({ path }) => path === "/api/v1/auth/sessions"
+      ? { ok: true, status: 200, data: [] }
+      : { ok: false, status: 403, error: "Email not verified" })
+    render(<TldwSettings />)
+    expect(await screen.findByTestId("login-method")).toHaveTextContent("password")
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }))
+    await waitFor(() => expect(mocks.apiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/auth/sessions", method: "GET" })))
+    expect(mocks.probeServerHealth).not.toHaveBeenCalled()
+    expect(screen.getByTestId("connection-status")).toHaveTextContent("success")
+    vi.unstubAllGlobals()
+  })
+
+  it("does not load or render billing when the server does not advertise it", async () => {
+    mocks.getConfig.mockReset().mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+    render(<TldwSettings />)
+    await screen.findByTestId("auth-mode")
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    expect(mocks.apiSend).not.toHaveBeenCalledWith(expect.objectContaining({ path: expect.stringContaining("/billing/") }))
+    expect(screen.queryByText("Billing controls")).not.toBeInTheDocument()
+    vi.unstubAllGlobals()
+  })
+
+  it("does not send a saved login to an edited foreign server URL", async () => {
+    mocks.getConfig.mockReset().mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 })))
+    render(<TldwSettings />)
+    await screen.findByTestId("auth-mode")
+    formValues.serverUrl = "https://different.example"
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }))
+    await waitFor(() => expect(mocks.probeServerHealth).toHaveBeenCalledWith(expect.objectContaining({ serverUrl: "https://different.example" })))
+    expect(mocks.apiSend).not.toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/auth/sessions" }))
+    vi.unstubAllGlobals()
+  })
+
+  it("loads billing only after all billing read routes are advertised", async () => {
+    mocks.getConfig.mockReset().mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
+    const paths = Object.fromEntries(['plans', 'subscription', 'usage', 'invoices'].map(route => [`/api/v1/billing/${route}`, { get: {} }]))
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths }), { status: 200 })))
+    render(<TldwSettings />)
+    expect(await screen.findByText("Billing controls")).toBeInTheDocument()
+    await waitFor(() => expect(mocks.apiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/billing/invoices?limit=20" })))
+  })
+
+  it("describes rejected multi-user sessions without calling them invalid API keys", async () => {
+    mocks.getConfig.mockReset().mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "expired-token" })
+    mocks.apiSend.mockResolvedValue({ ok: false, status: 401, error: "Token expired" })
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 })))
+    render(<TldwSettings />)
+    await screen.findByTestId("auth-mode")
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }))
+    await waitFor(() => expect(screen.getByTestId("connection-detail")).toHaveTextContent("Sign in again"))
+    expect(screen.getByTestId("connection-detail")).not.toHaveTextContent("Invalid API key")
   })
 })

@@ -313,6 +313,21 @@ describe("connection store stability", () => {
     expect(state.hasCompletedFirstRun).toBe(true)
   })
 
+  it("connects unverified multi-user sessions without profile or operator health permissions", async () => {
+    mockedClient.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "multi-user",
+      accessToken: "ordinary-user-token"
+    })
+    mockedApiSend.mockImplementation(async ({ path }) => path === "/api/v1/auth/sessions"
+      ? { ok: true, status: 200, data: [] }
+      : { ok: false, status: 403, error: "Email not verified or missing system.logs" })
+    await useConnectionStore.getState().checkOnce()
+    expect(useConnectionStore.getState().state.isConnected).toBe(true)
+    expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/auth/sessions", noAuth: false }))
+    expect(mockedApiSend).not.toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/health/live" }))
+  })
+
   it("uses lightweight health liveness endpoint and resets failure streak on success", async () => {
     setConnectionState({
       consecutiveFailures: 2,
@@ -353,7 +368,7 @@ describe("connection store stability", () => {
     mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: { status: "alive" } })
     await useConnectionStore.getState().checkOnce()
     expect(useConnectionStore.getState().state.isConnected).toBe(expected)
-    if (expected) expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/users/me", noAuth: false }))
+    if (expected) expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/auth/sessions", noAuth: false }))
     else expect(useConnectionStore.getState().state.configStep).toBe("auth")
   })
 
@@ -367,7 +382,7 @@ describe("connection store stability", () => {
         authSource: "cookie-session"
       })
       mockedApiSend.mockImplementation(async ({ path }) =>
-        path === "/api/v1/users/me"
+        path === "/api/v1/auth/sessions"
           ? { ok: false, status: 401, error: `Session ${reason}` }
           : { ok: true, status: 200, data: { status: "alive" } }
       )

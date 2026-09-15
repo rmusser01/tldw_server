@@ -22,6 +22,7 @@ import { commitManualServerTransition } from "@/components/Option/Onboarding/val
 import { emitSplashAfterSingleUserAuthSuccess } from "@/services/splash-auth"
 import { ServerOverviewHint } from "@/components/Common/ServerOverviewHint"
 import { requestOptionalHostPermission } from "@/utils/extension-permissions"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
 import type { CoreStatus, RagStatus } from "./tldw-connection-status"
 import { TldwSettingsTabs } from "./tldw-settings-tabs"
 import { probeServerHealth } from "./server-health-probe"
@@ -63,7 +64,7 @@ export const TldwSettings = () => {
   const [authSource, setAuthSource] = useState<TldwConfig['authSource']>()
   const [rememberApiKey, setRememberApiKey] = useState(true)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
-  const [loginMethod, setLoginMethod] = useState<LoginMethod>('magic-link')
+  const [loginMethod, setLoginMethod] = useState<LoginMethod>('password')
   const [magicEmail, setMagicEmail] = useState("")
   const [magicToken, setMagicToken] = useState("")
   const [magicSent, setMagicSent] = useState(false)
@@ -94,6 +95,32 @@ export const TldwSettings = () => {
   const [billingActionLoading, setBillingActionLoading] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null)
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly')
+  const [billingServerUrl, setBillingServerUrl] = useState<string | null>(null)
+  const billingAvailable = Boolean(serverUrl && billingServerUrl === serverUrl)
+
+  useEffect(() => {
+    setBillingServerUrl(null)
+    if (authMode !== 'multi-user' || !isLoggedIn || !serverUrl) return
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 5000)
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await fetch(`${serverUrl.replace(/\/$/, '')}/openapi.json`, { signal: controller.signal })
+        if (!response.ok) return
+        const spec = await response.json()
+        const supported = ['plans', 'subscription', 'usage', 'invoices'].every(
+          (route) => spec?.paths?.[`/api/v1/billing/${route}`]?.get
+        )
+        if (!cancelled && supported) setBillingServerUrl(serverUrl)
+      } catch {
+        // Optional billing remains hidden until the server advertises it.
+      } finally {
+        clearTimeout(timeout)
+      }
+    })()
+    return () => { cancelled = true; clearTimeout(timeout); controller.abort() }
+  }, [authMode, isLoggedIn, serverUrl])
 
   // ── Config load ──────────────────────────────────────────────────
 
@@ -288,7 +315,7 @@ export const TldwSettings = () => {
   // ── Billing loaders ──────────────────────────────────────────────
 
   const loadBilling = async () => {
-    if (authMode !== 'multi-user' || !isLoggedIn) return
+    if (authMode !== 'multi-user' || !isLoggedIn || !billingAvailable) return
     setBillingLoading(true)
     setBillingError(null)
     setBillingPlansError(null)
@@ -371,7 +398,7 @@ export const TldwSettings = () => {
   }
 
   const loadInvoices = async () => {
-    if (authMode !== 'multi-user' || !isLoggedIn) return
+    if (authMode !== 'multi-user' || !isLoggedIn || !billingAvailable) return
     setBillingInvoicesLoading(true)
     setBillingInvoicesError(null)
     try {
@@ -397,11 +424,11 @@ export const TldwSettings = () => {
   }
 
   useEffect(() => {
-    if (authMode === 'multi-user' && isLoggedIn) {
+    if (authMode === 'multi-user' && isLoggedIn && billingAvailable) {
       void loadBilling()
       void loadInvoices()
     }
-  }, [authMode, isLoggedIn])
+  }, [authMode, isLoggedIn, billingAvailable])
 
   // ── Connection test ──────────────────────────────────────────────
 
@@ -426,7 +453,13 @@ export const TldwSettings = () => {
       const hasApiKey =
         singleUser && typeof values.apiKey === "string" && values.apiKey.trim().length > 0
 
-      const resp = baseUrl
+      const configured = await tldwClient.getConfig()
+      const useSession = baseUrl === configured?.serverUrl?.replace(/\/$/, '') &&
+        values.authMode === configured?.authMode &&
+        (configured?.authMode === 'multi-user' || (configured?.authSource === 'cookie-session' && !hasApiKey))
+      const resp = useSession
+        ? await apiSend({ path: "/api/v1/auth/sessions", method: "GET" })
+        : baseUrl
         ? await probeServerHealth({
             serverUrl: baseUrl,
             authMode: values.authMode,
@@ -443,7 +476,7 @@ export const TldwSettings = () => {
       setCoreStatus(success ? "connected" : "failed")
 
       if (!success) {
-        if (resp?.status === 0) {
+        if (resp?.status === 0 && isExtensionRuntime()) {
           requestOptionalHostPermission(values.serverUrl, (granted, origin) => {
             if (!granted) {
               message.warning(
@@ -463,8 +496,8 @@ export const TldwSettings = () => {
           const hint =
             code === 401
               ? t(
-                  "settings:tldw.errors.invalidApiKey",
-                  "Invalid API key"
+                  singleUser ? "settings:tldw.errors.invalidApiKey" : "settings:tldw.errors.sessionExpired",
+                  singleUser ? "Invalid API key" : "Your session is invalid or expired. Sign in again."
                 )
               : t(
                   "settings:tldw.errors.forbidden",
@@ -877,8 +910,8 @@ export const TldwSettings = () => {
           </h3>
           <p className="text-sm text-text-muted">
             {t(
-              "settings:tldw.about.description",
-              "tldw server turns this extension into a full workspace for chat, knowledge search, and media."
+              "settings:tldw.about.workspaceDescription",
+              "Connect to tldw server for chat, knowledge search, and media."
             )}
           </p>
           <ServerOverviewHint />
@@ -895,7 +928,7 @@ export const TldwSettings = () => {
             <Button type="primary" onClick={() => { void testConnection() }} loading={testingConnection}>{t('settings:tldw.buttons.recheck', 'Recheck')}</Button>
           </Space>
         </div>
-        <TldwSettingsTabs authMode={authMode} isLoggedIn={isLoggedIn} />
+        <TldwSettingsTabs authMode={authMode} isLoggedIn={isLoggedIn} billingAvailable={billingAvailable} />
         <h2
           id="tldw-settings-connection"
           className="mb-4 scroll-mt-24 text-base font-semibold text-text">
@@ -973,7 +1006,7 @@ export const TldwSettings = () => {
           />
         </Form>
 
-        {authMode === 'multi-user' && isLoggedIn && (
+        {authMode === 'multi-user' && isLoggedIn && billingAvailable && (
           <TldwBillingSettings
             t={t}
             billingLoading={billingLoading}

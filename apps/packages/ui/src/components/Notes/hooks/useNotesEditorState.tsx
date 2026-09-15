@@ -5,6 +5,7 @@ import type { MessageInstance } from 'antd/es/message/interface'
 import type { QueryClient } from '@tanstack/react-query'
 import { useQuery } from '@tanstack/react-query'
 import { bgRequest } from '@/services/background-proxy'
+import { tldwAuth } from '@/services/tldw/TldwAuth'
 import {
   listNoteTasks,
   listTaskActivity,
@@ -1350,22 +1351,33 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   ])
 
   // ---- title suggestion ----
-  const { data: notesTitleSettings } = useQuery({
-    queryKey: ['notes-title-settings'],
-    enabled: isOnline,
+  const { data: scopedNotesTitleSettings } = useQuery({
+    queryKey: ['notes-title-settings', authorityScope],
+    enabled: isOnline && authorityScope !== null,
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
+      const requestAuthorityScope = authorityScope
       try {
+        // This policy endpoint is administrator-only; ordinary note editing and
+        // heuristic title suggestions work without reading server admin settings.
+        const user = await tldwAuth.getCurrentUser()
+        if (
+          authorityScopeRef.current !== requestAuthorityScope ||
+          !user?.is_active || user.role?.trim().toLowerCase() !== 'admin'
+        ) {
+          return null
+        }
         const settings = await bgRequest<NotesTitleSettingsResponse>({
           path: '/api/v1/admin/notes/title-settings' as any,
           method: 'GET' as any
         })
-        return settings
+        return authorityScopeRef.current === requestAuthorityScope ? settings : null
       } catch {
         return null
       }
     }
   })
+  const notesTitleSettings = authorityScope === null ? null : scopedNotesTitleSettings
 
   const allowedTitleStrategies = React.useMemo(
     () => deriveAllowedTitleStrategies(notesTitleSettings),

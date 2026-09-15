@@ -136,12 +136,24 @@ const LoginPage = () => {
       try {
         const { tldwClient } = await import("@/services/tldw/TldwApiClient")
         const config = await tldwClient.getConfig()
+        let multiUser = config?.authMode === "multi-user"
+        if (config?.serverUrl && !multiUser && !config.apiKey && config.authSource !== "cookie-session") {
+          try {
+            const metadata = await tldwClient.getFirstRunMetadata()
+            if (!cancelled && metadata.auth_mode === "multi_user") {
+              await tldwClient.updateConfig({ authMode: "multi-user" })
+              multiUser = true
+            }
+          } catch {
+            // Older servers may lack setup discovery; retain manual settings.
+          }
+        }
         if (cancelled) return
         setTarget({
           resolved: true,
           serverUrl:
             typeof config?.serverUrl === "string" ? config.serverUrl : null,
-          multiUser: config?.authMode === "multi-user"
+          multiUser
         })
       } catch {
         if (!cancelled) {

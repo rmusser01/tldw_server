@@ -853,11 +853,11 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
             !cfg.accessToken &&
             cfg.authMode !== "multi-user")
 
-        // Cookie metadata survives HTTP-only cookie expiry/revocation. Probe
-        // the canonical authenticated user endpoint for cookie-only readiness;
-        // public liveness cannot establish that the session is still valid.
-        const connectionProbePath = hasCookieSessionAuth && !hasSingleUserApiKey(cfg)
-          ? "/api/v1/users/me"
+        // Auth sessions validate credentials without profile email-verification
+        // or operator health permissions. Cookie metadata can outlive a session.
+        const connectionProbePath = cfg?.authMode === "multi-user" ||
+          (hasCookieSessionAuth && !hasSingleUserApiKey(cfg))
+          ? "/api/v1/auth/sessions"
           : HEALTH_LIVENESS_PATH
 
         const healthPromise = (async () => {

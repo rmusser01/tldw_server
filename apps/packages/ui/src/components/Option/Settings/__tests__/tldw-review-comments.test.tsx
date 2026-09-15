@@ -195,7 +195,7 @@ vi.mock("antd", () => {
 })
 
 vi.mock("@/config/platform", () => ({
-  isFirefoxTarget: () => false
+  isFirefoxTarget: false
 }))
 
 import { TldwBillingSettings } from "../TldwBillingSettings"
@@ -297,6 +297,21 @@ describe("settings PR review fixes", () => {
 
   afterEach(() => {
     cleanup()
+  })
+
+  it("switches an empty connection form without confirming credential loss", () => {
+    const props = createConnectionProps({ magicEmail: "", magicToken: "", magicSent: false })
+    render(<TldwConnectionSettings {...props} />)
+    fireEvent.change(screen.getByRole("combobox", { name: "segmented" }), {
+      target: { value: "multi-user" }
+    })
+    expect(modalConfirmMock).not.toHaveBeenCalled()
+    expect(props.setAuthMode).toHaveBeenCalledWith("multi-user")
+  })
+
+  it("does not offer extension site permission controls in the WebUI", () => {
+    render(<TldwConnectionSettings {...createConnectionProps()} />)
+    expect(screen.queryByRole("button", { name: "Grant Site Access" })).not.toBeInTheDocument()
   })
 
   it("clears both password and magic-link credentials when auth mode changes", () => {
