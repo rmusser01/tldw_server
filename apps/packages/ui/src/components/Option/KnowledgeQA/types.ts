@@ -379,6 +379,9 @@ export type KnowledgeQAActions = {
 export type KnowledgeQAContextValue = KnowledgeQAState &
   KnowledgeQAActions & {
     historyHydrated: boolean
+    client: import("./knowledgeQaClient").KnowledgeQaClient
+    isAuthorityCurrent: () => boolean
+    storageScopeKey: string | null
   }
 
 // Export format options

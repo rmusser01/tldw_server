@@ -1,3 +1,4 @@
+import type { ScopedRequestOptions } from "../TldwApiClient"
 import { bgRequest, bgStream, bgUpload } from '@/services/background-proxy'
 import { buildQuery } from '../client-utils'
 import { createJsonResponseLike } from '../json-response-like'
@@ -461,8 +462,11 @@ export const chatRagMethods = {
     return await this.request<any>({ path: '/api/v1/rag/health', method: 'GET' })
   },
 
-  async ragSourceHealth(this: TldwApiClientCore): Promise<any> {
+  async ragSourceHealth(this: TldwApiClientCore, options?: ScopedRequestOptions): Promise<any> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     return await this.request<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: "/api/v1/rag/source-health",
       method: "GET",
     })
@@ -525,13 +529,15 @@ export const chatRagMethods = {
     query: string,
     options?: any
   ): AsyncGenerator<any, void, unknown> {
-    const { timeoutMs, signal, ...rest } = options || {}
+    const { timeoutMs, signal, requestScope, ...rest } = options || {}
+    const scopeFields = requestScopeFields(requestScope)
     const normalizedQuery = this.normalizeRagQuery(query)
     const body = buildSanitizedRagRequestBody(normalizedQuery, rest)
     for await (const line of bgStream({
+      ...scopeFields,
       path: '/api/v1/rag/search/stream',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...scopeFields.headers },
       body,
       abortSignal: signal,
       streamIdleTimeoutMs: timeoutMs,
@@ -744,11 +750,14 @@ export const chatRagMethods = {
   async getChat(
     this: TldwApiClientCore,
     chat_id: string | number,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(`/api/v1/chats/${cid}`, query),
       method: "GET"
     })
@@ -805,10 +814,10 @@ export const chatRagMethods = {
   async getLatestChatVersion(
     this: TldwApiClientCore,
     chat_id: string | number,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope } & ScopedRequestOptions
   ): Promise<number | undefined> {
     const cid = String(chat_id)
-    const current = await this.getChat(cid, { scope: options?.scope })
+    const current = await this.getChat(cid, options)
     return typeof current?.version === "number" ? current.version : undefined
   },
 
@@ -920,11 +929,14 @@ export const chatRagMethods = {
     this: TldwApiClientCore,
     chat_id: string | number,
     options?: {
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
       expectedVersion?: number
       hardDelete?: boolean
       scope?: ChatScope
     }
   ): Promise<void> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const attemptDelete = async (
       versionToUse: number | undefined,
@@ -939,6 +951,8 @@ export const chatRagMethods = {
       })
       try {
         await bgRequest<void>({
+          ...scopeFields,
+          ...(options?.signal ? { abortSignal: options.signal } : {}),
           path: `/api/v1/chats/${cid}${query}`,
           method: "DELETE"
         })
@@ -1003,17 +1017,20 @@ export const chatRagMethods = {
       ttl_seconds?: number
       label?: string
     },
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ConversationShareLinkCreateResponse> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ConversationShareLinkCreateResponse>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(
         `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
         query
       ),
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
       body: payload || {},
     })
   },
@@ -1038,12 +1055,15 @@ export const chatRagMethods = {
     this: TldwApiClientCore,
     chat_id: string | number,
     shareId: string,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope } & ScopedRequestOptions
   ): Promise<{ success: boolean; share_id: string }> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = encodeURIComponent(String(chat_id))
     const sid = encodeURIComponent(String(shareId))
     const query = buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<{ success: boolean; share_id: string }>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(
         `/api/v1/chat/conversations/${cid}/share-links/${sid}`,
         query
@@ -1924,11 +1944,14 @@ export const chatRagMethods = {
     tags?: string[]
     categories?: string[]
     async_mode?: boolean
-  }): Promise<any> {
+  }, options?: ScopedRequestOptions): Promise<any> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     return await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: "/api/v1/chatbooks/export",
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
       body: payload
     })
   },
@@ -2107,7 +2130,8 @@ export const chatRagMethods = {
     })
   },
 
-  async downloadChatbookExport(this: TldwApiClientCore, job_id: string): Promise<{ blob: Blob; filename: string }> {
+  async downloadChatbookExport(this: TldwApiClientCore, job_id: string, options?: ScopedRequestOptions): Promise<{ blob: Blob; filename: string }> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     await this.ensureConfigForRequest(true)
     const response = await this.request<{
       ok: boolean
@@ -2116,9 +2140,11 @@ export const chatRagMethods = {
       error?: string
       headers?: Record<string, string>
     }>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: `/api/v1/chatbooks/download/${encodeURIComponent(job_id)}`,
       method: "GET",
-      headers: { Accept: "application/octet-stream" },
+      headers: { Accept: "application/octet-stream", ...scopeFields.headers },
       responseType: "arrayBuffer",
       returnResponse: true
     })

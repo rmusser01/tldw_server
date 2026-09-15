@@ -28,6 +28,8 @@ const state = {
 
 vi.mock("../KnowledgeQAProvider", () => ({
   useKnowledgeQA: () => ({
+    storageScopeKey: "test-owner",
+    isAuthorityCurrent: () => true,
     results: state.results,
     citations: state.citations,
     focusedSourceIndex: state.focusedSourceIndex,

@@ -61,6 +61,8 @@ const state = {
 
 vi.mock("../KnowledgeQAProvider", () => ({
   useKnowledgeQA: () => ({
+    isAuthorityCurrent: () => true,
+    client: { createNote: createNoteMock, exportChatbook: exportChatbookMock, downloadChatbookExport: downloadChatbookExportMock, createConversationShareLink: createShareLinkMock, revokeConversationShareLink: revokeShareLinkMock },
     messages: state.messages,
     currentThreadId: state.currentThreadId,
     results: state.results,

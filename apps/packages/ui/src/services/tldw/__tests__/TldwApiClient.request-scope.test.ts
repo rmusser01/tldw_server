@@ -53,6 +53,46 @@ describe("TldwApiClient captured request scope", () => {
     mocks.bgStream.mockReset()
   })
 
+  it.each([
+    ["fetchWithAuth", ["/api/v1/chat/conversations/owned/messages-with-context"], "GET"],
+    ["listCharacters", [{ limit: 5 }], "GET"],
+    ["searchCharacters", ["Helpful AI Assistant", { limit: 5 }], "GET"],
+    ["getChat", ["owned"], "GET"],
+    ["deleteChat", ["owned"], "DELETE"],
+    ["createConversationShareLink", ["owned", { ttl_seconds: 300 }], "POST"],
+    ["revokeConversationShareLink", ["owned", "share"], "DELETE"],
+    ["exportChatbook", [{ name: "Own export", description: "Own", content_selections: { chats: ["owned"] } }], "POST"],
+    ["downloadChatbookExport", ["job"], "GET"],
+    ["createNote", ["Own answer", { title: "Own note" }], "POST"],
+    ["ragSourceHealth", [], "GET"],
+  ])("binds the QA %s request without changing its body", async (method, args, requestMethod) => {
+    const client = new TldwApiClient()
+    vi.spyOn(client, "ensureConfigForRequest").mockResolvedValue({ ...requestScope.config, accessToken: "token" })
+    vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0])
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: new ArrayBuffer(0), id: "owned" })
+    const signal = new AbortController().signal
+    await (client[method as keyof typeof client] as (...args: unknown[]) => Promise<unknown>)(...args, { requestScope, signal })
+    const outbound = mocks.bgRequest.mock.calls.at(-1)?.[0]
+    expect(outbound).toMatchObject({
+      method: requestMethod, abortSignal: signal,
+      headers: { "X-TLDW-Expected-User-ID": "42" },
+      servicePromptConfig: { ...requestScope.config, expectedUserId: 42 },
+    })
+    expect(outbound.body ?? {}).not.toHaveProperty("requestScope")
+  })
+
+  it("binds QA streaming scope outside the inference body", async () => {
+    mocks.bgStream.mockImplementation(async function* () { yield '{"type":"contexts","contexts":[]}' })
+    const signal = new AbortController().signal
+    for await (const _chunk of new TldwApiClient().ragSearchStream("Own question", { requestScope, signal })) { /* consume */ }
+    const outbound = mocks.bgStream.mock.calls[0][0]
+    expect(outbound).toMatchObject({
+      path: "/api/v1/rag/search/stream", abortSignal: signal,
+      ...expectedScopeFields,
+    })
+    expect(outbound.body).not.toHaveProperty("requestScope")
+  })
+
   it("binds non-streaming chat without serializing the scope", async () => {
     mocks.bgRequest.mockResolvedValueOnce({ choices: [] })
     const client = new TldwApiClient()

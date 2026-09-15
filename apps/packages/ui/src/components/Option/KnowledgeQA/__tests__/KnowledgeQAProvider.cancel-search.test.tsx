@@ -1,3 +1,4 @@
+import "./knowledgeQaAuthorityFixture"
 import React from "react"
 import { act, render, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -394,7 +395,7 @@ describe("KnowledgeQAProvider search cancellation", () => {
     resolveFirstCreateChat?.({ id: "thread-first", version: 1 })
 
     await waitFor(() => {
-      expect(deleteChatMock).toHaveBeenCalledWith("thread-first")
+      expect(deleteChatMock).toHaveBeenCalledWith("thread-first", expect.objectContaining({ requestScope: expect.objectContaining({ userId: "test-owner" }) }))
     })
   })
 })

@@ -1059,6 +1059,11 @@ export interface ChatCompletionRequest {
   research_context?: ChatResearchContext
 }
 
+export type ScopedRequestOptions = {
+  signal?: AbortSignal
+  requestScope?: ServicePromptRequestScope
+}
+
 export type ChatCompletionRequestOptions = {
   signal?: AbortSignal
   timeoutMs?: number
@@ -1950,6 +1955,7 @@ export class TldwApiClientBase {
   async fetchWithAuth(
     path: PathOrUrl,
     init?: {
+      requestScope?: ServicePromptRequestScope
       method?: string
       headers?: Record<string, string>
       body?: any
@@ -1967,10 +1973,12 @@ export class TldwApiClientBase {
     text: () => Promise<string>
   }> {
     await this.ensureConfigForRequest(true)
+    const scopeFields = requestScopeFields(init?.requestScope)
     const response = await bgRequest<any, PathOrUrl>({
+      ...scopeFields,
       path,
       method: (init?.method || "GET") as any,
-      headers: init?.headers,
+      headers: scopeFields.headers ? { ...init?.headers, ...scopeFields.headers } : init?.headers,
       body: init?.body,
       timeoutMs: init?.timeoutMs,
       abortSignal: init?.signal,
@@ -4308,8 +4316,16 @@ export class TldwApiClientBase {
   }
 
   // Notes Methods
-  async createNote(content: string, metadata?: any): Promise<any> {
-    return await bgRequest<any>({ path: '/api/v1/notes/', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { content, ...metadata } })
+  async createNote(content: string, metadata?: any, options?: ScopedRequestOptions): Promise<any> {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    return await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      path: '/api/v1/notes/',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...scopeFields.headers },
+      body: { content, ...metadata }
+    })
   }
 
   async listNoteFolders(): Promise<{
@@ -4482,13 +4498,16 @@ export class TldwApiClientBase {
     return []
   }
 
-  async listCharacters(params?: Record<string, any>): Promise<any[]> {
+  async listCharacters(params?: Record<string, any>, options?: ScopedRequestOptions): Promise<any[]> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const query = this.buildQuery(params)
     const listPathCandidates = ["/api/v1/characters", "/api/v1/characters/"] as const
     const base = await this.resolveApiPath("characters.list", [...listPathCandidates])
     const requestList = async (path: string) =>
       this.normalizeCharacterListResponse(
         await bgRequest<any>({
+          ...scopeFields,
+          ...(options?.signal ? { abortSignal: options.signal } : {}),
           path: appendPathQuery(path as AllowedPath, query),
           method: "GET"
         })
@@ -4822,13 +4841,16 @@ export class TldwApiClientBase {
     return characters
   }
 
-   async searchCharacters(query: string, params?: Record<string, any>): Promise<any[]> {
+   async searchCharacters(query: string, params?: Record<string, any>, options?: ScopedRequestOptions): Promise<any[]> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const qp = this.buildQuery({ query, ...(params || {}) })
     const base = await this.resolveApiPath("characters.search", [
       "/api/v1/characters/search",
       "/api/v1/characters/search/"
     ])
     return await bgRequest<any[]>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(base, qp),
       method: 'GET'
     })
@@ -5604,11 +5626,14 @@ export class TldwApiClientBase {
 
   async getChat(
     chat_id: string | number,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = this.buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(`/api/v1/chats/${cid}`, query),
       method: "GET"
     })
@@ -5735,10 +5760,13 @@ export class TldwApiClientBase {
   async deleteChat(
     chat_id: string | number,
     options?: {
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
       expectedVersion?: number
       hardDelete?: boolean
     }
   ): Promise<void> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = this.buildQuery({
       ...(typeof options?.expectedVersion === "number"
@@ -5747,6 +5775,8 @@ export class TldwApiClientBase {
       ...(options?.hardDelete ? { hard_delete: true } : {})
     })
     await bgRequest<void>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: `/api/v1/chats/${cid}${query}`,
       method: "DELETE"
     })
@@ -5776,17 +5806,20 @@ export class TldwApiClientBase {
       ttl_seconds?: number
       label?: string
     },
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ConversationShareLinkCreateResponse> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ConversationShareLinkCreateResponse>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(
         `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
         query
       ),
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
       body: payload || {},
     })
   }
@@ -5809,12 +5842,15 @@ export class TldwApiClientBase {
   async revokeConversationShareLink(
     chat_id: string | number,
     shareId: string,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope } & ScopedRequestOptions
   ): Promise<{ success: boolean; share_id: string }> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = encodeURIComponent(String(chat_id))
     const sid = encodeURIComponent(String(shareId))
     const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<{ success: boolean; share_id: string }>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(
         `/api/v1/chat/conversations/${cid}/share-links/${sid}`,
         query
@@ -6796,11 +6832,14 @@ export class TldwApiClientBase {
     tags?: string[]
     categories?: string[]
     async_mode?: boolean
-  }): Promise<any> {
+  }, options?: ScopedRequestOptions): Promise<any> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     return await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: "/api/v1/chatbooks/export",
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
       body: payload
     })
   }
@@ -6979,7 +7018,8 @@ export class TldwApiClientBase {
     })
   }
 
-  async downloadChatbookExport(job_id: string): Promise<{ blob: Blob; filename: string }> {
+  async downloadChatbookExport(job_id: string, options?: ScopedRequestOptions): Promise<{ blob: Blob; filename: string }> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     await this.ensureConfigForRequest(true)
     const response = await this.request<{
       ok: boolean
@@ -6988,9 +7028,11 @@ export class TldwApiClientBase {
       error?: string
       headers?: Record<string, string>
     }>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: `/api/v1/chatbooks/download/${encodeURIComponent(job_id)}`,
       method: "GET",
-      headers: { Accept: "application/octet-stream" },
+      headers: { Accept: "application/octet-stream", ...scopeFields.headers },
       responseType: "arrayBuffer",
       returnResponse: true
     })

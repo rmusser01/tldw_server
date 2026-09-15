@@ -33,7 +33,6 @@ import type {
 } from "@/services/rag/unified-rag"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { mapKnowledgeQaExportErrorMessage } from "./errorMessages"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
   buildKnowledgeExportTrustLines,
   isBlockedAnswerExportTrustState,
@@ -85,6 +84,8 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
 
 export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
   const {
+    client: tldwClient,
+    isAuthorityCurrent,
     messages,
     currentThreadId,
     results,
@@ -186,7 +187,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
   }, [answerTrustState, answerEvidenceOrigin, options.format])
 
   const handleExport = useCallback(async () => {
-    if (!canSubmitExport) return
+    if (!isAuthorityCurrent() || !canSubmitExport) return
     const requestSessionKey = dialogSessionKey
     setIsExporting(true)
     setExportedContent(null)
@@ -211,7 +212,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
             evidenceOrigin: answerEvidenceOrigin,
           }
         )
-        if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+        if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
           return
         }
         setExportedContent(content)
@@ -232,7 +233,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
             evidenceOrigin: answerEvidenceOrigin,
           }
         )
-        if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+        if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
           return
         }
         setExportedContent(content)
@@ -271,7 +272,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         if (exportResult?.success === false) {
           throw new Error(String(exportResult?.message || "Export failed"))
         }
-        if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+        if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
           return
         }
 
@@ -281,7 +282,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         }
 
         const { blob, filename } = await tldwClient.downloadChatbookExport(jobId)
-        if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+        if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
           return
         }
         downloadBlob(blob, filename || `knowledge_qa_${Date.now()}.zip`)
@@ -289,7 +290,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         return
       }
     } catch (error) {
-      if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+      if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }
       const mappedError =
@@ -306,13 +307,14 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
       })
       console.error("Export failed:", error)
     } finally {
-      if (activeDialogSessionKeyRef.current === requestSessionKey) {
+      if (isAuthorityCurrent() && activeDialogSessionKeyRef.current === requestSessionKey) {
         setIsExporting(false)
       }
     }
   }, [
-    dialogSessionKey,
+    isAuthorityCurrent,
     canSubmitExport,
+    dialogSessionKey,
     options,
     query,
     answer,
@@ -325,45 +327,46 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     answerTrustState,
     answerEvidenceOrigin,
     currentThreadId,
+    tldwClient,
     onClose,
     message,
   ])
 
   const handleDownload = useCallback(() => {
-    if (!exportedContent) return
+    if (!isAuthorityCurrent() || !exportedContent) return
 
     const blob = new Blob([exportedContent], { type: "text/markdown" })
     downloadBlob(blob, `knowledge_qa_${Date.now()}.md`)
-  }, [exportedContent])
+  }, [exportedContent, isAuthorityCurrent])
 
   const handleCopy = useCallback(async () => {
-    if (!exportedContent) return
+    if (!isAuthorityCurrent() || !exportedContent) return
     const requestSessionKey = dialogSessionKey
 
     try {
       await navigator.clipboard.writeText(exportedContent)
-      if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+      if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }
       clearCopiedTimeout()
       setCopied(true)
       copiedTimeoutRef.current = window.setTimeout(() => {
-        if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+        if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
           return
         }
         setCopied(false)
         copiedTimeoutRef.current = null
       }, 2000)
     } catch (error) {
-      if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+      if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }
       console.error("Copy failed:", error)
     }
-  }, [clearCopiedTimeout, dialogSessionKey, exportedContent])
+  }, [clearCopiedTimeout, dialogSessionKey, exportedContent, isAuthorityCurrent])
 
   const handleSaveToNotes = useCallback(async () => {
-    if (!canSubmitExport) return
+    if (!isAuthorityCurrent() || !canSubmitExport) return
     const requestSessionKey = dialogSessionKey
 
     setIsSavingNote(true)
@@ -409,7 +412,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         title,
         metadata,
       })
-      if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+      if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }
       message.open({
@@ -418,7 +421,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         duration: 3,
       })
     } catch (error) {
-      if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+      if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }
       const mappedError =
@@ -431,13 +434,14 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         duration: 4,
       })
     } finally {
-      if (activeDialogSessionKeyRef.current === requestSessionKey) {
+      if (isAuthorityCurrent() && activeDialogSessionKeyRef.current === requestSessionKey) {
         setIsSavingNote(false)
       }
     }
   }, [
-    dialogSessionKey,
+    isAuthorityCurrent,
     canSubmitExport,
+    dialogSessionKey,
     query,
     answer,
     results,
@@ -450,6 +454,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     answerTrustState,
     answerEvidenceOrigin,
     currentThreadId,
+    tldwClient,
     message,
   ])
 
@@ -462,7 +467,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
       const shareLink = await tldwClient.createConversationShareLink(currentThreadId, {
         permission: "view",
       })
-      if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+      if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }
       const sharePath =
@@ -481,7 +486,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
       try {
         await navigator.clipboard.writeText(shareUrl)
       } catch (error) {
-        if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+        if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
           return
         }
         message.open({
@@ -492,7 +497,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         console.error("Share link clipboard copy failed:", error)
         return
       }
-      if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+      if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }
       setShareLinkCopied(true)
@@ -506,7 +511,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         shareLinkCopiedTimeoutRef.current = null
       }, 2000)
     } catch (error) {
-      if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+      if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }
       message.open({
@@ -516,7 +521,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
       })
       console.error("Share link copy failed:", error)
     } finally {
-      if (activeDialogSessionKeyRef.current === requestSessionKey) {
+      if (isAuthorityCurrent() && activeDialogSessionKeyRef.current === requestSessionKey) {
         setIsPreparingShareLink(false)
       }
     }
@@ -525,7 +530,9 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     clearShareLinkCopiedTimeout,
     currentThreadId,
     dialogSessionKey,
+    isAuthorityCurrent,
     message,
+    tldwClient,
   ])
 
   const handleRevokeShareLink = useCallback(async () => {
@@ -534,7 +541,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     setIsRevokingShareLink(true)
     try {
       await tldwClient.revokeConversationShareLink(currentThreadId, activeShareLink.id)
-      if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+      if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }
       setActiveShareLink(null)
@@ -544,7 +551,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         duration: 3,
       })
     } catch (error) {
-      if (activeDialogSessionKeyRef.current !== requestSessionKey) {
+      if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
         return
       }
       message.open({
@@ -554,16 +561,18 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
       })
       console.error("Share link revoke failed:", error)
     } finally {
-      if (activeDialogSessionKeyRef.current === requestSessionKey) {
+      if (isAuthorityCurrent() && activeDialogSessionKeyRef.current === requestSessionKey) {
         setIsRevokingShareLink(false)
       }
     }
   }, [
-    activeShareLink?.id,
+    activeShareLink,
     canCopyThreadLink,
     currentThreadId,
     dialogSessionKey,
+    isAuthorityCurrent,
     message,
+    tldwClient,
   ])
 
   useEffect(() => {
@@ -593,6 +602,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
 
   useEffect(
     () => () => {
+      activeDialogSessionKeyRef.current = ""
       clearCopiedTimeout()
       clearShareLinkCopiedTimeout()
       if (pendingPrintTimeoutRef.current != null) {

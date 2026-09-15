@@ -1,4 +1,14 @@
 import type { SearchHistoryItem } from "./types"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+
+export const getKnowledgeQaStorageScopeKey = ({ config, userId }: ServicePromptRequestScope): string =>
+  encodeURIComponent(JSON.stringify([
+    config.serverUrl.trim().replace(/\/+$/, ""), config.authMode, config.authSource ?? "manual",
+    config.orgId ?? null, userId === null ? null : String(userId), config.expectedSingleUserApiKeyScope ?? null,
+  ]))
+
+export const getKnowledgeQaHistoryStorageKey = (scope: ServicePromptRequestScope): string =>
+  `knowledge_qa_history:v1:${getKnowledgeQaStorageScopeKey(scope)}`
 
 const HISTORY_TRIM_BATCH_SIZE = 10
 
@@ -24,7 +34,7 @@ export const persistKnowledgeQaHistory = (
   history: SearchHistoryItem[],
   writeSerializedHistory: (serializedHistory: string) => void
 ): PersistHistoryResult => {
-  let candidate = [...history]
+  let candidate = history.slice(0, 100)
   let wasTrimmed = false
 
   while (true) {

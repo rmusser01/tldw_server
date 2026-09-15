@@ -13,9 +13,13 @@ const state = {
 
 const fetchWithAuthMock = vi.fn()
 let branchingEnabled = true
+const isAuthorityCurrent = () => true
+const qaClient = { fetchWithAuth: (...args: unknown[]) => fetchWithAuthMock(...args) }
 
 vi.mock("../KnowledgeQAProvider", () => ({
   useKnowledgeQA: () => ({
+    isAuthorityCurrent,
+    client: qaClient,
     messages: state.messages,
     setQuery: state.setQuery,
     branchFromTurn: state.branchFromTurn,

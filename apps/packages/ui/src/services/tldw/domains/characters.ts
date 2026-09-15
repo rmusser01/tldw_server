@@ -1,3 +1,5 @@
+import { requestScopeFields } from "./service-prompts"
+import type { ScopedRequestOptions } from "../TldwApiClient"
 import { bgRequest, bgStream } from '@/services/background-proxy'
 import { buildQuery } from '../client-utils'
 import { appendPathQuery } from '../path-utils'
@@ -51,13 +53,16 @@ export const characterMethods = {
     return []
   },
 
-  async listCharacters(this: TldwApiClientCore, params?: Record<string, any>): Promise<any[]> {
+  async listCharacters(this: TldwApiClientCore, params?: Record<string, any>, options?: ScopedRequestOptions): Promise<any[]> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const query = buildQuery(params)
     const listPathCandidates = ["/api/v1/characters", "/api/v1/characters/"] as const
     const base = await this.resolveApiPath("characters.list", [...listPathCandidates])
     const requestList = async (path: string) =>
       this.normalizeCharacterListResponse(
         await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
           path: appendPathQuery(path as AllowedPath, query),
           method: "GET"
         })
@@ -395,13 +400,16 @@ export const characterMethods = {
     return characters
   },
 
-  async searchCharacters(this: TldwApiClientCore, query: string, params?: Record<string, any>): Promise<any[]> {
+  async searchCharacters(this: TldwApiClientCore, query: string, params?: Record<string, any>, options?: ScopedRequestOptions): Promise<any[]> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const qp = buildQuery({ query, ...(params || {}) })
     const base = await this.resolveApiPath("characters.search", [
       "/api/v1/characters/search",
       "/api/v1/characters/search/"
     ])
     return await bgRequest<any[]>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(base, qp),
       method: 'GET'
     })

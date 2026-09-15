@@ -15,7 +15,7 @@ describe("Service Prompt scope policy", () => {
   it.each([
     ["/api/v1/chats/owned-chat/messages?limit=200&offset=0", true],
     ["/api/v1/chats/other-chat/messages", true],
-    ["/api/v1/chats/owned-chat", false],
+    ["/api/v1/chats/owned-chat", true],
     ["/api/v1/chats/owned-chat/messages/other-message", false],
     ["/api/v1/chats/a%2fb/messages", false],
     ["/api/v1/chats/%2e%2e/messages", false],

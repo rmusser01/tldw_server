@@ -98,7 +98,23 @@ export const isServicePromptRequestPath = (
   const pathname = readCanonicalPathname(path)
   if (!pathname) return false
   const requestMethod = String(method || "GET").toUpperCase()
+  if (pathname === "/api/v1/feedback/explicit") return requestMethod === "POST"
   if (requestMethod === "GET" && (pathname === "/api/v1/notes/tasks/activity" || /^\/api\/v1\/notes\/[^/]+\/tasks$/.test(pathname))) return true
+  if (/^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
+  if (/^\/api\/v1\/chat\/conversations\/[^/]+$/.test(pathname)) return ["GET", "PATCH"].includes(requestMethod)
+  if (/^\/api\/v1\/chat\/conversations\/[^/]+\/share-links$/.test(pathname)) return requestMethod === "POST"
+  if (/^\/api\/v1\/chat\/conversations\/[^/]+\/share-links\/[^/]+$/.test(pathname)) return requestMethod === "DELETE"
+  if (requestMethod === "GET" && (
+    /^\/api\/v1\/characters(?:\/search)?\/?$/.test(pathname) ||
+    pathname === "/api/v1/chat/conversations" ||
+    /^\/api\/v1\/chat\/conversations\/[^/]+\/messages-with-context$/.test(pathname) ||
+    pathname === "/api/v1/rag/source-health" ||
+    /^\/api\/v1\/chatbooks\/download\/[^/]+$/.test(pathname)
+  )) return true
+  if (requestMethod === "POST" && (
+    /^\/api\/v1\/chat\/messages\/[^/]+\/rag-context$/.test(pathname) ||
+    pathname === "/api/v1/rag/search/stream" || pathname === "/api/v1/chatbooks/export"
+  )) return true
   if (pathname === "/api/v1/notes/") return requestMethod === "POST"
   if (/^\/api\/v1\/notes\/[^/]+$/.test(pathname)) {
     return ["GET", "PUT"].includes(requestMethod)
