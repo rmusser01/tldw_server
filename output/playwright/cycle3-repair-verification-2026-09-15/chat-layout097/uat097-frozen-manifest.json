@@ -1,0 +1,40 @@
+{
+  "task": "TASK-13260.38",
+  "productionFrozenAt": "2026-09-15T22:40:20.266Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Common/ChatSidebar.tsx",
+      "sha256": "0df9b9e93f81b044230ff266be1e875891d9f188072bf2be1e6116eb28085e67"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx",
+      "sha256": "a59c22494b66b3414cd96e1e48aeee7c7f8335d57af8c179548ae8dfb52c0fb5"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx",
+      "sha256": "66011d29676c760cc1fc89231f31f4bba5e0c9e707fd9800e85d3702ec04d1a1"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.test.tsx",
+      "sha256": "d4b14a75e30e7b496635e114da53bec1727ce7e4c2e44c2f64d20677e7e6e808"
+    },
+    {
+      "path": "backlog/tasks/task-13260.38 - Keep-expanded-Chat-navigation-and-composer-usable-at-desktop-size.md",
+      "sha256": "59979f50db8d7a81d019e909f857f9482645b6fd84c5853bb94e24620c17ef30"
+    }
+  ],
+  "originalReplayInputs": [
+    {
+      "path": "/private/tmp/uat097-baseline.config.ts",
+      "sha256": "2cc279f922c9699a224fc712404b670fa1a45c28593d2a79030b7673f5bbd1a9"
+    },
+    {
+      "path": "/private/tmp/uat097-before-ChatSidebar.tsx",
+      "sha256": "901ffa2ced175cf013e503f0d26cabeb0908daa5c3402d5c544fe9a11e30e565"
+    },
+    {
+      "path": "/private/tmp/uat097-before-ComposerToolbar.tsx",
+      "sha256": "2bd5c6dd9bfb8fb7c9a23c1f43f029a95aebf6675169c5ecd21f507cfde48706"
+    }
+  ]
+}

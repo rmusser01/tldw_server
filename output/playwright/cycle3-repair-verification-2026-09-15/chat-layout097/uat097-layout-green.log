@@ -1,0 +1,182 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:36218) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx (9 tests | 1 failed) 1005ms
+     ✓ direct expanded mount opens shortcuts and keeps recent conversations collapsed 130ms
+     × keeps expanded shortcuts and recent controls in one scroller outside the fixed footer 261ms
+     ✓ renders shortcuts in the saved sidepanel order 62ms
+     ✓ resets to tools-first when collapsed sidebar is expanded 55ms
+     ✓ shows recent conversation controls when the user expands recent conversations 42ms
+     ✓ hides server selection controls while recent conversations are collapsed 95ms
+     ✓ exits selection mode when recent conversations collapse 238ms
+     ✓ keeps search controls reachable when a query is active across reset 43ms
+     ✓ resets to tools-first when openResetKey changes while already expanded 79ms
+(node:36223) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.test.tsx (36 tests) 543ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx > ChatSidebar tools-first reset > keeps expanded shortcuts and recent controls in one scroller outside the fixed footer
+TestingLibraryElementError: Unable to find an element by: [data-testid="chat-sidebar-shortcut-account"]
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"flex h-screen min-h-0 flex-col overflow-hidden border-r border-border bg-surface2"[39m
+      [33mdata-testid[39m=[32m"chat-sidebar"[39m
+      [33mstyle[39m=[32m"width: var(--sidebar-width);"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex shrink-0 items-center justify-between px-3 py-3 border-b border-border"[39m
+      [36m>[39m
+        [36m<h2[39m
+          [33mclass[39m=[32m"font-semibold text-text"[39m
+        [36m>[39m
+          [0mChats[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex items-center gap-1"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"New Chat"[39m
+            [33mclass[39m=[32m"p-2 rounded text-text-muted hover:bg-surface hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+            [33mdata-testid[39m=[32m"chat-sidebar-new-chat"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-plus size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M5 12h14"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 5v14"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Select chats"[39m
+            [33maria-pressed[39m=[32m"false"[39m
+            [33mclass[39m=[32m"rounded p-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg text-text-muted hover:bg-surface hover:text-text"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-square-check-big size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M21 10.656V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12.344"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"m9 11 3 3L22 4"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Collapse sidebar"[39m
+            [33mclass[39m=[32m"p-2 rounded text-text-muted hover:bg-surface hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+            [33mdata-testid[39m=[32m"chat-sidebar-toggle"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-chevron-left size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<path[39m
+                [33md[39m=[32m"m15 18-6-6 6-6"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"min-h-0 flex-1 overflow-y-auto"[39m
+      [36m>[39m
+        [36m<button[39m
+          [33maria-controls[39m=[32m"chat-sidebar-shortcuts"[39m
+          [33maria-expanded[39m=[32m"true"[39m
+          [33mclass[39m=[32m"group flex w-full items-center justify-between px-3 py-2 text-left hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+          [33mtitle[39m=[32m"Shortcuts"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"text-xs font-semibold uppercase tracking-wide text-text-subtle"[39m
+          [36m>[39m
+            [0mShortcuts[0m
+          [36m</span>[39m
+          [36m<svg[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"lucide lucide-chevron-down size-4 text-text-muted transition-transform group-hover:text-text rotate-0"[39m
+            [33mfill[39m=[32m"none"[39m
+            [33mheight[39m=[32m"24"[39m
+            [33mstroke[39m=[32m"currentColor"[39m
+            [33mstroke-linecap[39m=[32m"round"[39m
+            [33mstroke-linejoin[39m=[32m"round"[39m
+            [33mstroke-width[39m=[32m"2"[39m
+            [33mviewBox[39m=[32m"0 0 24 24"[39m
+            [33mwidth[39m=[32m"24"[39m
+            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+          [36m>[39m
+            [36m<path[39m
+              [33md[39m=[32m"m6 9 6 6 6-6"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+        [36m</button>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"px-3 pb-2 space-y-1"[39m
+          [33mid[39m=[32m"chat-sidebar-shortcuts"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"flex items-center gap-2 w-full px-2 py-2 rounded text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg text-text-muted hover:bg-surface hover:text-text"[39m
+            [33mdata-testid[39m=[32m"chat-sidebar-shortcut-quick-ingest"[39m
+          [36m>[39m
+            [36...
+ ❯ Object.getElementError ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ ../packages/ui/src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx:189:16
+    187|     for (const id of SIDEBAR_SHORTCUT_IDS) {
+    188|       expect(scroller).toContainElement(
+    189|         screen.getByTestId(`chat-sidebar-shortcut-${id}`)
+       |                ^
+    190|       )
+    191|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 44 passed (45)
+   Start at  15:38:35
+   Duration  3.20s (transform 218ms, setup 171ms, import 772ms, tests 1.55s, environment 526ms)

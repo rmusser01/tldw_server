@@ -1,0 +1,26 @@
+{
+  "task": "TASK13260.38",
+  "capturedAt": "2026-09-15T22:51:03.467Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Common/ChatSidebar.tsx",
+      "snapshot": "final-ChatSidebar.tsx",
+      "sha256": "0df9b9e93f81b044230ff266be1e875891d9f188072bf2be1e6116eb28085e67"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx",
+      "snapshot": "final-ComposerToolbar.tsx",
+      "sha256": "a59c22494b66b3414cd96e1e48aeee7c7f8335d57af8c179548ae8dfb52c0fb5"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx",
+      "snapshot": "final-ChatSidebar.tools-first.test.tsx",
+      "sha256": "66011d29676c760cc1fc89231f31f4bba5e0c9e707fd9800e85d3702ec04d1a1"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.test.tsx",
+      "snapshot": "final-ComposerToolbar.test.tsx",
+      "sha256": "d4b14a75e30e7b496635e114da53bec1727ce7e4c2e44c2f64d20677e7e6e808"
+    }
+  ]
+}

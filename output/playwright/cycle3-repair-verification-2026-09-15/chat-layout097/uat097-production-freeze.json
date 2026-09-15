@@ -1,0 +1,14 @@
+{
+  "task": "TASK-13260.38",
+  "frozenAt": "2026-09-15T22:40:20.266Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Common/ChatSidebar.tsx",
+      "sha256": "0df9b9e93f81b044230ff266be1e875891d9f188072bf2be1e6116eb28085e67"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx",
+      "sha256": "a59c22494b66b3414cd96e1e48aeee7c7f8335d57af8c179548ae8dfb52c0fb5"
+    }
+  ]
+}

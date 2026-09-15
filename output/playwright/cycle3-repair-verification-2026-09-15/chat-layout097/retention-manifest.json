@@ -1,0 +1,175 @@
+{
+  "capturedAt": "2026-09-15T22:51:03.467Z",
+  "privateScan": {
+    "knownCredentialValues": 14,
+    "credentialMatches": 0,
+    "patterns": [
+      "JWT",
+      "PEM private key"
+    ],
+    "scope": "every retained artifact scanned in memory before write"
+  },
+  "files": [
+    {
+      "name": "uat097-repair-report.md",
+      "origin": "/private/tmp/uat097-repair-report.md",
+      "originalSha256": "844f7ea3ec55741e4fae301ce8a0bc93f8a8a4dded3919c0abb3243685c4a325",
+      "retainedSha256": "844f7ea3ec55741e4fae301ce8a0bc93f8a8a4dded3919c0abb3243685c4a325",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "uat097-frozen-manifest.json",
+      "origin": "/private/tmp/uat097-frozen-manifest.json",
+      "originalSha256": "eec428e438bbeedd91c5bc90b55a729e2f98f6b4edd93aa422e61db7d7d264c4",
+      "retainedSha256": "eec428e438bbeedd91c5bc90b55a729e2f98f6b4edd93aa422e61db7d7d264c4",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "uat097-production-freeze.json",
+      "origin": "/private/tmp/uat097-production-freeze.json",
+      "originalSha256": "6aa02317a3d8e3f08171025302b4da5d698f244d0badfb0424e3fe940cc8de6f",
+      "retainedSha256": "6aa02317a3d8e3f08171025302b4da5d698f244d0badfb0424e3fe940cc8de6f",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "uat097-baseline.config.ts",
+      "origin": "/private/tmp/uat097-baseline.config.ts",
+      "originalSha256": "2cc279f922c9699a224fc712404b670fa1a45c28593d2a79030b7673f5bbd1a9",
+      "retainedSha256": "2cc279f922c9699a224fc712404b670fa1a45c28593d2a79030b7673f5bbd1a9",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "uat097-before-ChatSidebar.tsx",
+      "origin": "/private/tmp/uat097-before-ChatSidebar.tsx",
+      "originalSha256": "901ffa2ced175cf013e503f0d26cabeb0908daa5c3402d5c544fe9a11e30e565",
+      "retainedSha256": "901ffa2ced175cf013e503f0d26cabeb0908daa5c3402d5c544fe9a11e30e565",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "uat097-before-ComposerToolbar.tsx",
+      "origin": "/private/tmp/uat097-before-ComposerToolbar.tsx",
+      "originalSha256": "2bd5c6dd9bfb8fb7c9a23c1f43f029a95aebf6675169c5ecd21f507cfde48706",
+      "retainedSha256": "2bd5c6dd9bfb8fb7c9a23c1f43f029a95aebf6675169c5ecd21f507cfde48706",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "uat097-layout-red.log",
+      "origin": "/private/tmp/uat097-layout-red.log",
+      "originalSha256": "8e46b69a5c34b6c97a161d3c6b6389281e9688aef904e9eaf3cb281efe5d5258",
+      "retainedSha256": "eb84f7b39cbc4fae483b0ae41451ab1bd0f032eae1451b62cddfc2749af84675",
+      "whitespaceNormalized": true
+    },
+    {
+      "name": "uat097-layout-green.log",
+      "origin": "/private/tmp/uat097-layout-green.log",
+      "originalSha256": "f3606725ca874a8f2f196466558d017ed6e6dc4e96c4b684d1310d557c775fde",
+      "retainedSha256": "ad1653b29f56c59e84b0289507138ce595312ad4ad7065c076316079b7339a42",
+      "whitespaceNormalized": true
+    },
+    {
+      "name": "uat097-layout-final-tests.log",
+      "origin": "/private/tmp/uat097-layout-final-tests.log",
+      "originalSha256": "aa35ad8e76f8bae824343193e051717771b7546e60ba55c664e894e2881015b4",
+      "retainedSha256": "06fe8d6b281dd4b51dd91f0cfcaeea0240c0394204839163bf1ada4ec956082d",
+      "whitespaceNormalized": true
+    },
+    {
+      "name": "uat097-final-original-replay-red.log",
+      "origin": "/private/tmp/uat097-final-original-replay-red.log",
+      "originalSha256": "d6b13a4708177c52b1aee0b38a80b49c88dc168731e512665520c3ef4ffa6efe",
+      "retainedSha256": "fc0f18e86f600784df800a7c8999ba56d8cf1c7115da2bbbc6422ced069f0b87",
+      "whitespaceNormalized": true
+    },
+    {
+      "name": "uat097-independent-baseline-red.log",
+      "origin": "/private/tmp/uat097-independent-baseline-red.log",
+      "originalSha256": "0908de77a8273e8af3c07838355a76ef1ac4ea0caa937152b902e557e957e3e7",
+      "retainedSha256": "8819973f0b048b080426a096d692e6973b2c13c0895effff1fc32e1f328e9f90",
+      "whitespaceNormalized": true
+    },
+    {
+      "name": "uat097-independent-hashes.json",
+      "origin": "/private/tmp/uat097-independent-hashes.json",
+      "originalSha256": "f60da10268e1b1cc486d804a569b4f228dc15e0a83d432dc94ddccae6948782a",
+      "retainedSha256": "f60da10268e1b1cc486d804a569b4f228dc15e0a83d432dc94ddccae6948782a",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "uat097-independent-review.md",
+      "origin": "/private/tmp/uat097-independent-review.md",
+      "originalSha256": "ff4bf7e4379c2af3771d2b94fa80636fb35d17780c0619d21a46df1a2eeb0b11",
+      "retainedSha256": "ff4bf7e4379c2af3771d2b94fa80636fb35d17780c0619d21a46df1a2eeb0b11",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "uat097-independent-tests.log",
+      "origin": "/private/tmp/uat097-independent-tests.log",
+      "originalSha256": "5156ea709ce64d2911f75b43e2cc64c6c4707912d7d6de101a99f79a2a524339",
+      "retainedSha256": "7ebd3dddef81073bc2207a0e727c05db3363f6b9f9b9fd877a0d28db465a8d6a",
+      "whitespaceNormalized": true
+    },
+    {
+      "name": "uat097-eslint-baseline.json",
+      "origin": "/private/tmp/uat097-eslint-baseline.json",
+      "originalSha256": "a840e9fdccc1df4cbc1c6b9cdeb30670225722d1d96351f67f5f00b79040920a",
+      "retainedSha256": "a840e9fdccc1df4cbc1c6b9cdeb30670225722d1d96351f67f5f00b79040920a",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "uat097-eslint-current.json",
+      "origin": "/private/tmp/uat097-eslint-current.json",
+      "originalSha256": "50888f320bb002b10e28ee225abaa7a66b181430b472333af7bfbbd68aa7a3c6",
+      "retainedSha256": "50888f320bb002b10e28ee225abaa7a66b181430b472333af7bfbbd68aa7a3c6",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "uat097-eslint-comparison.json",
+      "origin": "/private/tmp/uat097-eslint-comparison.json",
+      "originalSha256": "8f9eeb5dfcc742239492874b34b65311b73467ba956e6cac7f2e257b8b2e4329",
+      "retainedSha256": "8f9eeb5dfcc742239492874b34b65311b73467ba956e6cac7f2e257b8b2e4329",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "final-ChatSidebar.tsx",
+      "origin": "apps/packages/ui/src/components/Common/ChatSidebar.tsx",
+      "originalSha256": "0df9b9e93f81b044230ff266be1e875891d9f188072bf2be1e6116eb28085e67",
+      "retainedSha256": "0df9b9e93f81b044230ff266be1e875891d9f188072bf2be1e6116eb28085e67",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "final-ComposerToolbar.tsx",
+      "origin": "apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx",
+      "originalSha256": "a59c22494b66b3414cd96e1e48aeee7c7f8335d57af8c179548ae8dfb52c0fb5",
+      "retainedSha256": "a59c22494b66b3414cd96e1e48aeee7c7f8335d57af8c179548ae8dfb52c0fb5",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "final-ChatSidebar.tools-first.test.tsx",
+      "origin": "apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx",
+      "originalSha256": "66011d29676c760cc1fc89231f31f4bba5e0c9e707fd9800e85d3702ec04d1a1",
+      "retainedSha256": "66011d29676c760cc1fc89231f31f4bba5e0c9e707fd9800e85d3702ec04d1a1",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "final-ComposerToolbar.test.tsx",
+      "origin": "apps/packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.test.tsx",
+      "originalSha256": "d4b14a75e30e7b496635e114da53bec1727ce7e4c2e44c2f64d20677e7e6e808",
+      "retainedSha256": "d4b14a75e30e7b496635e114da53bec1727ce7e4c2e44c2f64d20677e7e6e808",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "current-source-freeze.json",
+      "origin": null,
+      "originalSha256": "ee169996defeab9aa603ac82dbf40453e704eb83e446565acffdcbab7bba4dc7",
+      "retainedSha256": "ee169996defeab9aa603ac82dbf40453e704eb83e446565acffdcbab7bba4dc7",
+      "whitespaceNormalized": false
+    },
+    {
+      "name": "README.md",
+      "origin": null,
+      "originalSha256": "a037c2dc635ee24ff22f9904b3bd28e8b0d1a95a52a05da8e5007e27bfb47762",
+      "retainedSha256": "a037c2dc635ee24ff22f9904b3bd28e8b0d1a95a52a05da8e5007e27bfb47762",
+      "whitespaceNormalized": false
+    }
+  ]
+}
