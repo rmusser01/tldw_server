@@ -83,7 +83,6 @@ export function usePlaygroundSessionPersistence() {
     temporaryChat,
     setHistoryId,
     setServerChatId,
-    setServerChatTitle,
     setServerChatCharacterId,
     setServerChatAssistantKind,
     setServerChatAssistantId,
@@ -123,7 +122,6 @@ export function usePlaygroundSessionPersistence() {
       temporaryChat: state.temporaryChat,
       setHistoryId: state.setHistoryId,
       setServerChatId: state.setServerChatId,
-      setServerChatTitle: state.setServerChatTitle,
       setServerChatCharacterId: state.setServerChatCharacterId,
       setServerChatAssistantKind: state.setServerChatAssistantKind,
       setServerChatAssistantId: state.setServerChatAssistantId,
@@ -568,7 +566,6 @@ export function usePlaygroundSessionPersistence() {
     isRestoringRef.current = true
 
     try {
-      let cachedServerTitle: string | null = null
       if (savedHistoryId) {
         // Restore messages from Dexie
         const chatData = await getFullChatData(savedHistoryId)
@@ -577,9 +574,6 @@ export function usePlaygroundSessionPersistence() {
           // History was deleted, clear session
           clearSession()
           return "not-restored"
-        }
-        if (chatData.historyInfo.server_chat_id === savedServerChatId) {
-          cachedServerTitle = chatData.historyInfo.title || null
         }
 
         // Restore messages and history
@@ -609,25 +603,6 @@ export function usePlaygroundSessionPersistence() {
           setMessages([])
         }
         setServerChatId(savedServerChatId)
-        setServerChatTitle(cachedServerTitle)
-        if (savedTrackedAssistantKind && savedTrackedAssistantId) {
-          if (savedTrackedAssistantKind === "character") {
-            setServerChatCharacterId(savedTrackedCharacterId ?? savedTrackedAssistantId)
-            setServerChatAssistantKind("character")
-            setServerChatAssistantId(savedTrackedAssistantId)
-            setServerChatPersonaMemoryMode(null)
-          } else {
-            setServerChatCharacterId(null)
-            setServerChatAssistantKind("persona")
-            setServerChatAssistantId(savedTrackedAssistantId)
-            setServerChatPersonaMemoryMode(
-              sessionStore.serverChatPersonaMemoryMode ?? "read_only"
-            )
-          }
-          // Cached assistant identity omits canonical title/version metadata.
-          // Publish it before awaiting storage so a server refresh stays authoritative.
-          setServerChatMetaLoaded(false)
-        }
         if (
           savedTrackedAssistantSelection &&
           getAssistantSelectionMode(savedTrackedAssistantSelection) === "tracked"
@@ -654,6 +629,22 @@ export function usePlaygroundSessionPersistence() {
             })
             if (!isCurrentRestore()) return "cancelled"
           }
+        }
+        if (savedTrackedAssistantKind && savedTrackedAssistantId) {
+          if (savedTrackedAssistantKind === "character") {
+            setServerChatCharacterId(savedTrackedCharacterId ?? savedTrackedAssistantId)
+            setServerChatAssistantKind("character")
+            setServerChatAssistantId(savedTrackedAssistantId)
+            setServerChatPersonaMemoryMode(null)
+          } else {
+            setServerChatCharacterId(null)
+            setServerChatAssistantKind("persona")
+            setServerChatAssistantId(savedTrackedAssistantId)
+            setServerChatPersonaMemoryMode(
+              sessionStore.serverChatPersonaMemoryMode ?? "read_only"
+            )
+          }
+          setServerChatMetaLoaded(true)
         }
       }
       setChatMode(sessionStore.chatMode)
@@ -691,7 +682,6 @@ export function usePlaygroundSessionPersistence() {
     resolveCurrentScopeKey,
     setHistoryId,
     setServerChatId,
-    setServerChatTitle,
     setServerChatAssistantId,
     setServerChatAssistantKind,
     setServerChatCharacterId,

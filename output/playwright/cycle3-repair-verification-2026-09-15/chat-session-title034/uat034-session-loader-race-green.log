@@ -1,0 +1,15 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:38548) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | ../packages/ui/src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx > UAT034 late cached restore cannot downgrade an already loaded canonical conversation
+POST_HELD_RESTORE { meta: true, id: 6, title: 'Canonical title', load: 'loaded' }
+
+ ✓ ../packages/ui/src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx (11 tests | 10 skipped) 573ms
+   ✓ UAT034 late cached restore cannot downgrade an already loaded canonical conversation  573ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 10 skipped (11)
+   Start at  15:43:22
+   Duration  1.97s (transform 336ms, setup 88ms, import 908ms, tests 573ms, environment 288ms)

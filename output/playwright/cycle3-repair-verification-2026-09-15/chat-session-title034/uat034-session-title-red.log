@@ -1,0 +1,113 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:33729) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx (9 tests | 3 failed) 3765ms
+     × restores a persisted server-backed character chat even without local Dexie history 1065ms
+     × restores matching cached title while leaving server metadata pending ('persona-chat-7') 1055ms
+     × restores matching cached title while leaving server metadata pending ('different-chat') 1056ms
+     ✓ does not overwrite a server chat selected while session restore is in flight 113ms
+     ✓ reports cancellation when a server chat is selected during assistant persistence 105ms
+     ✓ keeps the richer tracked persona snapshot when autosave only has generic metadata 105ms
+     ✓ allows immediate session persistence after an empty restore attempt 106ms
+     ✓ allows immediate session persistence when no restore attempt is needed 103ms
+     ✓ clears stale tracked state when restoring a plain server-backed session 55ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx > usePlaygroundSessionPersistence > restores a persisted server-backed character chat even without local Dexie history
+AssertionError: expected true to be false // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx:149:69
+    147|         "char-42"
+    148|       )
+    149|       expect(useStoreMessageOption.getState().serverChatMetaLoaded).to…
+       |                                                                     ^
+    150|       expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+    151|         {
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx > usePlaygroundSessionPersistence > restores matching cached title while leaving server metadata pending ('persona-chat-7')
+AssertionError: expected null to be 'Tracked persona chat' // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+- Expected:
+"Tracked persona chat"
+
++ Received:
+null
+
+ ❯ src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx:236:64
+    234|         "read_only"
+    235|       )
+    236|       expect(useStoreMessageOption.getState().serverChatTitle).toBe(ex…
+       |                                                                ^
+    237|       expect(useStoreMessageOption.getState().serverChatMetaLoaded).to…
+    238|     })
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx > usePlaygroundSessionPersistence > restores matching cached title while leaving server metadata pending ('different-chat')
+AssertionError: expected true to be false // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx:237:69
+    235|       )
+    236|       expect(useStoreMessageOption.getState().serverChatTitle).toBe(ex…
+    237|       expect(useStoreMessageOption.getState().serverChatMetaLoaded).to…
+       |                                                                     ^
+    238|     })
+    239|   })
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 6 passed (9)
+   Start at  15:33:29
+   Duration  5.08s (transform 471ms, setup 70ms, import 929ms, tests 3.76s, environment 220ms)

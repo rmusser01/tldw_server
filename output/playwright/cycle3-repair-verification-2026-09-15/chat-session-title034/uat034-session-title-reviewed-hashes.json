@@ -1,0 +1,22 @@
+[
+  {
+    "path": "apps/packages/ui/src/hooks/usePlaygroundSessionPersistence.tsx",
+    "sha256": "9d2529b00d456712e86ed1c12360b2755faa889490b4ed023004d74a299ee545"
+  },
+  {
+    "path": "apps/packages/ui/src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx",
+    "sha256": "e09334cf6ccbeaa6e4d46a961f4f6670845f2fc6228f64258f20780d04519f0c"
+  },
+  {
+    "path": "/private/tmp/uat034-session-loader-race.config.ts",
+    "sha256": "a6c49b95ca963e25cc5a808de5609e6b3a062cc29a62d9bf3ff494f8cb0cc69d"
+  },
+  {
+    "path": "/private/tmp/uat034-session-loader-race-current.config.ts",
+    "sha256": "64a3ea8964d3cabdce0c20bb846989f4414a48c8f42d10a41e5b952aa534a5c0"
+  },
+  {
+    "path": "/private/tmp/uat034-session-offline.config.ts",
+    "sha256": "d40f5eb0c398f6b32fdb5562d50fd9d86fab78b0ae9760144cc1cec4862181e3"
+  }
+]

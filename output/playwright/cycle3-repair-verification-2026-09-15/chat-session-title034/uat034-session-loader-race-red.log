@@ -1,0 +1,45 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:35705) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | ../packages/ui/src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx > UAT034 late cached restore cannot downgrade an already loaded canonical conversation
+POST_HELD_RESTORE { meta: false, id: '5', title: 'Canonical title', load: 'loaded' }
+
+ ❯ ../packages/ui/src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx (10 tests | 1 failed | 9 skipped) 572ms
+     ↓ restores a persisted server-backed character chat even without local Dexie history
+     ↓ restores matching cached title while leaving server metadata pending ('persona-chat-7')
+     ↓ restores matching cached title while leaving server metadata pending ('different-chat')
+     ↓ does not overwrite a server chat selected while session restore is in flight
+     ↓ reports cancellation when a server chat is selected during assistant persistence
+     ↓ keeps the richer tracked persona snapshot when autosave only has generic metadata
+     ↓ allows immediate session persistence after an empty restore attempt
+     ↓ allows immediate session persistence when no restore attempt is needed
+     ↓ clears stale tracked state when restoring a plain server-backed session
+   × UAT034 late cached restore cannot downgrade an already loaded canonical conversation 572ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx > UAT034 late cached restore cannot downgrade an already loaded canonical conversation
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ ../packages/ui/src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx:591:65
+    552|     })
+    553|   })
+    554| })
+       |   ^
+    555|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 skipped (10)
+   Start at  15:36:54
+   Duration  1.61s (transform 271ms, setup 89ms, import 643ms, tests 572ms, environment 208ms)

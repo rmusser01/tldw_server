@@ -1,0 +1,11 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:40522) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx (10 tests) 865ms
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  15:46:51
+   Duration  2.11s (transform 429ms, setup 78ms, import 858ms, tests 865ms, environment 221ms)
