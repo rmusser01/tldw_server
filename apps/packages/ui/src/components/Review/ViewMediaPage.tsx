@@ -1,6 +1,8 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { getMediaPermalinkIdFromSearch } from './mediaPermalink'
+import { useMediaCapabilities } from '@/hooks/useMediaCapabilities'
 import {
   ChevronDown,
   ChevronLeft,
@@ -294,6 +296,10 @@ const MediaPageContent: React.FC = () => {
   const { t } = useTranslation(['review', 'common'])
   const navigate = useNavigate()
   const location = useLocation()
+  const mediaCapabilities = useMediaCapabilities()
+  const deleteDisabledReason = mediaCapabilities.canDelete ? undefined : mediaCapabilities.loading
+    ? 'Checking delete permission…'
+    : 'Your account does not have permission to delete media.'
   const message = useAntdMessage()
   const {
     setChatMode,
@@ -911,7 +917,7 @@ const MediaPageContent: React.FC = () => {
     setChatMode('normal')
     setSelectedKnowledge(null as any)
     setRagMediaIds(null)
-    navigate('/')
+    navigate('/chat')
     message.success(
       t(
         'review:reviewPage.chatPrepared',
@@ -957,7 +963,7 @@ const MediaPageContent: React.FC = () => {
     } catch {
       // ignore storage/event errors
     }
-    navigate('/')
+    navigate('/chat')
     try {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('tldw:focus-composer'))
@@ -1077,7 +1083,7 @@ const MediaPageContent: React.FC = () => {
     setChatMode('normal')
     setSelectedKnowledge(null as any)
     setRagMediaIds(null)
-    navigate('/')
+    navigate('/chat')
     message.success(t('review:reviewPage.sentToChat', 'Sent to chat'))
   }, [nav.selected, setChatMode, setSelectedKnowledge, setRagMediaIds, navigate, message, t])
 
@@ -1091,6 +1097,10 @@ const MediaPageContent: React.FC = () => {
   // render a single-column centered onboarding view instead of the two-column split.
   const isEmptyLibrary =
     search.activeTotalCount === 0 &&
+    displayResults.length === 0 &&
+    !nav.selected &&
+    !nav.pendingInitialMediaId &&
+    !getMediaPermalinkIdFromSearch(location.search) &&
     !hasActiveFilters &&
     !search.query?.trim() &&
     !search.isLoading &&
@@ -1463,6 +1473,7 @@ const MediaPageContent: React.FC = () => {
           {selection.bulkSelectionMode ? (
             <React.Suspense fallback={null}>
               <LazyMediaBulkToolbar
+                deleteDisabledReason={selection.bulkSelectedMediaItems.length > 0 ? deleteDisabledReason : undefined}
                 selection={{
                   ...selection,
                   handleSelectAllVisibleItems
@@ -1792,7 +1803,8 @@ const MediaPageContent: React.FC = () => {
                 }
                 search.refetch()
               }}
-              onDeleteItem={selection.handleDeleteItem}
+              onDeleteItem={nav.selected?.kind === 'note' || mediaCapabilities.canDelete ? selection.handleDeleteItem : undefined}
+              deleteDisabledReason={nav.selected?.kind === 'media' ? deleteDisabledReason : undefined}
               onCreateNoteWithContent={handleCreateNoteWithContent}
               onOpenInMultiReview={handleOpenInMultiReview}
               onSendAnalysisToChat={handleSendAnalysisToChat}

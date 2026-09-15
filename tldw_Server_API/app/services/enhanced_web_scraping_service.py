@@ -989,6 +989,13 @@ class WebScrapingService:
                         continue
 
                     if media_id:
+                        if not perform_chunking:
+                            await asyncio.to_thread(
+                                db.update_media_reprocess_state,
+                                media_id,
+                                chunking_status="skipped",
+                                reset_vector_processing=False,
+                            )
                         media_ids.append(media_id)
                         logger.info(f"Stored article with media_id: {media_id}, uuid: {media_uuid}")
                         try:

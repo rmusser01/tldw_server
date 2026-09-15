@@ -350,7 +350,7 @@ export function useContentEditState(deps: UseContentEditStateDeps) {
     const ok = await confirmDanger({
       title: t('common:confirmTitle', { defaultValue: 'Please confirm' }),
       content: t('review:mediaPage.deleteItemConfirm', {
-        defaultValue: 'Delete this item? This cannot be undone.'
+        defaultValue: 'Move this item to Trash? You can restore it from Trash.'
       }),
       okText: t('common:delete', { defaultValue: 'Delete' }),
       cancelText: t('common:cancel', { defaultValue: 'Cancel' })

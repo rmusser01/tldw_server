@@ -188,6 +188,7 @@ interface ContentViewerProps {
   onSendAnalysisToChat?: (text: string) => void
   contentRef?: (node: HTMLDivElement | null) => void
   onDeleteItem?: (item: MediaResultItem, detail: any | null) => Promise<void>
+  deleteDisabledReason?: string
   navigationTarget?: MediaNavigationTargetLike | null
   navigationNodeTitle?: string | null
   navigationPageCountHint?: number | null
@@ -222,6 +223,7 @@ export function ContentViewer({
   onSendAnalysisToChat,
   contentRef,
   onDeleteItem,
+  deleteDisabledReason,
   navigationTarget = null,
   navigationNodeTitle = null,
   navigationPageCountHint = null,
@@ -1896,14 +1898,14 @@ export function ContentViewer({
               />
             </Suspense>
           ) : null}
-          {selectedMedia && onDeleteItem && (
+          {selectedMedia && (onDeleteItem || deleteDisabledReason) && (
             <div className="mt-2">
               <button
                 type="button"
                 onClick={editState.handleDeleteItem}
-                disabled={editState.deletingItem}
+                disabled={editState.deletingItem || Boolean(deleteDisabledReason)}
                 className="w-full inline-flex items-center justify-center gap-2 rounded-md border border-danger/30 px-3 py-2 text-sm text-danger hover:bg-danger/10 disabled:opacity-60"
-                title={t('review:mediaPage.deleteItem', { defaultValue: 'Delete item' })}
+                title={deleteDisabledReason || t('review:mediaPage.deleteItem', { defaultValue: 'Delete item' })}
               >
                 {editState.deletingItem ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -1914,6 +1916,7 @@ export function ContentViewer({
                   ? t('review:mediaPage.deletingItem', { defaultValue: 'Deleting...' })
                   : t('review:mediaPage.deleteItem', { defaultValue: 'Delete item' })}
               </button>
+              {deleteDisabledReason && <p className="mt-1 text-xs text-text-muted">{deleteDisabledReason}</p>}
             </div>
           )}
         </div>

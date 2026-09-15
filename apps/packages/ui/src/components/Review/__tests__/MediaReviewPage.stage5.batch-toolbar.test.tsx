@@ -34,6 +34,7 @@ const detailById: Record<number, { content: string; summary?: string }> = {
 }
 
 const mocks = vi.hoisted(() => ({
+  canDelete: true,
   bgRequest: vi.fn(),
   messageInfo: vi.fn(),
   messageWarning: vi.fn(),
@@ -47,6 +48,10 @@ const mocks = vi.hoisted(() => ({
   setSelectedKnowledge: vi.fn(),
   setRagMediaIds: vi.fn(),
   navigate: vi.fn()
+}))
+
+vi.mock("@/hooks/useMediaCapabilities", () => ({
+  useMediaCapabilities: () => ({ canDelete: mocks.canDelete, loading: false })
 }))
 
 const interpolate = (template: string, values?: Record<string, unknown>) =>
@@ -192,10 +197,6 @@ vi.mock("@/services/settings/ui-settings", () => ({
   MEDIA_REVIEW_ORIENTATION_SETTING: { key: "mediaReviewOrientation", defaultValue: "vertical" },
   MEDIA_REVIEW_SELECTION_SETTING: { key: "mediaReviewSelection", defaultValue: [] },
   MEDIA_REVIEW_VIEW_MODE_SETTING: { key: "mediaReviewViewMode", defaultValue: "spread" }
-}))
-
-vi.mock("@/utils/media-detail-content", () => ({
-  extractMediaDetailContent: (detail: any) => detail?.content || detail?.text || ""
 }))
 
 vi.mock("@/components/Media/DiffViewModal", () => ({
@@ -384,6 +385,7 @@ vi.mock("@/components/Media/diff-worker-client", () => ({
 
 describe("MediaReviewPage stage5 batch toolbar", () => {
   beforeEach(() => {
+    mocks.canDelete = true
     mocks.bgRequest.mockReset()
     mocks.messageInfo.mockReset()
     mocks.messageWarning.mockReset()
@@ -478,6 +480,14 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
     await waitFor(() => {
       expect(screen.getByTestId("media-multi-batch-toolbar")).toBeInTheDocument()
     })
+  })
+
+  it("disables bulk trash when the account lacks delete permission", async () => {
+    mocks.canDelete = false
+    render(<MediaReviewPage />)
+    await screen.findByText("0 / 30 selected")
+    selectItemByCheckbox("Alpha paper")
+    expect(screen.getByTestId("media-multi-batch-trash")).toBeDisabled()
   })
 
   it("pins move-to-trash at the far right edge of the batch toolbar", async () => {

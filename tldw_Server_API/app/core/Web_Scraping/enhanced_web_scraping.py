@@ -92,6 +92,11 @@ from tldw_Server_API.app.core.Web_Scraping.scraper_router import DEFAULT_HANDLER
 from tldw_Server_API.app.core.Web_Scraping.ua_profiles import build_browser_headers, profile_to_impersonate
 from tldw_Server_API.app.core.Web_Scraping.url_utils import normalize_for_crawl
 
+
+class ArticleRetrievalError(ValueError):
+    """A terminal HTTP response that must not be retried using another transport."""
+
+
 _WEBSCRAPE_NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,
     AssertionError,
@@ -1170,6 +1175,8 @@ class EnhancedWebScraper:
                 )
                 elapsed = max(0.0, time.time() - t0)
                 return html, "curl", elapsed
+            except ArticleRetrievalError:
+                raise
             except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(f"curl backend failed; falling back to httpx: {exc}")
         t0 = time.time()
@@ -1182,6 +1189,9 @@ class EnhancedWebScraper:
                 cookies=cookies,
                 proxies=proxies,
             )
+            response_status = int(getattr(resp, "status_code", getattr(resp, "status", 0)))
+            if not 200 <= response_status < 300:
+                raise ArticleRetrievalError(f"Article retrieval failed: HTTP {response_status} (expected terminal 2xx response)")
         finally:
             await self._close_response(resp)
         backend_used = "httpx"
@@ -1218,7 +1228,7 @@ class EnhancedWebScraper:
         status = int(resp.get("status", 0))
         if 200 <= status < 300:
             return resp["text"]
-        raise ValueError(f"curl fetch did not reach a terminal 2xx response (status={status})")
+        raise ArticleRetrievalError(f"curl fetch did not reach a terminal 2xx response (status={status})")
 
     @staticmethod
     async def _close_response(resp: Any) -> None:

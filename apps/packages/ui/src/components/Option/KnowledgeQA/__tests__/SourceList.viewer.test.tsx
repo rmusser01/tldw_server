@@ -45,6 +45,18 @@ describe("SourceList full-source viewer", () => {
     vi.stubGlobal("open", vi.fn())
   })
 
+  it("opens an uploaded media source in Media instead of resolving its filename as a route", async () => {
+    state.results = [{
+      id: "r1", sourceId: "1", sourceType: "media_db", content: "Project Aster source.", score: 1,
+      metadata: { title: "Aster", source_type: "media_db", url: "full-single-uat-study.txt" }
+    }]
+    render(<SourceList />)
+    fireEvent.click(screen.getByRole("button", { name: "View source 1" }))
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Open in Media" }))
+    expect(window.open).toHaveBeenCalledWith("/media?id=1", "_blank", "noopener,noreferrer")
+  })
+
   it("opens and closes full source preview modal from source actions", async () => {
     render(<SourceList />)
 

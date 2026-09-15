@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStorage } from '@plasmohq/storage/hook'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
-import { setSetting } from '@/services/settings/registry'
+import { clearSetting, setSetting } from '@/services/settings/registry'
 import { bgRequest } from '@/services/background-proxy'
 import {
   LAST_MEDIA_ID_SETTING,
@@ -826,6 +826,8 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       setFavorites((prev: string[] | undefined) =>
         (prev || []).filter((fav) => fav !== idStr)
       )
+
+      await clearSetting(LAST_MEDIA_ID_SETTING)
 
       const remainingResults = displayResults.filter(
         (r) => String(r.id) !== idStr

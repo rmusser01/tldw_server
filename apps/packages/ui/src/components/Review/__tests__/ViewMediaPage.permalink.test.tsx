@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import ViewMediaPage from '../ViewMediaPage'
 
 const mocks = vi.hoisted(() => ({
+  canDelete: true,
   queryData: [] as Array<any>,
   detailById: {} as Record<string, any>,
   refetch: vi.fn(),
@@ -19,6 +20,10 @@ const mocks = vi.hoisted(() => ({
   setChatMode: vi.fn(),
   setSelectedKnowledge: vi.fn(),
   setRagMediaIds: vi.fn()
+}))
+
+vi.mock('@/hooks/useMediaCapabilities', () => ({
+  useMediaCapabilities: () => ({ canDelete: mocks.canDelete, loading: false })
 }))
 
 vi.mock('react-i18next', () => ({
@@ -311,6 +316,7 @@ const renderMediaPage = (initialEntry: string) => {
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/" element={<div data-testid="root-route" />} />
+        <Route path="/chat" element={<div data-testid="chat-route">Chat composer</div>} />
         <Route
           path="/media"
           element={
@@ -327,6 +333,7 @@ const renderMediaPage = (initialEntry: string) => {
 
 describe('ViewMediaPage Stage 3 permalinks', () => {
   beforeEach(() => {
+    mocks.canDelete = true
     mocks.queryData = []
     mocks.detailById = {}
     mocks.refetch.mockReset()
@@ -365,6 +372,39 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
       }
       return {}
     })
+  })
+
+  it('shows a newly ingested deep link even when the cached library is empty', async () => {
+    mocks.queryData = []
+    mocks.detailById['1'] = { media_id: 1, source: { title: 'First source' }, content: { text: 'Cedar source' } }
+    renderMediaPage('/media?id=1')
+    await waitFor(() => expect(screen.getByTestId('selected-media-id')).toHaveTextContent('1'))
+  })
+
+  it('clears a deleted deep link without hydrating its cached row again', async () => {
+    mocks.queryData = [{ kind: 'media', id: 1, title: 'Aster', raw: {}, meta: { type: 'document' } }]
+    mocks.getSetting.mockResolvedValue('1')
+    renderMediaPage('/media?id=1')
+    await waitFor(() => expect(screen.getByTestId('selected-media-id')).toHaveTextContent('1'))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete selected item' }))
+    await waitFor(() => expect(mocks.showUndoNotification).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent(/^$/))
+    expect(screen.getByTestId('selected-media-id')).toHaveTextContent('none')
+  })
+
+  it('disables Delete before confirmation when the caller lacks media.delete', async () => {
+    mocks.canDelete = false
+    renderMediaPage('/media?id=1')
+    await waitFor(() => expect(screen.getByTestId('selected-media-id')).toHaveTextContent('1'))
+    expect(screen.getByRole('button', { name: 'Delete selected item' })).toBeDisabled()
+    mocks.canDelete = true
+  })
+
+  it('opens the Chat composer directly with media context', async () => {
+    mocks.queryData = [{ kind: 'media', id: 1, title: 'Aster', raw: {}, meta: { type: 'document' } }]
+    renderMediaPage('/media?id=1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Chat with media action' }))
+    expect(await screen.findByText('Chat composer')).toBeInTheDocument()
   })
 
   it('hydrates and selects permalink media id even when not in current results', async () => {

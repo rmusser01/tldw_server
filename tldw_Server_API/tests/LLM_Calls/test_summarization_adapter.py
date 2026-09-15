@@ -70,6 +70,17 @@ class _Registry:
         return self.adapter
 
 
+@pytest.mark.unit
+def test_analysis_uses_current_provider_model_after_setup_changes(monkeypatch):
+    adapter = _Adapter(response={"choices": [{"message": {"content": "Cedar summary"}}]})
+    monkeypatch.setattr(sgl, "get_registry", lambda: _Registry(adapter))
+    monkeypatch.setattr(sgl, "loaded_config_data", {"llama_api": {"model": "old-model"}})
+    monkeypatch.setattr(sgl, "load_and_log_configs", lambda: {"llama_api": {"model": "configured-model"}})
+    result = sgl.analyze(api_name="llama", input_data="Cedar source", custom_prompt_arg="Summarize", api_key="test-key")
+    assert result == "Cedar summary"
+    assert adapter.requests[0][0]["model"] == "configured-model"
+
+
 def _disable_server_resolution(monkeypatch):
     monkeypatch.setattr(
         sgl,

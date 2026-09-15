@@ -11,6 +11,51 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import PolicyDecision, Runtim
 HTTP_BACKEND = "httpx"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [302, 403, 429, 500])
+async def test_http_fetch_rejects_non_success_body_before_extraction(monkeypatch, status_code):
+    response = SimpleNamespace(
+        status_code=status_code,
+        text="Please respect our robot policy when crawling us.",
+        aclose=AsyncMock(),
+    )
+    monkeypatch.setattr(ews, "afetch", AsyncMock(return_value=response))
+    scraper = ews.EnhancedWebScraper(config={})
+
+    with pytest.raises(ValueError, match=str(status_code)):
+        await scraper._fetch_html(
+            "https://en.wikipedia.org/wiki/Playwright_(software)",
+            headers={}, cookies=None, backend="httpx", impersonate=None, proxies=None,
+        )
+    response.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_http_fetch_retains_successful_article_body(monkeypatch):
+    response = SimpleNamespace(status_code=200, text="Article body", aclose=AsyncMock())
+    monkeypatch.setattr(ews, "afetch", AsyncMock(return_value=response))
+    scraper = ews.EnhancedWebScraper(config={})
+    html, backend, _ = await scraper._fetch_html(
+        "https://example.com/article",
+        headers={}, cookies=None, backend="httpx", impersonate=None, proxies=None,
+    )
+    assert (html, backend) == ("Article body", "httpx")
+
+
+@pytest.mark.asyncio
+async def test_remote_refusal_does_not_trigger_another_transport(monkeypatch):
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.fetch", lambda *_args, **_kwargs: {"status": 403})
+    fallback = AsyncMock(return_value=SimpleNamespace(status_code=200, text="fallback", aclose=AsyncMock()))
+    monkeypatch.setattr(ews, "afetch", fallback)
+    scraper = ews.EnhancedWebScraper(config={})
+    with pytest.raises(ValueError, match="403"):
+        await scraper._fetch_html(
+            "https://en.wikipedia.org/wiki/Playwright_(software)",
+            headers={}, cookies=None, backend="curl", impersonate=None, proxies=None,
+        )
+    fallback.assert_not_awaited()
+
+
 def test_fetch_html_curl_routes_through_http_client_fetch(monkeypatch):
     calls: dict[str, object] = {}
 

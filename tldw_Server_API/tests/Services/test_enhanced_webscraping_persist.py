@@ -8,6 +8,7 @@ from loguru import logger
 
 import tldw_Server_API.app.services.enhanced_web_scraping_service as svc_mod
 from tldw_Server_API.app.services.enhanced_web_scraping_service import WebScrapingService
+from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database, get_paginated_trash_files
 
 
 def _article(
@@ -50,6 +51,9 @@ def _patch_db(monkeypatch: pytest.MonkeyPatch, *responses: Any) -> None:
     pending = list(responses)
 
     class _StaticDB:
+        def update_media_reprocess_state(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
         def add_media_with_keywords(self, **_kwargs: Any) -> tuple[Any, Any, Any]:
             response = pending.pop(0)
             if isinstance(response, BaseException):
@@ -111,6 +115,20 @@ async def test_enhanced_webscraping_persist_stores_successful_batch(
     assert len(response["media_ids"]) == 2
     assert response["stored_articles"] == 2
     assert response["errors"] is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_disabled_web_chunking_is_skipped_and_trash_keeps_its_date(tmp_path, monkeypatch):
+    _patch_real_db_path(monkeypatch, tmp_path)
+    response = await _persist([_article()])
+    media_id = response["media_ids"][0]
+    with managed_media_database(client_id="web-test", db_path=str(tmp_path / "media_test.db"), initialize=False) as db:
+        media = db.get_media_by_id(media_id)
+        assert media["chunking_status"] == "skipped"
+        assert db.mark_as_trash(media_id)
+        rows, _, _, _ = get_paginated_trash_files(db)
+        assert rows[0]["trash_date"]
 
 
 @pytest.mark.integration

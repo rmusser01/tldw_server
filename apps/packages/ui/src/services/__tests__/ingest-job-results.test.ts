@@ -8,6 +8,15 @@ import {
 } from "@/services/tldw/ingest-job-results"
 
 describe("ingest job result helpers", () => {
+  it("surfaces saved-source processing warnings instead of reporting full success", () => {
+    const payload = {
+      status: "completed",
+      result: { status: "Warning", db_id: 1, warnings: ["Analysis failed: model is required"] }
+    }
+    expect(completedIngestJobIndicatesFailure(payload)).toBe(true)
+    expect(extractCompletedIngestJobError(payload)).toContain("Analysis failed: model is required")
+    expect(extractCompletedIngestJobMediaId(payload)).toBe(1)
+  })
   it("treats completed jobs with nested error payloads as failures", () => {
     const payload = {
       status: "completed",

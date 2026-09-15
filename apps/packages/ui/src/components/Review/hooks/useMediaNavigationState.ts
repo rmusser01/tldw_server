@@ -56,6 +56,8 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
     mediaId: string
     promise: Promise<any>
   } | null>(null)
+  const restoredInitialSettingRef = useRef(false)
+  const hydratedPermalinkRef = useRef<string | null>(null)
 
   const permalinkMediaId = useMemo(
     () => getMediaPermalinkIdFromSearch(location.search),
@@ -162,22 +164,35 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
 
   // Hydrate pending initial media from URL
   useEffect(() => {
-    if (!permalinkMediaId) return
-    if (selected?.kind === 'media' && selected?.id != null) return
+    if (!permalinkMediaId) {
+      hydratedPermalinkRef.current = null
+      return
+    }
+    if (hydratedPermalinkRef.current === permalinkMediaId) return
+    hydratedPermalinkRef.current = permalinkMediaId
+    if (selected?.kind === 'media' && String(selected.id) === permalinkMediaId) return
     setPendingInitialMediaId(permalinkMediaId)
     setPendingInitialMediaIdSource('url')
+    // Hydrate navigation changes once; clearing a deleted selection must not
+    // reselect the same cached URL before permalink synchronization runs.
   }, [permalinkMediaId, selected?.id, selected?.kind])
 
   // Hydrate pending initial media from settings
   useEffect(() => {
-    if (permalinkMediaId) return
+    if (restoredInitialSettingRef.current) return
+    if (permalinkMediaId) {
+      restoredInitialSettingRef.current = true
+      return
+    }
     if (selected?.kind === 'media' && selected?.id != null) return
     let cancelled = false
     ;(async () => {
       const lastMediaId = normalizeMediaPermalinkId(
         await getSetting(LAST_MEDIA_ID_SETTING)
       )
-      if (cancelled || !lastMediaId) return
+      if (cancelled) return
+      restoredInitialSettingRef.current = true
+      if (!lastMediaId) return
       setPendingInitialMediaId((prev) => prev ?? lastMediaId)
       setPendingInitialMediaIdSource((prev) => prev ?? 'setting')
     })()

@@ -66,6 +66,9 @@ export const extractCompletedIngestJobError = (
     payload?.error,
     payload?.detail,
     firstStringFromArray(payload?.errors),
+    String(payload?.status || "").toLowerCase() === "warning"
+      ? firstStringFromArray(payload?.warnings)
+      : undefined,
     record?.error_message,
     record?.cancellation_reason,
     record?.error,

@@ -252,7 +252,7 @@ def _summarize_via_adapter(
         if provider_section:
             effective_app_config.setdefault(provider_section, {})
     else:
-        effective_app_config = ensure_app_config(app_config if app_config is not None else loaded_config_data)
+        effective_app_config = ensure_app_config(app_config if app_config is not None else load_and_log_configs())
     registry = get_registry()
     adapter = registry.get_adapter(provider)
     if adapter is None:

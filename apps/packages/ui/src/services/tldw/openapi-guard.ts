@@ -63,6 +63,7 @@ export type ClientPath =
   | "/api/v1/rag/simple"
   | "/api/v1/rag/feedback/implicit"
   | "/api/v1/media"
+  | "/api/v1/media/capabilities"
   | "/api/v1/media/search"
   | "/api/v1/media/metadata-search"
   | "/api/v1/media/add"

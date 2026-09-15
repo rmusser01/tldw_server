@@ -20,6 +20,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/libs/utils"
 import { openExternalUrl } from "@/utils/safe-external-url"
+import { getSourceOpenAction } from "./sourceOpenAction"
 import type { RagResult } from "./types"
 import {
   detectSourceContentFacet,
@@ -152,7 +153,7 @@ export function SourceCard({
     [excerpt, highlightTerms]
   )
   const canExpand = displayExcerptText.length > excerptLength
-  const url = result.metadata?.url
+  const openAction = getSourceOpenAction(result)
   const sourceType =
     result.sourceType || result.metadata?.source_type || "media_db"
   const sourceTypeLabel = getSourceTypeLabel(sourceType)
@@ -276,10 +277,10 @@ export function SourceCard({
   }, [index, result, scheduleCopiedStateReset])
 
   const handleOpenExternal = useCallback(() => {
-    if (url) {
-      openExternalUrl(url, "_blank", "noopener,noreferrer")
+    if (openAction) {
+      openExternalUrl(openAction.href, "_blank", "noopener,noreferrer")
     }
-  }, [url])
+  }, [openAction])
 
   const jumpToCitationFromCard = useCallback(() => {
     if (!isCited) return
@@ -675,7 +676,7 @@ export function SourceCard({
                   )}
                   {copiedState === "excerpt" ? "Copied excerpt" : "Copy excerpt"}
                 </button>
-                {url && (
+                {openAction && (
                   <button
                     type="button"
                     role="menuitem"
@@ -686,7 +687,7 @@ export function SourceCard({
                     className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-subtle hover:bg-hover hover:text-text transition-colors"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    Open original
+                    {openAction.label}
                   </button>
                 )}
                 {canOpenInWorkspace && (
