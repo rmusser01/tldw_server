@@ -458,6 +458,29 @@ describe("QuickIngestWizardModal session runtime", () => {
     vi.restoreAllMocks()
   })
 
+  it("leaves pending stages and percentages unchanged as elapsed time passes, then accepts a terminal result", async () => {
+    vi.useFakeTimers()
+    mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-confirmed-only" })
+    useQuickIngestSessionStore.getState().createDraftSession({
+      queueItems: [{ id: "cedar", kind: "url", url: "https://example.com/cedar", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } }],
+    })
+    await act(async () => {
+      render(<QuickIngestWizardModal open autoProcessQueued onClose={vi.fn()} />)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    const before = useQuickIngestSessionStore.getState().session!.processingState.perItemProgress[0]
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(useQuickIngestSessionStore.getState().session!.processingState.perItemProgress[0]).toEqual(before)
+    expect(before.progressPercent).toBe(0)
+    expect(useQuickIngestSessionStore.getState().session!.processingState.elapsed).toBe(60)
+    act(() => {
+      for (const listener of mocks.runtimeListeners) listener({ type: "tldw:quick-ingest/completed", payload: {
+        sessionId: "qi-confirmed-only", results: [{ id: "cedar", status: "ok", type: "document", mediaId: 1 }],
+      } })
+    })
+    expect(useQuickIngestSessionStore.getState().session!.processingState.perItemProgress[0]).toMatchObject({ status: "complete", progressPercent: 100 })
+  })
+
   it("submits the queued wizard batch through the authenticated quick-ingest transport", async () => {
     const user = userEvent.setup()
     useQuickIngestSessionStore.getState().createDraftSession()
@@ -1914,6 +1937,10 @@ describe("QuickIngestWizardModal session runtime", () => {
     await waitFor(() => {
       expect(mocks.reattachQuickIngestSession).toHaveBeenCalled()
     })
+
+    expect(useQuickIngestSessionStore.getState().session?.processingState.perItemProgress).toEqual([
+      expect.objectContaining({ id: "queued-url-1", status: "processing", progressPercent: 0 }),
+    ])
 
     await user.click(screen.getByRole("button", { name: "Cancel Processing" }))
 
