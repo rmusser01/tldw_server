@@ -2,13 +2,16 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from loguru import logger
 
+import tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping as scraper_mod
 import tldw_Server_API.app.services.enhanced_web_scraping_service as svc_mod
+from tldw_Server_API.app.core.DB_Management.media_db.api import get_paginated_trash_files, managed_media_database
+from tldw_Server_API.app.core.exceptions import NetworkError
 from tldw_Server_API.app.services.enhanced_web_scraping_service import WebScrapingService
-from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database, get_paginated_trash_files
 
 
 def _article(
@@ -87,6 +90,76 @@ def _captured_logs() -> Iterator[list[str]]:
         yield records
     finally:
         logger.remove(sink_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "code"),
+    [
+        ({"policy_reason": "robots_disallowed", "error": "Blocked by outbound policy"}, "source_access_denied"),
+        ({"error": "Article retrieval failed: HTTP 403 (expected terminal 2xx response)"}, "source_access_denied"),
+        ({"error": "No content extracted"}, "empty_extraction"),
+        ({"error": "Request timed out"}, "extraction_timeout"),
+        ({"error_code": "extraction_timeout", "error": ""}, "extraction_timeout"),
+        ({"error": "<html>upstream-private-secret</html>"}, "extraction_failed"),
+        ({"error": "<html>Our deadline for submissions was yesterday</html>"}, "extraction_failed"),
+        ({"error": "Unsupported content at https://example.com/timeout"}, "extraction_failed"),
+    ],
+)
+async def test_persistence_reports_safe_extraction_failure_without_storing(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: dict[str, Any],
+    code: str,
+):
+    _patch_db(monkeypatch)
+    response = await _persist([
+        _article(
+            url="https://example.com/private?token=source-private-secret",
+            content="",
+            extraction_successful=False,
+            **failure,
+        )
+    ])
+    assert response["extraction_failures"] == [{"code": code}]
+    assert response["stored_articles"] == 0
+    assert "private-secret" not in str(response)
+    assert "<html>" not in str(response)
+    assert response["errors"]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_persistence_classifies_empty_success_payload_without_storing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _patch_db(monkeypatch)
+    response = await _persist([_article(content=" \n\t")])
+    assert response["extraction_failures"] == [{"code": "empty_extraction"}]
+    assert response["stored_articles"] == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["OpaqueTransportFailure", ""])
+async def test_queued_timeout_reaches_persistence_with_its_safe_category(monkeypatch, message):
+    _patch_db(monkeypatch)
+    scraper = scraper_mod.EnhancedWebScraper(config={"max_concurrent": 1})
+    monkeypatch.setattr(scraper_mod, "afetch", AsyncMock(side_effect=NetworkError(message, classification="timeout")))
+
+    async def scrape_without_preflight(url, *_args, **_kwargs):
+        return await scraper._scrape_with_trafilatura(url)
+
+    monkeypatch.setattr(scraper, "scrape_article", scrape_without_preflight)
+    await scraper.job_queue.start()
+    try:
+        articles = await scraper.scrape_multiple(["https://example.com/article"])
+        response = await _persist(articles)
+        assert response["extraction_failures"] == [{"code": "extraction_timeout"}]
+        assert response["stored_articles"] == 0
+        assert all(job.status == scraper_mod.JobStatus.FAILED for job in scraper.job_queue._completed_jobs.values())
+    finally:
+        await scraper.job_queue.stop()
 
 
 @pytest.mark.integration
@@ -212,7 +285,7 @@ async def test_enhanced_webscraping_persist_does_not_infer_duplicate_from_error_
 
     assert response["status"] == "persist-ok"
     assert response["duplicate_articles"] == 0
-    assert response["errors"] == ["Failed to extract: https://example.com/unavailable"]
+    assert response["errors"] == ["Source extraction failed. Check the server logs for details."]
 
 
 @pytest.mark.integration
@@ -294,7 +367,7 @@ async def test_enhanced_webscraping_persist_mixed_duplicate_and_failure_retains_
     assert response["stored_articles"] == 0
     assert response["skipped_articles"] == 1
     assert response["duplicate_articles"] == 1
-    assert response["errors"] == ["Failed to extract: https://example.com/b"]
+    assert response["errors"] == ["Source extraction failed. Check the server logs for details."]
 
 
 @pytest.mark.integration

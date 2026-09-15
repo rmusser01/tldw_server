@@ -295,13 +295,14 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
-  it("surfaces direct HTML scrape responses with zero stored articles as failed", async () => {
+  it("retains safe extraction categories through direct HTML batch results", async () => {
     mocks.bgRequest.mockResolvedValue({
       status: "persist-ok",
       media_ids: [],
       total_articles: 1,
       stored_articles: 0,
-      errors: ["Failed to extract: http://localhost:8080/e2e/source.html"]
+      errors: ["Source access was blocked by the website or outbound access policy."],
+      extraction_failures: [{ code: "source_access_denied" }]
     })
 
     const result = await submitQuickIngestBatch({
@@ -328,7 +329,8 @@ describe("submitQuickIngestBatch", () => {
     expect(result.results?.[0]).toMatchObject({
       id: "entry-failed-html",
       status: "error",
-      error: "Failed to extract: http://localhost:8080/e2e/source.html"
+      error: "Source access was blocked by the website or outbound access policy.",
+      data: { extraction_failures: [{ code: "source_access_denied" }] }
     })
   })
 

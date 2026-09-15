@@ -57,8 +57,8 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 
 **Files:** `useCharacterGreeting.ts`, `useSelectedAssistant.ts`, `useCharacterData.tsx`, `hooks/chat/useChatActions.ts`, `hooks/chat/useServerChatLoader.ts`, `components/Option/Playground/hooks/usePlaygroundPersistence.tsx`; adjacent assistant, greeting, persona-integration and persistence tests.
 
-- [ ] Build the actual picker/canonical hook/greeting/store regression with deferred legacy/profile hydration; reproduce replacement reverting and unmounted Edit form warning.
-- [ ] Remove competing legacy selection hydration, guard cleared/replaced/account-changed loads and limit Edit form writes to its mounted lifecycle.
+- [x] Build the actual picker/canonical hook/greeting/store regression with deferred legacy/profile hydration; reproduce replacement reverting and unmounted Edit form warning.
+- [x] Remove competing legacy selection hydration, guard cleared/replaced/account-changed loads and limit Edit form writes to its mounted lifecycle.
 - [ ] Add a combined normal pipeline/autosave regression with no queue, a queued second turn and delayed linked history; reproduce the duplicate conversation and mode change.
 - [ ] Extend neutral saved-chat bootstrap, carry established IDs into inference/persistence, and recheck autosave ownership after awaited work.
 - [ ] Verify temporary promotion, explicit persona/character, failed/aborted creation and delayed A→B results. Review and commit selection and canonical-creation changes separately.
@@ -83,9 +83,9 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 
 **Files:** `components/Common/QuickIngestWizardModal.tsx`, `QuickIngest/{ReviewStep,WizardConfigureStep,WizardResultsStep,timeEstimation}`, extraction-error propagation in `enhanced_web_scraping_service.py`; existing wizard integration/time-estimation/results and backend scraping tests.
 
-- [ ] Reproduce blank analysis provider advancing to Ready; unknown inference cost; server20% versus synthetic UI progress; lost denial/empty/timeout error distinctions.
-- [ ] Validate Configure transitions, use confirmed or indeterminate progress and preserve safe structured failure categories.
-- [ ] Verify analysis-disabled presets, terminal partial/failure/success, cancellation and unavailable progress. Run touched backend tests/Bandit and frontend lint/regressions.
+- [x] Reproduce blank analysis provider advancing to Ready; unknown inference cost; server20% versus synthetic UI progress; lost denial/empty/timeout error distinctions.
+- [x] Validate Configure transitions, use confirmed or indeterminate progress and preserve safe structured failure categories.
+- [x] Verify analysis-disabled presets, terminal partial/failure/success, cancellation and unavailable progress. Run touched backend tests/Bandit and frontend lint/regressions.
 - [ ] Review and exercise real small-source analysis plus the exact Wikipedia attempt without bypassing its refusal.
 
 ### TASK-13260.26 — UAT082 private ingest state

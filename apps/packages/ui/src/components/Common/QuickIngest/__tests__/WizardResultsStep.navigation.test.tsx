@@ -195,6 +195,28 @@ describe("WizardResultsStep navigation buttons", () => {
     expect(screen.queryByRole("button", { name: /remove/i })).toBeNull()
   })
 
+  it.each([
+    ["source_access_denied", "Access blocked", false],
+    ["empty_extraction", "No content", false],
+    ["extraction_timeout", "Timeout", true],
+    ["extraction_failed", "Error", false],
+  ] as const)("uses confirmed %s extraction status for guidance and Retry", (code, label, retryable) => {
+    const onRetryItems = vi.fn()
+    wizardHarness.results = [{
+      id: "article", type: "web", status: "error", outcome: "failed",
+      url: "https://example.com/article", error: "Failed to extract article",
+      data: { extraction_failures: [{ code }] },
+    }]
+    render(<WizardResultsStep onClose={vi.fn()} onRetryItems={onRetryItems} />)
+    expect(screen.getAllByText(new RegExp(label)).length).toBeGreaterThan(0)
+    const retryButtons = screen.queryAllByRole("button", { name: /retry/i })
+    expect(retryButtons.length > 0).toBe(retryable)
+    if (retryable) {
+      fireEvent.click(retryButtons[0])
+      expect(onRetryItems).toHaveBeenCalledWith(["article"])
+    }
+  })
+
   it("describes local skipped duplicates as already queued", () => {
     wizardHarness.results = [
       {

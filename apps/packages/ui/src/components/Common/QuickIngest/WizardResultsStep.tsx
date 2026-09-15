@@ -382,7 +382,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   const errorCategories = useMemo(() => {
     const map = new Map<string, ErrorCategory>()
     for (const item of failures) {
-      map.set(item.id, classifyError(item.error))
+      map.set(item.id, classifyError(item.error, item.data))
     }
     return map
   }, [failures])
@@ -684,7 +684,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                 <ErrorRow
                   key={item.id}
                   item={item}
-                  category={errorCategories.get(item.id) ?? classifyError(item.error)}
+                  category={errorCategories.get(item.id) ?? classifyError(item.error, item.data)}
                   qi={qi}
                   onRetry={getRetryHandlerForItem(item)}
                 />
@@ -710,7 +710,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                 <ErrorRow
                   key={item.id}
                   item={item}
-                  category={errorCategories.get(item.id) ?? classifyError(item.error)}
+                  category={errorCategories.get(item.id) ?? classifyError(item.error, item.data)}
                   qi={qi}
                   onRetry={getRetryHandlerForItem(item)}
                 />
@@ -736,7 +736,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                 <ErrorRow
                   key={item.id}
                   item={item}
-                  category={errorCategories.get(item.id) ?? classifyError(item.error)}
+                  category={errorCategories.get(item.id) ?? classifyError(item.error, item.data)}
                   qi={qi}
                   onRetry={getRetryHandlerForItem(item)}
                 />

@@ -1,14 +1,60 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 import tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping as ews
+from tldw_Server_API.app.core.exceptions import NetworkError
 from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
 from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightTarget
 from tldw_Server_API.app.core.Web_Scraping.runtime import PolicyDecision, RuntimeRequestContext
 
 HTTP_BACKEND = "httpx"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["_scrape_with_trafilatura", "_scrape_with_beautifulsoup"])
+@pytest.mark.parametrize("classification", ["timeout", None])
+async def test_scrape_handles_normalized_http_client_failure(monkeypatch, method, classification):
+    monkeypatch.setattr(ews, "afetch", AsyncMock(side_effect=NetworkError("", classification=classification)))
+    scraper = ews.EnhancedWebScraper(config={})
+    result = await getattr(scraper, method)("https://example.com/article")
+    assert result["extraction_successful"] is False
+    assert result.get("error_code") == ("extraction_timeout" if classification else None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [TimeoutError(), httpx.ReadTimeout(""), PlaywrightTimeoutError("")])
+async def test_scrape_preserves_typed_timeout_without_an_exception_message(monkeypatch, error):
+    scraper = ews.EnhancedWebScraper(config={})
+    monkeypatch.setattr(scraper, "_fetch_html", AsyncMock(side_effect=error))
+    result = await scraper._scrape_with_trafilatura("https://example.com/article")
+    assert result["error_code"] == "extraction_timeout"
+    assert result["extraction_successful"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_browser_timeout_is_classified_but_cancellation_propagates_with_cleanup(monkeypatch, cancelled):
+    error = asyncio.CancelledError() if cancelled else PlaywrightTimeoutError("")
+    page = SimpleNamespace(goto=AsyncMock(side_effect=error), close=AsyncMock())
+    context = SimpleNamespace(new_page=AsyncMock(return_value=page), close=AsyncMock())
+    scraper = ews.EnhancedWebScraper(config={})
+    scraper._browser = SimpleNamespace(new_context=AsyncMock(return_value=context))
+    monkeypatch.setattr(ews, "resolve_browser_transport_decision", lambda *args, **kwargs: SimpleNamespace(allowed=True))
+
+    if cancelled:
+        with pytest.raises(asyncio.CancelledError):
+            await scraper._scrape_with_playwright("https://example.com/article")
+    else:
+        result = await scraper._scrape_with_playwright("https://example.com/article")
+        assert result["error_code"] == "extraction_timeout"
+        assert result["extraction_successful"] is False
+    page.close.assert_awaited_once()
+    context.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
