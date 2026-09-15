@@ -41,16 +41,11 @@ import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings"
 import { useStoreMessageOption } from "@/store/option"
 import { usePromptPaletteCommands } from "@/components/Option/Prompt/usePromptPaletteCommands"
 import { CommandPaletteHost } from "@/components/Common/CommandPaletteHost"
+import { PageHelpModalHost } from "@/components/Common/PageHelpModalHost"
 
 // Lazy-load Timeline to reduce initial bundle size (~1.2MB cytoscape)
 const TimelineModal = lazy(() =>
   import("@/components/Timeline").then((m) => ({ default: m.TimelineModal }))
-)
-
-const PageHelpModal = lazy(() =>
-  import("@/components/Common/PageHelpModal").then((m) => ({
-    default: m.PageHelpModal
-  }))
 )
 
 const TutorialRunner = lazy(() =>
@@ -610,9 +605,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
 
           {/* Page Help Modal (Tutorials + Shortcuts) - triggered by ? */}
           {!hideHeader && (
-            <Suspense fallback={null}>
-              <PageHelpModal />
-            </Suspense>
+            <PageHelpModalHost />
           )}
 
           {/* Tutorial Runner - executes active tutorials */}
