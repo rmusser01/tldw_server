@@ -715,7 +715,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
           className="!mb-2"
         >
           <Select
-            allowClear
             value={targetDeckId ?? undefined}
             onChange={(value) => setTargetDeckId((value as DeckSelectionValue) ?? null)}
             data-testid="flashcards-generate-deck"
