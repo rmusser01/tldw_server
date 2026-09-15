@@ -1,0 +1,91 @@
+{
+  "newSessionCount": 1,
+  "session": {
+    "id": 2,
+    "deck_id": null,
+    "deck_name_snapshot": null,
+    "review_mode": "due",
+    "tag_filter": null,
+    "scope_key": "due:global",
+    "status": "completed",
+    "started_at": "2026-09-15T19:47:01.555Z",
+    "last_activity_at": "2026-09-15T19:48:54.064Z",
+    "completed_at": "2026-09-15T19:48:54.064Z",
+    "cards_reviewed": 7,
+    "client_id": "3"
+  },
+  "firstAcknowledgedSession": {
+    "id": 2,
+    "deck_id": null,
+    "deck_name_snapshot": null,
+    "review_mode": "due",
+    "tag_filter": null,
+    "scope_key": "due:global",
+    "status": "active",
+    "started_at": "2026-09-15T19:47:01.555Z",
+    "last_activity_at": "2026-09-15T19:47:01.554Z",
+    "completed_at": null,
+    "cards_reviewed": 1,
+    "client_id": "3"
+  },
+  "decked": 5,
+  "undecked": 2,
+  "changes": [
+    {
+      "id": "1f18ad3e-70ab-4eb7-9b08-f6a66b68c7d3",
+      "deck_id": null,
+      "versionDelta": 1,
+      "last_reviewed_at": "2026-09-15T19:48:52.863Z",
+      "reviewedAfter": true,
+      "repetitionDelta": 1
+    },
+    {
+      "id": "4c051ec1-3433-4c87-8392-3f64c8c7fab9",
+      "deck_id": null,
+      "versionDelta": 1,
+      "last_reviewed_at": "2026-09-15T19:48:53.435Z",
+      "reviewedAfter": true,
+      "repetitionDelta": 1
+    },
+    {
+      "id": "bf82742b-f2b4-4321-8d30-ecc48f655427",
+      "deck_id": 1,
+      "versionDelta": 1,
+      "last_reviewed_at": "2026-09-15T19:47:01.554Z",
+      "reviewedAfter": true,
+      "repetitionDelta": 0
+    },
+    {
+      "id": "99686df6-8d5b-4a0d-a945-6d365e5d79a1",
+      "deck_id": 1,
+      "versionDelta": 1,
+      "last_reviewed_at": "2026-09-15T19:48:15.456Z",
+      "reviewedAfter": true,
+      "repetitionDelta": 0
+    },
+    {
+      "id": "8b11405b-78d3-4f4c-b897-4c638b5ebfe0",
+      "deck_id": 1,
+      "versionDelta": 1,
+      "last_reviewed_at": "2026-09-15T19:48:16.183Z",
+      "reviewedAfter": true,
+      "repetitionDelta": 0
+    },
+    {
+      "id": "5e931ebb-89cb-40be-9fd7-2f4f0a39c2c2",
+      "deck_id": 1,
+      "versionDelta": 1,
+      "last_reviewed_at": "2026-09-15T19:48:16.815Z",
+      "reviewedAfter": true,
+      "repetitionDelta": 0
+    },
+    {
+      "id": "d258321c-97b0-42f3-a428-b32384f789f0",
+      "deck_id": 1,
+      "versionDelta": 1,
+      "last_reviewed_at": "2026-09-15T19:48:52.232Z",
+      "reviewedAfter": true,
+      "repetitionDelta": 0
+    }
+  ]
+}

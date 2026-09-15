@@ -1,0 +1,6 @@
+### Result
+{"checkedAt":"2026-09-15T19:47:01.600Z","before":"7 cards remaining, 0 reviewed, Available now: 7, new: 2, learning: 5, due: 0\nStudy queue\n7\ncards remaining\n0 reviewed\nAvailable now: 7\nnew: 2\nlearning: 5\ndue: 0\n~2 min left","after":"7 cards remaining, 1 reviewed, Available now: 7, new: 2, learning: 5, due: 0\nStudy queue\n7\ncards remaining\n1 reviewed\nAvailable now: 7\nnew: 2\nlearning: 5\ndue: 0\n~2 min left"}
+### Ran Playwright code
+```js
+await (async(page)=>{const panel=page.getByRole("tabpanel",{name:"Study",exact:true});const before=await panel.getByRole("status").filter({hasText:"cards remaining"}).innerText();await page.getByRole("button",{name:"Good: I remembered with a bit of effort. Press 3",exact:true}).click();await page.waitForFunction(()=>Array.from(document.querySelectorAll("[role=status]")).some(e=>e.textContent?.includes("1 reviewed")),null,{timeout:15000});return{checkedAt:new Date().toISOString(),before,after:await panel.getByRole("status").filter({hasText:"cards remaining"}).innerText()};})(page);
+```

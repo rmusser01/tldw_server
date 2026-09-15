@@ -1,0 +1,6 @@
+### Result
+{"checkedAt":"2026-09-15T19:43:35.723Z","row":"What is the mitochondria?\n\nCycle3 Bob Biology\nNote #9ae43c6a-2458-4910-97fd-013d888914f7\nMemory 2.50\nNext gap 0d\nRecall runs 0\nRelearns 0"}
+### Ran Playwright code
+```js
+await (async(page)=>{const d=page.getByRole("dialog",{name:"Move to deck",exact:true});await d.getByRole("img",{name:"close-circle",exact:true}).click();await d.getByRole("button",{name:"Move",exact:true}).click();await d.waitFor({state:"hidden",timeout:15000});const row=page.getByRole("listitem").filter({has:page.getByText("What is the mitochondria?",{exact:true})});return{checkedAt:new Date().toISOString(),row:await row.innerText()};})(page);
+```

@@ -1,0 +1,38 @@
+{
+  "checkedAt": "2026-09-15T19:49:29.044Z",
+  "identity": "bob",
+  "verifierAuth": "refresh",
+  "method": "GET",
+  "path": "/api/v1/flashcards/review-sessions?limit=100",
+  "status": 200,
+  "body": [
+    {
+      "id": 2,
+      "deck_id": null,
+      "deck_name_snapshot": null,
+      "review_mode": "due",
+      "tag_filter": null,
+      "scope_key": "due:global",
+      "status": "completed",
+      "started_at": "2026-09-15T19:47:01.555Z",
+      "last_activity_at": "2026-09-15T19:48:54.064Z",
+      "completed_at": "2026-09-15T19:48:54.064Z",
+      "cards_reviewed": 7,
+      "client_id": "3"
+    },
+    {
+      "id": 1,
+      "deck_id": 1,
+      "deck_name_snapshot": "Cycle3 Bob Biology",
+      "review_mode": "due",
+      "tag_filter": null,
+      "scope_key": "due:deck:1",
+      "status": "completed",
+      "started_at": "2026-09-15T10:27:47.062Z",
+      "last_activity_at": "2026-09-15T10:30:15.251Z",
+      "completed_at": "2026-09-15T10:30:15.251Z",
+      "cards_reviewed": 5,
+      "client_id": "3"
+    }
+  ]
+}

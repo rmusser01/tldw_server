@@ -52,7 +52,7 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 - [x] Cover authority changes during source acquisition, blocked/new-tab opening, unresolved target authentication, simultaneous consumption and StrictMode replay, whitespace/length bounds, legacy plaintext rejection and URL cleanup without overwriting subsequent edits.
 - [x] Implement the account-bound opaque transfer for all five known producers and consumer invalidation from the design. Preserve actual same-tab and extension/new-tab delivery; retain source drafts on storage/navigation failure.
 - [ ] Run the existing handoff suite and new interacting consumer/authority/platform tests, including unavailable shared storage despite a memory fallback; review browser URLs, provenance and actual intended-account generation in live targeted UAT.
-- Reviewed implementation checkpoint `aae6b72d05`: parent63 WebUI and12 shared storage controls pass after correcting a WebUI test spy leak; broader172 controls and independent review clear. Native handoff/generation acceptance remains pending.
+- Reviewed implementation checkpoint `aae6b72d05`: parent63 WebUI and12 shared storage controls pass after correcting a WebUI test spy leak; broader172 controls and independent review clear. Actual Bob Note handoff preserves exact text/provenance in a clean URL, and real generation/save creates two owned cards. Other producers and cross-account native acceptance remain pending.
 
 ### TASK-13260.15 — UAT067/068 selection portion, then TASK-13260.14 — UAT062
 
@@ -94,19 +94,22 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 ### TASK-13260.26 — UAT082 private ingest state
 
 **Files:** `store/quick-ingest-session.ts`, `store/quick-ingest.tsx`, Quick Ingest wizard/button, DocumentPicker, `services/tldw/quick-ingest-session-reattach.ts`, `quick-ingest-batch.ts`, auth cleanup and result actions; existing close/resume and authority regressions.
-- [ ] Reproduce completed Bob results visible after normal logout/admin login, plus delayed completion and persisted-state hydration after A→B→A.
-- [ ] Immediately mask/reset private state at verified authority changes and reject stale async work/actions without cancelling another account's server jobs.
-- [ ] Reject unowned persisted sessions/recent-document metadata; prevent late upserts recreating cleared state and old serial batch entries using new credentials.
-- [ ] Preserve same-account close/resume, reconnect and valid source actions; verify different servers and colliding numeric IDs.
+- [x] Reproduce completed Bob results visible after normal logout/admin login, plus delayed completion and persisted-state hydration after A→B→A.
+- [x] Immediately mask/reset private state at verified authority changes and reject stale async work/actions without cancelling another account's server jobs.
+- [x] Reject unowned persisted sessions/recent-document metadata; prevent late upserts recreating cleared state and old serial batch entries using new credentials.
+- [x] Preserve same-account close/resume, reconnect and valid source actions; verify different servers and colliding numeric IDs.
 - [ ] Independently review, run scoped frontend checks, and exercise the exact same-browser account transition before the next full UAT.
+
+- Reviewed checkpoint `af1e7bb08b`: parent61/5 and implementer480/32 tests pass; independent re-review clears all three expiry/marker probes. Lint0 errors/878 unchanged warnings; compiler90 exact baseline. Native account-switch and resume acceptance remains pending. Existing MV3 foreground preference remains; worker-only controls do not certify popup destruction.
 
 ### TASK-13260.27 — UAT086 QA account history
 
 **Files:** active KnowledgeQAProvider, history persistence/selection and existing account/transport helpers; Provider history/persistence/streaming and actual Recent UI tests. Coordinate source presentation with .17.
-- [ ] Reproduce Alice questions and cited-result metadata visible to Bob from global local storage; keep the correct foreign-conversation404 as a negative control.
-- [ ] Scope history, active results, sources and pending work to verified account/server authority; reject legacy unowned entries and delayed A→B→A writes/restores.
+- [x] Reproduce Alice questions and cited-result metadata visible to Bob from global local storage; keep the correct foreign-conversation404 as a negative control.
+- [x] Scope history, active results, sources and pending work to verified account/server authority; reject legacy unowned entries and delayed A→B→A writes/restores.
 - [ ] Preserve same-account reload/server history and bounded storage behavior; verify actual Recent actions plus delayed stream/restore/delete/share/export boundaries.
 - [ ] Independently review, run focused frontend checks, and verify exact same-browser isolation before the next full UAT.
+- Reviewed checkpoint `d05c13ecc0`: parent123 WebUI controls, broader746/69, unchanged90 compiler baseline and unchanged7 existing lint errors/938 warnings. Original stale-expiry probe and independent lifetime/changed-principal controls pass. Native account-history checks remain.
 
 ### TASK-13260.17 — UAT060/066/071/072/073
 
@@ -176,8 +179,8 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 **Files:** `tldw_Server_API/app/api/v1/schemas/flashcards.py`, `endpoints/flashcards.py`, `core/DB_Management/ChaChaNotes_DB.py`; frontend `services/flashcards.ts`, `useReviewFlashcardMutation` and `tabs/ReviewTab.tsx`; backend `tests/StudySuggestions/test_flashcard_review_sessions.py` and frontend `tabs/__tests__/ReviewTab.study-suggestions.test.tsx`.
 - [x] Reproduce the exact mixed seven-card global run split into two server sessions using real request/schema/database behavior and nonconstant returned session IDs in the UI test.
 - [x] Add optional explicit scope/session context, validate and retain one acknowledged run ID, support mixed cards only in validated global scope, and end exactly that session.
-- [ ] Verify legacy requests, wrong/foreign/inactive sessions, no-write failure, unrelated active sessions, pending account/scope changes, transient queue gaps, practice-only Cram and Undo. Run backend tests/Bandit and frontend regressions; review and live-check a mixed-deck session and reload rollup.
-- Reviewed backend `982b03a940` and frontend `536ad461e9`: backend35 controls/1 official PostgreSQL skip and Bandit0; parent82 WebUI controls, lint285 unchanged warnings and TypeScript90 baseline. Original canonical expiry/principal review probes now pass unchanged. The multi API was restarted to include the backend; native seven-card session, End and reload-rollup checks remain pending.
+- [x] Verify legacy requests, wrong/foreign/inactive sessions, no-write failure, unrelated active sessions, pending account/scope changes, transient queue gaps, practice-only Cram and Undo in regressions. Run backend tests/Bandit and frontend regressions; review and live-check a mixed-deck session and reload rollup.
+- Reviewed backend `982b03a940` and frontend `536ad461e9`: backend35 controls/1 official PostgreSQL skip and Bandit0; parent82 WebUI controls, lint285 unchanged warnings and TypeScript90 baseline. Original canonical expiry/principal review probes now pass unchanged. The restarted multi API and actual browser now pass five decked plus two undecked cards → one new global session2/count7 → automatic End200 → reload retaining completed7. The20-file mixed-study-round6 bundle retains source/row/session evidence and the terminal-wait limitation. Explicit early End/Undo/practice native checks and full fresh matrices remain separate.
 
 ### TASK-13260.22 — UAT077 Provider Keys loading
 
@@ -205,6 +208,13 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 - Resolve current effective authentication without stale cached credentials; preserve invalidation and delayed-read guards.
 - Verify same-account login, revoked sessions, account replacement, and Settings draft preservation; independently review and repeat the live two-tab control.
 - Code and targeted verification complete at `af725e4330`: parent61 App tests and broader179 tests pass with unchanged baseline diagnostics. Second owned-session revocation followed by normal login restores existing Settings header, Logged In and active notifications; both tabs subsequently return notification200. Full fresh run remains pending.
+
+### TASK-13260.31 — UAT092 required generation deck
+
+**Files:** `Flashcards/tabs/ImportExport/GeneratePanel.tsx`; existing generation/deck controls.
+- [x] Reproduce Clear immediately restoring the selected required deck; remove only the misleading `allowClear` prop.
+- [x] Run existing deck creation, generation gating and decomposition regressions; independent review.
+- [x] Verify the actual current native selector and existing/new deck choices after the isolated frontend rebuild; retain evidence. Reviewed/live-verified checkpoint `f9b0dd2f53`,24/3 regressions, flashcard-handoff-round5.
 
 ## Stage 5: Verify integration and repeat fresh UAT
 **Goal:** Establish complete acceptance on the repaired application.

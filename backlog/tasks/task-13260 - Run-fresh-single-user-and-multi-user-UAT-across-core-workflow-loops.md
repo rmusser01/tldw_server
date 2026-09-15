@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-15 18:59'
+updated_date: '2026-09-15 19:59'
 labels:
   - uat
   - testing
@@ -99,6 +99,12 @@ Cycle3 targeted repair checkpoint: commits7db8f5d851/b993995dfe extraction,7e48f
 Continued repair loop: committed Notes af14ac1258, Automation f45f7749c1, and independently re-reviewed mixed-session backend982b03a940. Targeted live Notes/Home controls pass with retained notes-home-round3 evidence (9files +hashmanifest,14knowncredentials/patternscan0matches,PNGsinspected); new Notes header UAT091P3 logged and narrowfixunder.18. Current37open=14P2/23P3 pendingfullfresh. Private transfer .13 independent review exposed real-router delivery deletion, Quiz cleanup deletion and Chat provenance/captured-owner gaps; implementer correcting. Study frontend .21 and QA history .27 active; .26privateingest paused at3REDtestcheckpoint until.13corrected. No new fullfresh run.
 
 Continuing authorized repair-before-full-UAT loop: private Flashcard handoff committedaae6b72d05; reviewed coherent Study frontend536ad461e9; reviewed source destinations16485e90d4. Review defects in Study canonical expiry/principal and Notes save-confirmation boundaries were reproduced and repaired, retained in child tasks. Parent latest82Study/47Notes tests pass, explicit-root lint adds0 and full TS matches90baseline. Preparing retained route/guide and actual Note source evidence; no full fresh run started and37findings remain open. Current multi API restarted to include982backend; temporary shared Next build cache/WIP compile failures are environment/implementation observations, not accepted live outcomes.
+
+QA ownership repair integratedd05c13ecc0 after final independent review; parent123/4 tests, compiler90baseline and unchanged lint7existing errors/938warnings. Native Note handoff confirmed exact text/provenance and plaintext-free URL; real two-card generation in progress during a coordinated stable-source window. .26 independent review reproduced stale-expiry hint deleting a valid rotated ingest session; frozen probe retained, final review continues before correction.
+
+Repair checkpoint: Quick Ingest af1e7bb08b committed after61 focused parent tests, corrected480/32 and independent review clear; native account-switch acceptance pending. Generator092 f9b0dd2f53 committed with24 regressions and actual existing/new selector passes. Multi mixed Study now passes five decked+two undecked, same completed global session2/count7 and reload; retained mixed-study-round6. Flashcard Note transfer/generation/save retained in round5. Disk exhaustion blocked first staging and caused Next panic; only task-owned inactive original compiled static/server bundles removed after no-open/no-tracked checks, keeping evidence and runtime data. Current Next serves200 again. Remaining Chat .15 frozen for independent review; full fresh matrices not started.
+
+Independent round5/round6 evidence review clear:34 hashes (14+20),10 JSON parse. Original reload command retained; final three-rating/error details explicitly runner-reported while terminal UI, per-card timestamps/versions and one completed session7 corroborate result. Chat .15 parent52/6 and independent303/25 tests pass, but review found P2 existing-mirror display rollback/hidden persistent draft; repair remains frozen pending final review and correction. No full fresh run started.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

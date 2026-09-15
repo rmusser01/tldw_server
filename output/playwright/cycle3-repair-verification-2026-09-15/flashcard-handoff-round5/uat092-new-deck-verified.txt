@@ -1,0 +1,6 @@
+### Result
+{"checkedAt":"2026-09-15T19:38:49.576Z","selection":"Create new deck","newDeckNameVisible":true,"clearCount":0}
+### Ran Playwright code
+```js
+await (async(page)=>{const deck=page.getByTestId("flashcards-generate-deck");const field=page.getByTestId("flashcards-generate-new-deck-name");await field.waitFor({state:"visible",timeout:10000});const result={checkedAt:new Date().toISOString(),selection:await deck.innerText(),newDeckNameVisible:await field.isVisible(),clearCount:await deck.getByRole("img",{name:"close-circle",exact:true}).count()};await deck.click();return result;})(page);
+```

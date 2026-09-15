@@ -1,0 +1,222 @@
+### Open tabs
+- 0: (current) [Flashcards | tldw](http://127.0.0.1:18281/flashcards?tab=importExport)
+- 1: [Server Settings | tldw](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+### Snapshot
+```yaml
+- generic [ref=f28e20]:
+  - generic [ref=f28e867]:
+    - link "Skip to main content" [ref=f28e868] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f28e869]:
+      - button "Expand sidebar" [ref=f28e870] [cursor=pointer]
+      - button "New Chat" [ref=f28e874] [cursor=pointer]
+      - generic [ref=f28e877]:
+        - button "Quick Ingest" [ref=f28e878] [cursor=pointer]
+        - button "Chat" [ref=f28e882] [cursor=pointer]
+        - button "Prompts" [ref=f28e885] [cursor=pointer]
+        - button "Characters" [ref=f28e889] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f28e894] [cursor=pointer]
+        - button "World Books" [ref=f28e898] [cursor=pointer]
+        - button "Notes" [ref=f28e901] [cursor=pointer]
+        - button "Knowledge QA" [ref=f28e905] [cursor=pointer]
+        - button "Media" [ref=f28e913] [cursor=pointer]
+        - button "Document Workspace" [ref=f28e916] [cursor=pointer]
+        - button "Research Workspace" [ref=f28e922] [cursor=pointer]
+        - button "Kanban" [ref=f28e928] [cursor=pointer]
+        - button "Watchlists" [ref=f28e930] [cursor=pointer]
+      - generic [ref=f28e935]:
+        - button "Open Notes Dock" [ref=f28e936] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f28e941] [cursor=pointer]
+        - button "Settings" [ref=f28e944] [cursor=pointer]
+    - main [ref=f28e948]:
+      - generic [ref=f28e949]:
+        - generic [ref=f28e952]:
+          - generic [ref=f28e953]:
+            - button "Expand sidebar" [ref=f28e954] [cursor=pointer]
+            - generic [ref=f28e956]:
+              - img "tldw Assistant" [ref=f28e957]
+              - generic [ref=f28e958]: tldw Assistant
+              - button "Companion Home" [ref=f28e959] [cursor=pointer]
+              - button "Show shortcuts" [ref=f28e963] [cursor=pointer]
+          - generic [ref=f28e966]:
+            - button "Search - Open command palette" [ref=f28e967] [cursor=pointer]:
+              - generic [ref=f28e971]: Search
+              - generic [ref=f28e972]: ⌘K
+            - button "Open settings" [ref=f28e973] [cursor=pointer]
+            - generic [ref=f28e985]:
+              - button "Notifications, 0 unread" [ref=f28e986] [cursor=pointer]
+              - status [ref=f28e990]: Notifications are active
+            - button "Switch to light theme" [ref=f28e991] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f28e998] [cursor=pointer]:
+              - generic [ref=f28e999]: "?"
+        - generic [ref=f28e1643]:
+          - generic [ref=f28e1645]:
+            - generic [ref=f28e1647]:
+              - generic [ref=f28e1648]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f28e1649]
+            - navigation "Flashcards modes" [ref=f28e1650]:
+              - generic [ref=f28e1651]: Study
+              - generic [ref=f28e1652]: Manage
+              - generic [ref=f28e1653]: Import / Export
+              - generic [ref=f28e1654]: Templates
+              - generic [ref=f28e1655]: Scheduler
+          - generic [ref=f28e1658]:
+            - tablist [ref=f28e1659]:
+              - generic [ref=f28e1661]:
+                - tab "Study" [ref=f28e1663] [cursor=pointer]
+                - tab "Manage" [ref=f28e1665] [cursor=pointer]
+                - tab "Import / Export" [selected] [ref=f28e1667] [cursor=pointer]
+                - tab "Templates" [ref=f28e1669] [cursor=pointer]
+                - tab "Scheduler" [ref=f28e1671] [cursor=pointer]
+              - generic [ref=f28e1673]:
+                - button "Test with Quiz" [disabled] [ref=f28e1675]
+                - button "Keyboard Shortcuts" [ref=f28e1676] [cursor=pointer]
+            - tabpanel "Import / Export" [ref=f28e1683]:
+              - generic [ref=f28e1684]:
+                - generic [ref=f28e1685]:
+                  - generic [ref=f28e1686]: Task
+                  - radiogroup "Create, import, or export task" [ref=f28e1690]:
+                    - generic [ref=f28e1691]:
+                      - generic [ref=f28e1692] [cursor=pointer]:
+                        - radio "Create cards" [checked]
+                        - generic "Create cards" [ref=f28e1693]
+                      - generic [ref=f28e1694] [cursor=pointer]:
+                        - radio "Import file"
+                        - generic "Import file" [ref=f28e1695]
+                      - generic [ref=f28e1696] [cursor=pointer]:
+                        - radio "Export backup"
+                        - generic "Export backup" [ref=f28e1697]
+                - region [ref=f28e1698]:
+                  - generic [ref=f28e1699]:
+                    - heading "Create and generate" [level=5] [ref=f28e1700]
+                    - text: Start new study material from study packs, source text, or images.
+                  - generic [ref=f28e1701]:
+                    - generic [ref=f28e1702]:
+                      - generic [ref=f28e1703]: Study packs
+                      - generic [ref=f28e1707]:
+                        - generic [ref=f28e1708]:
+                          - strong [ref=f28e1710]: Turn media or notes into a review queue.
+                          - text: Create a study pack from supported sources, then review the generated deck in Flashcards.
+                        - button "Create study pack" [ref=f28e1711] [cursor=pointer]
+                    - generic [ref=f28e1713]:
+                      - generic [ref=f28e1714]: Generate Flashcards
+                      - generic [ref=f28e1718]:
+                        - generic [ref=f28e1719]: Generate cards from pasted text, review/edit them, then save to a deck.
+                        - status [ref=f28e1720]:
+                          - generic [ref=f28e1724]:
+                            - paragraph [ref=f28e1725]: Source context attached
+                            - generic [ref=f28e1726]: Cards saved from this draft will be linked to note Cycle3 Bob Biology study note.
+                        - textbox "Paste transcript, notes, or study material..." [ref=f28e1727]: The mitochondria is the powerhouse of the cell. DNA stands for deoxyribonucleic acid. Photosynthesis converts light energy into chemical energy. The human body has 206 bones. Water boils at 100 degrees Celsius at sea level.
+                        - generic [ref=f28e1728]: "Tip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph."
+                        - generic [ref=f28e1729]:
+                          - generic [ref=f28e1730]:
+                            - switch "Advanced mix" [ref=f28e1731] [cursor=pointer]
+                            - generic [ref=f28e1734]: Advanced mix
+                          - generic [ref=f28e1736]:
+                            - generic "Number of cards" [ref=f28e1738]: "Number of cards :"
+                            - spinbutton [ref=f28e1742]: "2"
+                          - generic [ref=f28e1744]:
+                            - generic "Card type" [ref=f28e1746]: "Card type :"
+                            - generic [ref=f28e1750] [cursor=pointer]:
+                              - generic [ref=f28e1751]:
+                                - generic "Basic" [ref=f28e1752]
+                                - combobox [ref=f28e1753]
+                              - img "down" [ref=f28e1755]
+                          - generic [ref=f28e1759]:
+                            - generic "Difficulty" [ref=f28e1761]: "Difficulty :"
+                            - generic [ref=f28e1765] [cursor=pointer]:
+                              - generic [ref=f28e1766]:
+                                - generic "Mixed" [ref=f28e1767]
+                                - combobox [ref=f28e1768]
+                              - img "down" [ref=f28e1770]
+                          - generic [ref=f28e1774]:
+                            - generic "Deck" [ref=f28e1776]: "Deck :"
+                            - generic [ref=f28e1780] [cursor=pointer]:
+                              - generic [ref=f28e1781]:
+                                - generic "Cycle3 Bob Biology" [ref=f28e1782]
+                                - combobox [ref=f28e1783]
+                              - img "down" [ref=f28e1785]
+                              - img "close-circle" [ref=f28e1789]
+                          - generic [ref=f28e1792]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                          - generic [ref=f28e1794]:
+                            - generic "Provider (optional)" [ref=f28e1796]: "Provider (optional) :"
+                            - textbox [ref=f28e1800]
+                          - generic [ref=f28e1802]:
+                            - generic "Model (optional)" [ref=f28e1804]: "Model (optional) :"
+                            - textbox [ref=f28e1808]
+                        - generic [ref=f28e1810]:
+                          - generic "Focus topics (comma-separated)" [ref=f28e1812]: "Focus topics (comma-separated) :"
+                          - textbox "exam 1, chapter 3, formulas" [ref=f28e1816]
+                        - button "Generate cards" [active] [ref=f28e1818] [cursor=pointer]
+                        - generic [ref=f28e1820]:
+                          - strong [ref=f28e1822]: Generated cards (editable before save)
+                          - generic [ref=f28e1823]:
+                            - generic [ref=f28e1825]:
+                              - generic [ref=f28e1826]: Card 1
+                              - button "Remove" [ref=f28e1828] [cursor=pointer]
+                            - generic [ref=f28e1831]:
+                              - generic [ref=f28e1832]: Basic
+                              - textbox [ref=f28e1834]: What is the mitochondria?
+                              - textbox [ref=f28e1836]: The mitochondria is the powerhouse of the cell.
+                              - textbox "tag-1, tag-2" [ref=f28e1838]: biology
+                          - generic [ref=f28e1839]:
+                            - generic [ref=f28e1841]:
+                              - generic [ref=f28e1842]: Card 2
+                              - button "Remove" [ref=f28e1844] [cursor=pointer]
+                            - generic [ref=f28e1847]:
+                              - generic [ref=f28e1848]: Basic
+                              - textbox [ref=f28e1850]: What does photosynthesis convert light energy into?
+                              - textbox [ref=f28e1852]: Photosynthesis converts light energy into chemical energy.
+                              - textbox "tag-1, tag-2" [ref=f28e1854]: biology
+                          - button "Save generated cards" [ref=f28e1855] [cursor=pointer]
+                    - generic [ref=f28e1857]:
+                      - generic [ref=f28e1858]: Image Occlusion
+                      - generic [ref=f28e1862]:
+                        - generic [ref=f28e1863]: Upload one image, draw labeled rectangular occlusions, generate drafts, then save them in bulk.
+                        - generic [ref=f28e1864]:
+                          - generic [ref=f28e1866]:
+                            - generic "Deck" [ref=f28e1868]: "Deck :"
+                            - generic [ref=f28e1872] [cursor=pointer]:
+                              - generic [ref=f28e1873]:
+                                - generic "Cycle3 Bob Biology" [ref=f28e1874]
+                                - combobox [ref=f28e1875]
+                              - img "down" [ref=f28e1877]
+                              - img "close-circle" [ref=f28e1881]
+                          - generic [ref=f28e1884]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                          - generic [ref=f28e1886]:
+                            - generic "Tags" [ref=f28e1888]: "Tags :"
+                            - textbox "tag-1, tag-2" [ref=f28e1892]
+                        - generic [ref=f28e1893]:
+                          - generic [ref=f28e1894]: Upload one image, drag rectangular occlusions, label each region, then generate drafts.
+                          - generic [ref=f28e1895]:
+                            - generic [ref=f28e1896]: Source image
+                            - button "Upload image occlusion source" [ref=f28e1897]
+                          - status [ref=f28e1898]:
+                            - paragraph [ref=f28e1903]: Choose an image to begin authoring occlusions.
+                        - button "Generate occlusion drafts" [ref=f28e1904] [cursor=pointer]
+                - region [ref=f28e1906]:
+                  - generic [ref=f28e1907]:
+                    - heading "Import and export" [level=5] [ref=f28e1908]
+                    - text: Move cards in and out without changing the flashcards route.
+                  - generic [ref=f28e1909]:
+                    - generic [ref=f28e1910]: Import/export summary
+                    - generic [ref=f28e1914]:
+                      - generic [ref=f28e1915]:
+                        - strong [ref=f28e1917]: Supported formats
+                        - text: "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
+                      - generic [ref=f28e1918]:
+                        - strong [ref=f28e1920]: Current import limits
+                        - text: 10,000 lines / 32,768 bytes per line / 8,192 bytes per field
+                      - generic [ref=f28e1921]:
+                        - strong [ref=f28e1923]: Last action
+                        - text: Generate Flashcards · Generated 2 cards. · 12:13:12 PM
+                  - text: ": : : : : :"
+  - button "Open Next.js Dev Tools" [ref=f28e15] [cursor=pointer]
+  - alert [ref=f28e19]: Flashcards | tldw
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T18-37-05-960Z.log#L1560-L1561
