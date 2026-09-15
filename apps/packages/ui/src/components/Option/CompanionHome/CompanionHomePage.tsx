@@ -88,9 +88,10 @@ export function CompanionHomePage({
     loading: scheduledTaskSignalsLoading,
     partial: scheduledTaskSignalsPartial,
     error: scheduledTaskSignalsError,
+    sourceStates: scheduledTaskSourceStates,
     refresh: refreshScheduledTaskSignals
   } = useScheduledTaskHomeSignals({
-    enabled: !capsLoading
+    enabled: !capsLoading && isConnected
   })
   const refreshHome = React.useCallback(() => {
     refresh()
@@ -415,6 +416,7 @@ export function CompanionHomePage({
       <div className="grid gap-4 xl:grid-cols-2">
         <WhatsNextCard />
         <AutomationInboxCard
+          sourceStates={scheduledTaskSourceStates}
           items={scheduledTaskSignalItems}
           loading={scheduledTaskSignalsLoading}
           partial={scheduledTaskSignalsPartial}

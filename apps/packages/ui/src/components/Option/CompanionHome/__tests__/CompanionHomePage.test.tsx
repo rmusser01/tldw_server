@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   updatePersonalizationOptIn: vi.fn(),
   loadCompanionHomeLayout: vi.fn(),
   saveCompanionHomeLayout: vi.fn(),
+  callerRefresh: vi.fn(),
+  callerForbidden: vi.fn(),
   capabilitiesState: {
     capabilities: { hasPersonalization: true, hasPersona: true },
     loading: false
@@ -24,6 +26,34 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => mocks.capabilitiesState
+}))
+
+vi.mock("@/hooks/useConnectionState", () => ({ useIsConnected: () => true }))
+vi.mock("@/hooks/useCallerCapabilities", async () => {
+  const { buildChatSurfaceScopeKeyFromConfig } = await import("@/services/chat-surface-scope")
+  return {
+  useCallerCapabilities: () => ({
+    scheduledTasks: "allowed", notifications: "allowed", monitoringAlerts: "denied",
+    loading: false, userId: 7,
+    scopeKey: `${buildChatSurfaceScopeKeyFromConfig({ serverUrl: "https://home.test", authMode: "multi-user" }, { userId: 7 })}:manual`,
+    refresh: mocks.callerRefresh, refreshAfterForbidden: mocks.callerForbidden
+  })
+  }
+})
+vi.mock("@/services/tldw/TldwApiClient", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/services/tldw/TldwApiClient")>()
+  return { ...actual, tldwClient: {
+    ...actual.tldwClient,
+    getConfig: async () => null,
+    ensureConfigForRequest: async () => ({ serverUrl: "https://home.test", authMode: "multi-user" })
+  } }
+})
+vi.mock("@/services/service-prompts", () => ({
+  isServicePromptScopeUnresolvedError: () => false,
+  loadServicePromptSnapshot: async (_ids: string[], { signal }: { signal: AbortSignal }) => ({
+    requestScope: { config: { serverUrl: "https://home.test", authMode: "multi-user" }, userId: 7 },
+    scopeSignal: signal, release: vi.fn()
+  })
 }))
 
 vi.mock("@/design-system", async () => {
@@ -548,7 +578,9 @@ describe("CompanionHomePage", () => {
     expect(screen.getByText("Scheduled Tasks")).toBeInTheDocument()
     expect(screen.queryByText("Dismissed answer")).not.toBeInTheDocument()
     expect(screen.queryByText("Results only answer")).not.toBeInTheDocument()
-    expect(mocks.listScheduledTaskResults).toHaveBeenCalledWith({ limit: 50 })
+    expect(mocks.listScheduledTaskResults).toHaveBeenCalledWith({ limit: 50 }, expect.objectContaining({
+      servicePromptConfig: expect.objectContaining({ expectedUserId: 7 })
+    }))
   })
 
   it("keeps Companion Home usable when scheduled-task loading fails", async () => {
@@ -613,7 +645,9 @@ describe("CompanionHomePage", () => {
 
     expect(await screen.findByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
     expect(screen.getAllByRole("link", { name: /Release monitor/i })).toHaveLength(1)
-    expect(mocks.listNotifications).toHaveBeenCalledWith({ limit: 50 })
+    expect(mocks.listNotifications).toHaveBeenCalledWith({ limit: 50 }, expect.objectContaining({
+      servicePromptConfig: expect.objectContaining({ expectedUserId: 7 })
+    }))
   })
 
   it("does not flash the default core layout before the persisted layout resolves", async () => {

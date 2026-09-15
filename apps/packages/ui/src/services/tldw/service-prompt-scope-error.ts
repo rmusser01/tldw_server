@@ -110,6 +110,9 @@ export const isServicePromptRequestPath = (
   }
   if (requestMethod === "GET") {
     return pathname === "/api/v1/monitoring/alerts" ||
+      pathname === "/api/v1/scheduled-tasks" ||
+      pathname === "/api/v1/scheduled-tasks/results" ||
+      pathname === "/api/v1/notifications" ||
       /^\/api\/v1\/chats\/[^/]+\/messages$/.test(pathname) ||
       /^\/api\/v1\/writing\/manuscripts\/(?:scenes\/[^/]+|projects\/[^/]+\/(?:characters|world-info))$/.test(pathname)
   }
