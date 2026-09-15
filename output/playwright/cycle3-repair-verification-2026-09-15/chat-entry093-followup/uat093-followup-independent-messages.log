@@ -1,0 +1,16 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+stdout | src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > UAT093 keeps the explicit saved target while its profile is loading over a prior character
+probe-state [{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":null,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":false,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":0},{"id":"robot","meta":true,"character":5,"load":"loading","messages":1},{"id":"robot","meta":true,"character":5,"load":"loading","messages":1},{"id":"robot","meta":true,"character":5,"load":"loaded","messages":1},{"id":"robot","meta":true,"character":5,"load":"loaded","messages":1},{"id":"robot","meta":true,"character":5,"load":"loaded","messages":1}]
+
+ ✓ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (18 tests | 17 skipped) 590ms
+   ✓ UAT093 keeps the explicit saved target while its profile is loading over a prior character  589ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 17 skipped (18)
+   Start at  15:14:11
+   Duration  3.11s (transform 1.23s, setup 85ms, import 2.03s, tests 590ms, environment 293ms)
+
+(node:18556) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)

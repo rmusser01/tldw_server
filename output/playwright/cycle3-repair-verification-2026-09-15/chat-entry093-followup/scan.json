@@ -1,0 +1,11 @@
+{
+  "checkedAt": "2026-09-15T22:16:08.990Z",
+  "privateRuntimeManifestsChecked": 2,
+  "uniqueSecretValuesChecked": 14,
+  "knownSecretMatches": 0,
+  "authPatternMatches": 0,
+  "pngsVisuallyInspected": [
+    "uat093-repaired-entry-stalled.png"
+  ],
+  "note": "No runtime credentials or manifests are retained."
+}

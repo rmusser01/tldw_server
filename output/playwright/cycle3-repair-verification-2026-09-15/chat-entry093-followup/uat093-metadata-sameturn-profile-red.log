@@ -1,0 +1,54 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:6528) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (24 tests | 1 failed | 23 skipped) 557ms
+     ↓ registers the webui chat route context on mount
+     ↓ waits for session scope readiness before consuming the one-time restore pass
+     ↓ falls back to recent chat only when restore reports nothing restored
+     ↓ stops recent-chat initialization when restore reports cancellation
+     ↓ does not overwrite a server chat selected while session scope initializes
+     ↓ applies explicit character chat route ids before persisted session restore
+     ↓ applies character route ids before persisted session restore
+     ↓ applies a settings-return server chat before persisted session restore
+     ↓ selects the saved Flashcard source conversation through the actual neutral Chat route consumer
+     ↓ applies a sidepanel handoff before persisted session restore
+     ↓ starts a fresh character route chat over an active server chat
+     ↓ settles canonical saved entry with the real session subscription and local loader (StrictMode=false)
+     ↓ settles canonical saved entry with the real session subscription and local loader (StrictMode=true)
+     ↓ cancels pending generic restoration before applying an explicit settings target
+     ↓ finishes a delayed current settings local-history load
+     ↓ finishes a delayed current timeline local-history load
+     ↓ does not complete a failed local settings return as a successful server selection
+     ↓ keeps a saved target over a previous character while profile is delayed
+     ↓ keeps a saved target over a previous character while messages is delayed
+     ↓ does not install a late saved identity after picker changes during metadata fetch
+     ↓ does not install a late saved identity after replacement changes during metadata fetch
+     ↓ does not install a late saved identity after principal changes during metadata fetch
+     ↓ does not replay a consumed saved route or apply a late profile over a new picker choice (same turn false)
+     × does not replay a consumed saved route or apply a late profile over a new picker choice (same turn true) 556ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > Playground coordinator integration > does not replay a consumed saved route or apply a late profile over a new picker choice (same turn true)
+AssertionError: expected '5' to be '7' // Object.is equality
+
+Expected: "7"
+Received: "5"
+
+ ❯ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx:761:90
+    759|       })
+    760|       await act(async () => { release(); await pending; await new Prom…
+    761|       expect((useStoreMessageOption.getState() as SelectionTestState).…
+       |                                                                                          ^
+    762|       expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+    763|     } finally { release(); view.unmount() }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 23 skipped (24)
+   Start at  14:54:20
+   Duration  3.34s (transform 1.16s, setup 108ms, import 2.28s, tests 557ms, environment 290ms)

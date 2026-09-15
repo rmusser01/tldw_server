@@ -1,0 +1,159 @@
+### Open tabs
+- 0: (current) [Cycle3 BEEP Robot Chat (20260915_105530) | tldw](http://127.0.0.1:18281/chat)
+- 1: [](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/chat
+- Page Title: Cycle3 BEEP Robot Chat (20260915_105530) | tldw
+### Snapshot
+```yaml
+- generic [ref=f48e1]:
+  - generic [ref=f48e4]:
+    - link "Skip to main content" [ref=f48e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f48e6]:
+      - button "Expand sidebar" [ref=f48e7] [cursor=pointer]
+      - button "New Chat" [ref=f48e11] [cursor=pointer]
+      - generic [ref=f48e14]:
+        - button "Quick Ingest" [ref=f48e15] [cursor=pointer]
+        - button "Chat" [ref=f48e19] [cursor=pointer]
+        - button "Prompts" [ref=f48e22] [cursor=pointer]
+        - button "Characters" [ref=f48e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f48e31] [cursor=pointer]
+        - button "World Books" [ref=f48e35] [cursor=pointer]
+        - button "Notes" [ref=f48e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f48e42] [cursor=pointer]
+        - button "Media" [ref=f48e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f48e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f48e59] [cursor=pointer]
+        - button "Kanban" [ref=f48e65] [cursor=pointer]
+        - button "Watchlists" [ref=f48e67] [cursor=pointer]
+      - generic [ref=f48e72]:
+        - button "Open Notes Dock" [ref=f48e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f48e78] [cursor=pointer]
+        - button "Settings" [ref=f48e81] [cursor=pointer]
+    - main [ref=f48e85]:
+      - generic [ref=f48e86]:
+        - generic [ref=f48e89]:
+          - generic [ref=f48e90]:
+            - button "Expand sidebar" [ref=f48e91] [cursor=pointer]
+            - generic [ref=f48e93]:
+              - img "tldw Assistant" [ref=f48e94]
+              - generic [ref=f48e95]: tldw Assistant
+              - button "Companion Home" [ref=f48e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f48e100] [cursor=pointer]
+            - button "Cycle3 BEEP Robot Chat (20260915_105530)" [ref=f48e104] [cursor=pointer]
+            - generic [ref=f48e105]:
+              - generic "Saved chat. History is persisted." [ref=f48e106]: Saved
+              - generic "Character mode is active." [ref=f48e107]: "Character: Cycle3 Cedar Guide"
+          - generic [ref=f48e113]:
+            - button "Search - Open command palette" [ref=f48e114] [cursor=pointer]:
+              - generic [ref=f48e118]: Search
+              - generic [ref=f48e119]: ⌘K
+            - button "New saved chat" [ref=f48e120] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f48e124] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f48e125] [cursor=pointer]: Character
+            - button "Share conversation" [disabled] [ref=f48e126]
+            - button "Open settings" [ref=f48e133] [cursor=pointer]
+            - generic [ref=f48e145]:
+              - button "Notifications, 0 unread" [ref=f48e146] [cursor=pointer]
+              - status [ref=f48e150]: Notifications are active
+            - button "Switch to light theme" [ref=f48e151] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f48e158] [cursor=pointer]:
+              - generic [ref=f48e159]: "?"
+        - generic [ref=f48e160]:
+          - heading "Chat" [level=1] [ref=f48e161]
+          - generic [ref=f48e164]:
+            - paragraph [ref=f48e165]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f48e166]:
+              - main [ref=f48e167]:
+                - generic [ref=f48e168]:
+                  - generic [ref=f48e169]:
+                    - generic [ref=f48e170]:
+                      - generic [ref=f48e171]:
+                        - generic [ref=f48e172]:
+                          - text: Character Chat
+                          - generic [ref=f48e173]: Cycle3 Cedar Guide
+                        - generic [ref=f48e174]: Conversation timeline
+                      - generic [ref=f48e175]:
+                        - button "Switch to light theme" [ref=f48e176] [cursor=pointer]
+                        - button "Enter focus chat" [ref=f48e183] [cursor=pointer]:
+                          - generic [ref=f48e189]: Focus
+                        - button "Shortcuts" [ref=f48e190] [cursor=pointer]
+                        - button "Artifacts panel closed" [disabled] [ref=f48e194]
+                    - status "Character Chat setup status" [ref=f48e196]:
+                      - generic [ref=f48e200]:
+                        - paragraph [ref=f48e201]: Character chat is preparing
+                        - paragraph [ref=f48e202]: Wait for the current message or setup step to finish before sending.
+                      - button "Try again" [ref=f48e203] [cursor=pointer]
+                  - log "Chat messages" [ref=f48e207]
+                  - generic [ref=f48e210]:
+                    - generic [ref=f48e211]: Composer
+                    - generic [ref=f48e219]:
+                      - button [aria-hidden] [ref=f48e220]
+                      - button [aria-hidden] [ref=f48e221]
+                      - generic [ref=f48e222]:
+                        - generic [ref=f48e224]:
+                          - button "Hide composer options" [expanded] [ref=f48e225] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f48e230]
+                          - generic [ref=f48e231]:
+                            - button "Improve prompt" [ref=f48e234] [cursor=pointer]
+                            - generic [ref=f48e239]:
+                              - button "Send message" [ref=f48e240] [cursor=pointer]:
+                                - generic [ref=f48e241]: Send
+                              - button "Open message delivery options" [ref=f48e246] [cursor=pointer]
+                        - generic [ref=f48e251]:
+                          - generic [ref=f48e253]:
+                            - group "Mode and context controls" [ref=f48e254]:
+                              - button "Modes" [ref=f48e255] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f48e262] [cursor=pointer]':
+                                - generic [ref=f48e263]:
+                                  - generic [ref=f48e264]: MCP
+                                  - generic [ref=f48e265]: None
+                              - button "Search & Context" [ref=f48e268] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f48e273] [cursor=pointer]:
+                                - generic [ref=f48e276]: Prompt
+                              - button "Cycle3 Cedar Guide" [ref=f48e277] [cursor=pointer]
+                              - button "Role-play setup" [ref=f48e282] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f48e289] [cursor=pointer]
+                            - group "Run input controls" [ref=f48e295]:
+                              - button "OpenUI" [ref=f48e296] [cursor=pointer]
+                              - button "Start dictation" [ref=f48e302] [cursor=pointer]
+                              - generic [ref=f48e306]:
+                                - button "Attach image" [ref=f48e308] [cursor=pointer]
+                                - button "More attachments" [ref=f48e312] [cursor=pointer]
+                              - button "More tools" [ref=f48e315] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f48e318] [cursor=pointer]:
+                                - generic [ref=f48e322]: Chat Settings
+                          - generic "Active context" [ref=f48e323]:
+                            - button "LLaMa.cpp / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf" [ref=f48e325] [cursor=pointer]:
+                              - generic "Provider status" [ref=f48e329]: Healthy
+                            - button "Character Cycle3 Cedar Guide" [ref=f48e330] [cursor=pointer]:
+                              - generic [ref=f48e331]: Character
+                              - generic [ref=f48e332]: Cycle3 Cedar Guide
+                            - 'generic "Character context: Included" [ref=f48e333]':
+                              - generic [ref=f48e334]: Character context
+                              - generic [ref=f48e335]: Included
+                            - button "Configure context window size" [ref=f48e337] [cursor=pointer]:
+                              - generic [ref=f48e338]: 0 + ~0 = 0 tokens
+                            - button "Saved" [ref=f48e340] [cursor=pointer]
+                            - button "Advanced controls" [ref=f48e342] [cursor=pointer]
+                        - status [ref=f48e346]:
+                          - generic [ref=f48e347]: Add expression images for Cycle3 Cedar Guide.
+                          - generic [ref=f48e348]:
+                            - link "Edit expressions" [ref=f48e349] [cursor=pointer]:
+                              - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=4
+                            - button "Dismiss expression image setup" [ref=f48e350] [cursor=pointer]: Dismiss
+              - generic [ref=f48e351]:
+                - button "Restore context sidechannel" [ref=f48e352] [cursor=pointer]:
+                  - generic [ref=f48e356]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f48e357]:
+                - button "Restore runtime sidechannel" [ref=f48e358] [cursor=pointer]:
+                  - generic [ref=f48e359]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f48e368] [cursor=pointer]
+  - alert [ref=f48e372]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T21-10-19-087Z.log#L52-L99

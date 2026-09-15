@@ -694,6 +694,7 @@ export const Playground = () => {
     () => Promise<void>
   >(async () => {});
   const sidepanelHandoffAppliedRef = React.useRef(false);
+  const settingsReturnAppliedRef = React.useRef(false);
   const routeCharacterIntentAppliedRef = React.useRef<string | null>(null);
   const routeCharacterIntentInFlightRef = React.useRef<string | null>(null);
   const routeCharacterIntentRequestRef = React.useRef(0);
@@ -1846,7 +1847,7 @@ export const Playground = () => {
   );
 
   React.useEffect(() => {
-    if (!playgroundReady) return;
+    if (!playgroundReady || settingsReturnAppliedRef.current) return;
     if (
       !returnHistoryIdFromSettings &&
       !returnServerChatIdFromSettings &&
@@ -1896,6 +1897,7 @@ export const Playground = () => {
         setPendingReturnedResearchRunId(returnResearchRunIdFromSettings);
       }
 
+      settingsReturnAppliedRef.current = true;
       if (typeof window !== "undefined") {
         const url = new URL(window.location.href);
         url.searchParams.delete(SETTINGS_HISTORY_ID_PARAM);

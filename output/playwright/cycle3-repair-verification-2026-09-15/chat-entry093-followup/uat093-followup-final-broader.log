@@ -1,0 +1,41 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:14380) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx (13 tests) 4571ms
+     ✓ shows conversation title labels with UUID debug tooltip in list and header  730ms
+     ✓ retries transient conversation label lookups and hydrates once they recover  1637ms
+(node:14518) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx (10 tests) 2893ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting true)  630ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting false)  614ms
+(node:14548) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx (8 tests) 709ms
+(node:14576) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useLoadLocalConversation.test.tsx (13 tests) 504ms
+(node:14587) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (30 tests) 4232ms
+     ✓ does not replay a consumed saved route or apply a late profile over a new picker choice (same turn false)  524ms
+     ✓ does not replay a consumed saved route or apply a late profile over a new picker choice (same turn true)  528ms
+(node:14634) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useSelectedAssistant.test.tsx (15 tests) 95ms
+(node:14637) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx (7 tests) 19ms
+(node:14639) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useMessageOption.assistant-overlay.test.tsx (2 tests) 10ms
+(node:14644) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts (30 tests) 9ms
+
+ Test Files  9 passed (9)
+      Tests  128 passed (128)
+   Start at  15:07:07
+   Duration  22.89s (transform 2.01s, setup 569ms, import 6.19s, tests 13.04s, environment 2.20s)

@@ -1,0 +1,3 @@
+import base from "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/vitest.config"
+const ui="/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui"
+export default {...base, plugins:[{name:"prior-metadata-publication",enforce:"pre",transform(code,id){if(id!==ui+"/src/hooks/chat/useServerChatLoader.ts")return;return{code:code.replace('              await waitForSelectedAssistantCommit()\n              if (!canCommitCurrentLoad()) return\n',''),map:null}}}],test:{...base.test,setupFiles:[ui+"/vitest.setup.ts"],include:[ui+"/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx"]}}

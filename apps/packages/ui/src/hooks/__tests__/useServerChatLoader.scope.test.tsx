@@ -69,8 +69,9 @@ vi.mock("@/store/option", () => ({
   ) => selector(mocks.store), { getState: () => mocks.store })
 }))
 
-vi.mock("@/hooks/useSelectedAssistant", () => ({
-  useSelectedAssistant: () => [null, mocks.setSelectedAssistant]
+let selectionRevision = 0
+vi.mock("@/hooks/useSelectedAssistant", () => ({ getSelectedAssistantOperationRevision: () => selectionRevision, waitForSelectedAssistantCommit: async () => undefined,
+  useSelectedAssistant: () => [null, (...args: unknown[]) => { selectionRevision++; return mocks.setSelectedAssistant(...args) }]
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({

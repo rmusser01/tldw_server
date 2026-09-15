@@ -1,0 +1,15 @@
+### Result
+{"checkedAt":"2026-09-15T21:42:21.778Z","url":"http://127.0.0.1:18281/chat","title":"Cycle3 BEEP Robot Chat (20260915_105530) | tldw","principals":[{"id":2,"username":"cycle3_multi_alice","status":200},{"id":2,"username":"cycle3_multi_alice","status":200}],"waitError":"No visible saved message within20seconds","body":"Skip to main content\ntldw Assistant\nCycle3 BEEP Robot Chat (20260915_105530)\nSaved\nCharacter: Cycle3 Cedar Guide\nSearch\n⌘K\nTemp\nCharacter\nNotifications are active\n?\nChat\n\nCockpit rails hidden. Chat and composer remain active.\n\nCharacter Chat\nCycle3 Cedar Guide\nConversation timeline\nFocus\nShortcuts\nArtifacts panel closed\nComposer\nSEND\nModes\nMCP\nNone\nSearch & Context\nPrompt\nRole-play setup\nBuddy & Persona\nOpenUI\nAttach image\nMore tools\nChat Settings\nLLaMa.cpp / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf\nHealthy\nCharacter\nCycle3 Cedar Guide\nCharacter context\nIncluded\n0 + ~0 = 0 tokens\nSaved\nAdvanced controls\nAdd expression images for Cycle3 Cedar Guide.\nEdit expressions\nDismiss\nContext rail\nRestore context sidechannel\nRuntime rail\nRestore runtime sidechannel"}
+### Ran Playwright code
+```js
+await (async(page)=>{const principals=[];const observer=async r=>{if(r.url()==="http://127.0.0.1:18201/api/v1/auth/me"&&r.status()===200){const b=await r.json();principals.push({id:b.id,username:b.username,status:200});}};page.on("response",observer);let waitError=null;try{await page.reload();try{await page.getByRole("log",{name:"Chat messages",exact:true}).getByRole("article").first().waitFor({timeout:20000});}catch(error){waitError="No visible saved message within20seconds";}return {checkedAt:new Date().toISOString(),url:page.url(),title:await page.title(),principals,waitError,body:await page.locator("body").innerText()};}finally{page.off("response",observer);}})(page);
+```
+### Open tabs
+- 0: (current) [Cycle3 BEEP Robot Chat (20260915_105530) | tldw](http://127.0.0.1:18281/chat)
+- 1: [](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/chat
+- Page Title: Cycle3 BEEP Robot Chat (20260915_105530) | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T21-10-19-087Z.log#L100-L101

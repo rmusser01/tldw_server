@@ -16,7 +16,8 @@ vi.mock("@/db/dexie/schema", () => ({ db: {
 } }))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: state.request, bgStream: vi.fn() }))
 vi.mock("@/services/chat-settings", () => ({ syncChatSettingsForServerChat: async () => null }))
-vi.mock("@/hooks/useSelectedAssistant", () => ({ useSelectedAssistant: () => [null, state.selection] }))
+let selectionRevision = 0
+vi.mock("@/hooks/useSelectedAssistant", () => ({ getSelectedAssistantOperationRevision: () => selectionRevision, waitForSelectedAssistantCommit: async () => undefined, useSelectedAssistant: () => [null, (...args: unknown[]) => { selectionRevision++; return state.selection(...args) }] }))
 vi.mock("@/services/service-prompts", () => ({ loadServicePromptSnapshot: async (_ids: unknown, { signal }: { signal: AbortSignal }) => ({
   scopeKey: "scope-A", scopeSignal: signal, scopeInvalidatedSignal: state.controller.signal,
   requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "A" }, release: vi.fn()

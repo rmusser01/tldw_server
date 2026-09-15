@@ -1,0 +1,16 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:6922) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (24 tests) 2762ms
+     ✓ does not replay a consumed saved route or apply a late profile over a new picker choice (same turn false)  531ms
+     ✓ does not replay a consumed saved route or apply a late profile over a new picker choice (same turn true)  529ms
+(node:7020) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useSelectedAssistant.test.tsx (15 tests) 102ms
+
+ Test Files  2 passed (2)
+      Tests  39 passed (39)
+   Start at  14:55:04
+   Duration  6.08s (transform 1.20s, setup 142ms, import 2.37s, tests 2.86s, environment 504ms)

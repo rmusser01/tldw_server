@@ -1,0 +1,13 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ✓ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (18 tests | 17 skipped) 599ms
+   ✓ UAT093 keeps the explicit saved target while its profile is loading over a prior character  598ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 17 skipped (18)
+   Start at  15:14:03
+   Duration  3.70s (transform 1.42s, setup 137ms, import 2.47s, tests 599ms, environment 383ms)
+
+(node:18382) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)

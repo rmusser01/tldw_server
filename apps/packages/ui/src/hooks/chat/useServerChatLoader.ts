@@ -12,7 +12,7 @@ import {
 import { reconcileServerChatMessages, reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
 import { watchServerChatLoadAuthority } from "@/services/server-chat-load-authority"
-import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
+import { getSelectedAssistantOperationRevision, useSelectedAssistant, waitForSelectedAssistantCommit } from "@/hooks/useSelectedAssistant"
 import { syncChatSettingsForServerChat } from "@/services/chat-settings"
 import { validateCachedServerChatId } from "@/store/workspace-sync-contract"
 import type { ChatScope } from "@/types/chat-scope"
@@ -728,6 +728,7 @@ export const useServerChatLoader = ({
     serverChatDebounceRef.current.chatId = serverChatId
     serverChatDebounceRef.current.timer = setTimeout(() => {
       const controller = new AbortController()
+      let ownedSelectionRevision = getSelectedAssistantOperationRevision()
       const canCommitCurrentLoad = () =>
         useStoreMessageOption.getState().serverChatId === serverChatId &&
         shouldCommitServerChatLoadResult({
@@ -736,6 +737,18 @@ export const useServerChatLoader = ({
           requestController: controller,
           activeController: serverChatLoadRef.current.controller
         })
+      const applyOwnedAssistantSelection = async (selection: Parameters<typeof setSelectedAssistant>[0]) => {
+        const before = ownedSelectionRevision
+        if (!canCommitCurrentLoad() || getSelectedAssistantOperationRevision() !== before) return false
+        await setSelectedAssistant(selection, { isCurrent: () => {
+          const revision = getSelectedAssistantOperationRevision()
+          // This operation increments the existing revision synchronously. A
+          // later picker operation must win even before React rerenders.
+          return canCommitCurrentLoad() && (revision === before || revision === before + 1)
+        } })
+        ownedSelectionRevision = before + 1
+        return canCommitCurrentLoad() && getSelectedAssistantOperationRevision() === ownedSelectionRevision
+      }
       serverChatLoadRef.current = {
         chatId: serverChatId,
         controller,
@@ -747,6 +760,7 @@ export const useServerChatLoader = ({
         let didLoadSuccessfully = false
         let snapshot: ServicePromptSnapshot | undefined
         let stopWatchingAuthority: (() => void) | undefined
+        let pendingAssistantPresentation: Promise<unknown> | undefined
         try {
           setIsLoading(true)
           setServerChatLoadState("loading")
@@ -762,6 +776,7 @@ export const useServerChatLoader = ({
           let assistantKind = serverChatAssistantKind
           let assistantId = serverChatAssistantId
           let personaMemoryMode = serverChatPersonaMemoryMode
+          let restoreAssistantSelection = true
 
           if (!serverChatMetaLoaded) {
             try {
@@ -795,6 +810,23 @@ export const useServerChatLoader = ({
               assistantId = resolvedAssistantIdentity.assistantId
               characterId = resolvedAssistantIdentity.characterId
               personaMemoryMode = resolvedAssistantIdentity.personaMemoryMode
+              restoreAssistantSelection = getSelectedAssistantOperationRevision() === ownedSelectionRevision
+              const canonicalSelection = effectiveAssistantStateToSelection(
+                resolveEffectiveAssistantState({ tracked: { assistantKind, assistantId, characterId } })
+              )
+              // The previous chat's picker value is not a new user choice. Publish
+              // validated identity before metadata readiness can trigger mismatch
+              // detachment, without waiting for optional profile enrichment.
+              if (restoreAssistantSelection && canonicalSelection &&
+                (selectedAssistantRef.current?.kind !== canonicalSelection.kind ||
+                  selectedAssistantRef.current?.id !== canonicalSelection.id)) {
+                restoreAssistantSelection = await applyOwnedAssistantSelection(canonicalSelection)
+                if (!canCommitCurrentLoad()) return
+              }
+              // Other consumers can load this same chat concurrently. Their
+              // canonical write (or a newer picker choice) must settle too.
+              await waitForSelectedAssistantCommit()
+              if (!canCommitCurrentLoad()) return
               setServerChatTitle(chatTitle || "")
               setServerChatCharacterId(characterId)
               setServerChatAssistantKind(assistantKind)
@@ -836,6 +868,7 @@ export const useServerChatLoader = ({
           }
 
           const deferredAssistantPresentationPromise = (async () => {
+            if (!restoreAssistantSelection) return null
             let syncedSettings = null
             if (assistantKind == null && characterId == null) {
               try {
@@ -864,7 +897,7 @@ export const useServerChatLoader = ({
                     id: assistantId,
                     name: nextAssistantName
                   })
-                  await setSelectedAssistant(selection, { isCurrent: canCommitCurrentLoad })
+                  if (!await applyOwnedAssistantSelection(selection)) return null
                   return {
                     assistantName: nextAssistantName,
                     assistantAvatarUrl: selection?.avatar_url ?? null
@@ -885,7 +918,7 @@ export const useServerChatLoader = ({
                   id: assistantId,
                   name: "Persona"
                 })
-                await setSelectedAssistant(selection, { isCurrent: canCommitCurrentLoad })
+                if (!await applyOwnedAssistantSelection(selection)) return null
                 return {
                   assistantName: selection?.name || "Persona",
                   assistantAvatarUrl: selection?.avatar_url ?? null
@@ -904,7 +937,7 @@ export const useServerChatLoader = ({
                     ...character,
                     id: String(character.id ?? characterId)
                   })
-                  await setSelectedAssistant(selection, { isCurrent: canCommitCurrentLoad })
+                  if (!await applyOwnedAssistantSelection(selection)) return null
                   return {
                     assistantName:
                       selection?.name ||
@@ -937,13 +970,13 @@ export const useServerChatLoader = ({
               const selection =
                 effectiveAssistantStateToSelection(fallbackState)
               if (selection) {
-                await setSelectedAssistant(selection, { isCurrent: canCommitCurrentLoad })
+                if (!await applyOwnedAssistantSelection(selection)) return null
                 return {
                   assistantName: selection.name,
                   assistantAvatarUrl: selection.avatar_url ?? null
                 }
               }
-              await setSelectedAssistant(null, { isCurrent: canCommitCurrentLoad })
+              if (!await applyOwnedAssistantSelection(null)) return null
               return null
             }
 
@@ -961,15 +994,17 @@ export const useServerChatLoader = ({
             const selection =
               effectiveAssistantStateToSelection(effectiveAssistantState)
             if (selection) {
-              await setSelectedAssistant(selection, { isCurrent: canCommitCurrentLoad })
+              if (!await applyOwnedAssistantSelection(selection)) return null
               return {
                 assistantName: selection.name,
                 assistantAvatarUrl: selection.avatar_url ?? null
               }
             }
-            await setSelectedAssistant(null, { isCurrent: canCommitCurrentLoad })
+            if (!await applyOwnedAssistantSelection(null)) return null
             return null
           })()
+
+          pendingAssistantPresentation = deferredAssistantPresentationPromise
 
           const list = await fetchAllServerChatMessages(
             ({ limit, offset, signal }) =>
@@ -1113,6 +1148,10 @@ export const useServerChatLoader = ({
             })
           }
         } finally {
+          if (useStoreMessageOption.getState().serverChatId === serverChatId) setIsLoading(false)
+          // Messages are ready independently of optional profile enrichment.
+          // Keep this load's authority alive until that guarded work settles.
+          await pendingAssistantPresentation?.catch(() => undefined)
           stopWatchingAuthority?.()
           snapshot?.release()
           if (serverChatLoadRef.current.controller === controller) {
@@ -1123,7 +1162,6 @@ export const useServerChatLoader = ({
               loaded: didLoadSuccessfully
             }
           }
-          if (useStoreMessageOption.getState().serverChatId === serverChatId) setIsLoading(false)
         }
       }
 
