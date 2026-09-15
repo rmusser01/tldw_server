@@ -1684,8 +1684,13 @@ export function ContentViewer({
                                 <Copy className="w-3 h-3" />
                               </button>
                             </div>
-                            <div className="text-sm text-text whitespace-pre-wrap leading-relaxed">
-                            {editState.analysisShown}
+                            <div className="text-sm text-text leading-relaxed">
+                              <Suspense fallback={<div className="whitespace-pre-wrap">{editState.analysisShown}</div>}>
+                                <LazyMarkdownPreview
+                                  content={editState.analysisShown}
+                                  size={rendering.markdownPreviewSize}
+                                />
+                              </Suspense>
                             </div>
                           </div>
                         )

@@ -38,6 +38,7 @@ import {
   getRelevanceDescriptor,
   getMeasuredRelevance,
   getSourceTypeLabel,
+  getResultSourceType,
   type CitationUsageAnchor,
   splitTextByHighlights,
 } from "./sourceListUtils"
@@ -154,8 +155,7 @@ export function SourceCard({
   )
   const canExpand = displayExcerptText.length > excerptLength
   const openAction = getSourceOpenAction(result)
-  const sourceType =
-    result.sourceType || result.metadata?.source_type || "media_db"
+  const sourceType = getResultSourceType(result)
   const sourceTypeLabel = getSourceTypeLabel(sourceType)
   const sourceId = getResultSourceId(result)
   const chunkId = getResultChunkId(result)

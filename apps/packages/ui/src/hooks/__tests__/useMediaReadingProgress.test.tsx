@@ -192,6 +192,7 @@ describe('useMediaReadingProgress', () => {
     expect(mocks.updateReadingProgress).toHaveBeenCalledWith(
       '21',
       expect.objectContaining({
+        zoom_level: 100,
         percentage: 40,
         cfi: 'scroll:40'
       })
@@ -238,7 +239,7 @@ describe('useMediaReadingProgress', () => {
       }
     })
 
-    const { rerender } = renderHook(
+    const { rerender, result } = renderHook(
       ({ mediaId }: { mediaId: number }) =>
         useMediaReadingProgress({
           mediaId,
@@ -268,6 +269,7 @@ describe('useMediaReadingProgress', () => {
       expect(mocks.updateReadingProgress).toHaveBeenCalledWith(
         '1',
         expect.objectContaining({
+          zoom_level: 100,
           percentage: 50,
           cfi: 'scroll:50'
         })
@@ -281,5 +283,18 @@ describe('useMediaReadingProgress', () => {
     await waitFor(() => {
       expect(container.scrollTop).toBe(500)
     })
+
+    await act(async () => {
+      container.scrollTop = 1500
+      await result.current.saveProgress()
+    })
+    expect(mocks.updateReadingProgress).toHaveBeenLastCalledWith(
+      '2',
+      expect.objectContaining({
+        zoom_level: 100,
+        percentage: 75,
+        cfi: 'scroll:75'
+      })
+    )
   })
 })

@@ -45,6 +45,29 @@ describe("SourceList full-source viewer", () => {
     vi.stubGlobal("open", vi.fn())
   })
 
+  it.each([
+    { sourceType: undefined, metadataType: undefined, label: "Document" },
+    { sourceType: "notes", metadataType: undefined, label: "Note" },
+    { sourceType: undefined, metadataType: "web", label: "Web" },
+    { sourceType: "notes", metadataType: "web", label: "Note" }
+  ] as const)(
+    "keeps the source card and preview type consistent for $sourceType / $metadataType",
+    async ({ sourceType, metadataType, label }) => {
+      state.results = [{
+        id: "source-1",
+        content: "Synthetic source text.",
+        score: 1,
+        sourceType,
+        metadata: { title: "Typed source", source_type: metadataType }
+      }]
+      render(<SourceList />)
+      expect(screen.getByText(label, { exact: true })).toBeInTheDocument()
+      fireEvent.click(screen.getByRole("button", { name: "View source 1" }))
+      const dialog = await screen.findByRole("dialog")
+      expect(within(dialog).getByText(label, { exact: true })).toBeInTheDocument()
+    }
+  )
+
   it("opens an uploaded media source in Media instead of resolving its filename as a route", async () => {
     state.results = [{
       id: "r1", sourceId: "1", sourceType: "media_db", content: "Project Aster source.", score: 1,

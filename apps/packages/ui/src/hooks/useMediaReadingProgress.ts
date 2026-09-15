@@ -82,7 +82,7 @@ const computeReadingProgress = (
   return {
     current_page: currentPage,
     total_pages: Math.max(1, totalPages),
-    zoom_level: 1,
+    zoom_level: 100,
     view_mode: 'continuous',
     percentage: percentageRounded,
     cfi: `scroll:${percentageRounded}`
@@ -93,7 +93,7 @@ const buildProgressSignature = (payload: ReadingProgressPayload): string => {
   return [
     payload.current_page,
     payload.total_pages,
-    payload.zoom_level ?? 1,
+    payload.zoom_level ?? 100,
     payload.view_mode ?? 'continuous',
     payload.cfi ?? '',
     payload.percentage ?? 0

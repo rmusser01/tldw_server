@@ -16,6 +16,7 @@ import {
   getResultSourceId,
   getUnavailableEvidenceMessage,
   getSourceTypeLabel,
+  getResultSourceType,
 } from "./sourceListUtils"
 
 type SourceViewerModalProps = {
@@ -51,7 +52,7 @@ export function SourceViewerModal({
   const content = getResultEvidenceText(result)
   const unavailableMessage = getUnavailableEvidenceMessage(result)
   const openAction = getSourceOpenAction(result)
-  const sourceType = result.sourceType || result.metadata?.source_type
+  const sourceType = getResultSourceType(result)
   const sourceLabel = getSourceTypeLabel(sourceType)
   const evidenceOrigin = getEvidenceOrigin(result)
   const evidenceOriginLabel =

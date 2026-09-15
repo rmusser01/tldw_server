@@ -193,6 +193,10 @@ export function getSourceTypeLabel(
   return options.plural ? labels.plural : labels.singular
 }
 
+export function getResultSourceType(result: RagResult): string {
+  return result.sourceType || result.metadata?.source_type || "media_db"
+}
+
 export function buildSourceTypeCounts(results: RagResult[]): Record<string, number> {
   return results.reduce<Record<string, number>>((acc, result) => {
     const sourceType = normalizeSourceType(result.sourceType ?? result.metadata?.source_type)

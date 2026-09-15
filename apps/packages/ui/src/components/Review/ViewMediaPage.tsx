@@ -1106,6 +1106,28 @@ const MediaPageContent: React.FC = () => {
     !search.isLoading &&
     !search.isFetching
 
+  const trashNavigation = (
+    <button
+      type="button"
+      onClick={() => navigate('/media-trash')}
+      className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text"
+      aria-label={t('review:mediaPage.openTrash', { defaultValue: 'Trash' })}
+      title={t('review:mediaPage.openTrash', { defaultValue: 'Trash' })}
+    >
+      <Trash2 className="h-3.5 w-3.5" />
+      {t('review:mediaPage.openTrash', { defaultValue: 'Trash' })}
+    </button>
+  )
+
+  const staleSelectionNotice = nav.staleSelectionNotice ? (
+    <div
+      className="mx-3 mt-3 rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-text"
+      data-testid="media-stale-selection-notice"
+    >
+      {nav.staleSelectionNotice}
+    </div>
+  ) : null
+
   if (isEmptyLibrary) {
     return (
       <div
@@ -1117,6 +1139,8 @@ const MediaPageContent: React.FC = () => {
             <h1 className="mb-3 px-4 text-center text-base font-semibold text-text">
               {t('review:mediaPage.mediaInspector', { defaultValue: 'Media Inspector' })}
             </h1>
+            <div className="mb-3 flex justify-center">{trashNavigation}</div>
+            {staleSelectionNotice}
             <ResultsList
               results={displayResults}
               selectedId={null}
@@ -1176,16 +1200,7 @@ const MediaPageContent: React.FC = () => {
                 <span className="text-[11px] font-medium tabular-nums text-text-muted">
                   {displayResults.length} / {search.activeTotalCount}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => navigate('/media-trash')}
-                  className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text"
-                  aria-label={t('review:mediaPage.openTrash', { defaultValue: 'Trash' })}
-                  title={t('review:mediaPage.openTrash', { defaultValue: 'Trash' })}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  {t('review:mediaPage.openTrash', { defaultValue: 'Trash' })}
-                </button>
+                {trashNavigation}
                 <button
                   type="button"
                   onClick={selection.handleToggleBulkSelectionMode}
@@ -1743,14 +1758,7 @@ const MediaPageContent: React.FC = () => {
                 })}
               </button>
             </div>
-            {nav.staleSelectionNotice ? (
-              <div
-                className="mx-3 mt-3 rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-text"
-                data-testid="media-stale-selection-notice"
-              >
-                {nav.staleSelectionNotice}
-              </div>
-            ) : null}
+            {staleSelectionNotice}
             {nav.selected &&
             nav.detailFetchError &&
             String(nav.detailFetchError.mediaId) === String(nav.selected.id) ? (

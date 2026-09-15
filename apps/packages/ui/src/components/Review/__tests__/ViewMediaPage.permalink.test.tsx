@@ -317,6 +317,7 @@ const renderMediaPage = (initialEntry: string) => {
       <Routes>
         <Route path="/" element={<div data-testid="root-route" />} />
         <Route path="/chat" element={<div data-testid="chat-route">Chat composer</div>} />
+        <Route path="/media-trash" element={<div>Media Trash destination</div>} />
         <Route
           path="/media"
           element={
@@ -390,6 +391,28 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
     await waitFor(() => expect(mocks.showUndoNotification).toHaveBeenCalled())
     await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent(/^$/))
     expect(screen.getByTestId('selected-media-id')).toHaveTextContent('none')
+  })
+
+  it('retains Trash navigation after deleting the sole item and refreshing to an empty library', async () => {
+    mocks.queryData = [{ kind: 'media', id: 1, title: 'Only source', raw: {}, meta: { type: 'document' } }]
+    const originalRequest = mocks.bgRequest.getMockImplementation()!
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      if (request.path === '/api/v1/media/1' && request.method === 'DELETE') {
+        mocks.queryData = []
+        return {}
+      }
+      return originalRequest(request)
+    })
+    mocks.refetch.mockImplementation(async () => ({ data: mocks.queryData }))
+    renderMediaPage('/media?id=1')
+    await waitFor(() => expect(screen.getByTestId('selected-media-id')).toHaveTextContent('1'))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete selected item' }))
+
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent(/^$/))
+    await waitFor(() => expect(screen.queryByTestId('mock-content-viewer')).not.toBeInTheDocument())
+    expect(screen.getByTestId('results-list')).toBeEmptyDOMElement()
+    fireEvent.click(screen.getByRole('button', { name: 'Trash', exact: true }))
+    expect(await screen.findByText('Media Trash destination')).toBeInTheDocument()
   })
 
   it('disables Delete before confirmation when the caller lacks media.delete', async () => {
