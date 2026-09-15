@@ -66,6 +66,8 @@ import type {
 import {
   clearManualCredentials,
   hasNewerCurrentAccessToken,
+  hasInvalidatedRefreshSession,
+  invalidateRefreshSessionIfCurrent,
   isCompleteDeviceCredential,
   MANUAL_SESSION_KEY,
   normalizeServerOrigin,
@@ -2292,10 +2294,18 @@ export class TldwApiClientBase {
         cachedConfig.accessToken
       ).catch(() => false)
     )
-    if (this.config === null || hasNewerAccessToken) {
+    const sessionInvalidated = Boolean(cachedConfig &&
+      await hasInvalidatedRefreshSession(this.storage, cachedConfig).catch(() => false))
+    if (this.config === null || hasNewerAccessToken || sessionInvalidated) {
       await this.initialize().catch(() => null)
     }
     return this.config
+  }
+
+  async invalidateRefreshSession(checked: TldwConfig): Promise<boolean> {
+    const invalidated = await invalidateRefreshSessionIfCurrent(this.storage, checked)
+    await this.getConfig()
+    return invalidated
   }
 
   async commitTokenRefresh(

@@ -31,14 +31,16 @@
 **Goal:** Protect Notes generation content and make Chat selection/history reliable.
 **Success criteria:** No note plaintext URL; one canonical saved Chat; explicit character selection and all persisted replies survive reload without losing drafts or crossing accounts.
 **Tests:** Real interacting hooks/stores, deferred async boundaries and old Dexie cache round trips.
-**Status:** Not Started
+**Status:** In Progress
+
+Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication backend/frontend and Chat selection have independent owners; ingestion Stage3 begins concurrently with separate file ownership. All findings remain open until targeted live verification.
 
 ### TASK-13260.24 — UAT080 session refresh
 
 **Files:** AuthNZ refresh endpoint/dependencies/session manager/repository as required by the diagnosis; frontend refresh/proxy/connection and session-query lifecycle; existing real SQLite AuthNZ and authority regressions.
 - [ ] Reproduce the real request's outer `BEGIN IMMEDIATE` blocking the session service's second transaction; retain the observed wrong401 before implementation.
-- [ ] Use the existing non-locking request connection pattern while retaining the inner atomic refresh/CAS transaction, rotation and replay/revocation protections.
-- [ ] Distinguish retryable service failures from invalid sessions and verify rollback/repeated/concurrent refresh behavior with actual SQLite connections.
+- [x] Use the existing non-locking request connection pattern while retaining the inner atomic refresh/CAS transaction, rotation and replay/revocation protections. Reviewed backend checkpoint `3751292380`.
+- [x] Distinguish retryable service failures from invalid sessions and verify rollback/repeated/concurrent refresh behavior with actual SQLite connections. Backend regression56passed/3fixture skips; additional transaction controls89passed; independent parent40passed/3fixture skips. No new Bandit findings.
 - [ ] Verify retryable failures retain credentials; invalid sessions clear only their authority and stop cross-tab private queries; refresh cancellation cannot open an unrelated connection modal or discard saved/scoped data.
 - [ ] Independently review, run focused backend/frontend checks and scoped Bandit, then perform targeted real expiry/recovery before the next full UAT.
 
@@ -75,7 +77,7 @@
 **Goal:** Make progress, extraction errors, analysis and recovery controls accurate and usable.
 **Success criteria:** Required provider validation precedes Ready; no invented progress/estimate; source/analysis presentation is consistent; last-item Trash and valid reading-progress persistence work.
 **Tests:** Wizard transition/job-state integration, scraper error boundary, actual Media empty/deletion/Undo controls, rendering and progress identity tests.
-**Status:** Not Started
+**Status:** In Progress
 
 ### TASK-13260.16 — UAT056/057/061/065
 

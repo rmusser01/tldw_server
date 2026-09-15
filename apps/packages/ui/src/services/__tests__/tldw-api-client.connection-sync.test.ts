@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   failClearWrite: false,
   beforeLocalConfigWrite: null as null | (() => void),
   beforeServerUrlWrite: null as null | (() => Promise<void>),
+  afterLocalRead: null as null | ((key: string) => Promise<void>),
+  afterInvalidationWrite: null as null | (() => void),
   apiSend: vi.fn()
 }))
 
@@ -37,7 +39,11 @@ vi.mock("@/utils/safe-storage", () => ({
           ? mocks.storage
           : mocks.syncStorage
     return {
-      get: vi.fn(async (key: string) => values.get(key)),
+      get: vi.fn(async (key: string) => {
+        const value = values.get(key)
+        if (options?.area === "local") await mocks.afterLocalRead?.(key)
+        return value
+      }),
       set: vi.fn(async (key: string, value: unknown) => {
         if (options?.area === "local" && key === "tldwServerUrl") {
           await mocks.beforeServerUrlWrite?.()
@@ -71,6 +77,9 @@ vi.mock("@/utils/safe-storage", () => ({
           beforeWrite?.()
         }
         values.set(key, value)
+        if (options?.area === "local" && key.startsWith("tldwInvalidRefreshSession:")) {
+          mocks.afterInvalidationWrite?.()
+        }
       }),
       remove: vi.fn(async (key: string) => {
         values.delete(key)
@@ -105,8 +114,90 @@ describe("TldwApiClient connection storage sync", () => {
     mocks.failClearWrite = false
     mocks.beforeLocalConfigWrite = null
     mocks.beforeServerUrlWrite = null
+    mocks.afterLocalRead = null
+    mocks.afterInvalidationWrite = null
     mocks.apiSend.mockReset()
     window.localStorage.clear()
+  })
+
+  it("invalidates rejected refresh credentials across cached clients and gates private readiness queries", async () => {
+    const config = {
+      serverUrl: "https://api.example.test", authMode: "multi-user" as const,
+      accessToken: "expired-access", refreshToken: "expired-refresh"
+    }
+    await tldwClient.updateConfig(config)
+    const otherTabClient = new TldwApiClient()
+    expect(await otherTabClient.getConfig()).toMatchObject(config)
+    useConnectionStore.setState(({ state }) => ({ state: {
+      ...state, phase: ConnectionPhase.CONNECTED, isConnected: true, offlineBypass: false
+    } }))
+    mocks.bgRequest.mockRejectedValue(Object.assign(new Error("Invalid refresh"), { status: 401 }))
+
+    await expect(new TldwAuthService().refreshToken()).rejects.toMatchObject({ status: 401 })
+
+    expect(await tldwClient.getConfig()).not.toHaveProperty("accessToken")
+    expect(await otherTabClient.getConfig()).not.toHaveProperty("refreshToken")
+    expect(useConnectionStore.getState().state.isConnected).toBe(false)
+    mocks.apiSend.mockClear()
+    await useConnectionStore.getState().checkOnce({ force: true })
+    expect(mocks.apiSend.mock.calls.map(([request]) => request.path)).not.toContain("/api/v1/auth/sessions")
+
+    await tldwClient.updateConfig({ accessToken: "new-login-access", refreshToken: "new-login-refresh" })
+    expect(await tldwClient.getConfig()).toMatchObject({ accessToken: "new-login-access", refreshToken: "new-login-refresh" })
+  })
+
+  it("keeps credentials and connection authority when refresh is temporarily unavailable", async () => {
+    await tldwClient.updateConfig({
+      serverUrl: "https://api.example.test", authMode: "multi-user",
+      accessToken: "current-access", refreshToken: "valid-refresh"
+    })
+    useConnectionStore.setState(({ state }) => ({ state: {
+      ...state, phase: ConnectionPhase.CONNECTED, isConnected: true
+    } }))
+    mocks.bgRequest.mockRejectedValue(Object.assign(new Error("Busy"), { status: 503 }))
+    await expect(new TldwAuthService().refreshToken()).rejects.toMatchObject({ status: 503 })
+    expect(await tldwClient.getConfig()).toMatchObject({ accessToken: "current-access", refreshToken: "valid-refresh" })
+    expect(useConnectionStore.getState().state.isConnected).toBe(true)
+  })
+
+  it("preserves a newer login and its refresh timer when the old invalidation read finishes late", async () => {
+    await tldwClient.updateConfig({
+      serverUrl: "https://api.example.test", authMode: "multi-user",
+      accessToken: "old-access", refreshToken: "old-refresh", orgId: 1
+    })
+    let finishRead: () => void = () => {}
+    let readStarted = false
+    mocks.afterInvalidationWrite = () => {
+      mocks.afterInvalidationWrite = null
+      mocks.afterLocalRead = key => {
+        if (key !== "tldwConfig") return Promise.resolve()
+        mocks.afterLocalRead = null
+        readStarted = true
+        return new Promise(resolve => { finishRead = resolve })
+      }
+    }
+    mocks.bgRequest.mockImplementation(async ({ path }) => {
+      if (path === "/api/v1/auth/refresh") throw Object.assign(new Error("Invalid refresh"), { status: 401 })
+      if (path === "/api/v1/auth/login") return { access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 }
+      return { items: [{ id: 1 }] }
+    })
+    const auth = new TldwAuthService()
+    const pending = auth.refreshToken().catch(error => error)
+    await vi.waitFor(() => expect(readStarted).toBe(true))
+    await auth.login({ username: "new-user", password: "synthetic-test-password" })
+    useConnectionStore.setState(({ state }) => ({ state: { ...state, isConnected: true, phase: ConnectionPhase.CONNECTED } }))
+    const clearTimer = vi.spyOn(globalThis, "clearTimeout")
+    try {
+      finishRead()
+      await pending
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(await tldwClient.getConfig()).toMatchObject({ accessToken: "new-access", refreshToken: "new-refresh" })
+      expect(useConnectionStore.getState().state.isConnected).toBe(true)
+      expect(clearTimer).not.toHaveBeenCalled()
+    } finally {
+      clearTimer.mockRestore()
+      await auth.logout()
+    }
   })
 
   it("mirrors saved server URLs into the WebUI bootstrap host key", async () => {

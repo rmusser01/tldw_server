@@ -718,8 +718,8 @@ describe("App layout routing", () => {
     expect(mockLogout).toHaveBeenCalled()
   })
 
-  it.each(["storage", "tldw:config-updated"])(
-    "replaces private content locally after offline logout via %s and preserves queued drafts",
+  it.each(["storage", "tldw:config-updated", "expired-session"])(
+    "replaces private content after an offline auth boundary via %s and preserves queued drafts",
     async (eventName) => {
       const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(true)
       const queueKey = "tldw:notesOfflineDraftQueue:v1:alice"
@@ -737,7 +737,11 @@ describe("App layout routing", () => {
         currentConfig = { ...currentConfig, accessToken: undefined }
         online.mockReturnValue(false)
         act(() => {
-          window.dispatchEvent(eventName === "storage"
+          window.dispatchEvent(eventName === "expired-session"
+            ? new StorageEvent("storage", {
+                key: "tldwInvalidRefreshSession:synthetic-session-digest", newValue: "true"
+              })
+            : eventName === "storage"
             ? new StorageEvent("storage", {
                 key: "tldwConfig", oldValue, newValue: JSON.stringify(currentConfig)
               })

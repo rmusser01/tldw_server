@@ -276,6 +276,7 @@ export class TldwAuthService {
   }
 
   private async performTokenRefresh(): Promise<TokenResponse> {
+    const refreshTimer = this.refreshTimer
     await tldwClient.initialize()
     const config = await tldwClient.getConfig()
     if (!config || !config.refreshToken) {
@@ -291,20 +292,34 @@ export class TldwAuthService {
       ? null
       : scopedUserId.slice("user:".length)
 
-    const tokens = await bgRequest<TokenResponse>({
-      path: '/api/v1/auth/refresh',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: { refresh_token: config.refreshToken },
-      servicePromptConfig: {
-        serverUrl: config.serverUrl,
-        authMode: config.authMode,
-        authSource: config.authSource,
-        orgId: config.orgId,
-        expectedUserId,
-        expectedRefreshToken: config.refreshToken
+    let tokens: TokenResponse
+    try {
+      tokens = await bgRequest<TokenResponse>({
+        path: '/api/v1/auth/refresh',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: { refresh_token: config.refreshToken },
+        servicePromptConfig: {
+          serverUrl: config.serverUrl,
+          authMode: config.authMode,
+          authSource: config.authSource,
+          orgId: config.orgId,
+          expectedUserId,
+          expectedRefreshToken: config.refreshToken
+        }
+      })
+    } catch (error) {
+      if ((error as { status?: number } | null)?.status === 401) {
+        if (!await tldwClient.invalidateRefreshSession(config)) {
+          throw createServicePromptScopeChangedError()
+        }
+        if (this.refreshTimer && this.refreshTimer === refreshTimer) {
+          clearTimeout(this.refreshTimer)
+          this.refreshTimer = null
+        }
       }
-    })
+      throw error
+    }
 
     const committed = await tldwClient.commitTokenRefresh(
       config,

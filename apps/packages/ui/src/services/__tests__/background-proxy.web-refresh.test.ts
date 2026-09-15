@@ -61,6 +61,24 @@ const jwtForUser = (userId: string | number): string =>
   `header.${btoa(JSON.stringify({ sub: String(userId) }))}.signature`
 
 describe("background proxy web token refresh", () => {
+  it.each([false, true])("invalidates only the current session after an actual refresh401 (scoped=%s)", async (scoped) => {
+    const config = {
+      serverUrl: "https://api.example.com", authMode: "multi-user" as const,
+      accessToken: jwtForUser(42), refreshToken: "expired-refresh"
+    }
+    mocks.store.tldwConfig = config
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("unauthorized", { status: 401 })))
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({
+      path: "/api/v1/notes/private-note", method: "GET",
+      ...(scoped ? { servicePromptConfig: { serverUrl: config.serverUrl, authMode: config.authMode, expectedUserId: 42 } } : {})
+    })).rejects.toMatchObject({ status: 401 })
+    const { resolveDirectBrowserConfig } = await import("@/services/tldw/direct-browser-config")
+    const { createSafeStorage } = await import("@/utils/safe-storage")
+    expect(await resolveDirectBrowserConfig(createSafeStorage({ area: "local" }))).not.toHaveProperty("accessToken")
+    expect(mocks.store.tldwConfig).toEqual(config)
+  })
+
   it("keeps cancellation during refresh out of the backend-unreachable modal", async () => {
     let started!: () => void
     let release!: () => void

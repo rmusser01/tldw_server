@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { browser } from "wxt/browser"
 import {
   ConnectionPhase,
   deriveConnectionUxState,
@@ -1038,6 +1039,46 @@ describe("connection store stability", () => {
     expect(useConnectionStore.getState().state.isConnected).toBe(true)
     window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
     expect(useConnectionStore.getState().state.isConnected).toBe(false)
+  })
+
+  it("continues verifying hosted cookie authentication without browser bearer tokens", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "hosted"
+    mockedClient.getConfig.mockResolvedValue({ serverUrl: "https://server.test", authMode: "multi-user" })
+    mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: {} })
+    await useConnectionStore.getState().checkOnce({ force: true })
+    expect(useConnectionStore.getState().state.isConnected).toBe(true)
+    expect(mockedApiSend).toHaveBeenCalled()
+  })
+
+  it.each(["same-tab", "other-tab"])("discards a delayed expired-session check after a %s login", async (source) => {
+    let finishRead: (config: TldwConfig) => void = () => {}
+    mockedClient.getConfig.mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve }))
+    window.dispatchEvent(new StorageEvent("storage", { key: "tldwInvalidRefreshSession:old-session", newValue: "true" }))
+    await vi.waitFor(() => expect(mockedClient.getConfig).toHaveBeenCalled())
+    const current = { serverUrl: "https://server.test", authMode: "multi-user", accessToken: "new-access", refreshToken: "new-refresh" }
+    mockedClient.getConfig.mockResolvedValue(current as TldwConfig)
+    if (source === "same-tab") {
+      // Same-principal login still supersedes the old credential check.
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } }))
+    } else {
+      window.dispatchEvent(new StorageEvent("storage", { key: "tldwConfig", newValue: JSON.stringify(current) }))
+    }
+    setConnectionState({ isConnected: true, phase: ConnectionPhase.CONNECTED })
+    finishRead({ serverUrl: "https://server.test", authMode: "multi-user" })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(useConnectionStore.getState().state.isConnected).toBe(true)
+  })
+
+  it.each(["storage", "same-tab", "browser-storage"])("rechecks an expiry marker from %s against current effective credentials", async (source) => {
+    mockedClient.getConfig.mockResolvedValue({ serverUrl: "https://server.test", authMode: "multi-user" })
+    if (source === "storage") {
+      window.dispatchEvent(new StorageEvent("storage", { key: "tldwInvalidRefreshSession:expired", newValue: "true" }))
+    } else if (source === "browser-storage") {
+      await browser.storage.local.set({ "tldwInvalidRefreshSession:expired-browser-session": true })
+    } else {
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { refreshSessionInvalidated: true } }))
+    }
+    await vi.waitFor(() => expect(useConnectionStore.getState().state.isConnected).toBe(false))
   })
 
   it("discards pending readiness when another tab removes configured credentials", async () => {

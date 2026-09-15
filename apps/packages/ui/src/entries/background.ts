@@ -21,6 +21,7 @@ import {
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode";
 import {
   hasNewerCurrentAccessToken,
+  invalidateRefreshSessionIfCurrent,
   resolveEffectiveTldwConfig,
   storeRefreshRotationIfCurrent,
   waitForNewerCurrentAccessToken,
@@ -661,6 +662,10 @@ export default defineBackground({
               )
             ) {
               return;
+            }
+            if ((error as { status?: number } | null)?.status === 401 &&
+              !await invalidateRefreshSessionIfCurrent(storage, cfg)) {
+              throw createServicePromptScopeChangedError();
             }
             throw error;
           } finally {

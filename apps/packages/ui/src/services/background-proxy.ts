@@ -21,6 +21,7 @@ import {
 } from "@/services/tldw/direct-browser-config"
 import {
   hasNewerCurrentAccessToken,
+  invalidateRefreshSessionIfCurrent,
   storeRefreshRotationIfCurrent,
   waitForNewerCurrentAccessToken
 } from "@/services/tldw/single-user-credential"
@@ -760,6 +761,10 @@ const refreshAuthDirect = async (
           ) {
             return
           }
+          if ((error as { status?: number } | null)?.status === 401 &&
+            !await invalidateRefreshSessionIfCurrent(storage, cfg)) {
+            throw createServicePromptScopeChangedError()
+          }
           throw error
         } finally {
           scopedWebRefreshes.delete(key)
@@ -795,6 +800,12 @@ const refreshAuthDirect = async (
         | { access_token?: string; refresh_token?: string }
         | null
       if (!tokens?.access_token) {
+        if (resp.status === 401 && cfg?.authMode === "multi-user") {
+          if (await waitForNewerCurrentAccessToken(storage, cfg, capturedAccessToken)) return
+          if (!await invalidateRefreshSessionIfCurrent(storage, cfg)) {
+            throw createServicePromptScopeChangedError()
+          }
+        }
         throw createTokenRefreshError(resp)
       }
       if (!cfg || cfg.authMode !== "multi-user") {

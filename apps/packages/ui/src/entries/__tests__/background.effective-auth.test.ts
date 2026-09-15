@@ -244,6 +244,28 @@ describe("background effective extension auth", () => {
     expect(storageState.persistent.get("tldwConfig")).toEqual(config)
   })
 
+  it("invalidates a rejected scoped worker refresh in shared effective credentials", async () => {
+    const config = {
+      serverUrl: "https://api.example.test", authMode: "multi-user", authSource: "manual",
+      accessToken: jwtForUser(42), refreshToken: "expired-refresh"
+    }
+    storageState.persistent.set("tldwConfig", config)
+    storageState.persistent.delete("tldwCookieSessionConfig")
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("unauthorized", { status: 401 })))
+    await expect(sendRuntimeMessage({
+      type: "tldw:request", payload: {
+        path: "/api/v1/notes/private-note", method: "GET",
+        servicePromptConfig: { serverUrl: config.serverUrl, authMode: "multi-user", authSource: "manual", expectedUserId: 42 }
+      }
+    })).resolves.toMatchObject({ ok: false, status: 401 })
+    const { resolveEffectiveTldwConfig } = await import("@/services/tldw/single-user-credential")
+    const { createSafeStorage } = await import("@/utils/safe-storage")
+    expect(await resolveEffectiveTldwConfig({
+      persistent: createSafeStorage({ area: "local" }), session: createSafeStorage({ area: "session" })
+    })).not.toHaveProperty("refreshToken")
+    expect(storageState.persistent.get("tldwConfig")).toEqual(config)
+  })
+
   it("authenticates ordinary worker requests with session credentials", async () => {
     const fetchSpy = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true }), {

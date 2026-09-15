@@ -12,6 +12,16 @@
 - Workflow source: frontend E2E/UAT and shared integration tests, as clarified by the user. Exact named journeys and coverage limitations are recorded below; no literal A/B/C loop mapping was found.
 - AI provider: existing llama.cpp on port 9099; `/v1/models` verified with model `../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf`. No mock response counts as real model acceptance.
 
+## Cycle 3 repair checkpoints — 2026-09-15 UTC
+
+All 32 findings remain open pending targeted live verification and the subsequent full fresh run. These implementation checkpoints do not change the frozen UAT outcomes.
+
+- **UAT080 authentication:** backend checkpoint `3751292380` removes the SQLite refresh self-lock while retaining atomic rotation and replay controls. Typed transient failures preserve retryable status; actual invalid sessions retain401 semantics. Independent real SQLite/dependency controls passed40 tests with3 fixture-reported PostgreSQL skips; Bandit introduced no findings. Frontend transport checkpoint `b3a757b017` preserves status/Retry-After, stops stale-token write replay and separates cancellation from timeout (113 focused tests, independent review clear).
+- **UAT056 ingestion configuration:** checkpoint `4a21a23540` validates the enabled analysis provider before advancing to Ready; independent run89 passed.
+- **UAT057/061 ingestion progress:** checkpoint `dfab9ed3cb` removes simulated stages and size-derived duration estimates. Pending work shows elapsed time, indeterminate progress and confirmed finished-item counts. Actual reported item progress remains supported. Independent run205 passed across15 QuickIngest suites.
+- **UAT080 terminal-session handling, ready for live checks:** exact credential-pair invalidation markers preserve newer logins and rotations. Review exposed a delayed expiry event resetting a newer login's readiness/timer; red/green tests now cover the real client/auth/store chain and both-tab event handling. A hosted-cookie compatibility control also caught and repaired an overbroad missing-bearer gate. Final focused run290 passed; scoped ESLint0errors; full TypeScript retains90 baseline diagnostic signatures with none added/removed (not a clean typecheck). Independent review identified the race before a usage-limit interruption; parent completed the corrective review. Live expiry/recovery remains pending.
+- **UAT067/068 Chat selection, in progress:** disconnected Edit-form writes and greeting/loader selection races are under repair. Remaining saved-Chat and backlink findings are not yet verified.
+
 ## Cycle 2 repair status — 2026-09-15 UTC
 
 The user requested an ongoing UAT → review → fix loop until a complete fresh single/multi run encounters no issues. Repairs for UAT-020–045 are in progress under TASK-13260.5–.11 and `IMPLEMENTATION_PLAN_uat_cycle_2.md`. The findings below remain open pending integrated review and real-runtime verification; targeted tests do not replace the next full run.

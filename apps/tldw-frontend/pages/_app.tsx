@@ -24,6 +24,7 @@ import {
 } from "@web/lib/authStorage"
 import { loadTldwAuth, loadTldwClient } from "@web/lib/configured-auth-state"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
+import { REFRESH_SESSION_INVALIDATION_PREFIX } from "@/services/tldw/single-user-credential"
 import {
   buildFirstRunOnboardingRoute,
   CHARACTER_CHAT_ONBOARDING_INTENT,
@@ -297,7 +298,8 @@ export default function App({ Component, pageProps }: AppProps) {
       void refreshAuthState()
     }
     const onStorage = (event: StorageEvent) => {
-      if (!event.key || event.key === "tldwConfig") {
+      if (!event.key || event.key === "tldwConfig" ||
+        event.key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX)) {
         void refreshAuthState()
       }
     }

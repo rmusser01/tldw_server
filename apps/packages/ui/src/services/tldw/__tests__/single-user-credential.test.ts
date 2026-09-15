@@ -4,6 +4,7 @@ import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import {
   MANUAL_SESSION_KEY,
   REFRESH_ROTATION_KEY,
+  invalidateRefreshSessionIfCurrent,
   clearManualCredentials,
   hasNewerCurrentAccessToken,
   hasNewerCurrentRefreshRotation,
@@ -51,6 +52,78 @@ const multiUserConfig = {
 } satisfies TldwConfig
 const jwtForUser = (userId: string | number): string =>
   `header.${btoa(JSON.stringify({ sub: String(userId) }))}.signature`
+
+describe("terminal refresh session invalidation", () => {
+  it("removes only the rejected effective credentials while retaining connection settings", async () => {
+    const persistent = new MemoryStorage()
+    const session = new MemoryStorage()
+    await persistent.set("tldwConfig", multiUserConfig)
+    await expect(invalidateRefreshSessionIfCurrent(persistent, multiUserConfig)).resolves.toBe(true)
+    const effective = await resolveEffectiveTldwConfig({ persistent, session })
+    expect(effective).toMatchObject({ serverUrl: multiUserConfig.serverUrl, authMode: "multi-user", orgId: 7 })
+    expect(effective).not.toHaveProperty("accessToken")
+    expect(effective).not.toHaveProperty("refreshToken")
+    // No asynchronous rewrite of the shared config can overwrite a new login.
+    expect(await persistent.get("tldwConfig")).toEqual(multiUserConfig)
+  })
+
+  it("invalidates a rotated pair and leaves a later successful rotation usable", async () => {
+    const persistent = new MemoryStorage()
+    const session = new MemoryStorage()
+    await persistent.set("tldwConfig", multiUserConfig)
+    const rotated = { ...multiUserConfig, accessToken: "access-1", refreshToken: "refresh-1" }
+    await storeRefreshRotationIfCurrent(persistent, multiUserConfig, "refresh-0", rotated)
+    expect(await invalidateRefreshSessionIfCurrent(persistent, rotated)).toBe(true)
+    expect(await resolveEffectiveTldwConfig({ persistent, session })).not.toHaveProperty("accessToken")
+    await storeRefreshRotationIfCurrent(persistent, rotated, "refresh-1", {
+      accessToken: "access-2", refreshToken: "refresh-2"
+    })
+    expect(await resolveEffectiveTldwConfig({ persistent, session })).toMatchObject({
+      accessToken: "access-2", refreshToken: "refresh-2"
+    })
+  })
+
+  it.each(["other-account", "same-account-new-login", "rotation", "other-account-also-expired"])("a delayed invalidation cannot overwrite %s session state", async (change) => {
+    const persistent = new MemoryStorage()
+    const session = new MemoryStorage()
+    await persistent.set("tldwConfig", multiUserConfig)
+    let entered!: () => void
+    let release!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const originalSet = persistent.set.bind(persistent)
+    let delayed = false
+    persistent.set = async (key, value) => {
+      if (!delayed) { delayed = true; entered(); await gate }
+      await originalSet(key, value)
+    }
+    const pending = invalidateRefreshSessionIfCurrent(persistent, multiUserConfig)
+    await started
+    const next = { ...multiUserConfig, accessToken: "access-new", refreshToken: "refresh-new" }
+    if (change === "rotation") {
+      await storeRefreshRotationIfCurrent(persistent, multiUserConfig, "refresh-0", next)
+    } else {
+      await originalSet("tldwConfig", { ...multiUserConfig, accessToken: "bob-access", refreshToken: "bob-refresh" })
+      if (change === "same-account-new-login") await originalSet("tldwConfig", next)
+      if (change === "other-account-also-expired") {
+        await invalidateRefreshSessionIfCurrent(persistent, {
+          ...multiUserConfig, accessToken: "bob-access", refreshToken: "bob-refresh"
+        })
+      }
+    }
+    release()
+    expect(await pending).toBe(false)
+    if (change === "other-account-also-expired") {
+      expect(await resolveEffectiveTldwConfig({ persistent, session })).not.toHaveProperty("accessToken")
+      return
+    }
+    expect(await resolveEffectiveTldwConfig({ persistent, session })).toMatchObject(
+      change === "other-account"
+        ? { accessToken: "bob-access", refreshToken: "bob-refresh" }
+        : { accessToken: "access-new", refreshToken: "refresh-new" }
+    )
+  })
+})
 
 describe("manual single-user credential policy", () => {
   it("hydrates an exact-origin session key without persisting it", async () => {

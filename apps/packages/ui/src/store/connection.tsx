@@ -1,4 +1,5 @@
 import { createWithEqualityFn } from "zustand/traditional"
+import { browser } from "wxt/browser"
 
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 
@@ -10,6 +11,7 @@ const getTldwClient = async () =>
 import { getStoredTldwServerURL } from "@/services/tldw-server-url"
 import { apiSend } from "@/services/api-send"
 import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
+import { REFRESH_SESSION_INVALIDATION_PREFIX } from "@/services/tldw/single-user-credential"
 import { createSafeStorage } from "@/utils/safe-storage"
 import {
   resolveWebUiQuickstartServerUrl,
@@ -18,6 +20,7 @@ import {
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
 import { getRuntimeSingleUserApiKeyOverride, isCookieSessionConfigInvalidated } from "@/services/tldw/runtime-auth-override"
+import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
 import { isPlaceholderApiKey } from "@/utils/api-key"
 import {
@@ -805,10 +808,12 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           Boolean(serverUrl) &&
           (cfg?.authMode ?? "single-user") === "single-user" &&
           !hasSingleUserAuthValue
+        const missingMultiUserAuth = !isHostedTldwDeployment() && cfg?.authMode === "multi-user" &&
+          !cfg.accessToken && !cfg.refreshToken && !hasCookieSessionAuth
 
         // Require credentials or same-origin cookie transport configuration
         // before checking whether authenticated pages are ready.
-        if (missingSingleUserAuth) {
+        if (missingSingleUserAuth || missingMultiUserAuth) {
           set((s) => ({
             state: {
               ...s.state,
@@ -1325,17 +1330,53 @@ const invalidateConnectionAuthority = (): void => {
 }
 
 if (typeof window !== "undefined") {
+  let refreshSessionCheckGeneration = 0
+  const checkRefreshSessionInvalidation = async () => {
+    const generation = ++refreshSessionCheckGeneration
+    const config = await (await getTldwClient()).getConfig()
+    if (generation === refreshSessionCheckGeneration && !isHostedTldwDeployment() &&
+      config?.authMode === "multi-user" && !config.accessToken && !config.refreshToken &&
+      config.authSource !== "cookie-session") {
+      invalidateConnectionAuthority()
+    }
+  }
+  const onRefreshSessionInvalidation = () => {
+    void checkRefreshSessionInvalidation().catch(() => undefined)
+  }
+  if (browser.storage?.onChanged) {
+    browser.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local" || !changes || typeof changes !== "object") return
+      if (["tldwConfig", "tldwRefreshRotation", COOKIE_SESSION_CONFIG_KEY].some(key => key in changes)) {
+        refreshSessionCheckGeneration += 1
+      }
+      if (Object.keys(changes).some(key => key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX))) {
+        onRefreshSessionInvalidation()
+      }
+    })
+  }
   window.addEventListener("tldw:auth-principal-changed", (event) => {
+    refreshSessionCheckGeneration += 1
     if ((event as CustomEvent<{ kind?: string }>).detail?.kind === "logout") {
       invalidateConnectionAuthority()
     }
   })
   window.addEventListener("tldw:config-updated", (event) => {
-    if ((event as CustomEvent<{ authorityChanged?: boolean }>).detail?.authorityChanged) {
+    refreshSessionCheckGeneration += 1
+    const detail = (event as CustomEvent<{ authorityChanged?: boolean; refreshSessionInvalidated?: boolean }>).detail
+    if (detail?.refreshSessionInvalidated) {
+      onRefreshSessionInvalidation()
+    } else if (detail?.authorityChanged) {
       invalidateConnectionAuthority()
     }
   })
   window.addEventListener("storage", (event) => {
+    if (event.key?.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX)) {
+      onRefreshSessionInvalidation()
+      return
+    }
+    if (event.key === null || ["tldwConfig", "tldwRefreshRotation", COOKIE_SESSION_CONFIG_KEY].includes(event.key)) {
+      refreshSessionCheckGeneration += 1
+    }
     if (event.key === null) {
       invalidateConnectionAuthority()
       return
