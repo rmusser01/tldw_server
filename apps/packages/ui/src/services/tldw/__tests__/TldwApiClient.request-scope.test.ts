@@ -205,4 +205,43 @@ describe("TldwApiClient captured request scope", () => {
       ...expectedScopeFields
     })
   })
+
+  it("reads fresh promotion messages with captured scope without joining cached or pending reads", async () => {
+    const client = new TldwApiClient()
+    mocks.bgRequest.mockResolvedValueOnce([{ id: "cached", sender: "user", content: "old" }])
+    await client.listChatMessages("chat-1")
+    const controller = new AbortController()
+    let finishPending!: (rows: unknown[]) => void
+    mocks.bgRequest.mockImplementationOnce(() => new Promise(resolve => { finishPending = resolve }))
+    const first = client.listChatMessages("chat-1", undefined, {
+      fresh: true, requestScope, signal: controller.signal
+    })
+    mocks.bgRequest.mockResolvedValueOnce([{ id: "fresh", sender: "user", content: "new" }])
+    const second = await client.listChatMessages("chat-1", undefined, {
+      fresh: true, requestScope: { ...requestScope, userId: 43 }, signal: controller.signal
+    })
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(3)
+    expect(second[0].id).toBe("fresh")
+    expect(mocks.bgRequest.mock.calls[2][0]).toMatchObject({
+      method: "GET", abortSignal: controller.signal,
+      headers: { "X-TLDW-Expected-User-ID": "43" },
+      servicePromptConfig: { ...requestScope.config, expectedUserId: 43 }
+    })
+    finishPending([{ id: "late", sender: "user", content: "late" }])
+    await first
+    // Scoped reads must not poison the ordinary shared cache either.
+    expect((await client.listChatMessages("chat-1"))[0].id).toBe("cached")
+  })
+
+  it("serializes raw recovery listing as explicit false while keeping the captured owner", async () => {
+    const client = new TldwApiClient()
+    mocks.bgRequest.mockResolvedValueOnce([])
+    await client.listChatMessages("chat-1", { render_placeholders: false, limit: 200, offset: 0 }, {
+      fresh: true, requestScope
+    })
+    expect(mocks.bgRequest.mock.calls[0][0]).toMatchObject({
+      path: "/api/v1/chats/chat-1/messages?scope_type=global&render_placeholders=false&limit=200&offset=0",
+      headers: { "X-TLDW-Expected-User-ID": "42" }
+    })
+  })
 })

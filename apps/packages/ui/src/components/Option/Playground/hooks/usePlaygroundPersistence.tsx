@@ -5,6 +5,17 @@ import { usePersistenceMode } from "@/hooks/playground"
 import type { Character } from "@/types/character"
 import { type AssistantSelectionMode } from "@/types/assistant-selection"
 import { WEBUI_CHAT_SOURCE } from "@/utils/character-chat-session"
+import {
+  loadServicePromptSnapshot,
+  type ServicePromptSnapshot
+} from "@/services/service-prompts"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import {
+  clearChatPromotion,
+  isChatPromotionIncompleteError,
+  retryChatPromotion,
+  trackChatPromotion
+} from "@/services/pending-chat-promotion"
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -40,6 +51,7 @@ export interface UsePlaygroundPersistenceDeps {
   invalidateServerChatHistory: () => void
   navigate: (path: string) => void
   notificationApi: {
+    destroy?: (key?: string) => void
     error: (opts: Record<string, any>) => void
     warning: (opts: Record<string, any>) => void
     info: (opts: Record<string, any>) => void
@@ -80,6 +92,14 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
   const [showServerPersistenceHint, setShowServerPersistenceHint] =
     React.useState(false)
   const serverSaveInFlightRef = React.useRef(false)
+  const activeSaveControllerRef = React.useRef<AbortController | null>(null)
+  const latestDepsRef = React.useRef(deps)
+  latestDepsRef.current = deps
+  React.useEffect(() => () => activeSaveControllerRef.current?.abort(), [])
+  React.useEffect(
+    () => () => clearChatPromotion(setServerChatId, deps.historyId),
+    [setServerChatId, deps.historyId, temporaryChat]
+  )
   const historyRef = React.useRef(history)
   const selectedAssistantModeRef = React.useRef(selectedAssistantMode)
   const characterWorkflowActiveRef = React.useRef(characterWorkflowActive)
@@ -116,15 +136,12 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
     serverPersistenceHintSeenRef.current = serverPersistenceHintSeen
   }, [serverPersistenceHintSeen])
 
-  const {
-    persistenceTooltip,
-    focusConnectionCard,
-    getPersistenceModeLabel
-  } = usePersistenceMode({
-    temporaryChat,
-    serverChatId,
-    isConnectionReady
-  })
+  const { persistenceTooltip, focusConnectionCard, getPersistenceModeLabel } =
+    usePersistenceMode({
+      temporaryChat,
+      serverChatId,
+      isConnectionReady
+    })
 
   const privateChatLocked = temporaryChat && history.length > 0
 
@@ -225,8 +242,44 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
   const handleSaveChatToServer = React.useCallback(async () => {
     if (serverSaveInFlightRef.current) return
     serverSaveInFlightRef.current = true
+    const controller = new AbortController()
+    activeSaveControllerRef.current = controller
+    const capturedHistoryId = latestDepsRef.current.historyId
+    let createdChatId: string | null = null
+    const acknowledgedIds: string[] = []
+    let requestSnapshot: ServicePromptSnapshot | undefined
+    const isCurrentSave = () => {
+      const current = latestDepsRef.current
+      return (
+        !controller.signal.aborted &&
+        !requestSnapshot?.scopeSignal.aborted &&
+        !current.temporaryChat &&
+        current.historyId === capturedHistoryId &&
+        current.history.length > 0 &&
+        (!current.serverChatId || current.serverChatId === createdChatId)
+      )
+    }
+    const requireConnectionReady = () => {
+      if (!latestDepsRef.current.isConnectionReady) {
+        throw new Error(
+          "Connection unavailable. Reconnect, then retry saving chat."
+        )
+      }
+    }
     try {
-      const snapshot = [...historyRef.current]
+      const retry = retryChatPromotion(setServerChatId, capturedHistoryId)
+      if (retry) {
+        await retry
+        return
+      }
+      const snapshot = historyRef.current
+        .map((msg) => ({
+          role: ["system", "assistant", "user"].includes(msg.role)
+            ? msg.role
+            : "user",
+          content: (msg.content || "").trim()
+        }))
+        .filter((msg) => msg.content)
       if (
         !isConnectionReady ||
         temporaryChat ||
@@ -247,81 +300,189 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
       if (characterWorkflowNeedsTrackedCharacter) {
         return
       }
-      await tldwClient.initialize()
-      const firstUser = snapshot.find((m) => m.role === "user")
-      const explicitSource =
-        serverChatSourceRef.current &&
-        serverChatSourceRef.current.trim().length > 0
-          ? serverChatSourceRef.current.trim()
-          : null
-      const fallbackTitle =
-        explicitSource === "extension"
-          ? t(
-              "playground:composer.persistence.serverDefaultTitle",
-              "Extension chat"
+      await trackChatPromotion(
+        setServerChatId,
+        capturedHistoryId,
+        loadServicePromptSnapshot([], { signal: controller.signal }),
+        async (scopeSnapshot) => {
+          requestSnapshot = scopeSnapshot
+          if (!isCurrentSave()) return
+          requireConnectionReady()
+          const firstUser = snapshot.find((m) => m.role === "user")
+          const explicitSource =
+            serverChatSourceRef.current &&
+            serverChatSourceRef.current.trim().length > 0
+              ? serverChatSourceRef.current.trim()
+              : null
+          const fallbackTitle =
+            explicitSource === "extension"
+              ? t(
+                  "playground:composer.persistence.serverDefaultTitle",
+                  "Extension chat"
+                )
+              : t(
+                  "playground:composer.persistence.serverWebUiDefaultTitle",
+                  "WebUI chat"
+                )
+          const titleSource =
+            typeof firstUser?.content === "string" &&
+            firstUser.content.trim().length > 0
+              ? firstUser.content.trim()
+              : fallbackTitle
+          const title =
+            titleSource.length > 80
+              ? `${titleSource.slice(0, 77)}…`
+              : titleSource
+
+          const createPayload = {
+            title,
+            state: serverChatStateRef.current || "in-progress",
+            source: explicitSource || WEBUI_CHAT_SOURCE
+          }
+          const requestOptions = {
+            signal: requestSnapshot.scopeSignal,
+            requestScope: requestSnapshot.requestScope
+          }
+          // Every resumed conversation needs a fresh prefix check, including
+          // readiness pauses after an acknowledged create or message write.
+          const reconcileExistingChat = createdChatId !== null
+          if (!createdChatId) {
+            const created = await tldwClient.createChat(
+              createPayload,
+              requestOptions
             )
-          : t(
-              "playground:composer.persistence.serverWebUiDefaultTitle",
-              "WebUI chat"
+            if (!isCurrentSave()) return
+            const rawId =
+              (created as any)?.id ?? (created as any)?.chat_id ?? created
+            const cid = rawId != null ? String(rawId) : ""
+            if (!cid) {
+              throw new Error("Failed to create server chat")
+            }
+            createdChatId = cid
+            setServerChatId(cid)
+            setServerChatState(
+              (created as any)?.state ??
+                (created as any)?.conversation_state ??
+                serverChatStateRef.current ??
+                "in-progress"
             )
-      const titleSource =
-        typeof firstUser?.content === "string" &&
-        firstUser.content.trim().length > 0
-          ? firstUser.content.trim()
-          : fallbackTitle
-      const title =
-        titleSource.length > 80 ? `${titleSource.slice(0, 77)}…` : titleSource
+            setServerChatSource(
+              (created as any)?.source ?? serverChatSourceRef.current ?? null
+            )
+            setServerChatVersion((created as any)?.version ?? null)
+            invalidateServerChatHistory()
+          }
 
-      const createPayload = {
-        title,
-        state: serverChatStateRef.current || "in-progress",
-        source: explicitSource || WEBUI_CHAT_SOURCE
-      }
-      const created = await tldwClient.createChat(createPayload)
-      const rawId = (created as any)?.id ?? (created as any)?.chat_id ?? created
-      const cid = rawId != null ? String(rawId) : ""
-      if (!cid) {
-        throw new Error("Failed to create server chat")
-      }
-      setServerChatId(cid)
-      setServerChatState(
-        (created as any)?.state ??
-          (created as any)?.conversation_state ??
-          serverChatStateRef.current ??
-          "in-progress"
+          const cid = createdChatId
+          if (reconcileExistingChat) {
+            const stored = []
+            for (let offset = 0; ; offset += 200) {
+              requireConnectionReady()
+              const batch = await tldwClient.listChatMessages(
+                cid,
+                { limit: 200, offset, render_placeholders: false },
+                { ...requestOptions, fresh: true }
+              )
+              if (!isCurrentSave()) return
+              stored.push(...batch)
+              if (stored.length > snapshot.length || batch.length < 200) break
+            }
+            const prefixMatches =
+              stored.length >= acknowledgedIds.length &&
+              stored.length <= snapshot.length &&
+              stored.every(
+                (row, index) =>
+                  Boolean(row.id) &&
+                  (row.role || row.sender) === snapshot[index]?.role &&
+                  row.content === snapshot[index]?.content &&
+                  (!acknowledgedIds[index] ||
+                    String(row.id) === acknowledgedIds[index])
+              )
+            if (!prefixMatches)
+              throw new Error(
+                "Saved messages changed during recovery. Keep this local chat and resolve the server history before retrying."
+              )
+            acknowledgedIds.splice(
+              0,
+              acknowledgedIds.length,
+              ...stored.map((row) => String(row.id))
+            )
+          }
+          for (const msg of snapshot.slice(acknowledgedIds.length)) {
+            if (!isCurrentSave()) return
+            requireConnectionReady()
+            const saved = await tldwClient.addChatMessage(
+              cid,
+              msg,
+              requestOptions
+            )
+            if (!isCurrentSave()) return
+            if (!saved?.id)
+              throw new Error(
+                "The server did not confirm the saved message identity."
+              )
+            acknowledgedIds.push(String(saved.id))
+          }
+
+          if (!isCurrentSave()) return
+          if (!serverPersistenceHintSeenRef.current) {
+            serverPersistenceHintSeenRef.current = true
+            setServerPersistenceHintSeen(true)
+            setShowServerPersistenceHint(true)
+          }
+        },
+        {
+          abort: () => controller.abort(),
+          onComplete: () =>
+            notificationApi.destroy?.(`chat-promotion-${capturedHistoryId}`),
+          onFailure: (error, retrying) => {
+            if (!isCurrentSave()) return
+            notificationApi.error({
+              key: `chat-promotion-${capturedHistoryId}`,
+              duration: 0,
+              title: t(
+                "playground:composer.persistence.incompleteTitle",
+                "Chat saving is incomplete"
+              ),
+              description:
+                t(
+                  "playground:composer.persistence.incompleteBody",
+                  "Earlier messages are not fully saved. Retry saving chat before continuing."
+                ) + (error instanceof Error ? ` ${error.message}` : ""),
+              actions: (
+                <button
+                  type="button"
+                  disabled={retrying}
+                  onClick={() => {
+                    if (isCurrentSave()) void handleSaveChatToServer()
+                  }}
+                >
+                  {t(
+                    "playground:composer.persistence.retrySave",
+                    "Retry saving chat"
+                  )}
+                </button>
+              )
+            })
+          }
+        }
       )
-      setServerChatSource(
-        (created as any)?.source ?? serverChatSourceRef.current ?? null
-      )
-      setServerChatVersion((created as any)?.version ?? null)
-      invalidateServerChatHistory()
-
-      for (const msg of snapshot) {
-        const content = (msg.content || "").trim()
-        if (!content) continue
-        const role =
-          msg.role === "system" ||
-          msg.role === "assistant" ||
-          msg.role === "user"
-            ? msg.role
-            : "user"
-        await tldwClient.addChatMessage(cid, {
-          role,
-          content
-        })
-      }
-
-      if (!serverPersistenceHintSeenRef.current) {
-        serverPersistenceHintSeenRef.current = true
-        setServerPersistenceHintSeen(true)
-        setShowServerPersistenceHint(true)
-      }
     } catch (e: any) {
+      if (
+        controller.signal.aborted ||
+        requestSnapshot?.scopeSignal.aborted ||
+        isRequestConfigScopeChangedError(e) ||
+        isChatPromotionIncompleteError(e)
+      )
+        return
       notificationApi.error({
         message: t("error"),
         description: e?.message || t("somethingWentWrong")
       })
     } finally {
+      if (activeSaveControllerRef.current === controller) {
+        activeSaveControllerRef.current = null
+      }
       serverSaveInFlightRef.current = false
     }
   }, [
@@ -408,4 +569,6 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
   }
 }
 
-export type UsePlaygroundPersistenceReturn = ReturnType<typeof usePlaygroundPersistence>
+export type UsePlaygroundPersistenceReturn = ReturnType<
+  typeof usePlaygroundPersistence
+>

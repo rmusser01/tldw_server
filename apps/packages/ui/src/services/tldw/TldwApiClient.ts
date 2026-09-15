@@ -5831,7 +5831,7 @@ export class TldwApiClientBase {
   async listChatMessages(
     chat_id: string | number,
     params?: Record<string, any>,
-    options?: { signal?: AbortSignal; scope?: ChatScope }
+    options?: { signal?: AbortSignal; scope?: ChatScope; requestScope?: ServicePromptRequestScope; fresh?: boolean }
   ): Promise<ServerChatMessage[]> {
     const cid = String(chat_id)
     const query = this.buildQuery({
@@ -5839,7 +5839,8 @@ export class TldwApiClientBase {
       ...(params || {})
     })
     const cacheKey = this.getChatMessagesCacheKey(cid, query)
-    const cached = this.chatMessagesCache.get(cacheKey)
+    const useSharedCache = !options?.fresh && !options?.requestScope
+    const cached = useSharedCache ? this.chatMessagesCache.get(cacheKey) : undefined
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value
     }
@@ -5847,16 +5848,21 @@ export class TldwApiClientBase {
       this.chatMessagesCache.delete(cacheKey)
     }
 
-    const inFlight = this.chatMessagesInFlight.get(cacheKey)
+    const inFlight = useSharedCache ? this.chatMessagesInFlight.get(cacheKey) : undefined
     if (inFlight) {
       return inFlight
     }
 
     const request = (async () => {
+      const scopeFields = requestScopeFields(options?.requestScope)
       const data = await bgRequest<any>({
         path: `/api/v1/chats/${cid}/messages${query}`,
         method: "GET",
-        abortSignal: options?.signal
+        abortSignal: options?.signal,
+        ...(scopeFields.servicePromptConfig ? {
+          headers: scopeFields.headers,
+          servicePromptConfig: scopeFields.servicePromptConfig
+        } : {})
       })
 
       let list: any[] = []
@@ -5961,18 +5967,18 @@ export class TldwApiClientBase {
           pinned
         } as ServerChatMessage
       })
-      this.chatMessagesCache.set(cacheKey, {
+      if (useSharedCache) this.chatMessagesCache.set(cacheKey, {
         value: normalized,
         expiresAt: Date.now() + CHAT_MESSAGES_CACHE_TTL_MS
       })
       return normalized
     })()
 
-    this.chatMessagesInFlight.set(cacheKey, request)
+    if (useSharedCache) this.chatMessagesInFlight.set(cacheKey, request)
     try {
       return await request
     } finally {
-      this.chatMessagesInFlight.delete(cacheKey)
+      if (useSharedCache) this.chatMessagesInFlight.delete(cacheKey)
     }
   }
 

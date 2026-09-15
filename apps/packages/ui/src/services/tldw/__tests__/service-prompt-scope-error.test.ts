@@ -13,6 +13,17 @@ import {
 
 describe("Service Prompt scope policy", () => {
   it.each([
+    ["/api/v1/chats/owned-chat/messages?limit=200&offset=0", true],
+    ["/api/v1/chats/other-chat/messages", true],
+    ["/api/v1/chats/owned-chat", false],
+    ["/api/v1/chats/owned-chat/messages/other-message", false],
+    ["/api/v1/chats/a%2fb/messages", false],
+    ["/api/v1/chats/%2e%2e/messages", false],
+    ["/api/v1/chats//messages", false]
+  ])("bounds the scoped message-list route %s", (path, allowed) => {
+    expect(isServicePromptRequestPath(path, "GET")).toBe(allowed)
+  })
+  it.each([
     ["/api/v1/notes/", "POST", true],
     ["/api/v1/notes/private-note", "GET", true],
     ["/api/v1/notes/private-note", "PUT", true],
@@ -131,7 +142,7 @@ describe("Service Prompt scope policy", () => {
     expect(isServicePromptRequestPath("/api/v1/chat/completions", "GET")).toBe(false)
     expect(isServicePromptRequestPath("/api/v1/rag/search", "DELETE")).toBe(false)
     expect(isServicePromptRequestPath("/api/v1/research/websearch", "PATCH")).toBe(false)
-    expect(isServicePromptRequestPath("/api/v1/chats/chat-1/messages", "GET")).toBe(false)
+    expect(isServicePromptRequestPath("/api/v1/chats/chat-1/messages", "GET")).toBe(true)
     expect(isServicePromptRequestPath("/api/v1/chats/", "GET")).toBe(false)
     expect(isServicePromptRequestPath("/api/v1/chats", "POST")).toBe(false)
     expect(isServicePromptRequestPath("/api/v1/media/add", "GET")).toBe(false)

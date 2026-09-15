@@ -637,6 +637,7 @@ describe("useChatActions persona integration", () => {
   })
 
   it("adopts the first persisted plain chat so server message actions become available", async () => {
+    createChatMock.mockResolvedValueOnce({ id: "first-saved-chat", title: "Hello" })
     normalChatModeMock.mockImplementationOnce(async (...args: unknown[]) => {
       const params = args[6] as { saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null> }
       await params.saveMessageOnSuccess({
@@ -855,7 +856,7 @@ describe("useChatActions persona integration", () => {
     expect(ragModeMock).not.toHaveBeenCalled()
   })
 
-  it("keeps plain global sends out of the workspace server-chat bootstrap path", async () => {
+  it("reuses an existing global conversation through inference and local persistence", async () => {
     let capturedParams:
       | {
           conversationId?: string | null
@@ -897,10 +898,10 @@ describe("useChatActions persona integration", () => {
     })
 
     expect(createChatMock).not.toHaveBeenCalled()
-    expect(capturedParams?.serverChatId).toBeUndefined()
-    expect(capturedParams?.conversationId).toBeUndefined()
+    expect(capturedParams?.serverChatId).toBe("existing-global-chat")
+    expect(capturedParams?.conversationId).toBe("existing-global-chat")
     expect(baseSaveMessageOnSuccessMock).toHaveBeenCalledWith(
-      expect.not.objectContaining({
+      expect.objectContaining({
         conversationId: "existing-global-chat"
       })
     )

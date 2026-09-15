@@ -1,4 +1,5 @@
 import React from "react"
+import { isChatPromotionIncompleteError, waitForChatPromotion } from "@/services/pending-chat-promotion"
 import type { NotificationInstance } from "antd/es/notification/interface"
 import type { TFunction } from "i18next"
 import {
@@ -111,6 +112,7 @@ import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPers
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import { ensurePersonaServerChat } from "@/hooks/chat/personaServerChat"
 import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing"
+import { WEBUI_CHAT_SOURCE } from "@/utils/character-chat-session"
 import { resolveVisualIdentityBindingWithCache } from "@/hooks/useVisualIdentityResolver"
 import {
   aggregateChatSubmitResults,
@@ -577,6 +579,12 @@ export const useChatActions = ({
   visualIdentityManualExpressionOverride,
   setVisualIdentityManualExpressionOverride
 }: UseChatActionsOptions) => {
+  const latestChatContext = React.useRef({ historyId, serverChatId, temporaryChat })
+  latestChatContext.current = { historyId, serverChatId, temporaryChat }
+  const readCurrentChatContext = React.useCallback(() => {
+    const state = useStoreMessageOption.getState()
+    return state.setServerChatId === setServerChatId ? state : latestChatContext.current
+  }, [setServerChatId])
   const [appendFormattingGuidePrompt] = useStorage(
     PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY,
     false
@@ -1476,24 +1484,55 @@ export const useChatActions = ({
     async ({
       message,
       serverChatIdOverride,
-      servicePromptSnapshot
+      servicePromptSnapshot,
+      allowGlobal = false
     }: {
       message: string
       serverChatIdOverride?: string | null
       servicePromptSnapshot?: ServicePromptSnapshot
+      allowGlobal?: boolean
     }): Promise<{ chatId: string | null; historyId: string | null }> => {
+      let linkedHistoryId: string | null = historyId
+      const throwIfTurnCancelled = () => {
+        throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
+        servicePromptSnapshot?.scopeSignal.throwIfAborted()
+        const current = readCurrentChatContext()
+        if ((current.historyId !== historyId && current.historyId !== linkedHistoryId) ||
+          current.temporaryChat !== temporaryChat) {
+          throw new DOMException("The active chat changed before sending", "AbortError")
+        }
+      }
+      throwIfTurnCancelled()
       const overrideChatId =
         typeof serverChatIdOverride === "string" &&
         serverChatIdOverride.trim().length > 0
           ? serverChatIdOverride.trim()
           : null
-      const resolvedServerChatId = overrideChatId || serverChatId
-
-      if (scope?.type !== "workspace" || temporaryChat) {
+      if (temporaryChat || (scope?.type !== "workspace" && !allowGlobal)) {
         return { chatId: null, historyId: null }
       }
 
+      if (allowGlobal && servicePromptSnapshot) {
+        await waitForChatPromotion(setServerChatId, historyId, servicePromptSnapshot)
+        throwIfTurnCancelled()
+      }
+      const currentChat = readCurrentChatContext()
+      // Promotion may finish while scope initialization or the wait above is
+      // pending, so the callback's captured server ID is no longer authoritative.
+      const resolvedServerChatId = overrideChatId || currentChat.serverChatId
+
       if (resolvedServerChatId) {
+        if (scope?.type !== "workspace") {
+          throwIfTurnCancelled()
+          const ensuredHistoryId = await ensureServerChatHistoryId(
+            resolvedServerChatId,
+            serverChatTitle || undefined,
+            servicePromptSnapshot?.scopeInvalidatedSignal
+          )
+          linkedHistoryId = ensuredHistoryId
+          throwIfTurnCancelled()
+          return { chatId: resolvedServerChatId, historyId: ensuredHistoryId }
+        }
         let validatedServerChatId: string | null = null
         try {
           const chat: ServerChatSummary = await tldwClient.getChat(
@@ -1546,7 +1585,8 @@ export const useChatActions = ({
         state: serverChatState || "in-progress",
         topic_label: serverChatTopic || undefined,
         cluster_id: serverChatClusterId || undefined,
-        source: serverChatSource || undefined,
+        source: serverChatSource ||
+          (scope?.type === "workspace" ? undefined : WEBUI_CHAT_SOURCE),
         external_ref: serverChatExternalRef || undefined
       }
       const created = (await tldwClient.createChat(createPayload, {
@@ -1555,7 +1595,7 @@ export const useChatActions = ({
         signal: servicePromptSnapshot?.scopeSignal
       })) as TldwChatMeta
 
-      throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
+      throwIfTurnCancelled()
 
       let rawId: string | number | undefined
       let publishCreatedMetadata: (() => void) | null = null
@@ -1588,7 +1628,7 @@ export const useChatActions = ({
 
       const normalizedId = rawId != null ? String(rawId) : ""
       if (!normalizedId) {
-        throw new Error("Failed to create workspace chat session")
+        throw new Error("Failed to create saved chat session")
       }
 
       const createdTitle =
@@ -1601,7 +1641,8 @@ export const useChatActions = ({
         createdTitle || titleSeed || undefined,
         servicePromptSnapshot?.scopeInvalidatedSignal
       )
-      throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
+      linkedHistoryId = ensuredHistoryId
+      throwIfTurnCancelled()
       publishCreatedMetadata?.()
       setServerChatId(normalizedId)
       setServerChatTitle(createdTitle)
@@ -1616,6 +1657,8 @@ export const useChatActions = ({
     [
       ensureServerChatHistoryId,
       invalidateServerChatHistory,
+      readCurrentChatContext,
+      historyId,
       scope,
       serverChatClusterId,
       serverChatExternalRef,
@@ -3286,7 +3329,18 @@ export const useChatActions = ({
     try {
       // Pre-stream awaits run inside the try so a failure resets streaming state
       // (and lets the caller drain its queue) instead of stranding the UI.
-      if (turnPromptIds.length > 0) {
+      const needsSavedNormalScope =
+        !temporaryChat &&
+        !compareModeActive &&
+        !isContinue &&
+        !turnUsesImageMode &&
+        turnContextFiles.length === 0 &&
+        !docs?.length &&
+        !documentContext?.length &&
+        !turnShouldUseRag &&
+        turnResolvedSendMode !== "tracked_character" &&
+        turnResolvedSendMode !== "tracked_persona"
+      if (turnPromptIds.length > 0 || needsSavedNormalScope) {
         const loadedSnapshot = await loadServicePromptSnapshot(turnPromptIds, {
           signal
         })
@@ -3690,11 +3744,24 @@ export const useChatActions = ({
           const workspaceServerChat = await ensureWorkspaceServerChatForTurn({
             message,
             serverChatIdOverride,
-            servicePromptSnapshot: turnServicePromptSnapshot
+            servicePromptSnapshot: turnServicePromptSnapshot,
+            allowGlobal: true
           })
           const scopedNormalModeParams = workspaceServerChat.chatId
             ? {
                 ...normalModeParams,
+                // A late local-save failure must not restore this turn's
+                // captured messages over a newly signed-in account's state.
+                setMessages: (next: Parameters<typeof setMessages>[0]) => {
+                  if (!turnServicePromptSnapshot?.scopeInvalidatedSignal.aborted) {
+                    setMessages(next)
+                  }
+                },
+                setHistory: (next: Parameters<typeof setHistory>[0]) => {
+                  if (!turnServicePromptSnapshot?.scopeInvalidatedSignal.aborted) {
+                    setHistory(next)
+                  }
+                },
                 historyId:
                   workspaceServerChat.historyId ?? normalModeParams.historyId,
                 serverChatId: workspaceServerChat.chatId,
@@ -4071,7 +4138,7 @@ export const useChatActions = ({
         signal.aborted &&
         isAbortLikeError(e) &&
         !isRequestConfigScopeChangedError(e)
-      if (!requestCancelled) {
+      if (!requestCancelled && !isChatPromotionIncompleteError(e)) {
         notification.error({
           message: t("error"),
           description: errorMessage

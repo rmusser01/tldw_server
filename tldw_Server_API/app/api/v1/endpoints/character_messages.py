@@ -553,6 +553,13 @@ async def get_chat_messages(
     format_for_completions: bool = Query(False, description="Format messages for use with chat/completions endpoint"),
     include_tool_calls: bool = Query(False, description="Include tool_calls metadata per message when available (standard format only)"),
     include_metadata: bool = Query(False, description="Include stored message metadata.extra JSON where available"),
+    render_placeholders: bool = Query(
+        True,
+        description=(
+            "Expand character/user placeholders in standard message content. "
+            "Set false to read exact stored text; completion-formatted output remains rendered."
+        ),
+    ),
     include_message_ids: bool = Query(
         False,
         description="Include message_id fields when formatting for completions (no effect on standard format)",
@@ -573,6 +580,7 @@ async def get_chat_messages(
         include_character_context: Include character personality as system message
         format_for_completions: Return in format ready for /api/v1/chat/completions
         include_message_ids: Include message_id fields only in completions-formatted output
+        render_placeholders: Expand placeholders in standard message bodies (default true)
         db: Database instance
         current_user: Authenticated user
 
@@ -781,7 +789,8 @@ async def get_chat_messages(
             built_messages = []
             for m in paginated:
                 msg_copy = dict(m)
-                msg_copy["content"] = _replace_text(msg_copy.get("content"))
+                if render_placeholders:
+                    msg_copy["content"] = _replace_text(msg_copy.get("content"))
                 resp = _convert_db_message_to_response(msg_copy)
                 # Fetch metadata once if either flag is set (avoid duplicate queries)
                 if include_tool_calls or include_metadata:
@@ -850,7 +859,8 @@ async def get_chat_messages(
 
         for m in paginated:
             msg_copy = dict(m)
-            msg_copy["content"] = _replace_text_std(msg_copy.get("content"))
+            if render_placeholders:
+                msg_copy["content"] = _replace_text_std(msg_copy.get("content"))
             resp = _convert_db_message_to_response(msg_copy)
             # Fetch metadata once if either flag is set (avoid duplicate queries)
             if include_tool_calls or include_metadata:
