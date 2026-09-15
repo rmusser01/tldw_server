@@ -117,6 +117,7 @@ export const isServicePromptRequestPath = (
       /^\/api\/v1\/writing\/manuscripts\/(?:scenes\/[^/]+|projects\/[^/]+\/(?:characters|world-info))$/.test(pathname)
   }
   if (requestMethod !== "POST") return false
+  if (pathname === "/api/v1/flashcards/review" || pathname === "/api/v1/flashcards/review-sessions/end") return true
   if (["/api/v1/flashcards", "/api/v1/flashcards/decks", "/api/v1/flashcards/generate"].includes(pathname)) return true
   if (pathname === "/api/v1/chats/") return true
   return /^\/api\/v1\/(?:auth\/refresh|chat\/completions|media\/add|rag\/search|research\/websearch)$/.test(pathname) ||

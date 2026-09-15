@@ -37,6 +37,7 @@ import {
   type DeckCreateInput,
   type DeckUpdate,
   type Flashcard,
+  type FlashcardReviewContext,
   type FlashcardTemplateCreate,
   type FlashcardTemplateUpdate,
   type StudyAssistantContextResponse,
@@ -322,8 +323,10 @@ export function useEndFlashcardReviewSessionMutation() {
 
   return useMutation({
     mutationKey: ["flashcards:review-sessions:end"],
-    mutationFn: (reviewSessionId: number) => endFlashcardReviewSession(reviewSessionId),
-    onSuccess: async () => {
+    mutationFn: (params: number | { reviewSessionId: number; options?: FlashcardsRequestOptions }) =>
+      typeof params === "number" ? endFlashcardReviewSession(params) : endFlashcardReviewSession(params.reviewSessionId, params.options),
+    onSuccess: async (_result, params) => {
+      if (typeof params !== "number" && params.options?.signal?.aborted) return
       await invalidateFlashcardsQueries(queryClient)
     }
   })
@@ -939,16 +942,20 @@ export function useReviewFlashcardMutation() {
 
   return useMutation({
     mutationKey: ["flashcards:review"],
-    mutationFn: (params: { cardUuid: string; rating: number; answerTimeMs?: number }) =>
+    mutationFn: (params: { cardUuid: string; rating: number; answerTimeMs?: number; reviewContext?: FlashcardReviewContext; reviewSessionId?: number; options?: FlashcardsRequestOptions }) =>
       reviewFlashcard({
         card_uuid: params.cardUuid,
         rating: params.rating,
-        answer_time_ms: params.answerTimeMs
-      }),
-    onSuccess: () => {
+        answer_time_ms: params.answerTimeMs,
+        ...(params.reviewContext ? { review_context: params.reviewContext } : {}),
+        ...(params.reviewSessionId != null ? { review_session_id: params.reviewSessionId } : {})
+      }, params.options),
+    onSuccess: (_result, params) => {
+      if (params.options?.signal?.aborted) return
       invalidateFlashcardsQueries(qc)
     },
-    onError: (error) => {
+    onError: (error, params) => {
+      if (params.options?.signal?.aborted) return
       console.error("Failed to submit flashcard review:", error)
     }
   })

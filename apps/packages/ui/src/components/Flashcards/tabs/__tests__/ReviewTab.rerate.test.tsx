@@ -34,6 +34,11 @@ const messageSpies = {
   destroy: vi.fn()
 }
 
+vi.mock("@/services/service-prompts", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  ...await import("./review-scope-fixture")
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -93,7 +98,7 @@ vi.mock("../../hooks", () => ({
   useCramQueueQuery: vi.fn(),
   useReviewQuery: vi.fn(),
   useReviewFlashcardMutation: vi.fn(),
-  useEndFlashcardReviewSessionMutation: vi.fn(),
+  useEndFlashcardReviewSessionMutation: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({ id: 77 }), isPending: false })),
   useRecentFlashcardReviewSessionsQuery: vi.fn(() => ({
     data: [],
     isLoading: false,
@@ -198,6 +203,7 @@ describe("ReviewTab re-rate action", () => {
       mutateAsync: vi.fn().mockImplementation(async () => {
         currentCard = secondCard
         return {
+          review_session_id: 77,
           uuid: firstCard.uuid,
           ef: 2.6,
           interval_days: 2,
@@ -210,7 +216,7 @@ describe("ReviewTab re-rate action", () => {
       isPending: false
     } as any)
     vi.mocked(useEndFlashcardReviewSessionMutation).mockReturnValue({
-      mutateAsync: vi.fn(),
+      mutateAsync: vi.fn().mockResolvedValue({ id: 77 }),
       isPending: false
     } as any)
     vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
@@ -293,5 +299,13 @@ describe("ReviewTab re-rate action", () => {
       expect(screen.getByText("Question one")).toBeInTheDocument()
       expect(screen.getByText("Answer one")).toBeInTheDocument()
     })
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-4"))
+    const mutation = vi.mocked(useReviewFlashcardMutation).mock.results[0].value.mutateAsync
+    await waitFor(() => expect(mutation).toHaveBeenCalledTimes(2))
+    expect(mutation.mock.calls[1][0]).toEqual(expect.objectContaining({
+      cardUuid: firstCard.uuid, rating: 5, reviewSessionId: 77,
+      reviewContext: { review_mode: "due", deck_id: 1, tag_filter: null }
+    }))
+    expect(vi.mocked(useEndFlashcardReviewSessionMutation).mock.results[0].value.mutateAsync).not.toHaveBeenCalled()
   })
 })

@@ -1,4 +1,5 @@
 import React from "react"
+import { isInactiveFlashcardReviewSessionError, useFlashcardReviewRun } from "../hooks/useFlashcardReviewRun"
 import {
   Button,
   Card,
@@ -139,6 +140,11 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
         operation,
         fallback
       })
+      if (isInactiveFlashcardReviewSessionError(error)) {
+        mapped.message = t("option:flashcards.reviewSessionInactive", {
+          defaultValue: "This study session has ended. Start a new session to rate this card."
+        })
+      }
       console.warn("[flashcards:error]", {
         code: mapped.code,
         status: mapped.status,
@@ -156,7 +162,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
       message.error(formatFlashcardsUiErrorMessage(mapped))
       return mapped
     },
-    [message]
+    [message, t]
   )
 
   // State
@@ -175,7 +181,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   )
   const [isReloadingFailedCard, setIsReloadingFailedCard] = React.useState(false)
   const [isReviewOnboardingDismissed, setIsReviewOnboardingDismissed] = React.useState(false)
-  const [activeReviewSessionId, setActiveReviewSessionId] = React.useState<number | null>(null)
   const [selectedStudySessionId, setSelectedStudySessionId] = React.useState<number | null>(null)
   const [allDeckReviewStarted, setAllDeckReviewStarted] = React.useState(false)
   const [shortcutHintDensity, setShortcutHintDensity] = useFlashcardsShortcutHintDensity()
@@ -188,16 +193,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const undoTimeoutRef = React.useRef<number | null>(null)
   const undoIntervalRef = React.useRef<number | null>(null)
   const autoRevealAnswerRef = React.useRef(false)
-  const activeReviewSessionIdRef = React.useRef<number | null>(null)
-  const previousActiveCardUuidRef = React.useRef<string | null>(null)
-  const previousReviewScopeKeyRef = React.useRef<string | null>(null)
-  const completeReviewSessionRef = React.useRef<(
-    reason: "manual" | "auto" | "scope_change",
-    options?: {
-      revealSnapshot?: boolean
-      sessionId?: number | null
-    }
-  ) => Promise<void>>()
   const autoEndSessionAttemptedRef = React.useRef<number | null>(null)
 
   // Auto-track answer time - stores the timestamp when answer was revealed
@@ -230,6 +225,15 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const nextDueQuery = useNextDueQuery(reviewDeckId, directPathVisibilityOptions)
   const endReviewSessionMutation = useEndFlashcardReviewSessionMutation()
   const activeCramTagFilter = reviewMode === "cram" ? cramTagFilter : undefined
+  const reviewRun = useFlashcardReviewRun({
+    context: { review_mode: reviewMode, deck_id: reviewDeckId ?? null, tag_filter: activeCramTagFilter ?? null },
+    enabled: isActive && (reviewMode === "due" || cramUpdatesSchedule),
+    review: reviewMutation.mutateAsync,
+    end: endReviewSessionMutation.mutateAsync,
+    onCloseError: error => reportUiError(error, "ending the review session", t("option:flashcards.reviewSessionEndFailed", { defaultValue: "Failed to end session." }))
+  })
+  const activeReviewSessionId = reviewRun.activeSessionId
+
   const rawDueModeActiveCard = localOverrideCard ?? reviewOverrideCard ?? reviewQuery.data
   const isAllDeckDueReview = reviewMode === "due" && reviewDeckId == null
   const canShowAllDeckDashboard =
@@ -592,15 +596,13 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           return true
         }
 
-        const reviewResult = await reviewMutation.mutateAsync({
+        const reviewResult = await reviewRun.submit({
           cardUuid: card.uuid,
           rating,
           answerTimeMs: attemptedAnswerTimeMs
         })
-        if (typeof reviewResult.review_session_id === "number") {
-          setActiveReviewSessionId(reviewResult.review_session_id)
-          setSelectedStudySessionId(null)
-        }
+        if (!reviewResult) return false
+        setSelectedStudySessionId(null)
         setReviewFailure(null)
         setShowAnswer(false)
         answerStartTimeRef.current = null
@@ -692,9 +694,9 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
               rating,
               answerTimeMs: attemptedAnswerTimeMs
             },
-            canReload:
-              mapped.code === "FLASHCARDS_VERSION_CONFLICT" ||
-              mapped.code === "FLASHCARDS_NOT_FOUND"
+            canReload: !isInactiveFlashcardReviewSessionError(e) && (
+              mapped.code === "FLASHCARDS_VERSION_CONFLICT" || mapped.code === "FLASHCARDS_NOT_FOUND"
+            )
           })
         }
         return false
@@ -709,11 +711,22 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
       onClearOverride,
       reportUiError,
       reviewMode,
-      reviewMutation,
+      reviewRun,
       reviewOverrideCard,
       t
     ]
   )
+
+  const handleRestartReviewSession = () => {
+    if (!reviewRun.restart()) return
+    setReviewFailure(null)
+    setSelectedStudySessionId(null)
+    setReviewedCount(0)
+    setShowUndoButton(false)
+    setLastReviewedCard(null)
+    if (undoTimeoutRef.current) window.clearTimeout(undoTimeoutRef.current)
+    if (undoIntervalRef.current) window.clearInterval(undoIntervalRef.current)
+  }
 
   const handleRetryFailedReview = React.useCallback(async () => {
     if (!reviewFailure || reviewMutation.isPending) return
@@ -779,42 +792,24 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   }, [dueCountsQuery, message, reportUiError, reviewFailure, reviewQuery, t])
 
   const completeReviewSession = React.useCallback(
-    async (
-      reason: "manual" | "auto" | "scope_change",
-      options?: {
-        revealSnapshot?: boolean
-        sessionId?: number | null
-      }
-    ) => {
-      const sessionId = options?.sessionId ?? activeReviewSessionId
-      if (sessionId == null || endReviewSessionMutation.isPending) {
-        return
-      }
-      if (reason === "auto" && autoEndSessionAttemptedRef.current === sessionId) {
-        return
-      }
-      if (reason === "auto") {
-        autoEndSessionAttemptedRef.current = sessionId
-      }
-
+    async (reason: "manual" | "auto") => {
+      const sessionId = activeReviewSessionId
+      if (sessionId == null || reviewRun.isPending) return
+      if (reason === "auto" && autoEndSessionAttemptedRef.current === sessionId) return
+      if (reason === "auto") autoEndSessionAttemptedRef.current = sessionId
       try {
-        const completedSession = await endReviewSessionMutation.mutateAsync(sessionId)
-        setActiveReviewSessionId((current) => (current === sessionId ? null : current))
-        if (options?.revealSnapshot ?? reason !== "scope_change") {
+        const completedSession = await reviewRun.complete()
+        if (completedSession) {
           setSelectedStudySessionId(completedSession.id)
+          autoEndSessionAttemptedRef.current = null
         }
-        autoEndSessionAttemptedRef.current = null
       } catch (error: unknown) {
-        reportUiError(
-          error,
-          "ending the review session",
-          t("option:flashcards.reviewSessionEndFailed", {
-            defaultValue: "Failed to end session."
-          })
-        )
+        reportUiError(error, "ending the review session", t("option:flashcards.reviewSessionEndFailed", {
+          defaultValue: "Failed to end session."
+        }))
       }
     },
-    [activeReviewSessionId, endReviewSessionMutation, reportUiError, t]
+    [activeReviewSessionId, reviewRun, reportUiError, t]
   )
 
   const handleStudySuggestionActionResult = React.useCallback(
@@ -841,10 +836,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     },
     [currentDeckName, forceShowWorkspaceItems, navigate, onReviewDeckChange, reviewDeckId]
   )
-
-  React.useEffect(() => {
-    completeReviewSessionRef.current = completeReviewSession
-  }, [completeReviewSession])
 
   // Handle undo - re-present the last reviewed card
   const handleUndoReview = React.useCallback(() => {
@@ -937,13 +928,15 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   }, [activeCard?.uuid])
 
   React.useEffect(() => {
-    const previousActiveCardUuid = previousActiveCardUuidRef.current
-    const nextActiveCardUuid = activeCard?.uuid ?? null
-    if (previousActiveCardUuid && !nextActiveCardUuid && activeReviewSessionId != null) {
+    const exhausted = reviewMode === "due"
+      ? reviewQuery.isSuccess && !reviewQuery.isFetching && reviewQuery.data === null
+      : cramQueueQuery.isSuccess && !isCramQueueLoading && cramQueueIndex >= cramQueue.length
+    if (isActive && exhausted && !activeCard && !reviewRun.isPending && activeReviewSessionId != null) {
       void completeReviewSession("auto")
     }
-    previousActiveCardUuidRef.current = nextActiveCardUuid
-  }, [activeCard?.uuid, activeReviewSessionId, completeReviewSession])
+  }, [isActive, reviewMode, reviewQuery.isSuccess, reviewQuery.isFetching, reviewQuery.data,
+    cramQueueQuery.isSuccess, isCramQueueLoading, cramQueueIndex, cramQueue.length, activeCard,
+    reviewRun.isPending, activeReviewSessionId, completeReviewSession])
 
   // Track when the answer is shown (for auto-timing)
   const handleShowAnswer = React.useCallback(() => {
@@ -1065,17 +1058,8 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     setCramQueueIndex((idx) => Math.min(idx, cramQueue.length))
   }, [reviewMode, cramQueue.length])
 
+  // Presentation state belongs to the same review scope and authenticated owner.
   React.useEffect(() => {
-    activeReviewSessionIdRef.current = activeReviewSessionId
-  }, [activeReviewSessionId])
-
-  // Reset reviewed/session state when review scope changes
-  React.useEffect(() => {
-    const previousReviewScopeKey = previousReviewScopeKeyRef.current
-    const scopeChanged =
-      previousReviewScopeKey != null && previousReviewScopeKey !== reviewScopeKey
-    const sessionIdToClose = scopeChanged ? activeReviewSessionIdRef.current : null
-
     setReviewedCount(0)
     setCramQueueIndex(0)
     setLocalOverrideCard(null)
@@ -1087,23 +1071,14 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     setSessionReviewPromptSide(null)
     autoEndSessionAttemptedRef.current = null
     autoRevealAnswerRef.current = false
-    previousReviewScopeKeyRef.current = reviewScopeKey
 
-    if (sessionIdToClose != null) {
-      void (async () => {
-        try {
-          await completeReviewSessionRef.current?.("scope_change", {
-            sessionId: sessionIdToClose,
-            revealSnapshot: false
-          })
-        } finally {
-          setActiveReviewSessionId((current) =>
-            current === sessionIdToClose ? null : current
-          )
-        }
-      })()
-    }
-  }, [reviewScopeKey])
+    setReviewFailure(null)
+    setShowAnswer(false)
+    setAssistantOpen(false)
+    setEditDrawerOpen(false)
+    if (undoTimeoutRef.current) window.clearTimeout(undoTimeoutRef.current)
+    if (undoIntervalRef.current) window.clearInterval(undoIntervalRef.current)
+  }, [reviewScopeKey, reviewRun.authorityRevision])
 
   React.useEffect(() => {
     if (reviewOverrideCard) {
@@ -1460,7 +1435,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
               <div className="flex justify-end">
                 <Button
                   type="default"
-                  loading={endReviewSessionMutation.isPending}
+                  loading={reviewRun.isPending}
                   onClick={() => {
                     void completeReviewSession("manual")
                   }}
@@ -1590,13 +1565,13 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                             <Button
                               size="small"
                               type="primary"
-                              loading={reviewMutation.isPending}
-                              onClick={handleRetryFailedReview}
+                              loading={reviewRun.isPending}
+                              onClick={reviewRun.canRestart ? handleRestartReviewSession : handleRetryFailedReview}
                               data-testid="flashcards-review-retry-button"
                             >
-                              {t("option:flashcards.retryAction", {
-                                defaultValue: "Retry"
-                              })}
+                              {reviewRun.canRestart
+                                ? t("option:flashcards.restartSessionAction", { defaultValue: "Start new session" })
+                                : t("option:flashcards.retryAction", { defaultValue: "Retry" })}
                             </Button>
                             {reviewFailure.canReload && (
                               <Button
@@ -1987,7 +1962,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                   {activeReviewSessionId != null && (
                     <Button
                       type="default"
-                      loading={endReviewSessionMutation.isPending}
+                      loading={reviewRun.isPending}
                       onClick={() => {
                         void completeReviewSession("manual")
                       }}
@@ -2020,7 +1995,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           selectedSessionId={selectedStudySessionId}
           onOpenSession={(sessionId) => {
             setSelectedStudySessionId(sessionId)
-            setActiveReviewSessionId(null)
           }}
           isActive={isActive}
         />

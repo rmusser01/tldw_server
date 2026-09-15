@@ -29,6 +29,11 @@ const translations = vi.hoisted(() => ({
   actual: null as null | ((key: string, options?: string | Record<string, unknown>) => string)
 }))
 
+vi.mock("@/services/service-prompts", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  ...await import("./review-scope-fixture")
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (

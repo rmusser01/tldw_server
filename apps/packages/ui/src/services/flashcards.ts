@@ -498,6 +498,14 @@ export type FlashcardReviewRequest = {
   card_uuid: string
   rating: number // 0-5
   answer_time_ms?: number | null
+  review_context?: FlashcardReviewContext
+  review_session_id?: number
+}
+
+export type FlashcardReviewContext = {
+  review_mode: "due" | "cram"
+  deck_id: number | null
+  tag_filter?: string | null
 }
 
 export type FlashcardGeneratedDraft = {
@@ -894,12 +902,15 @@ export async function resetFlashcardScheduling(
 }
 
 // Review
-export async function reviewFlashcard(input: FlashcardReviewRequest): Promise<FlashcardReviewResponse> {
+export async function reviewFlashcard(input: FlashcardReviewRequest, options?: FlashcardsRequestOptions): Promise<FlashcardReviewResponse> {
+  const scope = requestScopeFields(options?.requestScope)
   return await bgRequest<FlashcardReviewResponse, AllowedPath, "POST">({
     path: "/api/v1/flashcards/review",
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: input
+    ...scope,
+    headers: { "Content-Type": "application/json", ...scope.headers },
+    body: input,
+    abortSignal: options?.signal
   })
 }
 
@@ -943,12 +954,14 @@ export async function listRecentFlashcardReviewSessions(params?: {
 
 export async function endFlashcardReviewSession(
   reviewSessionId: number,
-  options?: { signal?: AbortSignal }
+  options?: FlashcardsRequestOptions
 ): Promise<FlashcardReviewSessionSummary> {
+  const scope = requestScopeFields(options?.requestScope)
   return await bgRequest<FlashcardReviewSessionSummary, AllowedPath, "POST">({
     path: "/api/v1/flashcards/review-sessions/end" as any,
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    ...scope,
+    headers: { "Content-Type": "application/json", ...scope.headers },
     body: {
       review_session_id: reviewSessionId
     },

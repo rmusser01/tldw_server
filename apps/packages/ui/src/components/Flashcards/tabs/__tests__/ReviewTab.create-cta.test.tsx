@@ -42,6 +42,11 @@ const { navigateMock } = vi.hoisted(() => ({
   navigateMock: vi.fn()
 }))
 
+vi.mock("@/services/service-prompts", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  ...await import("./review-scope-fixture")
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -129,7 +134,7 @@ vi.mock("../../hooks", () => ({
   useCramQueueQuery: vi.fn(),
   useReviewQuery: vi.fn(),
   useReviewFlashcardMutation: vi.fn(),
-  useEndFlashcardReviewSessionMutation: vi.fn(),
+  useEndFlashcardReviewSessionMutation: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({ id: 77 }), isPending: false })),
   useRecentFlashcardReviewSessionsQuery: vi.fn(() => ({
     data: [],
     isLoading: false,
@@ -597,7 +602,7 @@ describe("ReviewTab create CTA visibility", () => {
     expect(within(row).getByText("New: 2")).toBeInTheDocument()
     expect(within(row).getByText("Learning: 1")).toBeInTheDocument()
 
-    fireEvent.click(within(row).getByRole("button", { name: "Review 4 ready" }))
+    fireEvent.click(within(row).getByRole("button", { name: "Review 3 ready" }))
     fireEvent.click(within(row).getByRole("button", { name: "Cram" }))
     fireEvent.click(within(row).getByRole("button", { name: "Edit" }))
     fireEvent.click(within(row).getByRole("button", { name: "Scheduler" }))
