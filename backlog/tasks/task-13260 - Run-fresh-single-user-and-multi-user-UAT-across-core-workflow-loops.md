@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-15 16:06'
+updated_date: '2026-09-15 16:59'
 labels:
   - uat
   - testing
@@ -91,6 +91,8 @@ Final independent evidence review is clear: all309 main captures and report hash
 Checkpoint whitespace check: source documentation and task records are clean. Two immutable raw console captures contain their original trailing space/blank line; retained byte-for-byte so their reviewed hashes remain valid. These are evidence-format exceptions, not product or authored-document warnings.
 
 Cycle3 targeted repair checkpoint: commits7db8f5d851/b993995dfe extraction,7e48f29cb1ProviderKeys,bfcb393a44revokedrotation,fb79cc565a notifications. All fullUAT findings remainopen; targeted087notifications and088staleSettings add2P3 for34currentopen(14P2/20P3). Retained22 credential-scanned captures plus safe request metadata in output/playwright/cycle3-repair-verification-2026-09-15/auth-and-provider withREADME/SHA256SUMS. Originalfrozen552-filebundleunchanged. Live naturalrefresh200 and revocation/relogin recorded; secondtabSettingsstillLoginRequired(.29). SavedChatpromotion has furtherreviewfailuresunderrepair. Narrowcapabilities .23 active, adding selfidentity inbody avoidsdeprecated/profile dependencies.
+
+2026-09-15 continuation: committed65b8914dbd optional browser guard, a3542ea385 Settings cross-tab/mode Cancel/context repair, af725e4330 app shell login recovery,68906b148b canonical saved Chat/incomplete recovery,9d9f5222f5 Study counts/window/Manage lists. Parent306 Chat frontend +9 backend,82 Settings,61 App,70 broadStudy +22 final controls passed; known TypeScript90 baseline unchanged. Natural expiry16:22:26 refresh passed; revoked session stopped polling; repeated normal UI login recovered existing Settings shell and notifications. UAT089/090 added, current36 open pending fullfresh acceptance. Safe20-file hash-indexed auth-recovery-round2 evidence retained. Isolated API18201 restarted with existing data, PID6720, health200. Remaining Notes review corrections, .13 private handoff and .17 Media repairs continue; full fresh UAT has not restarted.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -44,6 +44,8 @@ Extend `ensureWorkspaceServerChatForTurn` to create an owned neutral conversatio
 
 Exercise the real normal pipeline and autosave together against shared reactive state. Cover no queued turn, a queued second turn, delayed history linking, temporary-to-saved promotion, creation failure/abort and A→B during each awaited boundary. Assert one canonical conversation and one copy of each actual turn, as well as visible mode and request identity.
 
+An incomplete local-history promotion retains its captured authority, created conversation, original rows and acknowledged message IDs until recovered or the actual owner/history changes. A temporary connectivity failure pauses copying; it must not count as completion or release follow-up inference. Explicit Retry reconciles a fresh ordered transcript against the exact original prefix, including ambiguous writes, and never duplicates acknowledged rows. Because ordinary listing renders character placeholders, add a backwards-compatible `render_placeholders=false` option for this narrowly scoped reconciliation read; keep normal display rendering and existing read authorization unchanged.
+
 The multi-user Media→Chat sequence additionally reaches a participant-mismatch persistence400, then a successful fallback201, while a blocking development overlay appears. The source already catches and logs the initial error before fallback; the snapshot alone cannot distinguish a separately unhandled promise from development error interception. Verify the actual persistence/fallback boundary and browser error events, correct participant identity and handle asynchronous failure. A successful fallback must leave a usable UI; failed persistence must retain a truthful recoverable state. Do not merely suppress console errors or relabel a malformed request as expected.
 
 ## 3. Selection and persisted Chat reconciliation — TASK-13260.15 / UAT067/068/070/085
@@ -191,3 +193,7 @@ Natural expiry now refreshes successfully, but the WebUI notification transport 
 ## Targeted follow-up UAT088: Settings login recovery across tabs
 
 The mounted Settings owner loads authentication only at initialization. A normal login in another tab restores protected Notes but leaves Settings displaying Login Required. TASK-13260.29 will observe canonical effective credential changes and update authentication presentation for the displayed connection. Preserve unsaved server, API-key and timeout fields; do not reload the entire form on each token rotation. Gate stale asynchronous reads by generation, handle ordinary login/logout and exact-pair invalidation, and retain valid authentication during network outages. Verify the actual mounted Settings owner with real storage/events, delayed A→B→A reads, unrelated server changes and the observed two-tab login sequence.
+
+## Targeted follow-up UAT089: application shell recovery across tabs
+
+The WebUI app owner must resolve current effective canonical authentication when another tab signs in. Local Settings form recovery does not establish the shell's authentication state. Refresh only authenticated shell presentation and authorized polling; preserve Settings drafts, exact revoked-session invalidation and generation guards against delayed reads. Validate with the actual app owner and real storage events before repeating the two-tab browser control.

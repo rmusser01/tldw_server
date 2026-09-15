@@ -59,9 +59,11 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 
 - [x] Build the actual picker/canonical hook/greeting/store regression with deferred legacy/profile hydration; reproduce replacement reverting and unmounted Edit form warning.
 - [x] Remove competing legacy selection hydration, guard cleared/replaced/account-changed loads and limit Edit form writes to its mounted lifecycle.
-- [ ] Add a combined normal pipeline/autosave regression with no queue, a queued second turn and delayed linked history; reproduce the duplicate conversation and mode change.
-- [ ] Extend neutral saved-chat bootstrap, carry established IDs into inference/persistence, and recheck autosave ownership after awaited work.
-- [ ] Verify temporary promotion, explicit persona/character, failed/aborted creation and delayed A→B results. Review and commit selection and canonical-creation changes separately.
+- [x] Add a combined normal pipeline/autosave regression with no queue, a queued second turn and delayed linked history; reproduce the duplicate conversation and mode change.
+- [x] Extend neutral saved-chat bootstrap, carry established IDs into inference/persistence, and recheck autosave ownership after awaited work.
+- [x] Verify temporary promotion, explicit persona/character, failed/aborted creation and delayed A→B results. Review and commit selection and canonical-creation changes separately.
+- [x] Retain incomplete promotion across same-owner disconnect/reconnect, record an acknowledged created conversation before pausing, and block inference until explicit recovery succeeds. Verify zero/one copied rows, ambiguous writes and multi-page read-back. Use a backwards-compatible raw-content listing option to compare exact stored messages without placeholder expansion; retain normal display defaults and authorization.
+- Code checkpoint `68906b148b`: parent306 frontend/9 backend tests pass, independent recovery probes pass, unchanged lint/type baselines and clean Bandit. Actual saved-Chat browser acceptance remains pending.
 
 ### TASK-13260.15 — UAT070 mirror and UAT085 backlink portion
 
@@ -147,11 +149,12 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 ### TASK-13260.19 — UAT055/074/083/084
 
 **Files:** `components/Flashcards/components/DeckStudyDashboard.tsx`, `ReviewProgress.tsx`, `tabs/ManageTab.tsx`, `ReviewTab.tsx`, next-due query/locale copy and existing dashboard/ReviewTab/Manage tests.
-- [ ] Reproduce five expired learning cards displaying ten ready and actual Manage List deprecations.
-- [ ] Use `due + new` and native active/pending-deletion lists preserving all controls/states.
-- [ ] Reproduce shrinking due queue minus cumulative reviews reporting zero too soon; use consistent remaining semantics while preserving fixed Cram queues, refetch/failure behavior and newly due cards.
-- [ ] Label the next-due one-hour count accurately; verify staggered timestamps, boundary inclusion, capped uncertainty and actual translations.
+- [x] Reproduce five expired learning cards displaying ten ready and actual Manage List deprecations.
+- [x] Use `due + new` and native active/pending-deletion lists preserving all controls/states.
+- [x] Reproduce shrinking due queue minus cumulative reviews reporting zero too soon; use consistent remaining semantics while preserving fixed Cram queues, refetch/failure behavior and newly due cards.
+- [x] Label the next-due one-hour count accurately; verify staggered timestamps, boundary inclusion, capped uncertainty and actual translations.
 - [ ] Verify future/mixed/due-time states, row selection/edit/keyboard/pagination/Undo and actual queue agreement; review and live-check Study/Manage.
+- Reviewed code checkpoint `9d9f5222f5`:70 broad tests independently passed,22 final affected controls passed, lint44 unchanged warnings and TypeScript90 unchanged signatures. Live Study/Manage checks remain.
 
 ### TASK-13260.20 — UAT058/059/075/078
 
@@ -179,14 +182,21 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 ### TASK-13260.28 — UAT087 notification rotation follow-up
 
 - [x] Record natural refresh200 followed by unread-count401 and stale sign-in state in both tabs.
-- [ ] Reproduce with actual rotation storage and notification request/lifecycle boundaries; reuse effective credential selection and generation-scoped rotation events.
-- [ ] Preserve revoked401, permission403, cross-account isolation, cancellation and no automatic mutation replay; review and live-check both tabs.
+- [x] Reproduce with actual rotation storage and notification request/lifecycle boundaries; reuse effective credential selection and generation-scoped rotation events.
+- [x] Preserve revoked401, permission403, cross-account isolation, cancellation and no automatic mutation replay; review and live-check both tabs. Natural expiry16:22:26 refreshed16:22:28; both tabs resumed notification200. Revocation stopped private polling for71seconds. Full fresh run remains pending.
 
 ### TASK-13260.29 — UAT088 Settings login synchronization
 
 - [x] Record successful normal Notes login with stale Login Required in the already-open Settings tab.
-- [ ] Reproduce with the actual mounted Settings owner and effective credential/storage events; update auth presentation without replacing unsaved form fields.
-- [ ] Reject delayed and A→B→A reads; cover logout, exact-pair invalidation, unrelated server changes and valid offline credentials. Independently review and repeat the actual two-tab sequence.
+- [x] Reproduce with the actual mounted Settings owner and effective credential/storage events; update auth presentation without replacing unsaved form fields.
+- [x] Reject delayed and A→B→A reads; cover logout, exact-pair invalidation, unrelated server changes and valid offline credentials. Independently review and repeat the actual two-tab sequence. Checkpoint `a3542ea385`,82 tests; normal cross-tab login and real mode-change Cancel pass. Includes UAT090 context-backed confirmation and native login autofill hints.
+
+### TASK-13260.30 — UAT089 application shell login synchronization
+
+- Reproduce the existing Settings tab's hidden header after cross-tab login using the actual app auth owner and canonical storage.
+- Resolve current effective authentication without stale cached credentials; preserve invalidation and delayed-read guards.
+- Verify same-account login, revoked sessions, account replacement, and Settings draft preservation; independently review and repeat the live two-tab control.
+- Code and targeted verification complete at `af725e4330`: parent61 App tests and broader179 tests pass with unchanged baseline diagnostics. Second owned-session revocation followed by normal login restores existing Settings header, Logged In and active notifications; both tabs subsequently return notification200. Full fresh run remains pending.
 
 ## Stage 5: Verify integration and repeat fresh UAT
 **Goal:** Establish complete acceptance on the repaired application.

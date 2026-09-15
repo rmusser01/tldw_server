@@ -1,0 +1,24 @@
+[
+  {
+    "at": "2026-09-15T16:23:52.781Z",
+    "route": "/notes",
+    "loggedIn": false,
+    "loginRequired": false,
+    "notificationsActive": true,
+    "requests": {
+      "other:200": 18,
+      "notifications:200": 1
+    }
+  },
+  {
+    "at": "2026-09-15T16:23:52.781Z",
+    "route": "/settings/tldw",
+    "loggedIn": true,
+    "loginRequired": false,
+    "notificationsActive": true,
+    "requests": {
+      "other:200": 18,
+      "notifications:200": 1
+    }
+  }
+]

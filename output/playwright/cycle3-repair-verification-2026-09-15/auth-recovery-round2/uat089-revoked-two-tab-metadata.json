@@ -1,0 +1,22 @@
+[
+  {
+    "at": "2026-09-15T16:45:52.819Z",
+    "route": "/login",
+    "loginRequired": false,
+    "loggedIn": false,
+    "notificationsActive": false,
+    "usernameAutocomplete": null,
+    "passwordAutocomplete": null,
+    "privateFetches": 110
+  },
+  {
+    "at": "2026-09-15T16:45:52.819Z",
+    "route": "/settings/tldw",
+    "loginRequired": true,
+    "loggedIn": false,
+    "notificationsActive": false,
+    "usernameAutocomplete": "username",
+    "passwordAutocomplete": "current-password",
+    "privateFetches": 108
+  }
+]

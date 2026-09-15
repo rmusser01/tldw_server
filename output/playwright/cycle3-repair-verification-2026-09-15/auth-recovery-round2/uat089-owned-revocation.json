@@ -1,0 +1,6 @@
+{
+  "at": "2026-09-15T16:44:50.582Z",
+  "action": "revoke only the current isolated browser session for shell recovery",
+  "status": 200,
+  "ok": true
+}

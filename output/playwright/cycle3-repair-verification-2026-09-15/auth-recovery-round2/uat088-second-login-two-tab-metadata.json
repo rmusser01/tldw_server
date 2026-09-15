@@ -1,0 +1,18 @@
+[
+  {
+    "at": "2026-09-15T16:26:59.237Z",
+    "route": "/",
+    "loginRequired": false,
+    "loggedIn": false,
+    "notificationsActive": true,
+    "privateFetches": 67
+  },
+  {
+    "at": "2026-09-15T16:26:59.237Z",
+    "route": "/settings/tldw",
+    "loginRequired": false,
+    "loggedIn": true,
+    "notificationsActive": false,
+    "privateFetches": 38
+  }
+]

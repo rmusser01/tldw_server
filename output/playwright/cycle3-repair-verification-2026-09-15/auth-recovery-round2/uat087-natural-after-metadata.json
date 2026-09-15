@@ -1,0 +1,35 @@
+[
+  {
+    "at": "2026-09-15T16:22:53.044Z",
+    "route": "/notes",
+    "storedAccessExpiry": "2026-09-15T16:22:26.000Z",
+    "applicableRotation": true,
+    "effectiveAccessExpiry": "2026-09-15T16:52:28.000Z",
+    "loggedIn": false,
+    "loginRequired": false,
+    "notificationsActive": true,
+    "requests": {
+      "other:200": 103,
+      "notifications:200": 8,
+      "notes:200": 3
+    }
+  },
+  {
+    "at": "2026-09-15T16:22:53.044Z",
+    "route": "/settings/tldw",
+    "storedAccessExpiry": "2026-09-15T16:22:26.000Z",
+    "applicableRotation": true,
+    "effectiveAccessExpiry": "2026-09-15T16:52:28.000Z",
+    "loggedIn": true,
+    "loginRequired": false,
+    "notificationsActive": true,
+    "requests": {
+      "other:401": 5,
+      "refresh:401": 2,
+      "other:200": 159,
+      "notifications:200": 10,
+      "notifications:0": 2,
+      "refresh:200": 1
+    }
+  }
+]
