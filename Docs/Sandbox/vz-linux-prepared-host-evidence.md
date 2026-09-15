@@ -103,6 +103,36 @@ triage issue.
 
 ## Latest Evidence
 
+### 2026-09-14: PR #2964 review-fix real workflow verification
+
+- Repeated all six cases with the rebuilt, ad-hoc-signed helper after mapping
+  bridge-detected exec-response version errors to `guest_protocol_mismatch`.
+  The protocol drill now uses public reconciliation instead of a redundant
+  private orchestrator assertion; its platform gates reference tracker #1442.
+- Accepted packet: `~/Library/Logs/tldw/vz-protocol-workflow-20260914-qodo-r1/`.
+  `receipt.json` SHA-256:
+  `c8b02771cf643b1dcbd42ca35d58c32a8ba8864067c46be34217759658b1e3a3`.
+  The exact signed executable is retained as `helper-used`, SHA-256:
+  `049ab407cf4e0cb9b858f1b877d9f1df5bdb2c90c048230c2ff16eee9f486638`.
+- All three positive cases passed, without skips/errors; all three negative
+  controls produced their intended failure after real exit-zero execution.
+  The protocol-positive guest sent version `999`, rejected in 2.184 seconds
+  before exec. Both healthy commands completed in replacement VM
+  `f49e3d89-78b0-450f-8d5c-94de325690ec`. The protocol-negative guest sent
+  version `1` and completed `protocol-drill-first` with validation still enabled.
+- Public reconciliation reported zero persisted controls and live VMs after
+  rejection and final cleanup. The final receipt reports `ok=true`, no errors,
+  empty VM inventory, closed allocated disks, stopped helper, absent socket/PID,
+  removed runtime directory, and unchanged canonical/all fault-source hashes.
+- Verification: **358 focused Python tests passed, 3 explicit host-gated skips**,
+  **95 Swift tests passed**, and the normal Go agent suite passed. The new
+  exec-response regression failed before the fix and passed afterward, with
+  request-ID/malformed-response controls. Ruff, Black, scoped Bandit (excluding
+  test assertions), and diff checks passed; independent review found no issues.
+  Later exec-response mismatch classification is covered by Swift server/bridge
+  tests, not live fault injection. The full server suite and reboot drill were
+  not run; the existing broader residual gaps remain unchanged.
+
 ### 2026-09-14: Real guest protocol mismatch and recovery (TASK-13243.6)
 
 - Ran the checked-in `vz-failure-drill.py` on the same Apple Silicon host and

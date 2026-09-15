@@ -693,7 +693,8 @@ final class UnixSocketServer {
             return "guest_readiness_not_implemented"
         case GuestBridgeError.guestExecNotImplemented:
             return "guest_exec_not_implemented"
-        case VSockSessionError.protocolMismatch:
+        case VSockSessionError.protocolMismatch,
+             GuestBridgeError.guestProtocolError("protocol_mismatch"):
             return "guest_protocol_mismatch"
         case VSockSessionError.requestTimedOut:
             return "guest_transport_timeout"

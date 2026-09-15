@@ -326,6 +326,10 @@ generic `helper_internal_error`. Unrelated malformed messages retain their
 existing classification. This is the guest VSock protocol, not the separate
 host-helper protocol or the already tested missing-exec capability gate.
 
+The dedicated diagnostic also covers version mismatches in later exec replies.
+Swift server/bridge regression tests cover that path and preserve request-ID and
+malformed-response classifications; the live drill injects only the handshake.
+
 The existing disposable image-store/offline-preparer/isolated-helper lifecycle
 remains authoritative. A fresh workspace nonce correlates a guest-written proof
 with the attempted VM and wire version. Proof alone cannot pass the test:

@@ -144,6 +144,50 @@ func unixSocketServerClassifiesRejectedGuestMessagesBeforeReadinessAndExec(
     #expect(channel.writes.isEmpty)
 }
 
+@Test(arguments: [
+    (
+        #"{"protocol_version":"2","request_id":"REQUEST_ID","exit_code":0,"stdout":"untrusted","stderr":""}"#,
+        "guest_protocol_mismatch"
+    ),
+    (
+        #"{"protocol_version":"1","request_id":"wrong-request","exit_code":0,"stdout":"untrusted","stderr":""}"#,
+        "helper_internal_error"
+    ),
+    (
+        #"{"request_id":"REQUEST_ID","exit_code":0,"stdout":"untrusted","stderr":""}"#,
+        "invalid_request"
+    ),
+])
+func unixSocketServerClassifiesRejectedGuestExecResponses(guestResponse: String, expectedCode: String) throws {
+    let transport = RecordingGuestTransport()
+    transport.execResponseFactory = { payload in
+        let requestID = payload["request_id"] as? String ?? ""
+        return Data(guestResponse.replacingOccurrences(of: "REQUEST_ID", with: requestID).utf8)
+    }
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: VSockBridge(transport: transport)
+    )
+    let server = UnixSocketServer(
+        socketPath: "/tmp/macos-vz-helper.sock",
+        service: HelperService(registry: registry, vmManager: manager)
+    )
+    let createRequest = Data(#"{"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-exec-diagnostic","template":"/tmp/template.img","workspace_path":"/workspace"}}"#.utf8)
+    let createResponse = try server.handleRequestData(createRequest)
+    let createJSON = try #require(JSONSerialization.jsonObject(with: createResponse) as? [String: Any])
+    #expect(createJSON["state"] as? String == "running")
+
+    let execRequest = Data(#"{"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-exec-diagnostic","argv":["/bin/echo","ok"],"cwd":"/workspace","timeout_sec":1}}"#.utf8)
+    let execResponse = try server.handleRequestData(execRequest)
+    let execJSON = try #require(JSONSerialization.jsonObject(with: execResponse) as? [String: Any])
+    #expect(execJSON["error_code"] as? String == expectedCode)
+    #expect(execJSON["exit_code"] == nil)
+    #expect(execJSON["stdout"] == nil)
+    #expect(execJSON["stderr"] == nil)
+}
+
 @Test func unixSocketServerRejectsMalformedExecGuestRequestShape() throws {
     let registry = VMRegistry()
     let manager = VZLinuxVMManager(
