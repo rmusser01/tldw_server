@@ -833,8 +833,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
               for (let i = 0; i < updated.length; i += 1) {
                 if (
                   updated[i]?.isBot &&
-                  isGreetingMessageType(updated[i]?.messageType) &&
-                  !updated[i]?.serverMessageId
+                  isGreetingMessageType(updated[i]?.messageType)
                 ) {
                   updated[i] = {
                     ...updated[i],
@@ -1494,6 +1493,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       }
       const errorSave = await saveMessageOnError({
         e,
+        conversationId: activeChatId,
         botMessage: assistantContent,
         history: historyBase,
         historyId,

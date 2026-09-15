@@ -110,7 +110,7 @@ export const pageAssistModel = async ({
   const resolvedSaveToDb =
     typeof saveToDb === "boolean"
       ? saveToDb
-      : Boolean(resolvedConversationId) && !temporaryChat
+      : !temporaryChat
   const finalConversationId = resolvedSaveToDb
     ? resolvedConversationId
     : undefined

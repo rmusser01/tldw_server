@@ -69,6 +69,8 @@ const {
     setHistory: vi.fn(),
     setMessages: vi.fn(),
     setHistoryId: vi.fn(),
+    setSelectedSystemPrompt: vi.fn(),
+    setSelectedQuickPrompt: vi.fn(),
     setServerChatId: vi.fn(),
     setServerChatState: vi.fn(),
     setServerChatTopic: vi.fn(),
@@ -3343,9 +3345,13 @@ describe("CharactersManager first-use onboarding", () => {
         id: "char-1",
         name: "Writer Coach",
         system_prompt: expect.any(String),
-        greeting: expect.any(String)
+        greeting: expect.any(String),
+        metadata: { selectionMode: "tracked" }
       })
     )
+    expect(storeSetters.setHistory).toHaveBeenCalledWith([])
+    expect(storeSetters.setMessages).toHaveBeenCalledWith([])
+    expect(storeSetters.setServerChatId).toHaveBeenCalledWith(null)
     expect(navigateMock).toHaveBeenCalledWith(
       "/chat?mode=character&characterId=char-1"
     )

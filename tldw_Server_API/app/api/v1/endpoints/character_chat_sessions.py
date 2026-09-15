@@ -6122,6 +6122,10 @@ async def character_chat_completion(
             if body.repetition_penalty is not None
             else character_generation_settings.get("repetition_penalty")
         )
+        # Creation snapshots include 1.0 even for adapters without this optional
+        # sampler. Neutral repetition must not turn a valid completion into 400.
+        if resolved_repetition_penalty == 1.0:
+            resolved_repetition_penalty = None
         resolved_stop = (
             body.stop
             if body.stop is not None

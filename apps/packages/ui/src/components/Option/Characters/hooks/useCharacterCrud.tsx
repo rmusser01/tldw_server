@@ -5,6 +5,9 @@ import { useNavigate } from "react-router-dom"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { focusComposer } from "@/hooks/useComposerFocus"
 import { useStoreMessageOption } from "@/store/option"
+import { useStoreChatModelSettings } from "@/store/model"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { useStorage } from "@plasmohq/storage/hook"
 import { shallow } from "zustand/shallow"
 import { exportCharacterToJSON, exportCharacterToPNG } from "@/utils/character-export"
 import {
@@ -133,6 +136,8 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
 
   const navigate = useNavigate()
   const [, setSelectedCharacter] = useSelectedCharacter<any>(null)
+  const [, setStoredSystemPrompt] = useStorage<string | null>("selectedSystemPrompt", null)
+  const [, setStoredQuickPrompt] = useStorage<string | null>("selectedQuickPrompt", null)
 
   // Conversation state
   const [characterChats, setCharacterChats] = React.useState<ServerChatSummary[]>([])
@@ -145,6 +150,8 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
     setHistory,
     setMessages,
     setHistoryId,
+    setSelectedSystemPrompt,
+    setSelectedQuickPrompt,
     setServerChatId,
     setServerChatState,
     setServerChatTopic,
@@ -156,6 +163,8 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       setHistory: state.setHistory,
       setMessages: state.setMessages,
       setHistoryId: state.setHistoryId,
+      setSelectedSystemPrompt: state.setSelectedSystemPrompt,
+      setSelectedQuickPrompt: state.setSelectedQuickPrompt,
       setServerChatId: state.setServerChatId,
       setServerChatState: state.setServerChatState,
       setServerChatTopic: state.setServerChatTopic,
@@ -515,7 +524,10 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
 
   // --- Chat handler ---
   const handleChat = React.useCallback(async (record: any) => {
-    const characterSelection = buildCharacterSelectionPayload(record)
+    const characterSelection = {
+      ...buildCharacterSelectionPayload(record),
+      metadata: { selectionMode: "tracked" }
+    }
     await setSelectedCharacter(characterSelection)
 
     const readiness = buildCharacterChatReadiness({
@@ -534,6 +546,17 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       return
     }
 
+    // A row Chat action starts a fresh conversation. Establish that state before
+    // navigation so the composer cannot submit a previous prompt or history.
+    usePlaygroundSessionStore.getState().clearSession()
+    setHistoryId(null)
+    setHistory([])
+    setMessages([])
+    setServerChatId(null)
+    setSelectedSystemPrompt("")
+    setSelectedQuickPrompt(null)
+    useStoreChatModelSettings.getState().setSystemPrompt(undefined)
+    await Promise.all([setStoredSystemPrompt(null), setStoredQuickPrompt(null)])
     setChatIntentBlocker(null)
     navigate(buildCharacterChatPath({ characterId: characterSelection.id }))
     setTimeout(() => {
@@ -544,13 +567,24 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
     availableChatModels,
     navigate,
     setChatIntentBlocker,
-    setSelectedCharacter
+    setSelectedCharacter,
+    setHistoryId,
+    setHistory,
+    setMessages,
+    setServerChatId,
+    setSelectedSystemPrompt,
+    setSelectedQuickPrompt,
+    setStoredSystemPrompt,
+    setStoredQuickPrompt
   ])
 
   // --- Chat in new tab ---
   const handleChatInNewTab = React.useCallback(
     async (record: any) => {
-      const characterSelection = buildCharacterSelectionPayload(record)
+      const characterSelection = {
+        ...buildCharacterSelectionPayload(record),
+        metadata: { selectionMode: "tracked" }
+      }
       await setSelectedCharacter(characterSelection)
       const opened = window.open(
         resolveChatWorkspaceUrl({ characterId: characterSelection.id }),

@@ -71,6 +71,18 @@ describe("pageAssistModel MCP tools", () => {
     })
   })
 
+  it("persists the first saved conversation without requiring an existing server id", async () => {
+    useStoreMessageOption.setState({ temporaryChat: false, serverChatId: null })
+    const chat = await pageAssistModel({ model: "tool-model" })
+    expect(chat.saveToDb).toBe(true)
+  })
+
+  it("keeps temporary conversations unpersisted even with a stale server id", async () => {
+    useStoreMessageOption.setState({ temporaryChat: true, serverChatId: "old-chat" })
+    const chat = await pageAssistModel({ model: "tool-model" })
+    expect({ saved: chat.saveToDb, id: chat.conversationId }).toEqual({ saved: false, id: undefined })
+  })
+
   it("uses stored chatTools instead of all executable MCP tools", async () => {
     const notesTool = {
       name: "notes.search",

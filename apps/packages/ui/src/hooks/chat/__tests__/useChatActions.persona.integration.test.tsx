@@ -636,6 +636,24 @@ describe("useChatActions persona integration", () => {
     )
   })
 
+  it("adopts the first persisted plain chat so server message actions become available", async () => {
+    normalChatModeMock.mockImplementationOnce(async (...args: unknown[]) => {
+      const params = args[6] as { saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null> }
+      await params.saveMessageOnSuccess({
+        historyId: null, selectedModel: "deepseek-chat", message: "Hello", image: "",
+        fullText: "Saved answer", source: [], saveToDb: true, conversationId: "first-saved-chat"
+      })
+    })
+    const options = {
+      ...createHookOptions(), serverChatId: null, serverChatTitle: null,
+      serverChatAssistantKind: null, serverChatAssistantId: null,
+      serverChatCharacterId: null, selectedAssistant: null, historyId: null
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+    await act(async () => { await result.current.onSubmit({ message: "Hello", image: "" }) })
+    expect(options.setServerChatId).toHaveBeenCalledWith("first-saved-chat")
+  })
+
   it("rejects a stale server chat id from another scope before workspace sends", async () => {
     const scope = { type: "workspace", workspaceId: "workspace-fresh" } as const
     getChatMock.mockResolvedValueOnce({

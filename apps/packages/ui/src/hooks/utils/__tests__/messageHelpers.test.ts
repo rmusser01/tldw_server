@@ -22,6 +22,15 @@ describe("message helper wrappers", () => {
     mocks.saveSuccess.mockClear()
   })
 
+  it("retains server linkage when the first tracked turn fails", async () => {
+    const setHistoryId = vi.fn()
+    const wrapped = createSaveMessageOnError(false, [], vi.fn(), setHistoryId)
+    await wrapped({ conversationId: "failed-server-chat" })
+    const payload = (mocks.saveError.mock.calls.at(-1) as unknown[])[0] as { setHistoryId: (id: string) => void }
+    payload.setHistoryId("local-error-history")
+    expect(setHistoryId).toHaveBeenCalledWith("local-error-history", { preserveServerChatId: true })
+  })
+
   it("injects setHistory and setHistoryId defaults for saveMessageOnError", async () => {
     const setHistory = vi.fn()
     const setHistoryId = vi.fn()

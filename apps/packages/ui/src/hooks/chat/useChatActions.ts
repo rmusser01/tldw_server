@@ -1289,6 +1289,11 @@ export const useChatActions = ({
     }
 
     if (scopeSignal) historyKey = await persistLocally()
+    if (payload?.saveToDb && payloadConversationId && !serverChatId && !compareModeActive) {
+      throwIfScopeChanged()
+      setServerChatId(payloadConversationId)
+      invalidateServerChatHistory()
+    }
     return historyKey
   }
 
@@ -2105,8 +2110,7 @@ export const useChatActions = ({
               for (let i = 0; i < updated.length; i += 1) {
                 if (
                   updated[i]?.isBot &&
-                  isGreetingMessageType(updated[i]?.messageType) &&
-                  !updated[i]?.serverMessageId
+                  isGreetingMessageType(updated[i]?.messageType)
                 ) {
                   updated[i] = {
                     ...updated[i],
@@ -2835,6 +2839,7 @@ export const useChatActions = ({
       }
       const errorSave = await saveMessageOnError({
         e,
+        conversationId: activeChatId,
         botMessage: assistantContent,
         history: historyBase,
         historyId,

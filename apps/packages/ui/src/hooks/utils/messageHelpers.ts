@@ -85,11 +85,14 @@ export const createSaveMessageOnError = (
 ) => {
   return async (e: any): Promise<string | null> => {
     if (!temporaryChat) {
+      const setHistoryIdTarget = e?.setHistoryId ?? setHistoryId
       return await saveError({
         ...e,
         history: e?.history ?? history,
         setHistory: e?.setHistory ?? setHistory,
-        setHistoryId: e?.setHistoryId ?? setHistoryId
+        setHistoryId: e?.conversationId
+          ? (id: string) => setHistoryIdTarget(id, { preserveServerChatId: true })
+          : setHistoryIdTarget
       })
     } else {
       const historyToUpdate = Array.isArray(e?.history) ? e.history : history

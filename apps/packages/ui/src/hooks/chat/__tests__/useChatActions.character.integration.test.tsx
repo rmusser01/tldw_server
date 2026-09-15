@@ -321,6 +321,27 @@ describe("useChatActions character integration", () => {
     expect(options.setServerChatId).not.toHaveBeenCalledWith(null)
   })
 
+  it("rebinds a greeting to the newly created conversation after a failed session", async () => {
+    let visibleMessages: any[] = [{
+      id: "local-greeting", isBot: true, message: "Welcome back",
+      messageType: "character:greeting", serverMessageId: "old-chat-greeting"
+    }]
+    addChatMessageMock.mockImplementation(async (_id, payload) => ({
+      id: payload.role === "assistant" ? "new-chat-greeting" : "new-user", version: 1
+    }))
+    const character = { id: "char-stale", name: "Guide", greeting: "Welcome back", system_prompt: "Help the gardener." }
+    const options = {
+      ...createHookOptions(), serverChatId: null, serverChatCharacterId: null,
+      serverChatAssistantKind: null, selectedCharacter: character,
+      selectedAssistant: { ...character, kind: "character", metadata: { selectionMode: "tracked" } },
+      messages: visibleMessages,
+      setMessages: (next: any) => { visibleMessages = typeof next === "function" ? next(visibleMessages) : next }
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+    await act(async () => { await result.current.onSubmit({ message: "Try again", image: "" }) })
+    expect(visibleMessages.find(message => message.messageType === "character:greeting")?.serverMessageId).toBe("new-chat-greeting")
+  })
+
   it("handles emote commands without sending chat", async () => {
     const options = {
       ...createHookOptions(),
