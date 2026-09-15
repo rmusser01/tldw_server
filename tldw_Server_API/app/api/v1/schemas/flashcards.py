@@ -398,10 +398,20 @@ class FlashcardBulkCreateResponse(BaseModel):
     count: int
 
 
+class FlashcardReviewContext(BaseModel):
+    """Explicit queue scope; a null deck selects an all-decks study run."""
+
+    review_mode: Literal["due", "cram"] = "due"
+    deck_id: int | None = Field(..., ge=1)
+    tag_filter: str | None = Field(None, max_length=256)
+
+
 class FlashcardReviewRequest(BaseModel):
     card_uuid: str
     rating: int = Field(..., ge=0, le=5, description="Anki 0-5 rating")
     answer_time_ms: Optional[int] = None
+    review_context: FlashcardReviewContext | None = None
+    review_session_id: int | None = Field(None, ge=1)
 
 
 class FlashcardReviewResponse(BaseModel):

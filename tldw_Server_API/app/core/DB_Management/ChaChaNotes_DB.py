@@ -36405,8 +36405,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if scope_key:
             query += " AND scope_key = ?"
             params.append(scope_key)
-        cursor = self.execute_query(query, tuple(params), commit=True)
-        return max(0, int(getattr(cursor, "rowcount", 0) or 0))
+        with self.transaction() as conn:
+            cursor = conn.execute(query, tuple(params))
+            return max(0, int(getattr(cursor, "rowcount", 0) or 0))
 
     def list_flashcard_review_sessions(
         self,
@@ -36734,8 +36735,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         rating: int,
         answer_time_ms: int | None = None,
         review_session_id: int | None = None,
+        *,
+        review_mode: str | None = None,
+        review_deck_id: int | None = None,
+        review_tag_filter: str | None = None,
     ) -> dict[str, Any]:
-        """Submit a review for a flashcard and update scheduling. Returns updated card fields."""
+        """Review a card within a validated session and update its schedule atomically.
+
+        An explicit review_mode selects the caller's queue scope. A null
+        review_deck_id then means all decks; omitted context keeps the legacy
+        per-card deck scope. Acknowledged session IDs must still be active and
+        match that explicit context before any review or scheduling write.
+        """
         now_dt = datetime.now(timezone.utc)
         now = to_iso_z(now_dt) or self._get_current_utc_timestamp_iso()
         try:
@@ -36754,26 +36765,52 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     (scheduler_settings_to_json(None), card_uuid),
                 ).fetchone()
                 if not card:
-                    raise ConflictError("Flashcard not found", entity="flashcards", identifier=card_uuid)  # noqa: TRY003
-                card_id = int(card['id'])
+                    raise ConflictError(
+                        "Flashcard not found", entity="flashcards", identifier=card_uuid
+                    )  # noqa: TRY003
+                card_id = int(card["id"])
                 card_deck_id = int(card["deck_id"]) if card["deck_id"] is not None else None
+                explicit_scope = review_mode is not None
+                scope_mode = self._normalize_flashcard_review_mode(review_mode if explicit_scope else "due")
+                scope_deck_id = review_deck_id if explicit_scope else card_deck_id
+                scope_tag = self._normalize_nullable_text(review_tag_filter) if explicit_scope else None
+                scope_key = (
+                    f"{scope_mode}:deck:{scope_deck_id}" if scope_deck_id is not None else f"{scope_mode}:global"
+                )
+                if scope_tag:
+                    scope_key += f":tag:{scope_tag}"
+                if explicit_scope and scope_deck_id is not None and scope_deck_id != card_deck_id:
+                    raise InputError("Review context must include the flashcard deck")  # noqa: TRY003
+                if scope_tag:
+                    keyword_table = self._map_table_for_backend("keywords")
+                    matching_tag = conn.execute(
+                        f"""
+                        SELECT 1 FROM flashcard_keywords fk
+                        JOIN {keyword_table} kw ON kw.id = fk.keyword_id
+                        WHERE fk.card_id = ? AND kw.keyword = ?
+                        """,  # nosec B608 -- keyword table comes from the backend mapping
+                        (card_id, scope_tag),
+                    ).fetchone()
+                    if not matching_tag:
+                        raise InputError("Flashcard does not match the review tag filter")  # noqa: TRY003
                 resolved_review_session_id = int(review_session_id) if review_session_id is not None else None
                 if resolved_review_session_id is None:
                     auto_session = self.get_or_create_flashcard_review_session(
-                        deck_id=card_deck_id,
-                        review_mode="due",
-                        tag_filter=None,
-                        scope_key=f"due:deck:{card_deck_id}" if card_deck_id is not None else "due:global",
+                        deck_id=scope_deck_id,
+                        review_mode=scope_mode,
+                        tag_filter=scope_tag,
+                        scope_key=scope_key,
                     )
                     resolved_review_session_id = int(auto_session["id"])
                 if resolved_review_session_id is not None:
                     session_row = conn.execute(
                         """
-                        SELECT id, deck_id, status
+                        SELECT id, deck_id, status, review_mode, tag_filter, scope_key,
+                               CASE WHEN last_activity_at < ? THEN 1 ELSE 0 END AS is_stale
                           FROM flashcard_review_sessions
                          WHERE id = ?
                         """,
-                        (resolved_review_session_id,),
+                        (to_iso_z(now_dt - _FLASHCARD_REVIEW_SESSION_TIMEOUT), resolved_review_session_id),
                     ).fetchone()
                     if not session_row:
                         raise ConflictError(
@@ -36782,9 +36819,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             identifier=resolved_review_session_id,
                         )
                     session_deck_id = int(session_row["deck_id"]) if session_row["deck_id"] is not None else None
-                    if session_deck_id != card_deck_id:
+                    if explicit_scope and (
+                        session_deck_id != scope_deck_id
+                        or session_row["review_mode"] != scope_mode
+                        or self._normalize_nullable_text(session_row["tag_filter"]) != scope_tag
+                        or session_row["scope_key"] != scope_key
+                    ):
+                        raise InputError("review_session_id must match the requested review context")  # noqa: TRY003
+                    if not explicit_scope and session_deck_id != card_deck_id:
                         raise InputError("review_session_id must match the flashcard deck scope")  # noqa: TRY003
-                    if str(session_row["status"] or "").strip().lower() != "active":
+                    if str(session_row["status"] or "").strip().lower() != "active" or session_row["is_stale"]:
                         raise ConflictError(
                             "Flashcard review session is not active",
                             entity="flashcard_review_sessions",

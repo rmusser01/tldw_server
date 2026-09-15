@@ -244,12 +244,6 @@ def _attach_scheduler_preview(card: dict[str, Any], deck: dict[str, Any] | None)
     return card
 
 
-def _build_review_scope_key(*, review_mode: str, deck_id: int | None, tag_filter: str | None = None) -> str:
-    scope_parts = [str(review_mode or "due").strip().lower() or "due"]
-    scope_parts.append(f"deck:{deck_id}" if deck_id is not None else "global")
-    if tag_filter:
-        scope_parts.append(f"tag:{tag_filter}")
-    return ":".join(scope_parts)
 _FLASHCARDS_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
     CharactersRAGDBError,
@@ -2024,18 +2018,15 @@ def review_flashcard(payload: FlashcardReviewRequest, db: CharactersRAGDB = Depe
         card = db.get_flashcard(payload.card_uuid)
         if not card:
             raise HTTPException(status_code=404, detail=f"Flashcard not found ({payload.card_uuid})")
-        deck_id = int(card["deck_id"]) if card.get("deck_id") is not None else None
-        session = db.get_or_create_flashcard_review_session(
-            deck_id=deck_id,
-            review_mode="due",
-            tag_filter=None,
-            scope_key=_build_review_scope_key(review_mode="due", deck_id=deck_id),
-        )
+        context = payload.review_context
         updated = db.review_flashcard(
             payload.card_uuid,
             payload.rating,
             payload.answer_time_ms,
-            review_session_id=session["id"],
+            review_session_id=payload.review_session_id,
+            review_mode=context.review_mode if context is not None else None,
+            review_deck_id=context.deck_id if context is not None else None,
+            review_tag_filter=context.tag_filter if context is not None else None,
         )
         return updated
     except (SchedulerSettingsError, FsrsSettingsError) as e:
