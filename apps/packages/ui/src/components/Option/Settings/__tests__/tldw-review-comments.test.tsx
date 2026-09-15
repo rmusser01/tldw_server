@@ -14,6 +14,10 @@ const {
   modalConfirmMock: vi.fn()
 }))
 
+vi.mock("@/hooks/useAntdModal", () => ({
+  useAntdModal: () => ({ confirm: modalConfirmMock })
+}))
+
 vi.mock("@heroicons/react/24/outline", () => ({
   CheckIcon: () => <svg aria-hidden="true" />,
   XMarkIcon: () => <svg aria-hidden="true" />
@@ -224,6 +228,7 @@ const createConnectionProps = (
   setAuthMode: vi.fn(),
   isLoggedIn: false,
   setIsLoggedIn: vi.fn(),
+  refreshLoginStatus: vi.fn(async () => {}),
   loginMethod: "magic-link",
   setLoginMethod: vi.fn(),
   magicEmail: "persisted@example.com",
@@ -510,6 +515,18 @@ describe("settings PR review fixes", () => {
       "aria-busy",
       "true"
     )
+  })
+
+  it("updates the actual connection notices when the owner changes login status", () => {
+    const props = createConnectionProps({ authMode: "multi-user", isLoggedIn: false })
+    const { rerender } = render(<TldwConnectionSettings {...props} />)
+    expect(screen.getByText("Login Required")).toBeInTheDocument()
+    rerender(<TldwConnectionSettings {...props} isLoggedIn />)
+    expect(screen.queryByText("Login Required")).not.toBeInTheDocument()
+    expect(screen.getByText("Logged In")).toBeInTheDocument()
+    rerender(<TldwConnectionSettings {...props} isLoggedIn={false} />)
+    expect(screen.queryByText("Logged In")).not.toBeInTheDocument()
+    expect(screen.getByText("Login Required")).toBeInTheDocument()
   })
 
   it("offers cookie-session logout through the production auth handler", () => {

@@ -5,7 +5,6 @@ import {
   Input,
   Checkbox,
   Form,
-  Modal,
   Button,
   Tag
 } from "antd"
@@ -15,6 +14,7 @@ import type { TFunction } from "i18next"
 import { isFirefoxTarget } from "@/config/platform"
 import { isExtensionRuntime } from "@/utils/browser-runtime"
 import { Alert } from "@/components/ui/primitives"
+import { useAntdModal } from "@/hooks/useAntdModal"
 import { shouldClearManualApiKeyForServerChange } from "@/components/Option/Onboarding/validation"
 import {
   getCoreStatusLabel,
@@ -37,6 +37,7 @@ export type TldwConnectionSettingsProps = {
   setAuthMode: (mode: "single-user" | "multi-user") => void
   isLoggedIn: boolean
   setIsLoggedIn: (loggedIn: boolean) => void
+  refreshLoginStatus: () => Promise<void>
   loginMethod: LoginMethod
   setLoginMethod: (method: LoginMethod) => void
   magicEmail: string
@@ -95,6 +96,7 @@ export const TldwConnectionSettings = ({
   setAuthMode,
   isLoggedIn,
   setIsLoggedIn,
+  refreshLoginStatus,
   loginMethod,
   setLoginMethod,
   magicEmail,
@@ -118,6 +120,7 @@ export const TldwConnectionSettings = ({
   onGrantSiteAccess,
   onOpenHealthDiagnostics
 }: TldwConnectionSettingsProps) => {
+  const modal = useAntdModal()
   return (
     <>
       <Form.Item
@@ -172,6 +175,7 @@ export const TldwConnectionSettings = ({
                 setMagicToken('')
                 setMagicSent(false)
                 setIsLoggedIn(false)
+                void refreshLoginStatus()
               }
               const hasCredentials = isLoggedIn || authSource === 'cookie-session' || magicEmail || magicToken ||
                 ['apiKey', 'username', 'password'].some((field) => Boolean(form.getFieldValue?.(field)))
@@ -179,7 +183,7 @@ export const TldwConnectionSettings = ({
                 changeMode()
                 return
               }
-              Modal.confirm({
+              modal.confirm({
                 title: t('settings:tldw.authModeChangeWarning.title', 'Change authentication mode?'),
                 content: t('settings:tldw.authModeChangeWarning.content',
                   'Switching authentication modes will clear your current credentials. You will need to re-enter them after saving.'),
@@ -190,6 +194,8 @@ export const TldwConnectionSettings = ({
                 onCancel: () => {
                   // Reset the Segmented back to current value
                   form.setFieldValue('authMode', authMode)
+                  // Programmatic Form updates do not emit onValuesChange.
+                  void refreshLoginStatus()
                 }
               })
             }
@@ -296,7 +302,7 @@ export const TldwConnectionSettings = ({
                 name="username"
                 rules={[{ required: true, message: t('settings:tldw.fields.username.required', 'Please enter your username') }]}
               >
-                <Input placeholder={t('settings:tldw.fields.username.placeholder', 'Enter username')} />
+                <Input autoComplete="username" placeholder={t('settings:tldw.fields.username.placeholder', 'Enter username')} />
               </Form.Item>
 
               <Form.Item
@@ -304,7 +310,7 @@ export const TldwConnectionSettings = ({
                 name="password"
                 rules={[{ required: true, message: t('settings:tldw.fields.password.required', 'Please enter your password') }]}
               >
-                <Input.Password placeholder={t('settings:tldw.fields.password.placeholder', 'Enter password')} />
+                <Input.Password autoComplete="current-password" placeholder={t('settings:tldw.fields.password.placeholder', 'Enter password')} />
               </Form.Item>
 
               <Form.Item>

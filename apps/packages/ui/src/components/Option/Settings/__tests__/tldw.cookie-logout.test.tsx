@@ -1,7 +1,16 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { Storage } from "@plasmohq/storage"
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import {
+  REFRESH_ROTATION_KEY,
+  invalidateRefreshSessionIfCurrent,
+  refreshSessionInvalidationKey,
+  storeRefreshRotationIfCurrent
+} from "@/services/tldw/single-user-credential"
+import { COOKIE_SESSION_CONFIG_KEY } from "@/services/tldw/browser-networking"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -23,9 +32,15 @@ const form = {
   validateFields: vi.fn().mockResolvedValue({})
 }
 
+const configuredClient = (config: Partial<TldwConfig>) => {
+  localStorage.setItem("tldwConfig", JSON.stringify(config))
+  mocks.getConfig.mockReset().mockResolvedValue(config)
+}
+
 vi.mock("antd", () => {
   const Form = Object.assign(
-    ({ children }: { children?: React.ReactNode }) => <form>{children}</form>,
+    ({ children, onValuesChange }: { children?: React.ReactNode; onValuesChange?: () => void }) =>
+      <form onChange={() => onValuesChange?.()}>{children}</form>,
     { useForm: () => [form] }
   )
 
@@ -121,7 +136,10 @@ vi.mock("../TldwTimeoutSettings", () => ({
     }
   },
   determinePreset: vi.fn(() => "balanced"),
-  TldwTimeoutSettings: () => null
+  TldwTimeoutSettings: ({ requestTimeoutSec, setRequestTimeoutSec }: {
+    requestTimeoutSec: number; setRequestTimeoutSec: (value: number) => void
+  }) => <input aria-label="Request timeout" type="number" value={requestTimeoutSec}
+    onChange={(event) => setRequestTimeoutSec(Number(event.target.value))} />
 }))
 vi.mock("../TldwBillingSettings", () => ({
   TldwBillingSettings: () => <div>Billing controls</div>
@@ -135,6 +153,7 @@ vi.mock("../TldwConnectionSettings", () => ({
     loginMethod: string
     connectionStatus: string | null
     connectionDetail: string
+    isLoggedIn: boolean
     coreStatus: string
     ragStatus: string
     onTestConnection: () => void
@@ -150,6 +169,8 @@ vi.mock("../TldwConnectionSettings", () => ({
       <span data-testid="connection-detail">{props.connectionDetail}</span>
       <span data-testid="core-status">{props.coreStatus}</span>
       <span data-testid="rag-status">{props.ragStatus}</span>
+      <span data-testid="login-status">{props.isLoggedIn ? "Logged In" : "Login Required"}</span>
+      <input aria-label="Edit server" onChange={(event) => { formValues.serverUrl = event.target.value }} />
       {props.authSource !== "cookie-session" && <span>Manual key controls</span>}
       <button type="button" onClick={props.onTestConnection}>Test connection</button>
       <button type="button" onClick={props.onLogout}>Logout</button>
@@ -160,9 +181,11 @@ vi.mock("../TldwConnectionSettings", () => ({
 import { TldwSettings } from "../tldw"
 
 describe("TldwSettings cookie logout", () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks() })
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
+    sessionStorage.clear()
     Object.keys(formValues).forEach((key) => delete formValues[key])
     mocks.setFieldsValue.mockImplementation((values: Record<string, unknown>) => {
       Object.assign(formValues, values)
@@ -219,7 +242,7 @@ describe("TldwSettings cookie logout", () => {
   })
 
   it("tests an unverified authenticated session without profile permissions and defaults to password login", async () => {
-    mocks.getConfig.mockReset().mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
+    configuredClient({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 })))
     mocks.apiSend.mockImplementation(async ({ path }) => path === "/api/v1/auth/sessions"
       ? { ok: true, status: 200, data: [] }
@@ -234,7 +257,7 @@ describe("TldwSettings cookie logout", () => {
   })
 
   it("does not load or render billing when the server does not advertise it", async () => {
-    mocks.getConfig.mockReset().mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
+    configuredClient({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 }))
     vi.stubGlobal("fetch", fetchMock)
     render(<TldwSettings />)
@@ -246,7 +269,7 @@ describe("TldwSettings cookie logout", () => {
   })
 
   it("does not send a saved login to an edited foreign server URL", async () => {
-    mocks.getConfig.mockReset().mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
+    configuredClient({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 })))
     render(<TldwSettings />)
     await screen.findByTestId("auth-mode")
@@ -258,7 +281,7 @@ describe("TldwSettings cookie logout", () => {
   })
 
   it("loads billing only after all billing read routes are advertised", async () => {
-    mocks.getConfig.mockReset().mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
+    configuredClient({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
     const paths = Object.fromEntries(['plans', 'subscription', 'usage', 'invoices'].map(route => [`/api/v1/billing/${route}`, { get: {} }]))
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths }), { status: 200 })))
     render(<TldwSettings />)
@@ -267,7 +290,7 @@ describe("TldwSettings cookie logout", () => {
   })
 
   it("describes rejected multi-user sessions without calling them invalid API keys", async () => {
-    mocks.getConfig.mockReset().mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "expired-token" })
+    configuredClient({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "expired-token" })
     mocks.apiSend.mockResolvedValue({ ok: false, status: 401, error: "Token expired" })
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 })))
     render(<TldwSettings />)
@@ -275,5 +298,233 @@ describe("TldwSettings cookie logout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }))
     await waitFor(() => expect(screen.getByTestId("connection-detail")).toHaveTextContent("Sign in again"))
     expect(screen.getByTestId("connection-detail")).not.toHaveTextContent("Invalid API key")
+  })
+
+  describe("effective login status on the mounted Settings owner", () => {
+    const target: TldwConfig = {
+      serverUrl: "https://settings.example.test", authMode: "multi-user", authSource: "manual", orgId: 7
+    }
+    const signedIn = { ...target, accessToken: "alice-access", refreshToken: "alice-refresh" }
+    let storage: Storage
+    beforeEach(() => {
+      storage = new Storage({ area: "local" })
+      configuredClient(target)
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 })))
+    })
+
+    const status = (expected: string) => waitFor(() =>
+      expect(screen.getByTestId("login-status")).toHaveTextContent(expected)
+    )
+    const nativeWrite = (key: string, value: unknown) => {
+      const newValue = value === undefined ? null : JSON.stringify(value)
+      if (newValue === null) localStorage.removeItem(key)
+      else localStorage.setItem(key, newValue)
+      window.dispatchEvent(new StorageEvent("storage", { key, newValue }))
+    }
+    const writeConfig = async (config: TldwConfig, channel: "same-tab" | "cross-tab" | "config-event") => {
+      if (channel === "same-tab") await storage.set("tldwConfig", config)
+      else if (channel === "cross-tab") nativeWrite("tldwConfig", config)
+      else {
+        localStorage.setItem("tldwConfig", JSON.stringify(config))
+        window.dispatchEvent(new CustomEvent("tldw:config-updated"))
+      }
+    }
+
+    it.each(["same-tab", "cross-tab", "config-event"] as const)("tracks ordinary %s login and logout without replacing unsaved fields", async (channel) => {
+      render(<TldwSettings />)
+      await status("Login Required")
+      formValues.apiKey = "unsaved-key"
+      fireEvent.change(screen.getByLabelText("Request timeout"), { target: { value: "47" } })
+      const formWrites = mocks.setFieldsValue.mock.calls.length
+      await act(async () => writeConfig(signedIn, channel))
+      await status("Logged In")
+      await act(async () => writeConfig(target, channel))
+      await status("Login Required")
+      expect(formValues.apiKey).toBe("unsaved-key")
+      expect(formValues.serverUrl).toBe(target.serverUrl)
+      expect(screen.getByLabelText("Request timeout")).toHaveValue(47)
+      expect(mocks.setFieldsValue).toHaveBeenCalledTimes(formWrites)
+      expect(mocks.getConfig).toHaveBeenCalledTimes(1)
+    })
+
+    it("uses actual storage rather than a stale cached signed-in client config", async () => {
+      mocks.getConfig.mockResolvedValue(signedIn)
+      render(<TldwSettings />)
+      await status("Login Required")
+    })
+
+    it.each(["same-tab", "cross-tab"] as const)("recovers after exact-pair %s rotation while the raw pair stays invalidated", async (channel) => {
+      await storage.set("tldwConfig", signedIn)
+      await invalidateRefreshSessionIfCurrent(storage, signedIn)
+      render(<TldwSettings />)
+      await status("Login Required")
+      const tokens = { accessToken: "alice-rotated", refreshToken: "alice-rotated-refresh" }
+      await act(async () => {
+        if (channel === "same-tab") {
+          await storeRefreshRotationIfCurrent(storage, signedIn, signedIn.refreshToken, tokens)
+        } else {
+          nativeWrite(REFRESH_ROTATION_KEY, {
+            version: 1, ...signedIn, sourceAccessToken: signedIn.accessToken,
+            sourceRefreshToken: signedIn.refreshToken, ...tokens
+          })
+        }
+      })
+      await status("Logged In")
+      expect(formValues.serverUrl).toBe(target.serverUrl)
+    })
+
+    it.each(["same-tab", "cross-tab", "storage-only"] as const)("observes %s exact-pair invalidation", async (channel) => {
+      await storage.set("tldwConfig", signedIn)
+      render(<TldwSettings />)
+      await status("Logged In")
+      await act(async () => {
+        if (channel === "same-tab") await invalidateRefreshSessionIfCurrent(storage, signedIn)
+        else if (channel === "cross-tab") nativeWrite(refreshSessionInvalidationKey(signedIn)!, true)
+        else await storage.set(refreshSessionInvalidationKey(signedIn)!, true)
+      })
+      await status("Login Required")
+    })
+
+    it("does not treat a foreign server login as authentication for the displayed server", async () => {
+      render(<TldwSettings />)
+      await status("Login Required")
+      await act(async () => storage.set("tldwConfig", { ...signedIn, serverUrl: "https://foreign.example.test" }))
+      await status("Login Required")
+      expect(formValues.serverUrl).toBe(target.serverUrl)
+      await act(async () => storage.set("tldwConfig", signedIn))
+      await status("Logged In")
+    })
+
+    it("keeps valid offline authentication", async () => {
+      await storage.set("tldwConfig", signedIn)
+      vi.mocked(fetch).mockRejectedValue(new TypeError("Failed to fetch"))
+      render(<TldwSettings />)
+      await status("Logged In")
+    })
+
+    it.each(["account", "server"] as const)("ignores a delayed signed-in read across A-to-B-to-A %s changes", async (boundary) => {
+      await storage.set("tldwConfig", signedIn)
+      render(<TldwSettings />)
+      await status("Logged In")
+      let release!: () => void
+      const blocked = new Promise<void>((resolve) => { release = resolve })
+      const originalGet = Storage.prototype.get
+      let capture = true
+      const reads = vi.spyOn(Storage.prototype, "get").mockImplementation(async function (key) {
+        const value = await originalGet.call(this, key)
+        if (key === "tldwConfig" && capture) { capture = false; await blocked }
+        return value
+      })
+      act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated")))
+      await waitFor(() => expect(reads).toHaveBeenCalledWith("tldwConfig"))
+      await act(async () => {
+        await storage.set("tldwConfig", {
+          ...signedIn, accessToken: "bob",
+          serverUrl: boundary === "server" ? "https://foreign.example.test" : signedIn.serverUrl
+        })
+        await storage.set("tldwConfig", target)
+      })
+      await status("Login Required")
+      await act(async () => release())
+      await status("Login Required")
+      expect(formValues.serverUrl).toBe(target.serverUrl)
+    })
+
+    it("revalidates an edited target and ignores an earlier pending auth read", async () => {
+      await storage.set("tldwConfig", signedIn)
+      render(<TldwSettings />)
+      await status("Logged In")
+      let release!: () => void
+      const blocked = new Promise<void>((resolve) => { release = resolve })
+      const originalGet = Storage.prototype.get
+      let capture = true
+      const reads = vi.spyOn(Storage.prototype, "get").mockImplementation(async function (key) {
+        const value = await originalGet.call(this, key)
+        if (key === "tldwConfig" && capture) { capture = false; await blocked }
+        return value
+      })
+      act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated")))
+      await waitFor(() => expect(reads).toHaveBeenCalledWith("tldwConfig"))
+      fireEvent.change(screen.getByLabelText("Edit server"), { target: { value: "https://unsaved.example.test" } })
+      await status("Login Required")
+      await act(async () => release())
+      await status("Login Required")
+      expect(formValues.serverUrl).toBe("https://unsaved.example.test")
+    })
+
+    it("revalidates cookie ownership without reloading the form", async () => {
+      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+      await storage.set("tldwConfig", signedIn)
+      render(<TldwSettings />)
+      await status("Logged In")
+      await act(async () => storage.set(COOKIE_SESSION_CONFIG_KEY, {
+        serverUrl: window.location.origin, authMode: "single-user", authSource: "cookie-session"
+      }))
+      await status("Login Required")
+      await act(async () => storage.remove(COOKIE_SESSION_CONFIG_KEY))
+      await status("Logged In")
+      expect(formValues.serverUrl).toBe(target.serverUrl)
+    })
+
+    it("cleans up storage and window subscriptions under StrictMode", async () => {
+      await storage.set("tldwConfig", signedIn)
+      const { unmount } = render(<React.StrictMode><TldwSettings /></React.StrictMode>)
+      await status("Logged In")
+      unmount()
+      const reads = vi.spyOn(Storage.prototype, "get")
+      await act(async () => {
+        await storage.set("tldwConfig", target)
+        await storage.set(refreshSessionInvalidationKey(signedIn)!, true)
+        nativeWrite(REFRESH_ROTATION_KEY, null)
+        window.dispatchEvent(new CustomEvent("tldw:config-updated"))
+      })
+      expect(reads.mock.contexts.every((context) => context === storage)).toBe(true)
+    })
+
+    it("does not let an older initial load replace fields edited after StrictMode setup", async () => {
+      let finishOld!: (config: TldwConfig) => void
+      mocks.getConfig.mockReset()
+        .mockImplementationOnce(() => new Promise<TldwConfig>((resolve) => { finishOld = resolve }))
+        .mockResolvedValue(target)
+      render(<React.StrictMode><TldwSettings /></React.StrictMode>)
+      await status("Login Required")
+      formValues.apiKey = "unsaved-key"
+      fireEvent.change(screen.getByLabelText("Edit server"), { target: { value: "https://unsaved.example.test" } })
+      fireEvent.change(screen.getByLabelText("Request timeout"), { target: { value: "47" } })
+      const formWrites = mocks.setFieldsValue.mock.calls.length
+      await act(async () => finishOld({ ...signedIn, serverUrl: "https://stale.example.test", requestTimeoutMs: 1000 }))
+      expect(formValues.serverUrl).toBe("https://unsaved.example.test")
+      expect(formValues.apiKey).toBe("unsaved-key")
+      expect(screen.getByLabelText("Request timeout")).toHaveValue(47)
+      expect(mocks.setFieldsValue).toHaveBeenCalledTimes(formWrites)
+      await status("Login Required")
+    })
+
+    it("supports extension-style boolean watch results and removes obsolete marker subscriptions", async () => {
+      const originalWatch = Storage.prototype.watch
+      const watched: Array<{ storage: Storage; callbacks: Parameters<Storage["watch"]>[0] }> = []
+      vi.spyOn(Storage.prototype, "watch").mockImplementation(function (callbacks) {
+        watched.push({ storage: this, callbacks })
+        originalWatch.call(this, callbacks)
+        return true as unknown as ReturnType<Storage["watch"]>
+      })
+      await storage.set("tldwConfig", signedIn)
+      const { unmount } = render(<TldwSettings />)
+      try {
+        await status("Logged In")
+        const rotated = { accessToken: "alice-next", refreshToken: "alice-next-refresh" }
+        await act(async () => storeRefreshRotationIfCurrent(storage, signedIn, signedIn.refreshToken, rotated))
+        await status("Logged In")
+        const marker = refreshSessionInvalidationKey({ ...signedIn, ...rotated })!
+        await act(async () => storage.set(marker, true))
+        await status("Login Required")
+        const reads = vi.spyOn(Storage.prototype, "get")
+        await act(async () => storage.set(marker, true))
+        expect(reads.mock.contexts.every((context) => context === storage)).toBe(true)
+        expect(() => unmount()).not.toThrow()
+      } finally {
+        watched.forEach(({ storage: watchedStorage, callbacks }) => watchedStorage.unwatch(callbacks))
+      }
+    })
   })
 })

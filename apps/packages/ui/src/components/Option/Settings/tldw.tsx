@@ -7,7 +7,7 @@ import {
   Space
 } from "antd"
 import { Link, useNavigate } from "react-router-dom"
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { tldwClient, TldwConfig } from "@/services/tldw/TldwApiClient"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
@@ -25,6 +25,7 @@ import { requestOptionalHostPermission } from "@/utils/extension-permissions"
 import { isExtensionRuntime } from "@/utils/browser-runtime"
 import type { CoreStatus, RagStatus } from "./tldw-connection-status"
 import { TldwSettingsTabs } from "./tldw-settings-tabs"
+import { useSettingsLoginStatus } from "./useSettingsLoginStatus"
 import { probeServerHealth } from "./server-health-probe"
 import { TldwConnectionSettings, type LoginMethod } from "./TldwConnectionSettings"
 import {
@@ -55,6 +56,7 @@ export const TldwSettings = () => {
   const [loading, setLoading] = useState(false)
   const [initializing, setInitializing] = useState(true)
   const [initializingError, setInitializingError] = useState<string | null>(null)
+  const configLoadGeneration = useRef(0)
   const [testingConnection, setTestingConnection] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'success' | 'error' | null>(null)
   const [connectionDetail, setConnectionDetail] = useState<string>("")
@@ -63,7 +65,7 @@ export const TldwSettings = () => {
   const [authMode, setAuthMode] = useState<'single-user' | 'multi-user'>('single-user')
   const [authSource, setAuthSource] = useState<TldwConfig['authSource']>()
   const [rememberApiKey, setRememberApiKey] = useState(true)
-  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const { isLoggedIn, setIsLoggedIn, refreshLoginStatus } = useSettingsLoginStatus(form, !initializing)
   const [loginMethod, setLoginMethod] = useState<LoginMethod>('password')
   const [magicEmail, setMagicEmail] = useState("")
   const [magicToken, setMagicToken] = useState("")
@@ -125,14 +127,17 @@ export const TldwSettings = () => {
   // ── Config load ──────────────────────────────────────────────────
 
   useEffect(() => {
-    loadConfig()
+    void loadConfig()
+    return () => { configLoadGeneration.current += 1 }
   }, [])
 
   const loadConfig = async () => {
+    const generation = ++configLoadGeneration.current
     setLoading(true)
     setInitializingError(null)
     try {
       const config = await tldwClient.getConfig()
+      if (generation !== configLoadGeneration.current) return
       if (config) {
         setAuthMode(config.authMode)
         setAuthSource(config.authSource)
@@ -163,10 +168,6 @@ export const TldwSettings = () => {
           authMode: config.authMode,
           rememberApiKey: config.apiKeyPersistence !== 'session'
         })
-
-        if (config.authMode === 'multi-user' && config.accessToken) {
-          setIsLoggedIn(true)
-        }
       } else {
         setAuthMode('single-user')
         setAuthSource(undefined)
@@ -194,14 +195,17 @@ export const TldwSettings = () => {
       }
       setInitializingError(null)
     } catch (error) {
+      if (generation !== configLoadGeneration.current) return
       console.error('Failed to load config:', error)
       setInitializingError(
         (error as Error)?.message ||
           t('settings:tldw.loadError', 'Unable to load tldw server settings. Check your connection and try again.')
       )
     } finally {
-      setLoading(false)
-      setInitializing(false)
+      if (generation === configLoadGeneration.current) {
+        setLoading(false)
+        setInitializing(false)
+      }
     }
   }
 
@@ -639,7 +643,7 @@ export const TldwSettings = () => {
         password: values.password
       })
 
-      setIsLoggedIn(true)
+      await refreshLoginStatus()
       message.success(t('settings:tldw.login.success', 'Login successful!'))
 
       form.setFieldValue('password', '')
@@ -691,7 +695,7 @@ export const TldwSettings = () => {
     setLoading(true)
     try {
       await tldwAuth.verifyMagicLink(magicToken.trim())
-      setIsLoggedIn(true)
+      await refreshLoginStatus()
       message.success(t('settings:tldw.login.success', 'Login successful!'))
       setMagicToken('')
       await testConnection()
@@ -937,6 +941,7 @@ export const TldwSettings = () => {
         <Form
           form={form}
           onFinish={handleSave}
+          onValuesChange={() => { void refreshLoginStatus() }}
           layout="vertical"
           initialValues={{
             authMode: 'single-user',
@@ -959,6 +964,7 @@ export const TldwSettings = () => {
             }}
             isLoggedIn={isLoggedIn}
             setIsLoggedIn={setIsLoggedIn}
+            refreshLoginStatus={refreshLoginStatus}
             loginMethod={loginMethod}
             setLoginMethod={setLoginMethod}
             magicEmail={magicEmail}
