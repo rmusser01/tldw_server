@@ -1,0 +1,35 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:89023) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/services/__tests__/tldw-api-client.chat-mutations.test.ts (5 tests | 1 failed) 6ms
+     ✓ creates chats through the backend-canonical trailing-slash endpoint 2ms
+     ✓ retries updateChat once with the latest version after conflict 1ms
+     ✓ forwards nested routing overrides when creating a chat completion 1ms
+     ✓ forwards explicit chat completion timeouts to the request transport 0ms
+     × sanitizes leaky background payload fields when creating a chat completion 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/services/__tests__/tldw-api-client.chat-mutations.test.ts > TldwApiClient chat mutations > sanitizes leaky background payload fields when creating a chat completion
+AssertionError: expected 'trace=/Users/private/stack.txt' not to contain '/Users/private'
+
+Expected: "/Users/private"
+Received: "trace=/Users/private/stack.txt"
+
+ ❯ ../packages/ui/src/services/__tests__/tldw-api-client.chat-mutations.test.ts:192:31
+    190|     const payload = await response.json()
+    191|
+    192|     expect(payload.error).not.toContain("/Users/private")
+       |                               ^
+    193|     expect(payload.details).toBeUndefined()
+    194|     expect(payload.nested.traceback).toBeUndefined()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 passed (5)
+   Start at  14:31:11
+   Duration  823ms (transform 370ms, setup 88ms, import 439ms, tests 6ms, environment 202ms)

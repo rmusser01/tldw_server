@@ -5745,13 +5745,14 @@ export class TldwApiClientBase {
   async updateChat(
     chat_id: string | number,
     payload: Record<string, any>,
-    options?: { expectedVersion?: number }
+    options?: { expectedVersion?: number } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     let expectedVersion = options?.expectedVersion
     if (expectedVersion == null) {
       try {
-        const current = await this.getChat(cid)
+        const current = await this.getChat(cid, options)
         if (typeof current?.version === "number") {
           expectedVersion = current.version
         }
@@ -5764,9 +5765,11 @@ export class TldwApiClientBase {
         ? `?expected_version=${encodeURIComponent(String(expectedVersion))}`
         : ""
     const res = await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: `/api/v1/chats/${cid}${qp}`,
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...scopeFields.headers, "Content-Type": "application/json" },
       body: payload
     })
     return this.normalizeChatSummary(res)

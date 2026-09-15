@@ -1,0 +1,30 @@
+{
+  "frozenAt": "2026-09-15T21:42:49.051Z",
+  "paths": [
+    {
+      "path": "apps/packages/ui/src/hooks/useActiveChatTitle.ts",
+      "sha256": "75a3719510d1976f5638877936b8fcdcedb5a066a07b8f03d18da17da1a1edc0"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Layouts/Header.tsx",
+      "sha256": "e66d698c3a10fd948a8bbdb4c943aff56485d006dad79cc277bb35d213151a7c"
+    },
+    {
+      "path": "apps/tldw-frontend/pages/chat/index.tsx",
+      "sha256": "3a7b47749f0ccbc3b4ea82514f4d85c27493c5fbce89ee041a2b95f76da4112c"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "sha256": "ff8a6a5118efec852abac6b0f9834981fd6210295b889cfe1f3168e60cb5a982"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "sha256": "d1f82e5cc7e406886c18985bdc0a887a09b572a18215df669d9d341b10ed9786"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts",
+      "sha256": "e97098ed8a199aa621c81e9e97d87642b311977d5714e01c4bcfcd6628328f55"
+    }
+  ],
+  "supersedes": "2026-09-15T21:37:39.260Z"
+}

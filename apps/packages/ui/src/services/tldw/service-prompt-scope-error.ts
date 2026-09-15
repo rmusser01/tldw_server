@@ -100,7 +100,7 @@ export const isServicePromptRequestPath = (
   const requestMethod = String(method || "GET").toUpperCase()
   if (pathname === "/api/v1/feedback/explicit") return requestMethod === "POST"
   if (requestMethod === "GET" && (pathname === "/api/v1/notes/tasks/activity" || /^\/api\/v1\/notes\/[^/]+\/tasks$/.test(pathname))) return true
-  if (/^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
+  if (/^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return ["GET", "PUT", "DELETE"].includes(requestMethod)
   if (/^\/api\/v1\/chat\/conversations\/[^/]+$/.test(pathname)) return ["GET", "PATCH"].includes(requestMethod)
   if (/^\/api\/v1\/chat\/conversations\/[^/]+\/share-links$/.test(pathname)) return requestMethod === "POST"
   if (/^\/api\/v1\/chat\/conversations\/[^/]+\/share-links\/[^/]+$/.test(pathname)) return requestMethod === "DELETE"

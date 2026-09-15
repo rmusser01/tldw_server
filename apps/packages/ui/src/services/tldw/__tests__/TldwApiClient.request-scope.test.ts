@@ -58,6 +58,7 @@ describe("TldwApiClient captured request scope", () => {
     ["listCharacters", [{ limit: 5 }], "GET"],
     ["searchCharacters", ["Helpful AI Assistant", { limit: 5 }], "GET"],
     ["getChat", ["owned"], "GET"],
+    ["updateChat", ["owned", { title: "Own renamed title" }], "PUT"],
     ["deleteChat", ["owned"], "DELETE"],
     ["createConversationShareLink", ["owned", { ttl_seconds: 300 }], "POST"],
     ["revokeConversationShareLink", ["owned", "share"], "DELETE"],

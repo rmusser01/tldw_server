@@ -1,0 +1,1763 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:83269) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:83270) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts (22 tests | 1 failed) 14ms
+     ✓ binds the QA fetchWithAuth request without changing its body 2ms
+     ✓ binds the QA listCharacters request without changing its body 0ms
+     ✓ binds the QA searchCharacters request without changing its body 0ms
+     ✓ binds the QA getChat request without changing its body 0ms
+     × binds the QA updateChat request without changing its body 5ms
+     ✓ binds the QA deleteChat request without changing its body 0ms
+     ✓ binds the QA createConversationShareLink request without changing its body 0ms
+     ✓ binds the QA revokeConversationShareLink request without changing its body 0ms
+     ✓ binds the QA exportChatbook request without changing its body 0ms
+     ✓ binds the QA downloadChatbookExport request without changing its body 1ms
+     ✓ binds the QA createNote request without changing its body 0ms
+     ✓ binds the QA ragSourceHealth request without changing its body 0ms
+     ✓ binds QA streaming scope outside the inference body 0ms
+     ✓ binds non-streaming chat without serializing the scope 1ms
+     ✓ binds streaming chat without serializing the scope 0ms
+     ✓ does not replay scoped RAG POSTs and keeps scope out of JSON 1ms
+     ✓ preserves structured scope errors in the exported base RAG method 0ms
+     ✓ binds web search and keeps request scope out of JSON 0ms
+     ✓ binds mirrored chat messages to the captured account and signal 0ms
+     ✓ binds chat-session creation to the captured account and signal 0ms
+     ✓ reads fresh promotion messages with captured scope without joining cached or pending reads 0ms
+     ✓ serializes raw recovery listing as explicit false while keeping the captured owner 0ms
+ ❯ __tests__/pages/chat-title.integration.test.tsx (8 tests | 8 failed) 7062ms
+     × owns the real Next head through metadata hydration, rerender and remount 1016ms
+     × renders the canonical server title in the actual Header despite an empty legacy catalog 1014ms
+     × reads and renames a local-only title through Dexie without a server request 1006ms
+     × does not publish a delayed local title after switching histories 1007ms
+     × renames the saved conversation and its local mirror with captured scope and version 1005ms
+     × discards a delayed saved rename after A to B to A even with the same conversation IDs 1005ms
+     × does not restore an old local title on a canonical account change before Chat clears its IDs 4ms
+     × keeps an in-progress title edit across a benign canonical config event 1005ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/pages/chat-title.integration.test.tsx > active Chat title ownership > owns the real Next head through metadata hydration, rerender and remount
+AssertionError: expected '' to be 'Cedar server conversation | tldw' // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<main>[39m
+        [0mChat workspace[0m
+      [36m</main>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+- Expected
++ Received
+
+- Cedar server conversation | tldw
+
+ ❯ __tests__/pages/chat-title.integration.test.tsx:77:48
+     75|     const manager = initHeadManager()
+     76|     const view = render(<HeadManagerContext.Provider value={manager}><…
+     77|     await waitFor(() => expect(document.title).toBe("Cedar server conv…
+       |                                                ^
+     78|     view.rerender(<HeadManagerContext.Provider value={manager}><ChatPa…
+     79|     await waitFor(() => expect(document.title).toBe("Cedar server conv…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  __tests__/pages/chat-title.integration.test.tsx > active Chat title ownership > renders the canonical server title in the actual Header despite an empty legacy catalog
+TestingLibraryElementError: Unable to find role="button" and name "Cedar server conversation"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<header[39m
+      [33mclass[39m=[32m"z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"[39m
+      [33mdata-ischat-route[39m=[32m"true"[39m
+      [33mdata-istemporary-chat[39m=[32m"false"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 items-center gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-2 text-text"[39m
+          [36m>[39m
+            [36m<img[39m
+              [33malt[39m=[32m"tldw Assistant"[39m
+              [33mclass[39m=[32m"h-5 w-auto"[39m
+              [33msrc[39m=[32m"/@fs/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/assets/icon.png"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-sm font-medium"[39m
+            [36m>[39m
+              [0mtldw Assistant[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Companion Home"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-header-companion-home"[39m
+              [33mtitle[39m=[32m"Companion Home"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-house size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-label[39m=[32m"Show shortcuts"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-toggle-shortcuts"[39m
+              [33mtitle[39m=[32m"Show shortcuts"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-signpost size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 13v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 3v3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M18 6a2 2 0 0 1 1.387.56l2.307 2.22a1 1 0 0 1 0 1.44l-2.307 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.387-.56l-2.306-2.22a1 1 0 0 1 0-1.44l2.306-2.22A2 2 0 0 1 6 6z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-[140px] max-w-[220px] truncate"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"truncate text-left text-xs text-text-muted hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mtitle[39m=[32m"Untitled"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mUntitled[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-1"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium border-success/40 bg-success/10 text-success"[39m
+              [33mtitle[39m=[32m"Saved chat. History is persisted."[39m
+            [36m>[39m
+              [0mSaved[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Search - Open command palette"[39m
+            [33mclass[39m=[32m"hidden items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text sm:inline-flex focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+            [33mdata-testid[39m=[32m"chat-header-command-palette-trigger"[39m
+            [33mtitle[39m=[32m"Search"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-search size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[3...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<header[39m
+      [33mclass[39m=[32m"z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"[39m
+      [33mdata-ischat-route[39m=[32m"true"[39m
+      [33mdata-istemporary-chat[39m=[32m"false"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 items-center gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-2 text-text"[39m
+          [36m>[39m
+            [36m<img[39m
+              [33malt[39m=[32m"tldw Assistant"[39m
+              [33mclass[39m=[32m"h-5 w-auto"[39m
+              [33msrc[39m=[32m"/@fs/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/assets/icon.png"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-sm font-medium"[39m
+            [36m>[39m
+              [0mtldw Assistant[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Companion Home"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-header-companion-home"[39m
+              [33mtitle[39m=[32m"Companion Home"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-house size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-label[39m=[32m"Show shortcuts"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-toggle-shortcuts"[39m
+              [33mtitle[39m=[32m"Show shortcuts"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-signpost size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 13v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 3v3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M18 6a2 2 0 0 1 1.387.56l2.307 2.22a1 1 0 0 1 0 1.44l-2.307 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.387-.56l-2.306-2.22a1 1 0 0 1 0-1.44l2.306-2.22A2 2 0 0 1 6 6z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-[140px] max-w-[220px] truncate"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"truncate text-left text-xs text-text-muted hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mtitle[39m=[32m"Untitled"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mUntitled[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-1"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium border-success/40 bg-success/10 text-success"[39m
+              [33mtitle[39m=[32m"Saved chat. History is persisted."[39m
+            [36m>[39m
+              [0mSaved[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Search - Open command palette"[39m
+            [33mclass[39m=[32m"hidden items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text sm:inline-flex focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+            [33mdata-testid[39m=[32m"chat-header-command-palette-trigger"[39m
+            [33mtitle[39m=[32m"Search"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-search size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[3...
+ ❯ waitForWrapper ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ __tests__/pages/chat-title.integration.test.tsx:92:18
+     90|     change({ serverChatId: "server-a", serverChatTitle: "Cedar server …
+     91|     render(<Header />)
+     92|     await screen.findByRole("button", { name: "Cedar server conversati…
+       |                  ^
+     93|     change({ serverChatTitle: "Hydrated Cedar" })
+     94|     await screen.findByRole("button", { name: "Hydrated Cedar", exact:…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  __tests__/pages/chat-title.integration.test.tsx > active Chat title ownership > reads and renames a local-only title through Dexie without a server request
+TestingLibraryElementError: Unable to find role="button" and name "Local Cedar"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<header[39m
+      [33mclass[39m=[32m"z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"[39m
+      [33mdata-ischat-route[39m=[32m"true"[39m
+      [33mdata-istemporary-chat[39m=[32m"false"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 items-center gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-2 text-text"[39m
+          [36m>[39m
+            [36m<img[39m
+              [33malt[39m=[32m"tldw Assistant"[39m
+              [33mclass[39m=[32m"h-5 w-auto"[39m
+              [33msrc[39m=[32m"/@fs/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/assets/icon.png"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-sm font-medium"[39m
+            [36m>[39m
+              [0mtldw Assistant[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Companion Home"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-header-companion-home"[39m
+              [33mtitle[39m=[32m"Companion Home"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-house size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-label[39m=[32m"Show shortcuts"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-toggle-shortcuts"[39m
+              [33mtitle[39m=[32m"Show shortcuts"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-signpost size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 13v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 3v3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M18 6a2 2 0 0 1 1.387.56l2.307 2.22a1 1 0 0 1 0 1.44l-2.307 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.387-.56l-2.306-2.22a1 1 0 0 1 0-1.44l2.306-2.22A2 2 0 0 1 6 6z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-[140px] max-w-[220px] truncate"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"truncate text-left text-xs text-text-muted hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mtitle[39m=[32m"Untitled"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mUntitled[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-1"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium border-success/40 bg-success/10 text-success"[39m
+              [33mtitle[39m=[32m"Saved chat. History is persisted."[39m
+            [36m>[39m
+              [0mSaved[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Search - Open command palette"[39m
+            [33mclass[39m=[32m"hidden items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text sm:inline-flex focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+            [33mdata-testid[39m=[32m"chat-header-command-palette-trigger"[39m
+            [33mtitle[39m=[32m"Search"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-search size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[3...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<header[39m
+      [33mclass[39m=[32m"z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"[39m
+      [33mdata-ischat-route[39m=[32m"true"[39m
+      [33mdata-istemporary-chat[39m=[32m"false"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 items-center gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-2 text-text"[39m
+          [36m>[39m
+            [36m<img[39m
+              [33malt[39m=[32m"tldw Assistant"[39m
+              [33mclass[39m=[32m"h-5 w-auto"[39m
+              [33msrc[39m=[32m"/@fs/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/assets/icon.png"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-sm font-medium"[39m
+            [36m>[39m
+              [0mtldw Assistant[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Companion Home"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-header-companion-home"[39m
+              [33mtitle[39m=[32m"Companion Home"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-house size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-label[39m=[32m"Show shortcuts"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-toggle-shortcuts"[39m
+              [33mtitle[39m=[32m"Show shortcuts"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-signpost size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 13v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 3v3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M18 6a2 2 0 0 1 1.387.56l2.307 2.22a1 1 0 0 1 0 1.44l-2.307 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.387-.56l-2.306-2.22a1 1 0 0 1 0-1.44l2.306-2.22A2 2 0 0 1 6 6z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-[140px] max-w-[220px] truncate"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"truncate text-left text-xs text-text-muted hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mtitle[39m=[32m"Untitled"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mUntitled[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-1"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium border-success/40 bg-success/10 text-success"[39m
+              [33mtitle[39m=[32m"Saved chat. History is persisted."[39m
+            [36m>[39m
+              [0mSaved[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Search - Open command palette"[39m
+            [33mclass[39m=[32m"hidden items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text sm:inline-flex focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+            [33mdata-testid[39m=[32m"chat-header-command-palette-trigger"[39m
+            [33mtitle[39m=[32m"Search"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-search size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[3...
+ ❯ waitForWrapper ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ __tests__/pages/chat-title.integration.test.tsx:99:34
+     97|   it("reads and renames a local-only title through Dexie without a ser…
+     98|     const view = render(<Header />)
+     99|     fireEvent.click(await screen.findByRole("button", { name: "Local C…
+       |                                  ^
+    100|     const input = screen.getByRole("textbox", { name: "Rename conversa…
+    101|     fireEvent.change(input, { target: { value: "Renamed local" } })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  __tests__/pages/chat-title.integration.test.tsx > active Chat title ownership > does not publish a delayed local title after switching histories
+TestingLibraryElementError: Unable to find role="button" and name "Local Birch"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<header[39m
+      [33mclass[39m=[32m"z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"[39m
+      [33mdata-ischat-route[39m=[32m"true"[39m
+      [33mdata-istemporary-chat[39m=[32m"false"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 items-center gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-2 text-text"[39m
+          [36m>[39m
+            [36m<img[39m
+              [33malt[39m=[32m"tldw Assistant"[39m
+              [33mclass[39m=[32m"h-5 w-auto"[39m
+              [33msrc[39m=[32m"/@fs/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/assets/icon.png"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-sm font-medium"[39m
+            [36m>[39m
+              [0mtldw Assistant[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Companion Home"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-header-companion-home"[39m
+              [33mtitle[39m=[32m"Companion Home"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-house size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-label[39m=[32m"Show shortcuts"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-toggle-shortcuts"[39m
+              [33mtitle[39m=[32m"Show shortcuts"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-signpost size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 13v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 3v3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M18 6a2 2 0 0 1 1.387.56l2.307 2.22a1 1 0 0 1 0 1.44l-2.307 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.387-.56l-2.306-2.22a1 1 0 0 1 0-1.44l2.306-2.22A2 2 0 0 1 6 6z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-[140px] max-w-[220px] truncate"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"truncate text-left text-xs text-text-muted hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mtitle[39m=[32m"Untitled"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mUntitled[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-1"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium border-success/40 bg-success/10 text-success"[39m
+              [33mtitle[39m=[32m"Saved chat. History is persisted."[39m
+            [36m>[39m
+              [0mSaved[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Search - Open command palette"[39m
+            [33mclass[39m=[32m"hidden items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text sm:inline-flex focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+            [33mdata-testid[39m=[32m"chat-header-command-palette-trigger"[39m
+            [33mtitle[39m=[32m"Search"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-search size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[3...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<header[39m
+      [33mclass[39m=[32m"z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"[39m
+      [33mdata-ischat-route[39m=[32m"true"[39m
+      [33mdata-istemporary-chat[39m=[32m"false"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 items-center gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-2 text-text"[39m
+          [36m>[39m
+            [36m<img[39m
+              [33malt[39m=[32m"tldw Assistant"[39m
+              [33mclass[39m=[32m"h-5 w-auto"[39m
+              [33msrc[39m=[32m"/@fs/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/assets/icon.png"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-sm font-medium"[39m
+            [36m>[39m
+              [0mtldw Assistant[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Companion Home"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-header-companion-home"[39m
+              [33mtitle[39m=[32m"Companion Home"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-house size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-label[39m=[32m"Show shortcuts"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-toggle-shortcuts"[39m
+              [33mtitle[39m=[32m"Show shortcuts"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-signpost size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 13v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 3v3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M18 6a2 2 0 0 1 1.387.56l2.307 2.22a1 1 0 0 1 0 1.44l-2.307 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.387-.56l-2.306-2.22a1 1 0 0 1 0-1.44l2.306-2.22A2 2 0 0 1 6 6z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-[140px] max-w-[220px] truncate"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"truncate text-left text-xs text-text-muted hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mtitle[39m=[32m"Untitled"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mUntitled[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-1"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium border-success/40 bg-success/10 text-success"[39m
+              [33mtitle[39m=[32m"Saved chat. History is persisted."[39m
+            [36m>[39m
+              [0mSaved[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Search - Open command palette"[39m
+            [33mclass[39m=[32m"hidden items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text sm:inline-flex focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+            [33mdata-testid[39m=[32m"chat-header-command-palette-trigger"[39m
+            [33mtitle[39m=[32m"Search"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-search size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[3...
+ ❯ waitForWrapper ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ __tests__/pages/chat-title.integration.test.tsx:116:18
+    114|     render(<Header />)
+    115|     change({ historyId: "local-b" })
+    116|     await screen.findByRole("button", { name: "Local Birch", exact: tr…
+       |                  ^
+    117|     await act(async () => { old.resolve("Private old Cedar"); await ol…
+    118|     expect(screen.queryByText("Private old Cedar")).toBeNull()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  __tests__/pages/chat-title.integration.test.tsx > active Chat title ownership > renames the saved conversation and its local mirror with captured scope and version
+TestingLibraryElementError: Unable to find role="button" and name "Cedar server conversation"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<header[39m
+      [33mclass[39m=[32m"z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"[39m
+      [33mdata-ischat-route[39m=[32m"true"[39m
+      [33mdata-istemporary-chat[39m=[32m"false"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 items-center gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-2 text-text"[39m
+          [36m>[39m
+            [36m<img[39m
+              [33malt[39m=[32m"tldw Assistant"[39m
+              [33mclass[39m=[32m"h-5 w-auto"[39m
+              [33msrc[39m=[32m"/@fs/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/assets/icon.png"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-sm font-medium"[39m
+            [36m>[39m
+              [0mtldw Assistant[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Companion Home"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-header-companion-home"[39m
+              [33mtitle[39m=[32m"Companion Home"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-house size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-label[39m=[32m"Show shortcuts"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-toggle-shortcuts"[39m
+              [33mtitle[39m=[32m"Show shortcuts"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-signpost size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 13v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 3v3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M18 6a2 2 0 0 1 1.387.56l2.307 2.22a1 1 0 0 1 0 1.44l-2.307 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.387-.56l-2.306-2.22a1 1 0 0 1 0-1.44l2.306-2.22A2 2 0 0 1 6 6z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-[140px] max-w-[220px] truncate"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"truncate text-left text-xs text-text-muted hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mtitle[39m=[32m"Untitled"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mUntitled[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-1"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium border-success/40 bg-success/10 text-success"[39m
+              [33mtitle[39m=[32m"Saved chat. History is persisted."[39m
+            [36m>[39m
+              [0mSaved[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Search - Open command palette"[39m
+            [33mclass[39m=[32m"hidden items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text sm:inline-flex focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+            [33mdata-testid[39m=[32m"chat-header-command-palette-trigger"[39m
+            [33mtitle[39m=[32m"Search"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-search size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[3...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<header[39m
+      [33mclass[39m=[32m"z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"[39m
+      [33mdata-ischat-route[39m=[32m"true"[39m
+      [33mdata-istemporary-chat[39m=[32m"false"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 items-center gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-2 text-text"[39m
+          [36m>[39m
+            [36m<img[39m
+              [33malt[39m=[32m"tldw Assistant"[39m
+              [33mclass[39m=[32m"h-5 w-auto"[39m
+              [33msrc[39m=[32m"/@fs/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/assets/icon.png"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-sm font-medium"[39m
+            [36m>[39m
+              [0mtldw Assistant[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Companion Home"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-header-companion-home"[39m
+              [33mtitle[39m=[32m"Companion Home"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-house size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-label[39m=[32m"Show shortcuts"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-toggle-shortcuts"[39m
+              [33mtitle[39m=[32m"Show shortcuts"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-signpost size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 13v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 3v3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M18 6a2 2 0 0 1 1.387.56l2.307 2.22a1 1 0 0 1 0 1.44l-2.307 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.387-.56l-2.306-2.22a1 1 0 0 1 0-1.44l2.306-2.22A2 2 0 0 1 6 6z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-[140px] max-w-[220px] truncate"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"truncate text-left text-xs text-text-muted hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mtitle[39m=[32m"Untitled"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mUntitled[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-1"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium border-success/40 bg-success/10 text-success"[39m
+              [33mtitle[39m=[32m"Saved chat. History is persisted."[39m
+            [36m>[39m
+              [0mSaved[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Search - Open command palette"[39m
+            [33mclass[39m=[32m"hidden items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text sm:inline-flex focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+            [33mdata-testid[39m=[32m"chat-header-command-palette-trigger"[39m
+            [33mtitle[39m=[32m"Search"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-search size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[3...
+ ❯ waitForWrapper ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ __tests__/pages/chat-title.integration.test.tsx:123:34
+    121|     change({ serverChatId: "server-a", serverChatTitle: "Cedar server …
+    122|     render(<Header />)
+    123|     fireEvent.click(await screen.findByRole("button", { name: "Cedar s…
+       |                                  ^
+    124|     const input = screen.getByRole("textbox", { name: "Rename conversa…
+    125|     fireEvent.change(input, { target: { value: "Saved Cedar renamed" }…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  __tests__/pages/chat-title.integration.test.tsx > active Chat title ownership > discards a delayed saved rename after A to B to A even with the same conversation IDs
+TestingLibraryElementError: Unable to find role="button" and name "Cedar"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<header[39m
+      [33mclass[39m=[32m"z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"[39m
+      [33mdata-ischat-route[39m=[32m"true"[39m
+      [33mdata-istemporary-chat[39m=[32m"false"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 items-center gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-2 text-text"[39m
+          [36m>[39m
+            [36m<img[39m
+              [33malt[39m=[32m"tldw Assistant"[39m
+              [33mclass[39m=[32m"h-5 w-auto"[39m
+              [33msrc[39m=[32m"/@fs/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/assets/icon.png"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-sm font-medium"[39m
+            [36m>[39m
+              [0mtldw Assistant[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Companion Home"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-header-companion-home"[39m
+              [33mtitle[39m=[32m"Companion Home"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-house size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-label[39m=[32m"Show shortcuts"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-toggle-shortcuts"[39m
+              [33mtitle[39m=[32m"Show shortcuts"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-signpost size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 13v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 3v3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M18 6a2 2 0 0 1 1.387.56l2.307 2.22a1 1 0 0 1 0 1.44l-2.307 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.387-.56l-2.306-2.22a1 1 0 0 1 0-1.44l2.306-2.22A2 2 0 0 1 6 6z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-[140px] max-w-[220px] truncate"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"truncate text-left text-xs text-text-muted hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mtitle[39m=[32m"Untitled"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mUntitled[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-1"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium border-success/40 bg-success/10 text-success"[39m
+              [33mtitle[39m=[32m"Saved chat. History is persisted."[39m
+            [36m>[39m
+              [0mSaved[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Search - Open command palette"[39m
+            [33mclass[39m=[32m"hidden items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text sm:inline-flex focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+            [33mdata-testid[39m=[32m"chat-header-command-palette-trigger"[39m
+            [33mtitle[39m=[32m"Search"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-search size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[3...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<header[39m
+      [33mclass[39m=[32m"z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"[39m
+      [33mdata-ischat-route[39m=[32m"true"[39m
+      [33mdata-istemporary-chat[39m=[32m"false"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 items-center gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-2 text-text"[39m
+          [36m>[39m
+            [36m<img[39m
+              [33malt[39m=[32m"tldw Assistant"[39m
+              [33mclass[39m=[32m"h-5 w-auto"[39m
+              [33msrc[39m=[32m"/@fs/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/assets/icon.png"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-sm font-medium"[39m
+            [36m>[39m
+              [0mtldw Assistant[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Companion Home"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-header-companion-home"[39m
+              [33mtitle[39m=[32m"Companion Home"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-house size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-label[39m=[32m"Show shortcuts"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-toggle-shortcuts"[39m
+              [33mtitle[39m=[32m"Show shortcuts"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-signpost size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 13v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 3v3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M18 6a2 2 0 0 1 1.387.56l2.307 2.22a1 1 0 0 1 0 1.44l-2.307 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.387-.56l-2.306-2.22a1 1 0 0 1 0-1.44l2.306-2.22A2 2 0 0 1 6 6z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-[140px] max-w-[220px] truncate"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"truncate text-left text-xs text-text-muted hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mtitle[39m=[32m"Untitled"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mUntitled[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-1"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium border-success/40 bg-success/10 text-success"[39m
+              [33mtitle[39m=[32m"Saved chat. History is persisted."[39m
+            [36m>[39m
+              [0mSaved[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Search - Open command palette"[39m
+            [33mclass[39m=[32m"hidden items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text sm:inline-flex focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+            [33mdata-testid[39m=[32m"chat-header-command-palette-trigger"[39m
+            [33mtitle[39m=[32m"Search"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-search size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[3...
+ ❯ waitForWrapper ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ __tests__/pages/chat-title.integration.test.tsx:138:34
+    136|     change({ serverChatId: "server-a", serverChatTitle: "Cedar" })
+    137|     render(<Header />)
+    138|     fireEvent.click(await screen.findByRole("button", { name: "Cedar",…
+       |                                  ^
+    139|     const input = screen.getByRole("textbox", { name: "Rename conversa…
+    140|     fireEvent.change(input, { target: { value: "Stale rename" } })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  __tests__/pages/chat-title.integration.test.tsx > active Chat title ownership > does not restore an old local title on a canonical account change before Chat clears its IDs
+AssertionError: expected "vi.fn()" to be called 1 times, but got 0 times
+ ❯ __tests__/pages/chat-title.integration.test.tsx:159:26
+    157|     await act(async () => { old.resolve("Private Cedar"); await old.pr…
+    158|     expect(screen.queryByText("Private Cedar")).toBeNull()
+    159|     expect(fixture.read).toHaveBeenCalledTimes(1)
+       |                          ^
+    160|   })
+    161|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+ FAIL  __tests__/pages/chat-title.integration.test.tsx > active Chat title ownership > keeps an in-progress title edit across a benign canonical config event
+TestingLibraryElementError: Unable to find role="button" and name "Cedar"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<header[39m
+      [33mclass[39m=[32m"z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"[39m
+      [33mdata-ischat-route[39m=[32m"true"[39m
+      [33mdata-istemporary-chat[39m=[32m"false"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 items-center gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-2 text-text"[39m
+          [36m>[39m
+            [36m<img[39m
+              [33malt[39m=[32m"tldw Assistant"[39m
+              [33mclass[39m=[32m"h-5 w-auto"[39m
+              [33msrc[39m=[32m"/@fs/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/assets/icon.png"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-sm font-medium"[39m
+            [36m>[39m
+              [0mtldw Assistant[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Companion Home"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-header-companion-home"[39m
+              [33mtitle[39m=[32m"Companion Home"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-house size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-label[39m=[32m"Show shortcuts"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-toggle-shortcuts"[39m
+              [33mtitle[39m=[32m"Show shortcuts"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-signpost size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 13v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 3v3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M18 6a2 2 0 0 1 1.387.56l2.307 2.22a1 1 0 0 1 0 1.44l-2.307 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.387-.56l-2.306-2.22a1 1 0 0 1 0-1.44l2.306-2.22A2 2 0 0 1 6 6z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-[140px] max-w-[220px] truncate"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"truncate text-left text-xs text-text-muted hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mtitle[39m=[32m"Untitled"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mUntitled[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-1"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium border-success/40 bg-success/10 text-success"[39m
+              [33mtitle[39m=[32m"Saved chat. History is persisted."[39m
+            [36m>[39m
+              [0mSaved[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Search - Open command palette"[39m
+            [33mclass[39m=[32m"hidden items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text sm:inline-flex focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+            [33mdata-testid[39m=[32m"chat-header-command-palette-trigger"[39m
+            [33mtitle[39m=[32m"Search"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-search size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[3...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<header[39m
+      [33mclass[39m=[32m"z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"[39m
+      [33mdata-ischat-route[39m=[32m"true"[39m
+      [33mdata-istemporary-chat[39m=[32m"false"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 items-center gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-2 text-text"[39m
+          [36m>[39m
+            [36m<img[39m
+              [33malt[39m=[32m"tldw Assistant"[39m
+              [33mclass[39m=[32m"h-5 w-auto"[39m
+              [33msrc[39m=[32m"/@fs/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/assets/icon.png"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-sm font-medium"[39m
+            [36m>[39m
+              [0mtldw Assistant[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Companion Home"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-header-companion-home"[39m
+              [33mtitle[39m=[32m"Companion Home"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-house size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-label[39m=[32m"Show shortcuts"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mdata-testid[39m=[32m"chat-toggle-shortcuts"[39m
+              [33mtitle[39m=[32m"Show shortcuts"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-signpost size-4"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 13v8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 3v3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M18 6a2 2 0 0 1 1.387.56l2.307 2.22a1 1 0 0 1 0 1.44l-2.307 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.387-.56l-2.306-2.22a1 1 0 0 1 0-1.44l2.306-2.22A2 2 0 0 1 6 6z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-[140px] max-w-[220px] truncate"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"truncate text-left text-xs text-text-muted hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+              [33mtitle[39m=[32m"Untitled"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mUntitled[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-1"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium border-success/40 bg-success/10 text-success"[39m
+              [33mtitle[39m=[32m"Saved chat. History is persisted."[39m
+            [36m>[39m
+              [0mSaved[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Search - Open command palette"[39m
+            [33mclass[39m=[32m"hidden items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text sm:inline-flex focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"[39m
+            [33mdata-testid[39m=[32m"chat-header-command-palette-trigger"[39m
+            [33mtitle[39m=[32m"Search"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-search size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[3...
+ ❯ waitForWrapper ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ __tests__/pages/chat-title.integration.test.tsx:165:34
+    163|     change({ serverChatId: "server-a", serverChatTitle: "Cedar" })
+    164|     render(<Header />)
+    165|     fireEvent.click(await screen.findByRole("button", { name: "Cedar",…
+       |                                  ^
+    166|     const input = screen.getByRole("textbox", { name: "Rename conversa…
+    167|     fireEvent.change(input, { target: { value: "Draft title" } })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/9]⎯
+
+ FAIL  ../packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts > TldwApiClient captured request scope > binds the QA updateChat request without changing its body
+AssertionError: expected { …(4) } to match object { method: 'PUT', …(3) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "abortSignal": AbortSignal {
+-     Symbol(kEvents): Map {},
+-     Symbol(events.maxEventTargetListeners): 0,
+-     Symbol(events.maxEventTargetListenersWarned): false,
+-     Symbol(kHandlers): Map {},
+-     Symbol(kAborted): false,
+-     Symbol(kReason): undefined,
+-     Symbol(kComposite): false,
+-   },
+    "headers": {
+-     "X-TLDW-Expected-User-ID": "42",
++     "Content-Type": "application/json",
+    },
+    "method": "PUT",
+-   "servicePromptConfig": {
+-     "authMode": "multi-user",
+-     "expectedUserId": 42,
+-     "serverUrl": "https://research-one.test",
+-   },
+  }
+
+ ❯ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts:77:22
+     75|     await (client[method as keyof typeof client] as (...args: unknown[…
+     76|     const outbound = mocks.bgRequest.mock.calls.at(-1)?.[0]
+     77|     expect(outbound).toMatchObject({
+       |                      ^
+     78|       method: requestMethod, abortSignal: signal,
+     79|       headers: { "X-TLDW-Expected-User-ID": "42" },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/9]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  9 failed | 21 passed (30)
+   Start at  14:24:20
+   Duration  7.80s (transform 669ms, setup 208ms, import 851ms, tests 7.08s, environment 451ms)

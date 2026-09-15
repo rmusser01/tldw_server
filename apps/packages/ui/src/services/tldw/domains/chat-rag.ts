@@ -883,8 +883,9 @@ export const chatRagMethods = {
     this: TldwApiClientCore,
     chat_id: string | number,
     payload: Record<string, any>,
-    options?: { expectedVersion?: number; scope?: ChatScope }
+    options?: { expectedVersion?: number; scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     let expectedVersion = options?.expectedVersion
     if (expectedVersion == null) {
@@ -907,9 +908,11 @@ export const chatRagMethods = {
         })
       try {
         const res = await bgRequest<any>({
+          ...scopeFields,
+          ...(options?.signal ? { abortSignal: options.signal } : {}),
           path: appendPathQuery(`/api/v1/chats/${cid}`, qp),
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: { ...scopeFields.headers, "Content-Type": "application/json" },
           body: payload
         })
         return this.normalizeChatSummary(res)
