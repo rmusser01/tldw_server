@@ -1,0 +1,2 @@
+Observed browser console error after successful first normal chat, 2026-09-15 01:32 UTC:
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18000/api/v1/chats/ddf2f7f7-b8af-4e1a-b5df-8f9cb5f4db9b/settings?scope_type=global:0

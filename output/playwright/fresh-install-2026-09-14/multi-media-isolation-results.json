@@ -1,0 +1,240 @@
+[
+  {
+    "check": "alice ingest",
+    "status": 200,
+    "result": {
+      "results": [
+        {
+          "status": "Success",
+          "input_ref": "alice-uat.txt",
+          "processing_source": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/media_processing_qtcx117g/alice-uat.txt",
+          "media_type": "document",
+          "metadata": {
+            "title": "alice UAT private source",
+            "author": "Unknown",
+            "source_filename": "alice-uat.txt",
+            "raw": {
+              "extracted_title": null,
+              "extracted_author": "Unknown"
+            }
+          },
+          "content": "Private source for alice. Search marker freshuatalice20260914.",
+          "segments": null,
+          "chunks": [
+            {
+              "text": "Private source for alice. Search marker freshuatalice20260914.",
+              "metadata": {
+                "index": 0,
+                "start_index": 0,
+                "end_index": 62,
+                "word_count": 7,
+                "language": "en",
+                "chunk_method": "sentences",
+                "max_size": 1000,
+                "overlap": 200
+              }
+            }
+          ],
+          "analysis": null,
+          "summary": null,
+          "analysis_details": {
+            "analysis_model": null,
+            "custom_prompt_used": null,
+            "system_prompt_used": null,
+            "summarized_recursively": false,
+            "parser_used": "txt"
+          },
+          "error": null,
+          "warnings": null,
+          "db_id": 1,
+          "db_message": "Media 'alice UAT private source' added.",
+          "message": null,
+          "original_processing_source": "/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/media_processing_qtcx117g/alice-uat.txt",
+          "source_format": "txt",
+          "keywords": [],
+          "claims": null,
+          "claims_details": null,
+          "media_uuid": "6b7e17d4-a644-4646-81ce-04b97e29a702",
+          "transcript": "Private source for alice. Search marker freshuatalice20260914.",
+          "collections_item_id": 1,
+          "collections_origin": "media_add"
+        }
+      ]
+    }
+  },
+  {
+    "check": "bob ingest",
+    "status": 200,
+    "result": {
+      "results": [
+        {
+          "status": "Success",
+          "input_ref": "bob-uat.txt",
+          "processing_source": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/media_processing__i972se0/bob-uat.txt",
+          "media_type": "document",
+          "metadata": {
+            "title": "bob UAT private source",
+            "author": "Unknown",
+            "source_filename": "bob-uat.txt",
+            "raw": {
+              "extracted_title": null,
+              "extracted_author": "Unknown"
+            }
+          },
+          "content": "Private source for bob. Search marker freshuatbob20260914.",
+          "segments": null,
+          "chunks": [
+            {
+              "text": "Private source for bob. Search marker freshuatbob20260914.",
+              "metadata": {
+                "index": 0,
+                "start_index": 0,
+                "end_index": 58,
+                "word_count": 7,
+                "language": "en",
+                "chunk_method": "sentences",
+                "max_size": 1000,
+                "overlap": 200
+              }
+            }
+          ],
+          "analysis": null,
+          "summary": null,
+          "analysis_details": {
+            "analysis_model": null,
+            "custom_prompt_used": null,
+            "system_prompt_used": null,
+            "summarized_recursively": false,
+            "parser_used": "txt"
+          },
+          "error": null,
+          "warnings": null,
+          "db_id": 1,
+          "db_message": "Media 'bob UAT private source' added.",
+          "message": null,
+          "original_processing_source": "/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/media_processing__i972se0/bob-uat.txt",
+          "source_format": "txt",
+          "keywords": [],
+          "claims": null,
+          "claims_details": null,
+          "media_uuid": "800f1cbb-d405-42e1-99ce-70f2fffe902d",
+          "transcript": "Private source for bob. Search marker freshuatbob20260914.",
+          "collections_item_id": 1,
+          "collections_origin": "media_add"
+        }
+      ]
+    }
+  },
+  {
+    "check": "alice searches alice source",
+    "status": 200,
+    "result": {
+      "items": [
+        {
+          "id": 1,
+          "title": "alice UAT private source",
+          "url": "/api/v1/media/1",
+          "type": "document",
+          "status": "completed",
+          "created_at": "2026-09-15T01:22:06.586Z",
+          "updated_at": "2026-09-15T01:22:06.586Z"
+        }
+      ],
+      "pagination": {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 1,
+        "total_pages": 1,
+        "has_more": false,
+        "results_per_page": 10,
+        "total_items": 1
+      },
+      "results": [
+        {
+          "id": 1,
+          "title": "alice UAT private source",
+          "url": "/api/v1/media/1",
+          "type": "document",
+          "status": "completed",
+          "created_at": "2026-09-15T01:22:06.586Z",
+          "updated_at": "2026-09-15T01:22:06.586Z"
+        }
+      ]
+    }
+  },
+  {
+    "check": "alice searches bob source",
+    "status": 200,
+    "result": {
+      "items": [],
+      "pagination": {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 0,
+        "total_pages": 0,
+        "has_more": false,
+        "results_per_page": 10,
+        "total_items": 0
+      },
+      "results": []
+    }
+  },
+  {
+    "check": "bob searches alice source",
+    "status": 200,
+    "result": {
+      "items": [],
+      "pagination": {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 0,
+        "total_pages": 0,
+        "has_more": false,
+        "results_per_page": 10,
+        "total_items": 0
+      },
+      "results": []
+    }
+  },
+  {
+    "check": "bob searches bob source",
+    "status": 200,
+    "result": {
+      "items": [
+        {
+          "id": 1,
+          "title": "bob UAT private source",
+          "url": "/api/v1/media/1",
+          "type": "document",
+          "status": "completed",
+          "created_at": "2026-09-15T01:22:06.758Z",
+          "updated_at": "2026-09-15T01:22:06.758Z"
+        }
+      ],
+      "pagination": {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 1,
+        "total_pages": 1,
+        "has_more": false,
+        "results_per_page": 10,
+        "total_items": 1
+      },
+      "results": [
+        {
+          "id": 1,
+          "title": "bob UAT private source",
+          "url": "/api/v1/media/1",
+          "type": "document",
+          "status": "completed",
+          "created_at": "2026-09-15T01:22:06.758Z",
+          "updated_at": "2026-09-15T01:22:06.758Z"
+        }
+      ]
+    }
+  }
+]

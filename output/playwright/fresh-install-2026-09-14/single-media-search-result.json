@@ -1,0 +1,38 @@
+{
+  "check": "single-user ingested marker is searchable",
+  "status": 200,
+  "result": {
+    "items": [
+      {
+        "id": 1,
+        "title": "pasted-text",
+        "url": "/api/v1/media/1",
+        "type": "document",
+        "status": "completed",
+        "created_at": "2026-09-15T01:15:32.709Z",
+        "updated_at": "2026-09-15T01:15:32.709Z"
+      }
+    ],
+    "pagination": {
+      "mode": "page",
+      "page": 1,
+      "per_page": 10,
+      "total": 1,
+      "total_pages": 1,
+      "has_more": false,
+      "results_per_page": 10,
+      "total_items": 1
+    },
+    "results": [
+      {
+        "id": 1,
+        "title": "pasted-text",
+        "url": "/api/v1/media/1",
+        "type": "document",
+        "status": "completed",
+        "created_at": "2026-09-15T01:15:32.709Z",
+        "updated_at": "2026-09-15T01:15:32.709Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+[
+  {
+    "check": "alice create note",
+    "status": 201,
+    "id": "21f74a7f-2a69-48c8-beb3-0fcd1dda72cf"
+  },
+  {
+    "check": "bob create note",
+    "status": 201,
+    "id": "814553e6-200c-467c-9f36-d52b71ca3d86"
+  },
+  {
+    "check": "alice reads alice note",
+    "status": 200,
+    "visibleContent": "Only alice should see private marker freshuatalice20260914."
+  },
+  {
+    "check": "alice reads bob note",
+    "status": 404,
+    "visibleContent": null
+  },
+  {
+    "check": "bob reads alice note",
+    "status": 404,
+    "visibleContent": null
+  },
+  {
+    "check": "bob reads bob note",
+    "status": 200,
+    "visibleContent": "Only bob should see private marker freshuatbob20260914."
+  },
+  {
+    "check": "alice admin users denied",
+    "status": 403
+  },
+  {
+    "check": "bob admin users denied",
+    "status": 403
+  }
+]

@@ -1,0 +1,76 @@
+{
+  "checkout": "54ecc7e7735fc082b711d922a27e97ee9999e5ae",
+  "capturedDateUTC": "2026-09-15",
+  "localRunDate": "2026-09-14",
+  "artifacts": [
+    {
+      "file": "single-readiness-auth.png",
+      "original": "page-2026-09-15T01-07-01-535Z.png"
+    },
+    {
+      "file": "single-provider-continue-error.png",
+      "original": "page-2026-09-15T01-08-31-339Z.png"
+    },
+    {
+      "file": "single-first-chat-abort.png",
+      "original": "page-2026-09-15T01-12-32-864Z.png"
+    },
+    {
+      "file": "single-knowledge-qa-error.png",
+      "original": "page-2026-09-15T01-22-23-904Z.png"
+    },
+    {
+      "file": "multi-alice-notes-blocked.png",
+      "original": "page-2026-09-15T01-33-03-057Z.png"
+    },
+    {
+      "file": "single-chat-reload-pass.png",
+      "original": "page-2026-09-15T01-32-58-263Z.png"
+    },
+    {
+      "file": "multi-setup-skip-error.yml",
+      "original": "page-2026-09-15T01-13-00-978Z.yml"
+    },
+    {
+      "file": "single-home-provider-contradiction.yml",
+      "original": "page-2026-09-15T01-13-54-090Z.yml"
+    },
+    {
+      "file": "multi-auth-mode-confirmation.yml",
+      "original": "page-2026-09-15T01-14-32-619Z.yml"
+    },
+    {
+      "file": "multi-login-default.yml",
+      "original": "page-2026-09-15T01-14-53-635Z.yml"
+    },
+    {
+      "file": "multi-logged-in-health-failure.yml",
+      "original": "page-2026-09-15T01-17-29-684Z.yml"
+    },
+    {
+      "file": "single-knowledge-entry.yml",
+      "original": "page-2026-09-15T01-18-10-249Z.yml"
+    },
+    {
+      "file": "single-home-starter-noop.yml",
+      "original": "page-2026-09-15T01-29-01-365Z.yml"
+    },
+    {
+      "file": "multi-alice-login.yml",
+      "original": "page-2026-09-15T01-31-20-886Z.yml"
+    },
+    {
+      "file": "multi-alice-notes-retry.yml",
+      "original": "page-2026-09-15T01-33-02-308Z.yml"
+    },
+    {
+      "original": "page-2026-09-15T01-18-43-548Z.yml",
+      "file": "multi-admin-users-controls.yml"
+    },
+    {
+      "original": "page-2026-09-15T01-17-13-211Z.yml",
+      "file": "single-assistant-interstitial.yml"
+    }
+  ],
+  "notes": "Screenshots visually inspected; selected text artifacts scanned against generated runtime credentials. Raw browser state, private manifests, and full logs excluded."
+}
