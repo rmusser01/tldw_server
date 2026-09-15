@@ -636,7 +636,7 @@ export const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({
                 </div>
                 {loading ? (
                   <span className="text-xs text-text-muted">
-                    {t("common:loading", "Loading...")}
+                    {t("common:loading.title", "Loading...")}
                   </span>
                 ) : null}
               </div>
@@ -716,7 +716,7 @@ export const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({
                         }}
                       >
                         {testingConnectionId === connection.id
-                          ? t("common:loading", "Loading...")
+                          ? t("common:loading.title", "Loading...")
                           : t("sidepanel:personaGarden.connections.test", {
                               defaultValue: "Test"
                             })}
@@ -731,7 +731,7 @@ export const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({
                         }}
                       >
                         {deletingConnectionId === connection.id
-                          ? t("common:loading", "Loading...")
+                          ? t("common:loading.title", "Loading...")
                           : t("common:delete", "Delete")}
                       </button>
                     </div>

@@ -72,7 +72,10 @@ describe("ProviderKeysSettings design-system alerts", () => {
   })
 
   it("renders BYOK unavailable guidance through the design-system Alert primitive", async () => {
-    listUserProviderKeysMock.mockRejectedValue({ status: 403 })
+    listUserProviderKeysMock.mockRejectedValue({
+      status: 403,
+      details: { detail: "BYOK is disabled in this deployment" }
+    })
 
     render(<ProviderKeysSettings />)
 
