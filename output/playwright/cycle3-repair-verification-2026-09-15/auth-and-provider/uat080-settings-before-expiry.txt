@@ -1,0 +1,187 @@
+### Open tabs
+- 0: [Notes | tldw](http://127.0.0.1:18281/notes)
+- 1: (current) [Setup & Recovery | Settings | tldw](http://127.0.0.1:18281/settings)
+### Page
+- Page URL: http://127.0.0.1:18281/settings
+- Page Title: Setup & Recovery | Settings | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=e20]:
+  - generic [ref=e23]:
+    - link "Skip to main content" [ref=e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - main [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e29]:
+          - generic [ref=e31]:
+            - img "tldw Assistant" [ref=e32]
+            - generic [ref=e33]: tldw Assistant
+            - button "Companion Home" [ref=e34] [cursor=pointer]
+            - button "Show shortcuts" [ref=e38] [cursor=pointer]
+          - generic [ref=e41]:
+            - button "Search - Open command palette" [ref=e42] [cursor=pointer]:
+              - generic [ref=e46]: Search
+              - generic [ref=e47]: ⌘K
+            - button "Open settings" [ref=e48] [cursor=pointer]
+            - generic [ref=e60]:
+              - button "Notifications, 0 unread" [ref=e61] [cursor=pointer]
+              - status [ref=e65]: Notifications are active
+            - button "Switch to light theme" [ref=e66] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e73] [cursor=pointer]:
+              - generic [ref=e74]: "?"
+        - generic [ref=e79]:
+          - complementary [ref=e80]:
+            - navigation "Settings navigation" [ref=e81]:
+              - button "Switch to Sidebar" [ref=e83] [cursor=pointer]
+              - generic [ref=e84]:
+                - generic [ref=e85]: Filter settings
+                - textbox "Filter settings" [ref=e86]:
+                  - /placeholder: Find a setting
+              - generic [ref=e87]:
+                - generic [ref=e88]:
+                  - generic [ref=e89]: Setup & Recovery
+                  - list [ref=e91]:
+                    - listitem [ref=e92]:
+                      - link "Setup & Recovery" [ref=e93] [cursor=pointer]:
+                        - /url: /settings
+                    - listitem [ref=e102]:
+                      - link "tldw Server" [ref=e103] [cursor=pointer]:
+                        - /url: /settings/tldw
+                    - listitem [ref=e108]:
+                      - link "Provider Keys" [ref=e109] [cursor=pointer]:
+                        - /url: /settings/provider-keys
+                    - listitem [ref=e114]:
+                      - link "Manage Models" [ref=e115] [cursor=pointer]:
+                        - /url: /settings/model
+                    - listitem [ref=e129]:
+                      - link "Health & Diagnostics" [ref=e130] [cursor=pointer]:
+                        - /url: /settings/health
+                - generic [ref=e134]:
+                  - generic [ref=e135]: Preferences & Workflow
+                  - list [ref=e137]:
+                    - listitem [ref=e138]:
+                      - link "Preferences" [ref=e139] [cursor=pointer]:
+                        - /url: /settings/preferences
+                    - listitem [ref=e142]:
+                      - link "Chat" [ref=e143] [cursor=pointer]:
+                        - /url: /settings/chat
+                    - listitem [ref=e147]:
+                      - link "Chat Macros" [ref=e148] [cursor=pointer]:
+                        - /url: /settings/chat-macros
+                    - listitem [ref=e157]:
+                      - link "UI customization" [ref=e158] [cursor=pointer]:
+                        - /url: /settings/ui
+                    - listitem [ref=e161]:
+                      - link "Splash screens" [ref=e162] [cursor=pointer]:
+                        - /url: /settings/splash
+                    - listitem [ref=e167]:
+                      - link "Quick Ingest" [ref=e168] [cursor=pointer]:
+                        - /url: /settings/quick-ingest
+                    - listitem [ref=e173]:
+                      - link "Speech" [ref=e174] [cursor=pointer]:
+                        - /url: /settings/speech
+                    - listitem [ref=e179]:
+                      - link "Image Generation" [ref=e180] [cursor=pointer]:
+                        - /url: /settings/image-generation
+                    - listitem [ref=e186]:
+                      - link "Knowledge QA" [ref=e187] [cursor=pointer]:
+                        - /url: /settings/knowledge
+                    - listitem [ref=e191]:
+                      - link "RAG Settings" [ref=e192] [cursor=pointer]:
+                        - /url: /settings/rag
+                    - listitem [ref=e201]:
+                      - link "Workflow prompts" [ref=e202] [cursor=pointer]:
+                        - /url: /settings/prompt
+                    - listitem [ref=e206]:
+                      - link "Prompt Studio" [ref=e207] [cursor=pointer]:
+                        - /url: /settings/prompt-studio
+                      - generic [ref=e213]: Beta
+                    - listitem [ref=e214]:
+                      - link "Chatbooks settings" [ref=e215] [cursor=pointer]:
+                        - /url: /settings/chatbooks
+                    - listitem [ref=e219]:
+                      - link "Characters" [ref=e220] [cursor=pointer]:
+                        - /url: /settings/characters
+                    - listitem [ref=e224]:
+                      - link "World Books" [ref=e225] [cursor=pointer]:
+                        - /url: /settings/world-books
+                    - listitem [ref=e229]:
+                      - link "Chat Dictionaries" [ref=e230] [cursor=pointer]:
+                        - /url: /settings/chat-dictionaries
+                - generic [ref=e235]:
+                  - generic [ref=e236]: Data & Administration
+                  - list [ref=e238]:
+                    - listitem [ref=e239]:
+                      - link "Data Management" [ref=e240] [cursor=pointer]:
+                        - /url: /settings/data
+                    - listitem [ref=e246]:
+                      - link "Manage Share" [ref=e247] [cursor=pointer]:
+                        - /url: /settings/share
+                    - listitem [ref=e252]:
+                      - link "Evaluations" [ref=e253] [cursor=pointer]:
+                        - /url: /settings/evaluations
+                    - listitem [ref=e257]:
+                      - link "Moderation Review" [ref=e258] [cursor=pointer]:
+                        - /url: /moderation
+                    - listitem [ref=e263]:
+                      - link "Content Rules" [ref=e264] [cursor=pointer]:
+                        - /url: /moderation/rules
+                    - listitem [ref=e269]:
+                      - link "MCP Hub" [ref=e270] [cursor=pointer]:
+                        - /url: /settings/mcp-hub
+                    - listitem [ref=e275]:
+                      - link "About" [ref=e276] [cursor=pointer]:
+                        - /url: /settings/about
+              - button "Hide beta badges" [ref=e281] [cursor=pointer]
+          - region [ref=e282]:
+            - button "Close" [ref=e284] [cursor=pointer]
+            - generic [ref=e289]:
+              - heading "Settings" [level=1] [ref=e290]
+              - paragraph [ref=e292]: Current section:Setup & Recovery
+              - generic [ref=e293]:
+                - generic [ref=e294]:
+                  - heading "Setup & Recovery" [level=2] [ref=e295]
+                  - paragraph [ref=e296]: Check the basics first, then jump to the page that owns the fix.
+                - generic [ref=e298]:
+                  - generic [ref=e300]:
+                    - generic [ref=e301]:
+                      - generic [ref=e302]: Server connection
+                      - paragraph [ref=e303]: http://127.0.0.1:18201
+                    - link "Edit server" [ref=e304] [cursor=pointer]:
+                      - /url: /settings/tldw
+                  - generic [ref=e306]:
+                    - generic [ref=e307]:
+                      - generic [ref=e308]: Authentication
+                      - paragraph [ref=e309]: No auth issue detected from the current connection state.
+                    - link "Fix auth" [ref=e310] [cursor=pointer]:
+                      - /url: /settings/tldw
+                  - generic [ref=e312]:
+                    - generic [ref=e313]:
+                      - generic [ref=e314]: Provider keys
+                      - paragraph [ref=e315]: Provider key status is checked on the provider keys page.
+                    - link "Provider keys" [ref=e316] [cursor=pointer]:
+                      - /url: /settings/provider-keys
+                  - generic [ref=e318]:
+                    - generic [ref=e319]:
+                      - generic [ref=e320]: Default chat model
+                      - paragraph [ref=e321]: llama:../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf
+                    - link "Model settings" [ref=e322] [cursor=pointer]:
+                      - /url: /settings/model
+                  - generic [ref=e324]:
+                    - generic [ref=e325]:
+                      - generic [ref=e326]: Embedding model
+                      - paragraph [ref=e327]: Embedding default not checked yet.
+                    - link "Embedding defaults" [ref=e328] [cursor=pointer]:
+                      - /url: /settings/rag
+                  - generic [ref=e330]:
+                    - generic [ref=e331]:
+                      - generic [ref=e332]: Health checks
+                      - paragraph [ref=e333]: Open diagnostics for detailed server and subsystem checks.
+                    - link "Full diagnostics" [ref=e334] [cursor=pointer]:
+                      - /url: /settings/health
+                - button "Restart onboarding" [ref=e335] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=e15] [cursor=pointer]
+  - alert [ref=e19]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T15-18-10-922Z.log#L3-L4

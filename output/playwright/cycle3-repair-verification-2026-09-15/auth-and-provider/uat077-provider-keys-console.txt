@@ -1,0 +1,38 @@
+[     145ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[    2042ms] [LOG] [Fast Refresh] done in 1999ms @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[    2133ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18281/_next/static/chunks/bdf27_react-dom_cjs_react-dom_development_018fd5a3.js:25055
+[    2155ms] [LOG] [HMR] connected @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[    2287ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[    2617ms] [ERROR] Failed to load resource: the server responded with a status of 403 (Forbidden) @ http://127.0.0.1:18201/api/v1/users/keys:0
+[    2618ms] [WARNING] [tldw:request] GET /api/v1/users/keys 403 BYOK is disabled in this deployment @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[    2860ms] [LOG] [Fast Refresh] done in 672ms @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[   78215ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[   78417ms] [LOG] [Fast Refresh] done in 303ms @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  118655ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  118812ms] [LOG] [Fast Refresh] done in 257ms @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  268818ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  269033ms] [LOG] [Fast Refresh] done in 316ms @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  269592ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  269822ms] [LOG] [Fast Refresh] done in 330ms @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  363140ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  363213ms] [LOG] [Fast Refresh] done in 176ms @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  429084ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  429240ms] [LOG] [Fast Refresh] done in 40ms @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  430165ms] [ERROR] Failed to load resource: the server responded with a status of 403 (Forbidden) @ http://127.0.0.1:18201/api/v1/users/keys:0
+[  430166ms] [WARNING] [tldw:request] GET /api/v1/users/keys 403 BYOK is disabled in this deployment @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  494915ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  495001ms] [LOG] [Fast Refresh] done in 188ms @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  541346ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  543145ms] [LOG] [Fast Refresh] done in 1595ms @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  543280ms] [ERROR] Failed to load resource: the server responded with a status of 403 (Forbidden) @ http://127.0.0.1:18201/api/v1/users/keys:0
+[  543281ms] [WARNING] [tldw:request] GET /api/v1/users/keys 403 BYOK is disabled in this deployment @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  561193ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  561286ms] [LOG] [Fast Refresh] done in 58ms @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  561561ms] [ERROR] Failed to load resource: the server responded with a status of 403 (Forbidden) @ http://127.0.0.1:18201/api/v1/users/keys:0
+[  561565ms] [WARNING] [tldw:request] GET /api/v1/users/keys 403 BYOK is disabled in this deployment @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  576073ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  576170ms] [LOG] [Fast Refresh] done in 198ms @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  646783ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  646841ms] [LOG] [Fast Refresh] done in 159ms @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  685217ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  685301ms] [LOG] [Fast Refresh] done in 184ms @ http://127.0.0.1:18281/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206

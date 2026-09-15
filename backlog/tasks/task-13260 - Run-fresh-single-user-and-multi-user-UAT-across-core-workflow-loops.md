@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-15 11:19'
+updated_date: '2026-09-15 16:06'
 labels:
   - uat
   - testing
@@ -89,6 +89,8 @@ Frozen Cycle 3 browser execution ended at 2026-09-15T11:14:21Z. Parent sealed 30
 Final independent evidence review is clear: all309 main captures and report hashes verified,41JSON parsed, UAT064/085/086 and offline recovery claims match retained controls. Parent verifier scanned552 retained files against14known runtime credential values and JWT/private-key markers with zero matches. FourPNG captures visually inspected. Frozen evidence checkpoint is ready; repair work may begin. All32 findings remain open until their fixes and targeted live verification pass.
 
 Checkpoint whitespace check: source documentation and task records are clean. Two immutable raw console captures contain their original trailing space/blank line; retained byte-for-byte so their reviewed hashes remain valid. These are evidence-format exceptions, not product or authored-document warnings.
+
+Cycle3 targeted repair checkpoint: commits7db8f5d851/b993995dfe extraction,7e48f29cb1ProviderKeys,bfcb393a44revokedrotation,fb79cc565a notifications. All fullUAT findings remainopen; targeted087notifications and088staleSettings add2P3 for34currentopen(14P2/20P3). Retained22 credential-scanned captures plus safe request metadata in output/playwright/cycle3-repair-verification-2026-09-15/auth-and-provider withREADME/SHA256SUMS. Originalfrozen552-filebundleunchanged. Live naturalrefresh200 and revocation/relogin recorded; secondtabSettingsstillLoginRequired(.29). SavedChatpromotion has furtherreviewfailuresunderrepair. Narrowcapabilities .23 active, adding selfidentity inbody avoidsdeprecated/profile dependencies.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

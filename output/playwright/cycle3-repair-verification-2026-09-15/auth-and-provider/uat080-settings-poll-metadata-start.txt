@@ -1,0 +1,6 @@
+### Result
+{"at":"2026-09-15T15:50:20.780Z","buffered":135,"privateFetches":7,"latestPrivateFetchEnd":496134.90000009537,"loginRequired":true}
+### Ran Playwright code
+```js
+await (async page => await page.evaluate(() => ({at: new Date().toISOString(), buffered: performance.getEntriesByType("resource").length, privateFetches: performance.getEntriesByType("resource").filter(e => e.initiatorType === "fetch" && new URL(e.name).pathname.startsWith("/api/v1/")).length, latestPrivateFetchEnd: Math.max(0,...performance.getEntriesByType("resource").filter(e => e.initiatorType === "fetch" && new URL(e.name).pathname.startsWith("/api/v1/")).map(e => e.responseEnd)), loginRequired: document.body.innerText.includes("Login Required") })))(page);
+```

@@ -118,7 +118,7 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 **Goal:** Keep core route status, navigation and study counts useful and truthful.
 **Success criteria:** Saved Notes have consistent announcements and accessible results; eligibility counts match the queue; Manage emits no deprecated List warning; route/setup guidance is accurate.
 **Tests:** Notes state/layout, real Manage controls, dashboard mixed-state clock fixtures, route/auth titles and prerequisite state branches.
-**Status:** Not Started
+**Status:** In Progress
 
 ### TASK-13260.23 — narrow caller capabilities for UAT078/079
 
@@ -171,10 +171,22 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 ### TASK-13260.22 — UAT077 Provider Keys loading
 
 **Files:** `components/Option/Settings/ProviderKeysSettings.tsx`, its actual-i18n behavior test, static related PersonaGarden Scopes/Policies/Commands/Connections label callers, `i18n/icu-format.ts` and `i18n/__tests__/icu-format.test.ts`.
-- [ ] Reproduce the object-valued `common:loading` label with real English resources and ICU; observe the route exception before edits.
-- [ ] Use scalar loading titles and verify pending/empty/success/403 states without a crash. Preserve the confirmed BYOK-disabled guidance and permission boundary; test static related PersonaGarden loading/test/delete states separately.
-- [ ] Guard only string placeholder transformation, then delegate all other input unchanged to upstream ICU; verify syntax-tree arrays and custom object parse-error handling alongside repeated interpolation/plural tests.
-- [ ] Review and run the same fresh-admin visible Provider Keys route; record any separately encountered issue before expanding scope.
+- [x] Reproduce the object-valued `common:loading` label with real English resources and ICU; observe the route exception before edits.
+- [x] Use scalar loading titles and verify pending/empty/success/403 states without a crash. Preserve the confirmed BYOK-disabled guidance and permission boundary; test static related PersonaGarden loading/test/delete states separately.
+- [x] Guard only string placeholder transformation, then delegate all other input unchanged to upstream ICU; verify syntax-tree arrays and custom object parse-error handling alongside repeated interpolation/plural tests.
+- [x] Review and run the same fresh-admin visible Provider Keys route; record any separately encountered issue before expanding scope. Committed `7e48f29cb1`; real disabled-deployment guidance rendered without the original crash. Existing title finding058 remains separate.
+
+### TASK-13260.28 — UAT087 notification rotation follow-up
+
+- [x] Record natural refresh200 followed by unread-count401 and stale sign-in state in both tabs.
+- [ ] Reproduce with actual rotation storage and notification request/lifecycle boundaries; reuse effective credential selection and generation-scoped rotation events.
+- [ ] Preserve revoked401, permission403, cross-account isolation, cancellation and no automatic mutation replay; review and live-check both tabs.
+
+### TASK-13260.29 — UAT088 Settings login synchronization
+
+- [x] Record successful normal Notes login with stale Login Required in the already-open Settings tab.
+- [ ] Reproduce with the actual mounted Settings owner and effective credential/storage events; update auth presentation without replacing unsaved form fields.
+- [ ] Reject delayed and A→B→A reads; cover logout, exact-pair invalidation, unrelated server changes and valid offline credentials. Independently review and repeat the actual two-tab sequence.
 
 ## Stage 5: Verify integration and repeat fresh UAT
 **Goal:** Establish complete acceptance on the repaired application.
