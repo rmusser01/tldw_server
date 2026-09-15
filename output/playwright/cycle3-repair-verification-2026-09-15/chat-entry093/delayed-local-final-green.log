@@ -1,0 +1,22 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ✓ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (18 tests | 17 skipped) 86ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 17 skipped (18)
+   Start at  14:22:07
+   Duration  2.30s (transform 1.07s, setup 77ms, import 1.77s, tests 86ms, environment 253ms)
+
+(node:81353) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+2:22:08 PM [vite] (client) warning: Duplicate key "getSessionFiles" in object literal
+143 |    getHistoryByServerChatId: vi.fn(async () => null),
+144 |    getPromptById: vi.fn(async () => null), getSessionFiles: vi.fn(async () => []),
+145 |    getSessionFiles: vi.fn(async () => []),
+    |    ^
+146 |    getRecentChatFromWebUI: vi.fn(async () => null)
+147 |  }))
+
+  Plugin: vite:esbuild
+  File: /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx

@@ -1,0 +1,27 @@
+[
+  {
+    "file": "apps/packages/ui/src/components/Option/Playground/Playground.tsx",
+    "errors": 0,
+    "added": []
+  },
+  {
+    "file": "apps/packages/ui/src/components/Common/ChatSidebar/LocalChatList.tsx",
+    "errors": 0,
+    "added": []
+  },
+  {
+    "file": "apps/packages/ui/src/hooks/useLoadLocalConversation.ts",
+    "errors": 0,
+    "added": []
+  },
+  {
+    "file": "apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx",
+    "errors": 0,
+    "added": []
+  },
+  {
+    "file": "apps/packages/ui/src/hooks/__tests__/useLoadLocalConversation.test.tsx",
+    "errors": 0,
+    "added": []
+  }
+]

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 
 import { Playground } from "../Playground"
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator"
@@ -64,19 +64,17 @@ const restoreDecisionState = vi.hoisted(() => ({
 const tldwClientState = vi.hoisted(() => ({
   initialize: vi.fn(async () => undefined),
   getProvidersStatus: vi.fn(async () => null),
+  getChatSettings: vi.fn(async () => ({ settings: {} })),
   getCharacter: vi.fn(async (id: string | number) => ({
     id,
     name: "Route Character"
   }))
 }))
 
-const loadLocalConversationState = vi.hoisted(() => ({
-  value: vi.fn(async () => undefined)
-}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, defaultValue?: string) => defaultValue || key
+    t: (key: string, fallback?: string | { defaultValue?: string }) => typeof fallback === "string" ? fallback : fallback?.defaultValue ?? key
   })
 }))
 
@@ -97,7 +95,11 @@ vi.mock("@/hooks/useMessageOption", () => ({
 }))
 
 vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
-  usePlaygroundSessionPersistence: () => sessionPersistenceState.value
+  usePlaygroundSessionPersistence: () => {
+    // Match the real hook subscription: cancelling a restore must rerender its owner.
+    usePlaygroundSessionStore()
+    return sessionPersistenceState.value
+  }
 }))
 
 vi.mock("@/hooks/playground-session-restore", async () => {
@@ -114,6 +116,8 @@ vi.mock("@/hooks/playground-session-restore", async () => {
       actual.shouldRestorePersistedPlaygroundSession(input)
   }
 })
+
+vi.mock("@/services/model-settings", () => ({ lastUsedChatModelEnabled: async () => false }))
 
 vi.mock("@/services/app", () => ({
   webUIResumeLastChat: vi.fn(async () => false)
@@ -138,6 +142,7 @@ vi.mock("@/db/dexie/helpers", () => ({
   formatToMessage: vi.fn(),
   getHistoryByServerChatId: vi.fn(async () => null),
   getPromptById: vi.fn(async () => null),
+  getSessionFiles: vi.fn(async () => []),
   getRecentChatFromWebUI: vi.fn(async () => null)
 }))
 
@@ -220,9 +225,6 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useDesktop: () => true
 }))
 
-vi.mock("@/hooks/useLoadLocalConversation", () => ({
-  useLoadLocalConversation: () => loadLocalConversationState.value
-}))
 
 vi.mock("@/hooks/useServerChatHistory", () => ({
   useServerChatHistory: () => ({
@@ -260,6 +262,12 @@ vi.mock("react-router-dom", async () => {
   }
 })
 
+class RouteTestBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() { return { failed: true } }
+  render() { return this.state.failed ? <p role="alert">Chat route crashed</p> : this.props.children }
+}
+
 describe("Playground coordinator integration", () => {
   beforeEach(() => {
     window.history.pushState({}, "", "/chat")
@@ -268,6 +276,7 @@ describe("Playground coordinator integration", () => {
     messageOptionState.value.historyId = null
     messageOptionState.value.serverChatId = null
     messageOptionState.value.selectedCharacter = null
+    messageOptionState.value.setHistoryId.mockClear()
     messageOptionState.value.setServerChatId.mockClear()
     messageOptionState.value.setServerChatCharacterId.mockClear()
     messageOptionState.value.setServerChatAssistantKind.mockClear()
@@ -282,7 +291,6 @@ describe("Playground coordinator integration", () => {
       id,
       name: "Route Character"
     }))
-    loadLocalConversationState.value.mockClear()
     sessionPersistenceState.value.restoreSession = vi.fn(
       async () => "not-restored" as const
     )
@@ -551,5 +559,80 @@ describe("Playground coordinator integration", () => {
         name: "Route Character"
       })
     )
+  })
+
+  it.each([false, true])("settles canonical saved entry with the real session subscription and local loader (StrictMode=%s)", async (strict) => {
+    messageOptionState.value.serverChatId = "settings-chat"
+    window.history.pushState({}, "", "/chat?settingsServerChatId=settings-chat")
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const element = strict ? <React.StrictMode><Playground /></React.StrictMode> : <Playground />
+    const view = render(<RouteTestBoundary>{element}</RouteTestBoundary>)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(usePlaygroundSessionStore.getState().restoreRevision).toBeLessThanOrEqual(2)
+    await waitFor(() => expect(window.location.search).toBe(""))
+    const settledRevision = usePlaygroundSessionStore.getState().restoreRevision
+    view.rerender(<RouteTestBoundary>{element}</RouteTestBoundary>)
+    await act(async () => { await Promise.resolve() })
+    expect(usePlaygroundSessionStore.getState().restoreRevision).toBe(settledRevision)
+    expect(error.mock.calls.flat().join(" ")).not.toContain("Maximum update depth")
+    view.unmount()
+  })
+
+  it("cancels pending generic restoration before applying an explicit settings target", async () => {
+    const capturedRevision = usePlaygroundSessionStore.getState().restoreRevision
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    let staleRestorePublished = false
+    const pendingRestore = held.then(() => {
+      if (usePlaygroundSessionStore.getState().restoreRevision === capturedRevision) staleRestorePublished = true
+    })
+    let revisionWhenApplied: number | null = null
+    messageOptionState.value.setServerChatId.mockImplementationOnce(() => {
+      revisionWhenApplied = usePlaygroundSessionStore.getState().restoreRevision
+    })
+    window.history.pushState({}, "", "/chat?settingsServerChatId=settings-chat")
+    const view = render(<Playground />)
+    await waitFor(() => expect(revisionWhenApplied).not.toBeNull())
+    await act(async () => { release(); await pendingRestore })
+    expect(revisionWhenApplied).toBeGreaterThan(capturedRevision)
+    expect(staleRestorePublished).toBe(false)
+    view.unmount()
+  })
+
+  it.each(["settings", "timeline"] as const)("finishes a delayed current %s local-history load", async origin => {
+    const { PageAssistDatabase } = await import("@/db/dexie/chat")
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const read = vi.spyOn(PageAssistDatabase.prototype, "getChatHistory").mockImplementation(async () => { await held; return [] })
+    vi.spyOn(PageAssistDatabase.prototype, "getHistoryInfo").mockResolvedValue({ id: "owned-local", title: "Owned local title", createdAt: 1, is_rag: false })
+    if (origin === "settings") window.history.pushState({}, "", "/chat?settingsHistoryId=owned-local")
+    const view = render(<Playground />)
+    if (origin === "timeline") {
+      await act(async () => { await Promise.resolve() })
+      act(() => window.dispatchEvent(new CustomEvent("tldw:open-history", { detail: { historyId: "owned-local" } })))
+    }
+    await waitFor(() => expect(read).toHaveBeenCalledWith("owned-local"))
+    await act(async () => { release(); await held })
+    await waitFor(() => expect(document.title).toBe("Owned local title"))
+    expect(messageOptionState.value.setHistoryId).toHaveBeenCalledWith("owned-local", { preserveServerChatId: false })
+    view.unmount()
+  })
+
+  it("does not complete a failed local settings return as a successful server selection", async () => {
+    const { PageAssistDatabase } = await import("@/db/dexie/chat")
+    let fail!: () => void
+    const held = new Promise<never>((_resolve, reject) => { fail = () => reject(new Error("Synthetic local failure")) })
+    const read = vi.spyOn(PageAssistDatabase.prototype, "getChatHistory").mockReturnValue(held)
+    vi.spyOn(PageAssistDatabase.prototype, "getHistoryInfo").mockResolvedValue({ id: "missing-local", title: "Missing local title", createdAt: 1, is_rag: false })
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    window.history.pushState({}, "", "/chat?settingsHistoryId=missing-local&settingsServerChatId=target-server")
+    const view = render(<Playground />)
+    await waitFor(() => expect(read).toHaveBeenCalled())
+    messageOptionState.value.setServerChatId.mockClear()
+    await act(async () => { fail(); await held.catch(() => undefined) })
+    expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled()
+    expect(window.location.search).toContain("settingsHistoryId=missing-local")
+    view.unmount()
   })
 })

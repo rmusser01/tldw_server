@@ -1,0 +1,348 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:80510) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (17 tests) 446ms
+(node:80558) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx (13 tests) 4181ms
+     ✓ shows conversation title labels with UUID debug tooltip in list and header  597ms
+     ✓ retries transient conversation label lookups and hydrates once they recover  1597ms
+(node:80668) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > prepares follow-up research by attaching the selected run and seeding the deterministic draft
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > prepares follow-up research by attaching the selected run and seeding the deterministic draft
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > consumes researchReturnRunId once and passes the returned run marker to PlaygroundChat
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > consumes researchReturnRunId once and passes the returned run marker to PlaygroundChat
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > shows Follow up on the active attachment surface and opens the local confirmation before preparing follow-up research
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > shows Follow up on the active attachment surface and opens the local confirmation before preparing follow-up research
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > shows Follow up on the pinned mini-card and keeps the confirmation local
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > shows Follow up on the pinned mini-card and keeps the confirmation local
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > shows Follow up on recent-history entries and cancels without changing the active attachment
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > shows Follow up on recent-history entries and cancels without changing the active attachment
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > confirming follow-up does not implicitly trigger Use
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > confirming follow-up does not implicitly trigger Use
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > replaces the attached research context and lets the form remove it
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > replaces the attached research context and lets the form remove it
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > tracks a run-derived baseline and lets preview edits update only the active attachment
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > tracks a run-derived baseline and lets preview edits update only the active attachment
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > clears attached research context when the active thread changes
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > clears attached research context when the active thread changes
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > initializes to readiness under StrictMode replay (latch unlatches on teardown)
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > initializes to readiness under StrictMode replay (latch unlatches on teardown)
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > auto-restores persisted attached research context and bounded history for saved chats
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > auto-restores persisted attached research context and bounded history for saved chats
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > auto-restores the pinned attachment when a saved chat has no active attachment
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > auto-restores the pinned attachment when a saved chat has no active attachment
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > persists attachment attach, edit, remove, and history swaps for saved chats
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > persists attachment attach, edit, remove, and history swaps for saved chats
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > persists pin and unpin actions for saved chats
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > persists pin and unpin actions for saved chats
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > pins a history entry without changing the active attachment
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > pins a history entry without changing the active attachment
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > pins a history entry from the fallback surface when no active attachment exists
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > pins a history entry from the fallback surface when no active attachment exists
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > does not persist attachments for temporary chats
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > does not persist attachments for temporary chats
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > restores the correct persisted attachment when switching saved chats
+[Playground] Failed to load provider status TypeError: __vite_ssr_import_39__.tldwClient.getProvidersStatus is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:469:36
+    at async Promise.all (index 1)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+stderr | src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx > Playground research context integration > restores the correct persisted attachment when switching saved chats
+Failed to fetch chat models: TypeError: __vite_ssr_import_0__.tldwClient.getConfig is not a function
+    at TldwModelsService.getModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:347:37)
+    at TldwModelsService.getChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwModels.ts:429:20)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:378:26
+    at fetchChatModels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw-server.ts:419:12)
+    at async Promise.all (index 0)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:462:42
+
+ ✓ src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx (18 tests) 2550ms
+     ✓ persists attachment attach, edit, remove, and history swaps for saved chats  481ms
+(node:80709) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx (8 tests) 709ms
+(node:80726) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx > Playground thread search integration > opens in-thread search on Cmd/Ctrl+F and forwards query to PlaygroundChat
+tldw_server: fetchChatModels resolved { tldwCount: 0, total: 0 }
+
+stdout | src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx > Playground thread search integration > opens shortcut help from the header and closes with Escape
+tldw_server: fetchChatModels resolved { tldwCount: 0, total: 0 }
+
+stdout | src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx > Playground thread search integration > opens shortcut help when a global open-shortcuts event is dispatched
+tldw_server: fetchChatModels resolved { tldwCount: 0, total: 0 }
+
+stdout | src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx > Playground thread search integration > does not render the deprecated chat workflows header action
+tldw_server: fetchChatModels resolved { tldwCount: 0, total: 0 }
+
+stdout | src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx > Playground thread search integration > shows a desktop right-edge artifacts expand button only when an artifact is active and the rail is closed
+tldw_server: fetchChatModels resolved { tldwCount: 0, total: 0 }
+
+stdout | src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx > Playground thread search integration > does not show the right-edge artifacts expand button without an active artifact
+tldw_server: fetchChatModels resolved { tldwCount: 0, total: 0 }
+
+stdout | src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx > Playground thread search integration > opens artifacts from the right edge and marks them read
+tldw_server: fetchChatModels resolved { tldwCount: 0, total: 0 }
+
+stdout | src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx > Playground thread search integration > routes artifact focus events to the edge button when the rail is closed
+tldw_server: fetchChatModels resolved { tldwCount: 0, total: 0 }
+
+stdout | src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx > Playground thread search integration > shows mobile artifacts sheet context and returns focus to trigger when closing
+tldw_server: fetchChatModels resolved { tldwCount: 0, total: 0 }
+
+stdout | src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx > Playground thread search integration > shows branch fork context and returns to parent history in one action
+tldw_server: fetchChatModels resolved { tldwCount: 0, total: 0 }
+
+stdout | src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx > Playground thread search integration > restores sidepanel WebUI handoff state from the URL fragment and clears the fragment
+tldw_server: fetchChatModels resolved { tldwCount: 0, total: 0 }
+
+stdout | src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx > Playground thread search integration > imports sidepanel document draft files into chat attachments
+tldw_server: fetchChatModels resolved { tldwCount: 0, total: 0 }
+
+ ✓ src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx (12 tests) 984ms
+(node:80776) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useLoadLocalConversation.test.tsx (13 tests) 540ms
+
+ Test Files  6 passed (6)
+      Tests  81 passed (81)
+   Start at  14:21:06
+   Duration  17.93s (transform 1.76s, setup 387ms, import 6.16s, tests 9.41s, environment 1.41s)

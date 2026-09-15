@@ -1855,7 +1855,6 @@ export const Playground = () => {
       return;
     }
 
-    usePlaygroundSessionStore.getState().cancelPendingRestore();
     let cancelled = false;
 
     const restoreFromSettingsReturnTarget = async () => {
@@ -1863,7 +1862,7 @@ export const Playground = () => {
         returnHistoryIdFromSettings &&
         returnHistoryIdFromSettings !== historyId
       ) {
-        await loadLocalConversation(returnHistoryIdFromSettings);
+        if (await loadLocalConversation(returnHistoryIdFromSettings) === false) return;
       } else if (
         !returnHistoryIdFromSettings &&
         returnServerChatIdFromSettings &&
@@ -1877,7 +1876,7 @@ export const Playground = () => {
             ? existingHistory.id
             : null;
         if (fallbackHistoryId) {
-          await loadLocalConversation(fallbackHistoryId);
+          if (await loadLocalConversation(fallbackHistoryId) === false) return;
         }
       }
 
@@ -1941,7 +1940,7 @@ export const Playground = () => {
         sidepanelChatHandoff.historyId &&
         sidepanelChatHandoff.historyId !== historyId
       ) {
-        await loadLocalConversation(sidepanelChatHandoff.historyId);
+        if (await loadLocalConversation(sidepanelChatHandoff.historyId) === false) return;
       }
       if (cancelled) return;
 
