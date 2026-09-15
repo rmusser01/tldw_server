@@ -1,0 +1,26 @@
+{
+  "createdAt": "2026-09-15T10:21:10.297Z",
+  "scope": "UAT-only development-cache configuration transition",
+  "files": [
+    {
+      "name": "README.md",
+      "bytes": 2020,
+      "sha256": "d9b1d2ad5d517094203c7a5febab0054214f381bcbeb4c44d48b6405a83eb8ec"
+    },
+    {
+      "name": "next-cache-config-check.cjs",
+      "bytes": 2291,
+      "sha256": "aaeedae2429d3a89c074fb678bbba8102cc6ae8cf077e5f56d67304c2aff2146"
+    },
+    {
+      "name": "next-cache-config-result.json",
+      "bytes": 194,
+      "sha256": "be987435da95e3cb3942faf359d1762bfa412fd61aecc7ec3d0592195997ff64"
+    },
+    {
+      "name": "next-cache-config.diff",
+      "bytes": 600,
+      "sha256": "82cecbb9f477ac375c2abe4b68f242f9c22494f9aabf5be7ceb9605a3385aff6"
+    }
+  ]
+}

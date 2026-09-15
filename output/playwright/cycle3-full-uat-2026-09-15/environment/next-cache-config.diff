@@ -1,0 +1,15 @@
+diff --git a/apps/tldw-frontend/next.config.mjs b/apps/tldw-frontend/next.config.mjs
+index 97f49d47b4..f08b5db820 100644
+--- a/apps/tldw-frontend/next.config.mjs
++++ b/apps/tldw-frontend/next.config.mjs
+@@ -173,6 +173,10 @@ const nextConfig = {
+   typescript: {
+     ignoreBuildErrors: true,
+   },
++  // Isolated UAT runs rebuild from fresh state; avoid retaining multi-GB dev caches.
++  ...(liveTierDistDir
++    ? { experimental: { turbopackFileSystemCacheForDev: false } }
++    : {}),
+   turbopack: {
+     root: repoWorkspaceRoot,
+     // Keep Turbopack aliases aligned with shared UI + web shims.

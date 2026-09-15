@@ -1,0 +1,7 @@
+{
+  "verifiedAt": "2026-09-15T10:21:10.279Z",
+  "normalDevCache": true,
+  "isolatedUatDevCache": false,
+  "allOtherNormalizedConfigEqual": true,
+  "headersRedirectsRewritesWebpackEqual": true
+}

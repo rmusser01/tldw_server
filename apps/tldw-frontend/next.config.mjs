@@ -173,6 +173,10 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  // Isolated UAT runs rebuild from fresh state; avoid retaining multi-GB dev caches.
+  ...(liveTierDistDir
+    ? { experimental: { turbopackFileSystemCacheForDev: false } }
+    : {}),
   turbopack: {
     root: repoWorkspaceRoot,
     // Keep Turbopack aliases aligned with shared UI + web shims.

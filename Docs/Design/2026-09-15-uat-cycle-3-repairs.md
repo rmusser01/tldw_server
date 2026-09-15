@@ -2,7 +2,9 @@
 
 Tracking: repair children under TASK-13260. Evidence: [running tracker](../Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md) and [single-user captures](../../output/playwright/cycle3-full-uat-2026-09-15/single/README.md). Product tested: `d40e17dc81`.
 
-This design covers UAT056–077 and reopened UAT055 Manage scope, including evidence-review discovery076 and fresh multi-user discovery077. Fresh multi-user UAT is still running. Finish that frozen matrix and reconcile its findings before changing application code or tests. The user has authorized the continuing UAT → review → fix loop; these are repairs to existing behavior within that scope.
+Environment-only exception during the frozen multi-user run: repeated disk exhaustion required disabling Next's development filesystem cache when the existing `TLDW_NEXT_DIST_DIR` selects an isolated UAT build. The four-line configuration change preserves default development behavior and all application logic. Both browser profiles, API and databases survive the frontend restart. Actual normalized configuration comparison and independent review passed; record the transition in the evidence rather than claiming identical build configuration throughout.
+
+This design covers UAT056–079 and reopened UAT055 Manage scope, including evidence-review discovery076 and fresh multi-user discoveries077–079. Fresh multi-user UAT is still running. Finish that frozen matrix and reconcile its findings before changing application code or tests. The user has authorized the continuing UAT → review → fix loop; these are repairs to existing behavior within that scope.
 
 ## Shared contracts
 
@@ -18,11 +20,17 @@ This design covers UAT056–077 and reopened UAT055 Manage scope, including evid
 
 The Notes action passes text and provenance into `buildFlashcardsGenerateRoute`, which serializes them into a URL. A source-ID-only fetch would avoid plaintext URLs but lose the current unsaved editor text. Keep that text in a short-lived, consume-once transfer and navigate using an opaque token.
 
-Follow the existing `source-review-handoff.ts` storage/expiry pattern, adding a verified server/account binding. Capture the current authority before storing or consuming; unavailable authority must not be guessed. Remove consumed/expired records and clear these transfers at logout/server/account changes. Storage failure must show an actionable failure without falling back to a text-bearing URL. Keep the current 12,000-character bound explicit.
+Follow the existing `source-review-handoff.ts` storage/expiry pattern, adding a verified server/account binding. Capture authority and its generation at the initiating action, before asynchronous selection or media loading; revalidate after acquisition, storage and before navigation. Unavailable authority must not be guessed. Remove consumed/expired records and clear these transfers at logout/server/account changes. Storage failure must show an actionable failure without falling back to a text-bearing URL. Use trimming only to detect empty content; preserve original whitespace within the12,000-character bound and visibly identify any truncated prefix. Do not claim exact transfer of a longer source.
 
 Once the Flashcards page has consumed the transfer, its editor and generated drafts remain private. Clear them and invalidate pending generation/save completions when the authority changes, including A→B→A. Bind generation and persistence to the captured authority; clearing only session storage is insufficient.
 
-The shared route builder also has extension/new-tab callers. Do not replace their transport with same-tab session storage without testing the actual platform transition. Scope the Notes producer first; preserve existing callers explicitly and record any remaining text-bearing route surface rather than claiming a global guarantee.
+Repair all five known producers of this same text-bearing route: Notes, Media Review, sidepanel Chat, sidepanel Flashcards selection and Quiz's generated-material fallback. Notes is the live-confirmed UAT finding; the other four are statically confirmed callers of the same serializer. Preserve their source text/provenance and intended same-tab or new-tab transition. Await successful storage before navigation and retain editable source content on failure; do not create a transfer prematurely when Quiz only needs a fallback after another action fails.
+
+Use a transport shared by the actual source and target contexts. `sidepanel-chat-handoff.ts` already demonstrates opaque routes with the existing local storage abstraction, bounded payloads, expiry and write verification. Reuse those conventions without copying its unrelated package schema or its missing account binding. Same-tab session storage cannot establish extension-to-options/new-tab delivery. The WebUI Plasmo shim can silently fall back to memory when browser storage is unavailable, so same-instance readback alone cannot prove durable cross-document delivery. Cover the actual storage/backend boundary and fail the action visibly when its required transport is unavailable; do not globally change unrelated storage fallback behavior.
+
+Verify navigation success at the actual platform boundary. The WebUI `tabs.create` shim resolves even when `window.open` is blocked, and awaiting selection/storage can lose popup activation. Use a task-local opener that distinguishes a real extension runtime from the WebUI shim; reserve a blank WebUI target during the initiating click when needed, navigate only after a valid transfer exists, and close the blank target/remove abandoned transfers on failure. Keep the source draft until opening is confirmed. A new tab may lack session-only authentication; leave the token unconsumed until that target verifies authority, without putting credentials into the payload.
+
+Consume-once requires a supported atomic claim across target contexts; separate asynchronous read/remove calls do not establish it. Verify two target contexts, StrictMode replay, delayed storage and authority changes between read/claim/apply. URL cleanup must neither erase the imported text nor overwrite subsequent edits. Reject and remove legacy plaintext generation/provenance query/hash parameters with recoverable guidance to reopen from the source; importing them into whichever account opens an old URL would retain an unbound path. Plain text-free Transfer navigation remains valid.
 
 Acceptance includes exact unsaved source text, origin IDs and real generation in the intended account; no source text/title/IDs in its navigation URL; expiry, consumed token, unavailable storage and delayed account-switch controls.
 
@@ -33,6 +41,8 @@ The normal pipeline publishes a completed history before its awaited local persi
 Extend `ensureWorkspaceServerChatForTurn` to create an owned neutral conversation for the first saved global Standard turn. Establish its server ID and validated linked local-history ID before invoking inference, and carry those IDs through completion and persistence. Preserve explicit persona/character and temporary paths. Autosave still supports genuine local-to-server promotion, but must recheck captured account/conversation state after asynchronous initialization before creating anything.
 
 Exercise the real normal pipeline and autosave together against shared reactive state. Cover no queued turn, a queued second turn, delayed history linking, temporary-to-saved promotion, creation failure/abort and A→B during each awaited boundary. Assert one canonical conversation and one copy of each actual turn, as well as visible mode and request identity.
+
+The multi-user Media→Chat sequence additionally reaches a participant-mismatch persistence400, then a successful fallback201, while a blocking development overlay appears. The source already catches and logs the initial error before fallback; the snapshot alone cannot distinguish a separately unhandled promise from development error interception. Verify the actual persistence/fallback boundary and browser error events, correct participant identity and handle asynchronous failure. A successful fallback must leave a usable UI; failed persistence must retain a truthful recoverable state. Do not merely suppress console errors or relabel a malformed request as expected.
 
 ## 3. Selection and persisted Chat reconciliation — TASK-13260.15 / UAT067/068/070
 
@@ -62,11 +72,13 @@ Use the supported notification `actions` property and the existing context-backe
 
 Reading progress uses percentage zoom units: send100 for the unzoomed viewer, including its signature fallback. Keep API validation25–400. Selection cleanup is expected to flush the old item's progress; test the old/new identities and restored position rather than treating any old-item request as wrong routing.
 
-## 6. Notes status and usable results — TASK-13260.18 / UAT063/069
+## 6. Notes status and usable results — TASK-13260.18 / UAT063/069/079
 
 A successful server-detail load with saved version/time should announce saved state. Do not mark a new, dirty, offline-only or stale-account draft saved. The current inconsistency is in an accessibility live region; the visible footer already has the correct server metadata.
 
 Expanded Views, Filters and Recent Notes must not consume all sidebar height. Bound/scroll the controls and reserve usable results space within the existing layout. Merely adding `min-h-0` or defaulting the controls closed does not prove the expanded state usable. Test1280×720 with at least five notes and three recent entries, actual pointer and keyboard access, resize, reload, offline state and mobile layout.
+
+Ordinary successful saves must not eagerly read `monitoring/alerts`, whose router requires `system.logs`. Preserve optional feedback for users who actually have that permission, including custom roles. Use TASK-13260.23's narrow current-user capabilities; deployment/OpenAPI flags and an `admin` role-name check are not authoritative entitlement checks. Capture the save's authority generation before its first await and carry it into monitoring, using the existing guarded Notes transport and the verified owner's `user_id` filter. Check the originating account and selected Note before dispatch and before publishing any alert. Permission lookup failure must not turn a successful Note save into an error or reveal a prior account's notice. Test ordinary denial, authorized feedback, unavailable lookup and delayed save/alert A→B→A or note replacement.
 
 ## 7. Study eligibility and supported lists — TASK-13260.19 / UAT055/074
 
@@ -74,11 +86,13 @@ Backend analytics categories overlap: `due` includes expired learning/relearning
 
 Replace both active and pending-deletion AntD Lists in Manage with native supported markup. Preserve loading and empty states, compact/expanded rows, action menus, selection, keyboard focus, pagination, pending deletion and Undo. Existing RecentStudySessions is an adjacent working pattern, not proof that Manage is repaired.
 
-## 8. Route and setup guidance — TASK-13260.20 / UAT058/059/075
+## 8. Route and setup guidance — TASK-13260.20 / UAT058/059/075/078
 
 Use the existing Next page-title pattern for fresh Home/setup, Media, Knowledge, Flashcards and tested Settings wrappers. Titles must follow the route and signed-out boundary without restoring old Chat/account metadata. Keep browser-dependent shared routes SSR-disabled.
 
 Reading Queue should use the same prerequisite ordering as other personalized cards: unavailable capability, disabled profile, actual degraded fetch, then empty/success. Do not add requests merely to make an unconfigured feature look tested.
+
+Automation Inbox must distinguish `tasks.read` denial from a temporary service failure. Gate reads on authoritative account capabilities when available, and retain accurate denied/unsupported/error states when older servers cannot supply those capabilities. Keep independently available notifications or results visible rather than discarding every source because one is denied. Clear previous-account items and ignore delayed results after disable/account transitions. Do not infer user entitlement from the current OpenAPI-derived capability flags. Test all-denied, mixed-source success/denial, transient failure, refresh after a permission change and A→B with a pending request.
 
 The server guide action must open maintained server setup documentation. The [server self-hosting profile index](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md) resolves and describes the single/multi/local profile choices. Use that target and account for both the `serverOverview.docsUrl` override and onboarding fallback translations. Keep legitimate browser-extension links elsewhere unchanged. In-app keyboard Help already loads successfully and is not part of this destination repair.
 
@@ -101,6 +115,16 @@ Six static related label callers exist in PersonaGarden Scopes/Policies/Commands
 ## Design review
 
 Independent read-only review found no material omission in the private-transfer or Chat ownership/selection/mirror contracts. The existing loader/session Vitest fixtures mock persistence, so their green results alone cannot establish the real Dexie round trip; use the existing browser harness for that regression and settled reload acceptance. Multi-user findings remain subject to reconciliation before implementation.
+
+Follow-up review of the expanded five-producer transfer found popup-success, early authority capture, simultaneous consumption, whitespace/length and legacy-reader gaps. The section1 contracts now include those controls. Static related surfaces are distinguished from live UAT failures.
+
+## 11. Caller capability discovery — TASK-13260.23 / prerequisite for078/079
+
+Add only `can_read_scheduled_tasks`, `can_read_notifications` and `can_read_monitoring_alerts` to an authenticated `/users/me/capabilities` endpoint using `get_auth_principal`. Evaluate each through the exact `RequirePermission` guard used by its protected endpoint, following `media/capabilities.py`; return no arbitrary-user lookup, full permission catalog or protected content. Mark responses `Cache-Control: no-store`. Preserve unexpected guard failures rather than relabeling them as denied.
+
+The existing self-profile requires an active verified stored user, while Home/Notes permission eligibility does not imply that profile contract. Bob's profile200 is confirmed, but another retained profile403 has no captured body. A separate narrow capability endpoint preserves profile verification and avoids extending deprecated, optionally410 `/auth/me`. Do not assign the uncaptured403 a reason or equate a discovery403 with three known denied permissions.
+
+Keep frontend permission discovery separate from deployment capabilities. Bind results to verified server/account/org plus authority generation; immediately mask them on disconnect/account change and reject delayed A→B→A results. Distinguish allowed, denied, unknown and unsupported. Refresh on reconnect, explicit refresh and a protected request's403; actual endpoint authorization remains decisive. Do not persist these decisions with preferences or reuse them indefinitely from login state. Home and Notes consume this shared bounded contract in their own repair units.
 
 ## Completion boundary
 

@@ -9,7 +9,7 @@
 
 ## Global constraints
 
-- Product remains frozen at `d40e17dc81` until both current matrices have actual outcomes or explicit blocks. No application/test edits during that run.
+- Application behavior remains frozen at `d40e17dc81` until both current matrices have actual outcomes or explicit blocks. No application/test edits during that run. One documented environment exception disables Next development filesystem caching only for existing isolated UAT builds; retain before/after configuration evidence and runtime restart provenance.
 - Existing TASK-13260 covers UAT/evidence; its repair children cover the units below. Update their notes, verification and status through Backlog MCP or CLI.
 - Preserve role/ownership/source classification and remote restrictions. No mocked response, skipped step or seeded artifact is a live acceptance pass.
 - Reuse current dependencies and test harnesses. Use the project virtual environment before Python/Bandit. Never expose runtime credentials.
@@ -35,11 +35,12 @@
 
 ### TASK-13260.13 — UAT064
 
-**Files:** `apps/packages/ui/src/services/tldw/flashcards-generate-handoff.ts`, NotesManager generation action, Flashcards page/GeneratePanel consumers, existing authority/logout cleanup; adjacent handoff and Notes/Flashcards integration suites.
+**Files:** `apps/packages/ui/src/services/tldw/flashcards-generate-handoff.ts`, its five Notes/Media/sidepanel/Quiz producers, Flashcards page/GeneratePanel consumers, existing authority/logout cleanup; adjacent handoff and Notes/Flashcards/platform integration suites.
 
 - [ ] Add regressions for exact unsaved source transfer, URL privacy, expiry/consume/storage failure and A→B→A with delayed generation/save; observe the original plaintext-route failure.
-- [ ] Implement the account-bound opaque Notes transfer and consumer invalidation from the design. Preserve other platform callers explicitly.
-- [ ] Run the existing handoff suite and new interacting consumer/authority tests; review browser URLs, provenance and actual intended-account generation in live targeted UAT.
+- [ ] Cover authority changes during source acquisition, blocked/new-tab opening, unresolved target authentication, simultaneous consumption and StrictMode replay, whitespace/length bounds, legacy plaintext rejection and URL cleanup without overwriting subsequent edits.
+- [ ] Implement the account-bound opaque transfer for all five known producers and consumer invalidation from the design. Preserve actual same-tab and extension/new-tab delivery; retain source drafts on storage/navigation failure.
+- [ ] Run the existing handoff suite and new interacting consumer/authority/platform tests, including unavailable shared storage despite a memory fallback; review browser URLs, provenance and actual intended-account generation in live targeted UAT.
 
 ### TASK-13260.15 — UAT067/068 selection portion, then TASK-13260.14 — UAT062
 
@@ -90,11 +91,20 @@
 **Tests:** Notes state/layout, real Manage controls, dashboard mixed-state clock fixtures, route/auth titles and prerequisite state branches.
 **Status:** Not Started
 
-### TASK-13260.18 — UAT063/069
+### TASK-13260.23 — narrow caller capabilities for UAT078/079
+
+**Files:** existing users endpoint/schema area, a small shared caller-capability service/hook, and adjacent AuthNZ/current-user/authority regressions. This is a prerequisite for the permission portions of TASK-13260.18 and .20.
+- [ ] Reproduce missing authoritative discovery for the three optional reads; add caller-only booleans evaluated by canonical permission guards with `no-store` responses.
+- [ ] Preserve existing profile verification and deprecated auth/me contracts. Verify ordinary/custom-grant/admin decisions, unauthenticated access and unexpected guard failures against protected endpoints.
+- [ ] Add account/generation-scoped discovery that separates denied/unknown/unsupported, masks stale data, rejects A→B→A completions and refreshes on reconnect/explicit refresh/protected403.
+- [ ] Independently review, run focused backend/frontend checks and scoped Bandit, then integrate the Home/Notes consumers in their owning units.
+
+### TASK-13260.18 — UAT063/069/079
 
 **Files:** Notes `hooks/useNotesEditorState.tsx`, `NotesSidebar.tsx`, `NotesListPanel` and related layout helpers/tests.
 - [ ] Reproduce a loaded versioned Note announcing no save status and a zero-height list with expanded controls at1280×720.
 - [ ] Correct successful authority-scoped hydration status and bound/scroll controls with reserved results space.
+- [ ] Reproduce the successful ordinary Note save followed by `system.logs`403. Resolve a narrow authoritative entitlement contract, gate optional monitoring reads and discard delayed notices after account/note changes without weakening permissions or losing authorized feedback.
 - [ ] Verify real pointer/keyboard use with five notes/three recents, resize/reload/mobile, plus new/dirty/offline/stale-account status protections; review and commit.
 
 ### TASK-13260.19 — UAT055/074
@@ -104,11 +114,12 @@
 - [ ] Use `due + new` and native active/pending-deletion lists preserving all controls/states.
 - [ ] Verify future/mixed/due-time states, row selection/edit/keyboard/pagination/Undo and actual queue agreement; review and live-check Study/Manage.
 
-### TASK-13260.20 — UAT058/059/075
+### TASK-13260.20 — UAT058/059/075/078
 
 **Files:** tested Next page wrappers, `components/Option/CompanionHome/CompanionHomePage.tsx`, `components/Common/ServerOverviewHint.tsx`, relevant locale targets and associated route/Home tests.
 - [ ] Verify empty titles, Reading Queue prerequisite classification and both effective setup-guide URL keys against the retained evidence.
 - [ ] Apply existing title ownership, prerequisite ordering and a verified maintained server documentation target.
+- [ ] Reproduce Automation Inbox's temporary-outage copy for `tasks.read`403. Separate denial from service failure, preserve independently available sources, use authoritative account gating when supported, and clear/guard results across disable/account changes.
 - [ ] Verify route changes/logout cannot retain Chat metadata; capability-disabled/profile-disabled/fetch-failure/empty-success branches; localization overrides and actual guide navigation. Review and commit.
 
 ### TASK-13260.21 — UAT076

@@ -2,7 +2,7 @@
 
 ## Run status
 
-- Current status: **Cycle3 UAT is running on `d40e17dc81`. Single-user execution is complete with failures; fresh multi-user execution is in progress.** The current pass records22new findings UAT056–077 plus reopened055 Manage scope: nineP2 and fourteenP3. Current coverage is in the [cycle3 matrix](#cycle-3-full-fresh-uat--started-2026-09-15t0743z). Earlier runs and repairs below remain historical evidence. This is not release sign-off.
+- Current status: **Cycle3 UAT is running with application behavior frozen at `d40e17dc81`. Single-user execution is complete with failures; fresh multi-user execution is in progress.** A documented UAT-only development-cache configuration change addresses repeated disk exhaustion; it changes no application behavior. The current pass records24new findings UAT056–079 plus reopened055 Manage scope: nineP2 and sixteenP3. Current coverage is in the [cycle3 matrix](#cycle-3-full-fresh-uat--started-2026-09-15t0743z). Earlier runs and repairs below remain historical evidence. This is not release sign-off.
 - Requested scope: fresh single-user and multi-user setup, then core workflow loops A, B, and C; record every observed bug, failure, and UX issue.
 - Backlog record: `backlog/tasks/task-13260 - Run-fresh-single-user-and-multi-user-UAT-across-core-workflow-loops.md` (see ENV-003).
 - Initial checkout: `codex/email-offline-validation-13250`, commit `54ecc7e7735fc082b711d922a27e97ee9999e5ae`. Repairs are on `codex/fresh-install-uat-fixes`.
@@ -121,7 +121,7 @@ Validation follow-up: the broader UAT048 login regression run passed58tests and 
 
 ## Cycle 3 full fresh UAT — started 2026-09-15T07:43Z
 
-- Frozen product revision: `d40e17dc81`. New findings during this run will be recorded before another repair pass.
+- Frozen application behavior: `d40e17dc81`. New findings during this run will be recorded before another repair pass. The separately documented development-cache configuration exception preserves application logic and default non-UAT behavior.
 - Empty profiles: `/private/tmp/tldw-onboarding-uat-cycle3-single-20260915` and `/private/tmp/tldw-onboarding-uat-cycle3-multi-20260915`; audits confirmed no users database before initialization, no test/mock/provider overrides, and blank RAG defaults inheriting Chat.
 - Both AuthNZ initializations succeeded through migration98. Only the multi-user bootstrap admin was provisioned through the documented CLI. Alice/Bob creation remains a UI acceptance step.
 - New APIs18200/18201 and WebUIs18280/18281; WebUIs run sequentially for disk space. New persistent browser profiles will contain no previous configuration or account state.
@@ -129,18 +129,18 @@ Validation follow-up: the broader UAT048 login regression run passed58tests and 
 
 | Required workflow | Single-user | Multi-user |
 | --- | --- | --- |
-| Fresh setup, provider discovery, real first Chat | PASS: blank-model discovery, selected-model validation/save, real first response200; manual key UI recovery succeeds | Pending |
-| Normal saved Chat, second turn, reload/persistence | FAIL062: both real replies persist, but first turn is duplicated in another conversation and mode switches to Character | Pending |
-| Public file ingest → content search → Chat/QA with citations | Functional PASS: exact Aster content, real answers, one mapped citation and correct Media source; ingest/Chat UX findings remain | Pending |
+| Fresh setup, provider discovery, real first Chat | PASS: blank-model discovery, selected-model validation/save, real first response200; manual key UI recovery succeeds | Functional setup/real Chat PASS through documented operator config; separate Provider Keys route FAIL077 |
+| Normal saved Chat, second turn, reload/persistence | FAIL062: both real replies persist, but first turn is duplicated in another conversation and mode switches to Character | FAIL062: real two-turn continuity/reload works, but mode changes and participant-mismatch persistence400 occurs; blocking overlay also observed in later Media→Chat |
+| Public file ingest → content search → Chat/QA with citations | Functional PASS: exact Aster content, real answers, one mapped citation and correct Media source; ingest/Chat UX findings remain | In progress: Alice Cedar ingest/search/Media→Chat/default QA with one citation and correct preview succeed; citation Media jump pending at disk interruption. Bob independent own Media ingest/read succeeds |
 | Exact Wikipedia URL → search → grounded Chat | BLOCKED: remote extraction fails, zero articles stored; failure is honestly counted, but generic error065 obscures the reason | Pending |
 | Notes → generated Flashcards → save/review/reload | Functional PASS: exact five facts generate5grounded cards, all saved/linked/reviewed and persisted; UX/privacy055/058/063/064 remain | Pending |
 | Create/save/back/apply Prompt → actual request and real answer | Application PASS: synced pirate prompt, clean Back, exact system payload and real pirate answer/reload;062 recurs, output uses Arrr casing | Pending |
 | Tracked character Chat, context replacement, saved history | FAIL068/070: direct Aster/Robot entry and real replies work, but replacement reverts and settled reload hides a persisted final answer | Pending |
-| Chat → Note/backlink and reviewed Flashcard → study | Artifacts/pairs/scheduling PASS for normal and deliberate characters, all7cards studied; completed-session accounting FAIL076 | Pending |
+| Chat → Note/backlink and reviewed Flashcard → study | Artifacts/pairs/scheduling PASS for normal and deliberate characters, all7cards studied; completed-session accounting FAIL076 | In progress: Alice real Cedar reply saved as Note, exact content/backlink passed, reviewed card created; study and deliberate character paths remain |
 | Media analysis → Review → re-analysis → reload | Functional PASS: original grounded analysis in Review; distinct correct second analysis survives reload/restore; Markdown presentation060 remains | Pending |
 | Permission-aware delete → Trash date → restore | Functional recovery PASS through direct Trash route: truthful date, cleared selection, preserved content/analysis; last-item navigation071 and console072 fail | Pending |
 | Auth/disconnect/offline logout/reconnect | PASS: manual-key disconnect clears two tabs and stops private polling; invalid-key guidance, re-entry, offline disconnect and recovery succeed | Pending |
-| Admin creates Alice/Bob; owned/foreign API and browser isolation | N/A | Pending |
+| Admin creates Alice/Bob; owned/foreign API and browser isolation | N/A | In progress: UI account creation, Bob own Note/Media reads and admin403 passed; Alice Note GET/versioned PUT404 with unchanged owner read passed. Foreign Media and same-profile/offline controls remain |
 
 ### Cycle 3 observations
 
@@ -335,6 +335,38 @@ Auth recovery evidence: actual Disconnect clears Settings and the other Knowledg
 - Status: open, frozen cycle3. Evidence: `/private/tmp/uat-cycle3-multi-provider-keys-settled.txt` and `/private/tmp/uat-cycle3-multi-provider-keys-console.txt`. No permission was changed and no provider key was submitted.
 
 UAT077 follow-up: the key-list403 explicitly says BYOK is disabled in this deployment, so that response is an expected configuration result and must retain accurate guidance. Read-only review found six additional object-valued `common:loading` calls in PersonaGarden Scopes/Policies/Commands/Connections; these are static related findings, not exercised UAT passes/failures. The shared ICU adapter should transform strings only, then preserve upstream handling for object/error-handler and syntax-tree inputs; that compatibility guard does not replace correcting scalar label callers.
+
+#### UAT-078 — P3: Home describes denied automation data as a temporary outage
+
+- Mode / step: fresh ordinary user Bob signs in through the UI and opens Home.
+- Actual: Automation Inbox says scheduled-task results are temporarily unavailable. Its scheduled-task/results requests return403 with missing `tasks.read`, rather than a transient server outage.
+- Expected: distinguish unavailable account capability from retryable transport/server failures, and avoid eager privileged reads when authoritative capability information is available. Preserve backend permissions.
+- Status: open. UI evidence: `/private/tmp/uat-cycle3-multi-bob-home.txt`; exact request/response evidence is being retained by the Bob UAT runner. Read-only trace: `useScheduledTaskHomeSignals` runs whenever capability loading ends; `AutomationInboxCard` renders generic temporary-unavailability copy for an error.
+- Repair tracking: TASK-13260.20. OpenAPI/deployment capability flags do not establish user permissions; preserve independently available sources and clear stale account results.
+
+#### UAT-079 — P3: Ordinary Note save eagerly requests privileged monitoring alerts
+
+- Mode / step: ordinary user Bob creates and saves Cycle3 Bob private note through the UI.
+- Actual: the Note saves201 and own reads return200, but the post-save monitoring request returns403 missing `system.logs`. The editor remains usable and no blocking overlay appears.
+- Expected: successful ordinary Notes actions should not eagerly request an unavailable admin monitoring endpoint. Keep its permission boundary and preserve legitimate monitoring feedback for authorized accounts.
+- Status: open. Note `a80707b3-c761-4d8a-8bbe-fe2222886bc2`, version1; UI evidence `/private/tmp/uat-cycle3-multi-bob-note-saved.txt`, request evidence retention in progress. Read-only trace: `loadMonitoringNoticeForSavedNote` requests `/monitoring/alerts` without a capability guard, then silently catches permission failures. Account changes during authorized monitoring reads also need stale-result protection in the repair.
+- Repair tracking: TASK-13260.18. Preserve custom-role monitoring permission and successful ordinary saves; role names alone cannot establish the required entitlement.
+
+Environment interruption around10:00UTC: disk exhaustion prevented the browser wrapper from opening its npm cache and an independent API login returned500. Bob's first ingest submission had not occurred. The verified current multi frontend processes31535/31537 were stopped, only `.next-live-tier-cycle3-multi-20260915` was removed, and frontend43042 restarted with approximately3.6GiB free. API42500, user data and both browser profiles were preserved. Both runners resumed from fresh snapshots/reload. These failures are retained as environment limitations, not invented product findings.
+
+Second interruption around10:10–10:11UTC: the same isolated dist grew to3.4GiB, dominated by2.6GiB in `dev/cache`; free space fell to117MiB. Alice's citation Media-jump click and Bob's generation-form fills did not execute. Both runners paused with no model/save pending. Parent verified/stopped frontend43042/43043, confirmed18281 closed, removed only its exact generated dist and recovered3.6GiB. One shell stop attempt failed before execution because the disk could not create a heredoc temporary file; the verified direct Node command succeeded.
+
+Environment repair: `next.config.mjs` now disables supported `experimental.turbopackFileSystemCacheForDev` only when existing `TLDW_NEXT_DIST_DIR` selects an isolated UAT run. Independent review found no issue. Actual Next configuration comparison confirms ordinary dev cache=true, isolated UAT cache=false, all other normalized configuration plus headers/redirects/rewrites/webpack equal. Syntax and scoped lint checks pass; no Python was touched, so Bandit is inapplicable to this configuration-only change. Frontend48482 restarted through the same launcher, `/login` returned200, and both retained browser profiles resumed. API42500, provider, databases, credentials and application behavior remain unchanged. This exception is not a product repair or a fresh full-run restart.
+
+Bob fixture checkpoint: own Copper Finch Media1 (`1430f1e4-37e3-473e-b6d0-764f8f922f8d`) contains the exact Bob source and differs from Alice's numeric Media1, as expected for per-user databases. Bob's Alice-Note GET and valid version1 PUT both return404; Alice's independent read remains200/version1 with original content. Bob's self-profile GET returned200 at10:07:21Z, without exposing profile values in evidence. Bob Biology Note `9ae43c6a-2458-4910-97fd-013d888914f7` was UI-saved/version1 with the exact five-fact fixture; its handoff reproduces064. Generation/review is still pending. Evidence: `/private/tmp/uat-cycle3-multi-bob-read-controls.txt`, `uat-cycle3-multi-bob-biology-saved.txt`, `uat-cycle3-multi-bob-biology-handoff.txt`.
+
+Multi-user setup observation: Alice and Bob were created as ordinary Users through the admin UI. Synthetic `.test` email validation failed visibly and was corrected to `example.com`; no email was sent. The multi-user wizard intentionally hands off to operator documentation. The local-LLM guide prescribes `config.txt`; the API setup editor exposes the endpoint but only comments the model key. Exactly three values were configured in the isolated0600 runtime file (`default_api`, `llama_api_IP`, `llama_model`), then only API18201 restarted. The exact real Qwen model appears and is selectable after a visible model refresh; temporary catalog lag after restart is an environment observation, not a new model-selector bug. Evidence: `/private/tmp/uat-cycle3-multi-operator-provider-config.json` and `uat-cycle3-multi-local-provider-controls.txt`.
+
+UAT062 multi-user recurrence: Alice's two real normal-Chat turns and settled reload retain CEDAR-27. The workspace nevertheless changes to Character mode and uses tracked completion for the next turn; persistence also reports400 `speaker_character_name must reference a selected participant in this chat` before a message fallback201. After Media→Chat produces a correct real answer, this same400 also opens a blocking Next Runtime Error overlay and intercepts the More Actions click. The fallback still saves the answer; the UI error is independently actionable. Evidence: `/private/tmp/uat-cycle3-multi-chat-overlay.txt`, stack through `background-proxy.ts`, `chat-rag.ts` and `useChatActions.ts`. The runner captures then visibly dismisses the overlay to continue. Independent reads of both created server conversations remain underway; do not infer final duplicate counts solely from the main tracked conversation's five rows.
+
+Bob's post-recovery independent reads corroborate the permission findings: own Note200 with exact saved version/content; admin users403 requiring admin; scheduled tasks/results403 missing `tasks.read`; monitoring alerts403 missing `system.logs`. Retained follow-up bodies: `/private/tmp/uat-cycle3-multi-bob-own-controls.txt`. Original pre-reload response bodies had been evicted and are not claimed as captured. The first independent probe used an incorrect credentials mode and triggered two CORS errors; the corrected normal bearer probe used `credentials: omit`. Those two probe errors are harness noise.
+
+Isolation verification constraint: numeric Media and study-session IDs are scoped by each user's database. Equal IDs in Alice and Bob can legitimately resolve to different owned records. Verify content/ownership and choose a known foreign-only identifier before expecting404; do not mutate Bob's own record under a colliding numeric ID as a purported foreign-write check. Note UUID controls are unambiguous.
 
 Runtime transition09:28UTC: after completing single-user checks, stopped only verified frontend parent27709/listener27711, confirmed port18280 was closed, and removed its1.2GiB regenerated build cache to make room for sequential multi-user UAT. Single-user API18200, runtime data, browser profiles and evidence remain available. Application revision stays frozen at `d40e17dc81`. Fresh multi API18201/WebUI18281 and a new browser are now running; normal admin Settings login succeeds, with Core reachable / RAG healthy. Full multi-user workflows remain in progress.
 

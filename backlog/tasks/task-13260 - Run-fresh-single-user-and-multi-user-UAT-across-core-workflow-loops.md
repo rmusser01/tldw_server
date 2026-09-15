@@ -3,19 +3,19 @@ id: TASK-13260
 title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
-created_date: 2026-09-15 01:27
-updated_date: 2026-09-15 09:50
+created_date: '2026-09-15 01:27'
+updated_date: '2026-09-15 10:21'
 labels:
-- uat
-- testing
-- documentation
+  - uat
+  - testing
+  - documentation
 dependencies: []
 documentation:
-- Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md
-- Docs/Design/2026-09-15-uat-cycle-2-repairs.md
-- IMPLEMENTATION_PLAN_uat_cycle_2.md
-- Docs/Design/2026-09-15-uat-cycle-3-repairs.md
-- IMPLEMENTATION_PLAN_uat_cycle_3.md
+  - Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md
+  - Docs/Design/2026-09-15-uat-cycle-2-repairs.md
+  - IMPLEMENTATION_PLAN_uat_cycle_2.md
+  - Docs/Design/2026-09-15-uat-cycle-3-repairs.md
+  - IMPLEMENTATION_PLAN_uat_cycle_3.md
 ---
 
 ## Description
@@ -23,6 +23,7 @@ documentation:
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Exercise fresh-data single-user and multi-user installations through the authoritative named frontend UAT/E2E journeys and shared real-server workflows. The user clarified that these tests define the requested loops; no literal A/B/C mapping was found. Record every observed bug, failure and UX issue, then review, repair and repeat fresh UAT until an issue-free complete pass. Existing dependencies are reused, so clean-machine dependency installation is not certified.
 <!-- SECTION:DESCRIPTION:END -->
+
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 Exercise single-user fresh setup and agreed core workflow loops A, B, and C.
@@ -39,6 +40,7 @@ Prepare isolated configurations, SQLite databases, ports, and browser sessions; 
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Checkpoint: 15 product findings recorded in Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md (five P1, six P2, four P3), with six environment/tooling observations. Fresh isolated single-user and multi-user SQLite state initialized using existing dependencies; no clean dependency/Docker/Postgres certification. Single-user real local chat and reload persistence pass; source ingestion and media search pass. Admin plus Alice/Bob authenticate, and API note/media isolation and ordinary-user admin denial pass. Multi-user onboarding skip fails CSRF; Alice's Notes UI is blocked by /api/v1/health/live requiring system.logs. Knowledge QA fails provider validation after optional RAG setup was deferred. User definitions for A/B/C remain outstanding, so neither loop coverage nor overall UAT is complete. Selected screenshots, snapshots, and API results retained under output/playwright/fresh-install-2026-09-14; private credentials/raw logs excluded. UAT services and synthetic state retained on ports 18000/18080 and 18001/18081 for continuation; original 8000 and model 9099 untouched. Backlog CLI collision replaced original untracked 13259; semantic content restored through MCP from task history, with original timestamp values documented in its recovery note. This UAT uses explicit 13260. No product code modified; Bandit/application tests are not applicable to the documentation/evidence checkpoint.
 Repair pass completed on codex/fresh-install-uat-fixes. All19 recorded product findings have verified repairs/dispositions; children13260.1-.4 Done. Final focused verification488frontend tests/248Python tests; touchedBandit0findings; ESLint0errors; same90baselineTypeScript diagnostics. Live ordinary Notes, unverified-admin diagnostics and UI user creation, cited Cedar QA with honest relevance, and all-security-filtered no-generation control verified. Existing Notes fixture and prompt-loader baseline failures documented. Full fresh-install workflow UAT has not been rerun; authoritative named frontend journeys/shared real-server workflows and fixture/provenance/no-skip gaps are in the tracker. Next full pass needs fresh single/multi profiles and explicit acceptance matrices; no invented A/B/C mapping. All runtime data remains isolated on18000/18001 and18080/18081; original8000/model9099 unchanged.
@@ -65,12 +67,22 @@ Cycle3 single: second Media analysis survives reload and Trash restore;071 empty
 Cycle3 single-user workflow execution completed with failures at2026-09-15T09:27Z; product remains frozen d40e17dc81. Auth controls passed: actual manual-key disconnect cleared both tabs, no private polling over98/63seconds, invalid-key401 guidance, valid-key re-entry, offline disconnect and reconnect. Visible keyboard Help loaded successfully. UAT070 settled reload failed despite persisted server reply. Tracked Note/card/backlink and seven-card study/reload passed. Public QA positive and confidential-source exclusion negative both passed. New P3 UAT075 records Settings server setup guide opening the moved browser-extension repository instead of server setup documentation. Preparing multi-user UAT next; evidence retention runs in parallel. Stop/recycle only own single frontend build to conserve disk; keep all runtime data/API/browser evidence.
 Cycle3 evidence independently reviewed:144retained files, all hashes and21JSON valid, zero credential matches. Precision review found UAT076: seven continuously reviewed cards split into completed global2 and active Biology5 session; individual schedules are correct. Added separate TASK13260.21; prior single findings have repair units13260.13–.20. Single current total22open findings (21new056–076 plus reopened055),8P2/14P3. Single auth health before/afterrecovery passes; immediate reload retainskey but saysnotcheckedyet, now distinguished. Fresh multiAPI18201/UI18281 live, normaladminlogin succeeds; workflowsongoing. Design/plan prepared, no product or test edits.
 Cycle3 single evidence checkpoint ready:145captures including explicit later076sessionGET,22validJSON, all hashes/sizes and prior144files preserved. Independent28-value scan147bundlefiles clean; parent scan161owned docs/task/evidence files against14unique secret values and JWT/private-key patterns clean. Finding inventory reconciles056–077 plus reopened055:9P2/14P3 currentopen. Independent design review found no material privatehandoff/Chat omissions; realDexie browser roundtrip remains required. Multiuser077loadingtranslationcrash confirmed; BYOK403expecteddisabledconfig separately verified. Admin UIcreatedAlice/Bob; localprovider configuredvia documented operatorconfig exact3keys andapi restart, no source changes. Parentgitdiffchecks show zero tracked product edits; documentation/evidence-only checkpoint uses structural/secret verification, no new application tests/Bandit applicable. Multi execution and repairs remain incomplete.
+Cycle3 continuation: UAT078 Home automation permission-state copy and UAT079 post-save privileged monitoring reads added; currently UAT056–079 plus reopened055 =25open findings (9P2/16P3). Single execution complete with failures; multi execution ongoing with independent ordinary Bob fixture/ownership controls. Fresh ENOSPC interrupted wrapper/API evidence operations before Bob ingest submission. Recycled only verified current multi frontend cache: old31535/31537 stopped, exact owned dist removed, restarted frontend43042, 3.6GiB free. API42500, user databases and browser profiles preserved. Canonical isolated provider default is llama.cpp; earlier custom llama_cpp attempt is a harness spelling deviation, not a product regression. Product remains frozen d40e17dc81.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Cycle3 environment repair: repeated ENOSPC is dominated by the isolated multi frontend dev/cache (2.6GiB of3.4GiB). Both browser runners paused with no inference/save pending. Parent verified43042/43043, stopped them, confirmed18281 closed, removed only .next-live-tier-cycle3-multi-20260915 and recovered3.6GiB. Installed Next16.1.4 supports experimental.turbopackFileSystemCacheForDev=false. Add a minimal setting scoped to existing TLDW_NEXT_DIST_DIR, preserving default non-UAT behavior; verify real config loading and independently review before restarting. This is a documented configuration-only exception to the frozen application/test source rule; no product repairs or tests altered during full UAT.
+
+Environment cache repair independently reviewed and verified: actual Next config comparison normal dev cache=true, isolated UAT=false, other normalized config/headers/redirects/rewrites/webpack identical; node syntax and scoped ESLint pass. Initial verifier omitted required advanced-mode NEXT_PUBLIC_API_URL and failed configuration validation before testing; corrected isolated env passed. Frontend48482/session52335 loginHTTP200, API42500 preserved, both runners resumed. No Python touched, Bandit inapplicable. Added shared caller-capability prerequisite TASK-13260.23 through CLI after stalled MCP calls under disk pressure; no duplicate record existed.
+
+Retained environment/cache evidence at output/playwright/cycle3-full-uat-2026-09-15/environment/README.md with4 hash-indexed files. Combined checkpoint verifies145 single captures/22 JSON,4 environment captures,167 scanned docs/tasks/evidence files,14 unique runtime credential values with0 matches, and25 current findings (9P2/16P3). Only the documented isolated dev-cache configuration changes application-tree files; all functional repairs remain pending frozen multi UAT.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Active UAT→review→fix loop remains In Progress. Previous findings001–055 have targeted repairs through d40e17dc81, with historical limits retained. Frozen cycle3 single-user execution is complete with22current findings (new056–076 plus reopened055); fresh multi-user UAT is in progress. Individual source/Chat/Note/card operations and manual-key recovery have successful controls, but duplicate/character/reload Chat state, private note URL transfer, study session accounting and presentation/recovery defects remain. Exact Wikipedia article retrieval is externally blocked. Current tracker, cycle3 evidence and repair plan contain the latest scope; this is not acceptance or release sign-off.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
