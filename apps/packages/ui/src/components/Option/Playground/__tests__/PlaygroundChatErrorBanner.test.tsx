@@ -216,6 +216,65 @@ describe("PlaygroundChatErrorBanner", () => {
     expect(latest?.hint).toBe("Retry from composer")
   })
 
+  it.each(["message", "content"])("does not restore composer recovery after a saved retry succeeds (%s)", (field) => {
+    const messages = Object.freeze([
+      Object.freeze({ id: "user-1", role: "user", [field]: "When does the garden open?" }),
+      Object.freeze({ id: "failed-2", role: "assistant", [field]: encodeError("Historical failure") }),
+      Object.freeze({ id: "success-3", role: "assistant", [field]: "The garden opens on 18 December 2026." })
+    ])
+    const ComposerRecovery = () => {
+      const { visibleError, dismissError } = usePlaygroundChatErrorBanner(messages)
+      return (
+        <PlaygroundChatErrorBanner
+          error={visibleError}
+          diagnosticsLabel="Health & diagnostics"
+          retryLabel="Retry chat"
+          dismissLabel="Dismiss error"
+          onRetry={() => undefined}
+          onDismiss={dismissError}
+        />
+      )
+    }
+
+    render(<MemoryRouter><ComposerRecovery /></MemoryRouter>)
+
+    expect(screen.queryByTestId("playground-chat-error-banner")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Retry chat" })).not.toBeInTheDocument()
+  })
+
+  it("clears the old failure while a retry streams and exposes the retry's own failure", () => {
+    const failedAttempt = {
+      id: "failed-2", role: "assistant", message: encodeError("Historical failure")
+    }
+    const { result, rerender } = renderHook(
+      ({ messages }) => usePlaygroundChatErrorBanner(messages),
+      { initialProps: { messages: [failedAttempt] } }
+    )
+    expect(result.current.visibleError?.summary).toBe("Historical failure")
+
+    rerender({ messages: [failedAttempt, { id: "retry-3", role: "assistant", message: "" }] })
+    expect(result.current.visibleError).toBeNull()
+
+    rerender({ messages: [failedAttempt, {
+      id: "retry-3", role: "assistant", message: encodeError("Current retry failure")
+    }] })
+    expect(result.current.visibleError?.summary).toBe("Current retry failure")
+  })
+
+  it("does not offer recovery for an older turn after a new user message", () => {
+    expect(getLatestChatErrorBannerEntry([
+      { id: "failed-2", isBot: true, message: encodeError("Historical failure") },
+      { id: "user-3", isBot: false, message: "Try another question." }
+    ])).toBeNull()
+  })
+
+  it("keeps the current failed attempt visible across non-conversational metadata", () => {
+    expect(getLatestChatErrorBannerEntry([
+      { id: "failed-2", role: "assistant", content: encodeError("Current failure") },
+      { id: "system-3", role: "system", isBot: false, content: "Updated context" }
+    ])?.summary).toBe("Current failure")
+  })
+
   it("uses compact dismissal keys without embedding the encoded payload", () => {
     const detail = "server detail: " + "x".repeat(2048)
     const latest = getLatestChatErrorBannerEntry([
