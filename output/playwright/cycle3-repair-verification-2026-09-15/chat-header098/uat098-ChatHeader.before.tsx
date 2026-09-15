@@ -234,7 +234,7 @@ export function ChatHeader({
       className="z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"
     >
       <div className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2">
-        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {showSidebarToggle && (
             <Tooltip title={sidebarLabel} placement="bottom">
               <button
@@ -242,14 +242,14 @@ export function ChatHeader({
                 onClick={onToggleSidebar}
                 aria-label={sidebarLabel}
                 data-testid="chat-header-sidebar-toggle"
-                className={`shrink-0 rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text ${focusRingClasses}`}
+                className={`rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text ${focusRingClasses}`}
                 title={sidebarLabel}
               >
                 <Menu className="size-4" aria-hidden="true" />
               </button>
             </Tooltip>
           )}
-          <div className="flex shrink-0 items-center gap-2 text-text">
+          <div className="flex items-center gap-2 text-text">
             <img
               src={logoSrc}
               alt={toText(t("common:pageAssist", "tldw Assistant"))}
@@ -309,7 +309,7 @@ export function ChatHeader({
                 <button
                   type="button"
                   onClick={onTitleEditStart}
-                  className={`block w-full truncate text-left text-xs text-text-muted hover:text-text ${focusRingClasses}`}
+                  className={`truncate text-left text-xs text-text-muted hover:text-text ${focusRingClasses}`}
                   title={chatTitle || "Untitled"}
                 >
                   {chatTitle || t("option:header.untitledChat", "Untitled")}
@@ -318,7 +318,7 @@ export function ChatHeader({
             </div>
           )}
           {showSessionModeBadge ? (
-            <div className="flex max-w-full flex-wrap items-center gap-1">
+            <div className="flex items-center gap-1">
               <span
                 className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${
                   temporaryChat

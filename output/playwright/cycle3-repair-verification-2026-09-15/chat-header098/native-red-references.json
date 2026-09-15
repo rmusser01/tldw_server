@@ -1,0 +1,17 @@
+{
+  "purpose": "Original UAT098 native RED retained once in adjacent durable bundle; these relative links and hashes identify exact evidence without duplicating the PNG.",
+  "files": [
+    {
+      "file": "uat097-reviewed-mobile-header-bounds.txt",
+      "relativePath": "../chat-restoration-native-final/uat097-reviewed-mobile-header-bounds.txt",
+      "sha256": "7bcd7e0a25d5981725ea8c2e1f0ac3425fa861306927f719464450da5cb3d2fb",
+      "bytes": 1528
+    },
+    {
+      "file": "uat097-reviewed-390-layout.png",
+      "relativePath": "../chat-restoration-native-final/uat097-reviewed-390-layout.png",
+      "sha256": "f2a5da0c6ada083b57e6285dc4eb8445ce0478ecfe57be6634dc770ed5a2ec48",
+      "bytes": 66629
+    }
+  ]
+}

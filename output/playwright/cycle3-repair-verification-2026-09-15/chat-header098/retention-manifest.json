@@ -1,0 +1,360 @@
+{
+  "retainedAt": "2026-09-15T23:49:22.793Z",
+  "task": "TASK13260.39",
+  "frozenSource": {
+    "path": "apps/packages/ui/src/components/Layouts/ChatHeader.tsx",
+    "sha256": "99ead6a0de84203afbe797b24d8da293a87fd668e3453fd5a245d42939fb996f"
+  },
+  "files": [
+    {
+      "file": "uat098-final-1024.png",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-1024.png",
+      "sourceBytes": 108641,
+      "sourceSha256": "51f734e400a43d435ef16e50f97145c734268faac88c5c53c8c0dc63561a3390",
+      "retainedBytes": 108641,
+      "retainedSha256": "51f734e400a43d435ef16e50f97145c734268faac88c5c53c8c0dc63561a3390",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-1280.png",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-1280.png",
+      "sourceBytes": 113994,
+      "sourceSha256": "f88f9321b2f6a05c2a05a588b0b60a30095b9a0e3585ea3ce2bba0b5908b2ad1",
+      "retainedBytes": 113994,
+      "retainedSha256": "f88f9321b2f6a05c2a05a588b0b60a30095b9a0e3585ea3ce2bba0b5908b2ad1",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-390-geometry.txt",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-390-geometry.txt",
+      "sourceBytes": 2732,
+      "sourceSha256": "24063d2eda6cf66ad94f30841b224b6241a0970b157860643abda503c2027bc4",
+      "retainedBytes": 2732,
+      "retainedSha256": "24063d2eda6cf66ad94f30841b224b6241a0970b157860643abda503c2027bc4",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-390.png",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-390.png",
+      "sourceBytes": 63138,
+      "sourceSha256": "e88a3b040cf5aac6a60f5169aaee4e778834b55edc3a2e9e17bc75532a0e6588",
+      "retainedBytes": 63138,
+      "retainedSha256": "e88a3b040cf5aac6a60f5169aaee4e778834b55edc3a2e9e17bc75532a0e6588",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-desktop-geometry.txt",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-desktop-geometry.txt",
+      "sourceBytes": 3429,
+      "sourceSha256": "b1b9f9e496c8da4a56394c5a89f580b9722a4e24258880992df256fe0b4883e3",
+      "retainedBytes": 3429,
+      "retainedSha256": "b1b9f9e496c8da4a56394c5a89f580b9722a4e24258880992df256fe0b4883e3",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-mobile-after-focus-exit.txt",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-mobile-after-focus-exit.txt",
+      "sourceBytes": 6968,
+      "sourceSha256": "b6c149f42157b763ccab9788ec632f6b73d8629f6fafb6ee24228e645191b158",
+      "retainedBytes": 6968,
+      "retainedSha256": "b6c149f42157b763ccab9788ec632f6b73d8629f6fafb6ee24228e645191b158",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-mobile-ready-snapshot.txt",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-mobile-ready-snapshot.txt",
+      "sourceBytes": 11006,
+      "sourceSha256": "419a26e52236ed819f63264ad4c0f67238c4d502404f682dfe3d7db041f45e76",
+      "retainedBytes": 11006,
+      "retainedSha256": "419a26e52236ed819f63264ad4c0f67238c4d502404f682dfe3d7db041f45e76",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-mobile-recents-current.txt",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-mobile-recents-current.txt",
+      "sourceBytes": 7511,
+      "sourceSha256": "52db69eb500706fa94178a67926f5be756c44b1f342e465d3c76b542f67e8929",
+      "retainedBytes": 7511,
+      "retainedSha256": "52db69eb500706fa94178a67926f5be756c44b1f342e465d3c76b542f67e8929",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-mobile-recents.txt",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-mobile-recents.txt",
+      "sourceBytes": 17337,
+      "sourceSha256": "a113c3898a1951e222a2beb4d4a61fe224f4d4a3f6fd75367b45122c267cab44",
+      "retainedBytes": 17337,
+      "retainedSha256": "a113c3898a1951e222a2beb4d4a61fe224f4d4a3f6fd75367b45122c267cab44",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-mobile-robot-mouse.txt",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-mobile-robot-mouse.txt",
+      "sourceBytes": 3658,
+      "sourceSha256": "d720770f6ab13dfbf6b49b38efd84ee65e5ff80517acb7bcdc310d1ee1935fe6",
+      "retainedBytes": 3658,
+      "retainedSha256": "d720770f6ab13dfbf6b49b38efd84ee65e5ff80517acb7bcdc310d1ee1935fe6",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-mobile-robot-snapshot.txt",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-mobile-robot-snapshot.txt",
+      "sourceBytes": 17494,
+      "sourceSha256": "5c4cea5d61fe1026b3df2ebd46e0e832192f78bd21031f9953f3ae5a835f5bcb",
+      "retainedBytes": 17494,
+      "retainedSha256": "5c4cea5d61fe1026b3df2ebd46e0e832192f78bd21031f9953f3ae5a835f5bcb",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-mobile-shortcuts-settled.txt",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-mobile-shortcuts-settled.txt",
+      "sourceBytes": 22258,
+      "sourceSha256": "1d16bd68e488c470186f159d78c383b92f859ba0b502346e38cb202372e10956",
+      "retainedBytes": 22258,
+      "retainedSha256": "1d16bd68e488c470186f159d78c383b92f859ba0b502346e38cb202372e10956",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-mobile-shortcuts.txt",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-mobile-shortcuts.txt",
+      "sourceBytes": 22258,
+      "sourceSha256": "2d038c1db8a2cdfbb096078261161c608b1cf746c17c593b891b6693797d3b2b",
+      "retainedBytes": 22258,
+      "retainedSha256": "2d038c1db8a2cdfbb096078261161c608b1cf746c17c593b891b6693797d3b2b",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-mobile-sidebar.txt",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-mobile-sidebar.txt",
+      "sourceBytes": 8883,
+      "sourceSha256": "639bb41e169443052fb3a181ed87f52602c332d1bd684816b79dff83b2ce4b5e",
+      "retainedBytes": 8883,
+      "retainedSha256": "639bb41e169443052fb3a181ed87f52602c332d1bd684816b79dff83b2ce4b5e",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-mobile-snapshot.txt",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-mobile-snapshot.txt",
+      "sourceBytes": 11387,
+      "sourceSha256": "6036894f257715504e37c48c9f9449c2707dfb2f1e4008915a153966d604412f",
+      "retainedBytes": 11387,
+      "retainedSha256": "6036894f257715504e37c48c9f9449c2707dfb2f1e4008915a153966d604412f",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-mobile-title-edit-bounds.txt",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-mobile-title-edit-bounds.txt",
+      "sourceBytes": 516,
+      "sourceSha256": "c33066bed5ec1abe76f3ac35368c2b10a425323edd4552f3f7a148b57f0e648a",
+      "retainedBytes": 516,
+      "retainedSha256": "c33066bed5ec1abe76f3ac35368c2b10a425323edd4552f3f7a148b57f0e648a",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-final-mobile-title-edit.txt",
+      "group": "native-final",
+      "source": "/private/tmp/uat098-final-mobile-title-edit.txt",
+      "sourceBytes": 11072,
+      "sourceSha256": "0742940105f868277eb4a2bdbbe6b5d03e991abe16b2cb9517987dc4ec9d590e",
+      "retainedBytes": 11072,
+      "retainedSha256": "0742940105f868277eb4a2bdbbe6b5d03e991abe16b2cb9517987dc4ec9d590e",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-repair-report.md",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-repair-report.md",
+      "sourceBytes": 4117,
+      "sourceSha256": "3976c2c2a48551906ff4f27efe93f972e75710f81dcd5958663cf6df23484616",
+      "retainedBytes": 4117,
+      "retainedSha256": "3976c2c2a48551906ff4f27efe93f972e75710f81dcd5958663cf6df23484616",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-production-freeze.json",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-production-freeze.json",
+      "sourceBytes": 316,
+      "sourceSha256": "0415dafb88d4239ea432a3c98d37f6e43e527a4014cc721b0dde9f6a8d3917f9",
+      "retainedBytes": 316,
+      "retainedSha256": "0415dafb88d4239ea432a3c98d37f6e43e527a4014cc721b0dde9f6a8d3917f9",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-owned-paths.json",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-owned-paths.json",
+      "sourceBytes": 499,
+      "sourceSha256": "f7315f8d7aaa9cacaaa4c849b959af7c42bde6fd4a01082490731fffda680cd8",
+      "retainedBytes": 499,
+      "retainedSha256": "f7315f8d7aaa9cacaaa4c849b959af7c42bde6fd4a01082490731fffda680cd8",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-ChatHeader.before.tsx",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-ChatHeader.before.tsx",
+      "sourceBytes": 24506,
+      "sourceSha256": "1e75ccb62ca303d38076efd42ca35c329a470b149bebfaa4a07c67a8f09fb0ab",
+      "retainedBytes": 24506,
+      "retainedSha256": "1e75ccb62ca303d38076efd42ca35c329a470b149bebfaa4a07c67a8f09fb0ab",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-source.diff",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-source.diff",
+      "sourceBytes": 2445,
+      "sourceSha256": "408dab03e5c91b614fed0de20988152f5edfd91f6efc378a8d99a0b1fd7d933f",
+      "retainedBytes": 2445,
+      "retainedSha256": "408dab03e5c91b614fed0de20988152f5edfd91f6efc378a8d99a0b1fd7d933f",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-header-baseline-tests.log",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-header-baseline-tests.log",
+      "sourceBytes": 1046,
+      "sourceSha256": "d3dad4ece88877e38f1ac844177cbb7d511512686142c05aeb03d6957b972267",
+      "retainedBytes": 1045,
+      "retainedSha256": "35b033e2778c550a0371ee0e88f35c76fd92b40a0975061b476fb6744600d29b",
+      "normalization": "trailing-whitespace-and-single-final-newline"
+    },
+    {
+      "file": "uat098-header-green-tests.log",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-header-green-tests.log",
+      "sourceBytes": 1046,
+      "sourceSha256": "17b2c7f341c519c6ea82507f70fbe60e3cd316d35d5ad0150c9709c6b2df6245",
+      "retainedBytes": 1045,
+      "retainedSha256": "1081e836fc268401669c4c146599be876527991172a4788163dc47dbe1440ab2",
+      "normalization": "trailing-whitespace-and-single-final-newline"
+    },
+    {
+      "file": "uat098-title-green-tests.log",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-title-green-tests.log",
+      "sourceBytes": 568,
+      "sourceSha256": "640955ae7b5a68ee5e892c56a175a6a92937d50c84f280b6c0653d34c7caefa6",
+      "retainedBytes": 567,
+      "retainedSha256": "9d3c88c873ae5f4945e5fb21e741e88dba4ddb3f9941c8e096a24b42634be672",
+      "normalization": "trailing-whitespace-and-single-final-newline"
+    },
+    {
+      "file": "uat098-eslint-before.json",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-eslint-before.json",
+      "sourceBytes": 26882,
+      "sourceSha256": "34787cbfd726e44d494707a3695f88c6986d934a9d6d27dd4c63ceb3a3771efe",
+      "retainedBytes": 26882,
+      "retainedSha256": "34787cbfd726e44d494707a3695f88c6986d934a9d6d27dd4c63ceb3a3771efe",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-eslint-after.json",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-eslint-after.json",
+      "sourceBytes": 26955,
+      "sourceSha256": "340877ddf68b4aa7f721ca17090353043c91748ac008ff60b3d821ca94e2fe92",
+      "retainedBytes": 26955,
+      "retainedSha256": "340877ddf68b4aa7f721ca17090353043c91748ac008ff60b3d821ca94e2fe92",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-eslint-comparison.json",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-eslint-comparison.json",
+      "sourceBytes": 316,
+      "sourceSha256": "ba13ee7d2dbc46c1e8ef4049b44736fa2d9f0cd4da278491e4422395acdcebce",
+      "retainedBytes": 316,
+      "retainedSha256": "ba13ee7d2dbc46c1e8ef4049b44736fa2d9f0cd4da278491e4422395acdcebce",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-evidence-SHA256SUMS",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-evidence-SHA256SUMS",
+      "sourceBytes": 1025,
+      "sourceSha256": "19bb32802e64324dd89c6170cc2057bb3541e163f645017c4117a8cfa0702fb9",
+      "retainedBytes": 1025,
+      "retainedSha256": "6d1d0201c4c90484cb54d305deb7e04cdcb2ca01f37e9814658a49d5f9cd59ec",
+      "normalization": "checksum-values-recomputed-for-normalized-retained-static-inputs"
+    },
+    {
+      "file": "uat098-independent-review.md",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-independent-review.md",
+      "sourceBytes": 4167,
+      "sourceSha256": "d0fe05af89896baaf6d16a122f90983aad0cda91b6d6ed3bb02e8b5d6469525f",
+      "retainedBytes": 4167,
+      "retainedSha256": "d0fe05af89896baaf6d16a122f90983aad0cda91b6d6ed3bb02e8b5d6469525f",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-independent-hashes.json",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-independent-hashes.json",
+      "sourceBytes": 334,
+      "sourceSha256": "9df53d713e9a92863965bb7fde46a1ed36c8f528b900ff5d917245f3de9ed050",
+      "retainedBytes": 334,
+      "retainedSha256": "9df53d713e9a92863965bb7fde46a1ed36c8f528b900ff5d917245f3de9ed050",
+      "normalization": "none"
+    },
+    {
+      "file": "uat098-independent-shared-tests.log",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-independent-shared-tests.log",
+      "sourceBytes": 1327,
+      "sourceSha256": "b782441e7f87999156ef0ee710974025ac3f8a68171429e5bc07420d5b41caee",
+      "retainedBytes": 1326,
+      "retainedSha256": "2053029df755f723653b1d1a50d266d67a880ec44ce7f192586c2a6267e14b4f",
+      "normalization": "trailing-whitespace-and-single-final-newline"
+    },
+    {
+      "file": "uat098-independent-web-title-tests.log",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-independent-web-title-tests.log",
+      "sourceBytes": 569,
+      "sourceSha256": "76605823a79ce12552a30a30806e1ad9217a20ced56e69938b3ad0e895b1161a",
+      "retainedBytes": 568,
+      "retainedSha256": "970f70396ce77593e4812c940b1e0ba39a13f3659d074a7aff23c0179fe153e0",
+      "normalization": "trailing-whitespace-and-single-final-newline"
+    },
+    {
+      "file": "uat098-independent-eslint.json",
+      "group": "static-review",
+      "source": "/private/tmp/uat098-independent-eslint.json",
+      "sourceBytes": 26955,
+      "sourceSha256": "340877ddf68b4aa7f721ca17090353043c91748ac008ff60b3d821ca94e2fe92",
+      "retainedBytes": 26955,
+      "retainedSha256": "340877ddf68b4aa7f721ca17090353043c91748ac008ff60b3d821ca94e2fe92",
+      "normalization": "none"
+    },
+    {
+      "file": "ChatHeader.after.tsx",
+      "group": "frozen-source-copy",
+      "source": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Layouts/ChatHeader.tsx",
+      "sourceBytes": 24579,
+      "sourceSha256": "99ead6a0de84203afbe797b24d8da293a87fd668e3453fd5a245d42939fb996f",
+      "retainedBytes": 24579,
+      "retainedSha256": "99ead6a0de84203afbe797b24d8da293a87fd668e3453fd5a245d42939fb996f",
+      "normalization": "none"
+    }
+  ]
+}

@@ -1,0 +1,181 @@
+### Open tabs
+- 0: (current) [Cycle3 Cedar Guide Chat (20260915_103705) | tldw](http://127.0.0.1:18281/chat)
+- 1: [Server Settings | tldw](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/chat
+- Page Title: Cycle3 Cedar Guide Chat (20260915_103705) | tldw
+### Snapshot
+```yaml
+- generic [ref=f67e20]:
+  - generic [ref=f67e23]:
+    - link "Skip to main content" [ref=f67e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - main [ref=f67e25]:
+      - generic [ref=f67e26]:
+        - generic [ref=f67e29]:
+          - generic [ref=f67e30]:
+            - button "Expand sidebar" [ref=f67e31] [cursor=pointer]
+            - generic [ref=f67e33]:
+              - img "tldw Assistant" [ref=f67e34]
+              - generic [ref=f67e35]: tldw Assistant
+              - button "Companion Home" [ref=f67e36] [cursor=pointer]
+              - button "Show shortcuts" [ref=f67e40] [cursor=pointer]
+            - generic [ref=f67e43]:
+              - generic "Saved chat. History is persisted." [ref=f67e44]: Saved
+              - generic "Character mode is active." [ref=f67e45]: "Character: Cycle3 Cedar Guide"
+          - generic [ref=f67e51]:
+            - button "New saved chat" [ref=f67e52] [cursor=pointer]
+            - button "Share conversation" [ref=f67e56] [cursor=pointer]
+            - button "Open settings" [ref=f67e63] [cursor=pointer]
+            - generic [ref=f67e75]:
+              - button "Notifications, 0 unread" [ref=f67e76] [cursor=pointer]
+              - status [ref=f67e80]: Notifications are active
+            - button "Switch to light theme" [ref=f67e81] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f67e88] [cursor=pointer]:
+              - generic [ref=f67e89]: "?"
+        - generic [ref=f67e90]:
+          - heading "Chat" [level=1] [ref=f67e91]
+          - generic [ref=f67e94]:
+            - paragraph [ref=f67e95]: Context rail hidden. Runtime rail visible.
+            - generic [ref=f67e96]:
+              - tablist "Mobile cockpit panels" [ref=f67e97]:
+                - tab "Restore context sidechannel" [ref=f67e98] [cursor=pointer]
+                - tab "Runtime" [expanded] [selected] [ref=f67e99] [cursor=pointer]
+              - generic [ref=f67e100]:
+                - button "Show context rail" [ref=f67e101] [cursor=pointer]
+                - button "Hide runtime rail" [pressed] [ref=f67e102] [cursor=pointer]
+              - paragraph [ref=f67e103]: Runtime panel active. Composer draft remains available below.
+              - tabpanel "Runtime" [ref=f67e104]:
+                - generic [ref=f67e105]:
+                  - region "Runtime state" [ref=f67e106]:
+                    - generic [ref=f67e107]:
+                      - heading "Runtime" [level=2] [ref=f67e108]
+                      - button "Collapse Runtime" [expanded] [ref=f67e109] [cursor=pointer]
+                    - generic [ref=f67e112]:
+                      - generic [ref=f67e113]:
+                        - generic [ref=f67e114]:
+                          - paragraph [ref=f67e115]: Ready
+                          - paragraph [ref=f67e116]: Character chat is preparing
+                        - generic [ref=f67e117]: Turn idle
+                      - generic [ref=f67e118]:
+                        - term [ref=f67e119]: Provider
+                        - definition [ref=f67e120]: llama
+                        - term [ref=f67e121]: Model
+                        - definition [ref=f67e122]: ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf
+                      - generic [ref=f67e123]:
+                        - paragraph [ref=f67e124]: Provider route
+                        - paragraph [ref=f67e125]: llama:../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf
+                        - paragraph [ref=f67e126]: Route llama:../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf
+                  - region "Model route" [ref=f67e127]:
+                    - generic [ref=f67e128]:
+                      - heading "Model route" [level=2] [ref=f67e129]
+                      - button "Collapse Model route" [expanded] [ref=f67e130] [cursor=pointer]
+                    - generic [ref=f67e133]:
+                      - button "Open model settings" [ref=f67e135] [cursor=pointer]: Model settings
+                      - generic [ref=f67e139]:
+                        - paragraph [ref=f67e140]: Provider:model settings
+                        - paragraph [ref=f67e141]: Default settings for this provider:model.
+                  - region "Assistant" [ref=f67e142]:
+                    - generic [ref=f67e143]:
+                      - heading "Assistant" [level=2] [ref=f67e144]
+                      - button "Collapse Assistant" [expanded] [ref=f67e145] [cursor=pointer]
+                    - generic [ref=f67e148]:
+                      - generic [ref=f67e149]:
+                        - generic [ref=f67e150]:
+                          - paragraph [ref=f67e151]: Cycle3 Cedar Guide
+                          - paragraph [ref=f67e152]: Character selected
+                        - generic [ref=f67e153]: Character
+                      - generic [ref=f67e154]:
+                        - button "Select character or persona" [ref=f67e155] [cursor=pointer]: Select assistant
+                        - button "Manage assistant" [ref=f67e159] [cursor=pointer]
+                        - button "Clear assistant" [ref=f67e163] [cursor=pointer]
+                        - button "Open Scene Director" [ref=f67e167] [cursor=pointer]: Scene Director
+                  - region "MCP tools" [ref=f67e169]:
+                    - generic [ref=f67e170]:
+                      - heading "MCP tools" [level=2] [ref=f67e171]
+                      - button "Collapse MCP tools" [expanded] [ref=f67e172] [cursor=pointer]
+                    - generic [ref=f67e176]:
+                      - generic [ref=f67e181]:
+                        - paragraph [ref=f67e182]: Chat tool access
+                        - paragraph [ref=f67e183]: No MCP tools available
+                      - button "Configure MCP tools" [ref=f67e184] [cursor=pointer]
+                  - region "Run controls" [ref=f67e186]:
+                    - generic [ref=f67e187]:
+                      - heading "Run controls" [level=2] [ref=f67e188]
+                      - button "Collapse Run controls" [expanded] [ref=f67e189] [cursor=pointer]
+                    - generic [ref=f67e192]:
+                      - generic [ref=f67e193]:
+                        - generic [ref=f67e194]:
+                          - button "Stop generation" [disabled] [ref=f67e195]
+                          - paragraph [ref=f67e198]: No turn is running.
+                        - button "Regenerate last response" [ref=f67e200] [cursor=pointer]
+                      - generic [ref=f67e204]:
+                        - paragraph [ref=f67e205]: Timeline
+                        - paragraph [ref=f67e206]: 2 messages
+                        - paragraph [ref=f67e207]: Search closed
+            - main [ref=f67e209]:
+              - generic [ref=f67e210]:
+                - generic [ref=f67e211]:
+                  - generic [ref=f67e212]:
+                    - generic [ref=f67e214]:
+                      - text: Character Chat
+                      - generic [ref=f67e215]: Cycle3 Cedar Guide
+                    - generic [ref=f67e216]:
+                      - button "Switch to light theme" [ref=f67e217] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f67e224] [cursor=pointer]
+                      - button "Open keyboard shortcuts (Shift+/)" [ref=f67e230] [cursor=pointer]
+                  - status "Character Chat setup status" [ref=f67e233]:
+                    - generic [ref=f67e237]:
+                      - paragraph [ref=f67e238]: Character chat is preparing
+                      - paragraph [ref=f67e239]: Wait for the current message or setup step to finish before sending.
+                    - button "Try again" [ref=f67e240] [cursor=pointer]
+                - log "Chat messages":
+                  - generic [ref=f67e245]:
+                    - article "User message 1 of 2" [ref=f67e246]:
+                      - generic [ref=f67e249]:
+                        - generic [ref=f67e251]:
+                          - generic [ref=f67e252]: You
+                          - generic [ref=f67e253]: • 3:37 AM
+                        - paragraph [ref=f67e255]: Who coordinates Project Cedar, and when do volunteers meet? Answer in one sentence using your facts.
+                        - button "More actions" [ref=f67e258] [cursor=pointer]: •••
+                    - article "Assistant message 2 of 2" [ref=f67e262]:
+                      - generic [ref=f67e268]:
+                        - generic [ref=f67e270]:
+                          - generic [ref=f67e271]: Cycle3 Cedar Guide
+                          - generic [ref=f67e272]: • 3:37 AM
+                        - generic [ref=f67e273]:
+                          - button "collapsed Model’s reasoning (optional)" [ref=f67e276] [cursor=pointer]:
+                            - img "collapsed" [ref=f67e278]
+                            - generic [ref=f67e281]: Model’s reasoning (optional)
+                          - paragraph [ref=f67e284]: Loading content…
+                        - generic [ref=f67e285]:
+                          - generic [ref=f67e286]:
+                            - generic [ref=f67e287]: Was this helpful?
+                            - generic [ref=f67e288]:
+                              - button "Helpful" [disabled] [ref=f67e289]
+                              - button "Not helpful" [disabled] [ref=f67e292]
+                              - button "More feedback" [disabled] [ref=f67e295]
+                          - button "More actions" [ref=f67e301] [cursor=pointer]: •••
+                - generic [ref=f67e309]:
+                  - button [aria-hidden] [ref=f67e310]
+                  - button [aria-hidden] [ref=f67e311]
+                  - generic [ref=f67e312]:
+                    - generic [ref=f67e314]:
+                      - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f67e317]
+                      - generic [ref=f67e318]:
+                        - button "Improve prompt" [ref=f67e321] [cursor=pointer]
+                        - generic [ref=f67e326]:
+                          - button "Send message" [ref=f67e327] [cursor=pointer]:
+                            - generic [ref=f67e328]: Send
+                          - button "Open message delivery options" [ref=f67e333] [cursor=pointer]
+                    - button "Buddy & Persona" [ref=f67e338] [cursor=pointer]
+                    - status [ref=f67e344]:
+                      - generic [ref=f67e345]: Add expression images for Cycle3 Cedar Guide.
+                      - generic [ref=f67e346]:
+                        - link "Edit expressions" [ref=f67e347] [cursor=pointer]:
+                          - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=4
+                        - button "Dismiss expression image setup" [ref=f67e348] [cursor=pointer]: Dismiss
+  - button "Open Next.js Dev Tools" [ref=f67e15] [cursor=pointer]
+  - alert [ref=f67e19]
+```

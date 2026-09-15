@@ -1,0 +1,16 @@
+{
+  "checkedAt": "2026-09-15T23:31:30.975Z",
+  "before": {
+    "errors": 0,
+    "warnings": 2
+  },
+  "after": {
+    "errors": 0,
+    "warnings": 2
+  },
+  "added": [],
+  "removed": [],
+  "coverage": [
+    "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Layouts/ChatHeader.tsx"
+  ]
+}
