@@ -11,6 +11,7 @@ import {
   buildPresentationVisualStyleSnapshot,
   tldwClient,
   type PresentationDetailResult,
+  type StructuredPresentationStudioRecord,
   type VisualStyleRecord
 } from "@/services/tldw/TldwApiClient"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
@@ -43,8 +44,12 @@ type InFlightProjectRequest = {
   promise: Promise<DetailLoadResult | null>
 }
 
+type StructuredPresentationDetailResult = Omit<PresentationDetailResult, "record"> & {
+  record: StructuredPresentationStudioRecord
+}
+
 type DetailLoadResult =
-  | { kind: "structured"; detail: PresentationDetailResult }
+  | { kind: "structured"; detail: StructuredPresentationDetailResult }
   | { kind: "standalone_html" }
   | { kind: "unsupported"; contentKind: string | null }
   | { kind: "metadata_unavailable" }
@@ -458,7 +463,10 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
               ) {
                 throw new Error("Structured presentation could not be verified.")
               }
-              return { kind: "structured", detail }
+              return {
+                kind: "structured",
+                detail: detail as StructuredPresentationDetailResult
+              }
             }
             if (metadata.record.content_kind === "standalone_html") {
               return { kind: "standalone_html" }
@@ -494,7 +502,10 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
               ) {
                 return { kind: "metadata_unavailable" }
               }
-              return { kind: "structured", detail }
+              return {
+                kind: "structured",
+                detail: detail as StructuredPresentationDetailResult
+              }
             }
           }
         })()

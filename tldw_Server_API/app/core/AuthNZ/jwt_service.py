@@ -11,8 +11,8 @@ from uuid import uuid4
 
 #
 # 3rd-party imports
-from jose import JWTError, jwt
-from jose.exceptions import ExpiredSignatureError, JWTClaimsError
+from tldw_Server_API.app.core.Utils import jwt_compat as jwt
+from tldw_Server_API.app.core.Utils.jwt_compat import JWTError, ExpiredSignatureError, JWTClaimsError
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.crypto_utils import (
@@ -139,7 +139,7 @@ class JWTService:
                     try:
                         # Derive a stable surrogate secret from the API key
                         derived = derive_hmac_key(self.settings)
-                        # jose accepts str/bytes; use hex string for readability
+                        # Use a hex string for the HMAC signing key.
                         self._encode_key = derived.hex()
                         self._decode_key = self._encode_key
                         logger.debug("JWTService: using derived single-user surrogate key for HS algorithms")

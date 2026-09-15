@@ -68,13 +68,16 @@ describe('DebugPage', () => {
     const user = userEvent.setup();
     render(<DebugPage />);
 
-    const [lookupInput, resolveInput] = screen.getAllByLabelText('User ID');
+    const userIdInputs = screen.getAllByLabelText('User ID').filter(
+      (input) => input.id !== 'rl-user-id'
+    );
+    expect(userIdInputs).toHaveLength(3);
 
-    await user.type(lookupInput, '12abc{enter}');
+    for (const input of userIdInputs) {
+      await user.type(input, '12abc{enter}');
+    }
 
-    await user.type(resolveInput, '42xyz{enter}');
-
-    expect(screen.getAllByText('Enter a valid positive user ID')).toHaveLength(2);
+    expect(screen.getAllByText('Enter a valid positive user ID')).toHaveLength(3);
     expect(api.getUser).not.toHaveBeenCalled();
     expect(api.debugResolvePermissions).not.toHaveBeenCalled();
   });

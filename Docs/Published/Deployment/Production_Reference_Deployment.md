@@ -24,6 +24,8 @@ database, and metrics routes require an authenticated operator principal.
 - `Helper_Scripts/Deployment/production_preflight.py` performs offline checks.
 - `Helper_Scripts/Deployment/production_deploy.py` owns verified deployment and
   restore-backed rollback ordering.
+- `Docs/Development/Software_Supply_Chain.md` defines the image identity, SBOM,
+  vulnerability, exception, evidence, and attestation gate.
 - `TLDW_BACKUP_DIR` is an absolute, operator-owned directory separate from live
   volumes. Back up the secret/config file separately; it is deliberately absent
   from non-secret deployment manifests.
@@ -47,9 +49,9 @@ chmod 600 "$PRODUCTION_ENV_FILE"
 
 Fill every required value. Important invariants include:
 
-- `TLDW_APP_IMAGE` and `TLDW_ROLLBACK_IMAGE` are different immutable digests or
-  `sha-<commit>` tags. `CADDY_IMAGE`, `POSTGRES_IMAGE`, and `REDIS_IMAGE` use
-  exact full versions or digests.
+- `TLDW_APP_IMAGE` and `TLDW_ROLLBACK_IMAGE` are different version tags bound
+  to full lowercase SHA-256 subject digests. Every reference image also uses a
+  `tag@sha256:` reference. Tag-only and floating inputs fail closed.
 - `TLDW_EDGE_SUBNET` and `TLDW_BACKEND_SUBNET` are non-overlapping private IPv4
   CIDRs. Every trusted-proxy input derives from the edge CIDR.
 - `TLDW_PUBLIC_DOMAIN`, `TLDW_ACME_EMAIL`, and `ALLOWED_ORIGINS` describe the
@@ -61,6 +63,25 @@ Fill every required value. Important invariants include:
 - PostgreSQL and Redis URLs encode the same external credentials supplied to
   their services. Do not reuse secrets across fields.
 - Remote setup remains disabled. The public proxy denies setup routes.
+
+These are the committed `linux/amd64` reference-image candidates, not a passing
+release certification. Known source and image findings still block admission;
+obtain fresh passing release evidence before deployment. These literals mirror
+`.github/supply-chain/reference-images.json` and may change only through the
+[supply-chain digest-refresh and scan gate](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Development/Software_Supply_Chain.md#refresh-an-image-digest):
+
+```bash
+CADDY_IMAGE=caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+POSTGRES_IMAGE=postgres:18.6-alpine3.24@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+REDIS_IMAGE=redis:7.4.11-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+PROMETHEUS_IMAGE=prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
+ALERTMANAGER_IMAGE=prom/alertmanager:v0.34.0@sha256:690c7b525f4367aa91f73e2f91c632206d32e97c6384bdbf2fb7a861b420340d
+GRAFANA_IMAGE=grafana/grafana:13.2.1@sha256:f772d434e8fab0049deb2b1b30abd43342bcfca1537614aa8d36080232cf4283
+```
+
+The digest following each tag is the subject/index digest. Supply-chain
+evidence separately records the selected `linux/amd64` child manifest digest;
+do not substitute that child digest into the reviewed environment literal.
 
 Make a protected, operator-managed backup of the secret/config file. Do not put
 it inside `TLDW_BACKUP_DIR`, because manifests cover PostgreSQL, Redis, and
@@ -201,9 +222,9 @@ standalone production monitoring companion after the main production stack is
 healthy:
 
 ```bash
-export PROMETHEUS_IMAGE=prom/prometheus:v2.55.1
-export ALERTMANAGER_IMAGE=prom/alertmanager:v0.30.1
-export GRAFANA_IMAGE=grafana/grafana:11.5.2
+export PROMETHEUS_IMAGE=prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
+export ALERTMANAGER_IMAGE=prom/alertmanager:v0.34.0@sha256:690c7b525f4367aa91f73e2f91c632206d32e97c6384bdbf2fb7a861b420340d
+export GRAFANA_IMAGE=grafana/grafana:13.2.1@sha256:f772d434e8fab0049deb2b1b30abd43342bcfca1537614aa8d36080232cf4283
 export PROMETHEUS_UID="$(docker run --rm --network none --entrypoint id "$PROMETHEUS_IMAGE" -u)"
 export PROMETHEUS_GID="$(docker run --rm --network none --entrypoint id "$PROMETHEUS_IMAGE" -g)"
 test "$PROMETHEUS_UID" -gt 0
@@ -491,10 +512,13 @@ all three matching artifacts and the independently protected secret/config
 backup. Replicate them to operator-managed storage, test restores on a schedule,
 and document retention and deletion policy.
 
-Known follow-up boundaries are explicit:
+TASK-13013.7 implements the supply-chain contract, immutable image inventory,
+digest-bound provenance and SBOM evidence, and release admission workflow
+documented above. Release certification remains pending remediation or explicit
+human approval of narrowly scoped exceptions for the known blocking findings.
 
-- `TASK-13013.7` owns broader image provenance, digest, attestation, and SBOM
-  enforcement.
+Remaining follow-up boundaries are explicit:
+
 - `TASK-13013.9` owns long-duration capacity, restore-time, and soak evidence.
 - `TASK-13144` owns the global client-identity middleware and physical-peer
   normalization across trusted proxy consumers.

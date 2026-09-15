@@ -19,7 +19,6 @@ export interface CreatePromptOptions {
   name: string
   template: string
 }
-
 export class PromptsWorkspacePage extends BasePage {
   /* ------------------------------------------------------------------ */
   /* Locators                                                            */
@@ -182,16 +181,16 @@ export class PromptsWorkspacePage extends BasePage {
       // Click save in the full-page editor
       const saveBtn = this.page.getByTestId("prompt-full-page-editor")
         .getByRole("button", { name: /save/i }).first()
+      const promptAddedNotices = this.page
+        .locator(".ant-notification-notice-success")
+        .filter({ hasText: /Prompt Added/i })
+      await expect(promptAddedNotices).toHaveCount(0, { timeout: 10_000 })
       await saveBtn.click()
-      await expect(saveBtn).toBeEnabled({ timeout: 15_000 })
+      await expect(promptAddedNotices).toHaveCount(1, { timeout: 30_000 })
 
-      // Close any auto-opened details drawer after save
-      await this.page.keyboard.press("Escape")
-      await expect(this.fullPageEditor).toBeHidden({ timeout: 2_000 }).catch(() => {})
-      // Force-remove any lingering drawer/dialog portals
-      await this.page.evaluate(() => {
-        document.querySelectorAll('.ant-drawer-root, .ant-drawer-mask').forEach(el => el.remove())
-      }).catch(() => {})
+      await this.page.goto("/prompts", { waitUntil: "domcontentloaded" })
+      await this.assertPageReady()
+      await expect(this.fullPageEditor).toBeHidden({ timeout: 5_000 })
     } else {
       // Drawer path (fallback)
       await expect(this.drawerNameInput).toBeVisible({ timeout: 10_000 })
@@ -205,8 +204,12 @@ export class PromptsWorkspacePage extends BasePage {
         await systemInput.locator("textarea").first().fill(opts.template)
       }
 
+      const promptAddedNotices = this.page
+        .locator(".ant-notification-notice-success")
+        .filter({ hasText: /Prompt Added/i })
+      await expect(promptAddedNotices).toHaveCount(0, { timeout: 10_000 })
       await this.drawerSaveButton.click()
-      await expect(this.drawerSaveButton).toBeEnabled({ timeout: 15_000 })
+      await expect(promptAddedNotices).toHaveCount(1, { timeout: 30_000 })
     }
   }
 

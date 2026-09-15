@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Task 2D deterministic Watchlist feed</title>
+    <link>http://127.0.0.1/</link>
+    <description>Local fixture for real Watchlist briefing persistence.</description>
+    <item>
+      <title>Task 2D persisted briefing article</title>
+      <link>https://example.test/task2d/persisted-briefing-v1</link>
+      <guid isPermaLink="false">task2d-persisted-briefing-v1</guid>
+      <description>The real Watchlist run fetched this deterministic RSS article and persisted it for briefing generation.</description>
+      <pubDate>Sun, 30 Aug 2026 16:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

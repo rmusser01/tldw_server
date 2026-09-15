@@ -78,7 +78,7 @@
     "e2e:all-tiers": "playwright test --project=tier-1 --project=tier-2 --project=tier-3 --project=tier-4 --project=tier-5 --project=journeys"
   },
   "dependencies": {
-    "@sentry/nextjs": "^9.27.0",
+    "@sentry/nextjs": "10.46.0",
     "@ant-design/cssinjs": "^2.0.3",
     "@ant-design/icons": "^5.5.0",
     "@dnd-kit/abstract": "^0.1.21",
@@ -124,7 +124,7 @@
     "lucide-react": "^0.562.0",
     "marked": "^17.0.1",
     "mermaid": "^11.12.2",
-    "next": "^16.1.3",
+    "next": "16.3.3",
     "pa-tesseract.js": "^5.1.1",
     "pdfjs-dist": "^4.10.38",
     "prism-react-renderer": "^2.4.1",
@@ -152,7 +152,7 @@
     "@axe-core/playwright": "^4.11.1",
     "openapi-typescript": "^7.13.0",
     "@eslint/js": "^9.39.2",
-    "@next/eslint-plugin-next": "^16.1.0",
+    "@next/eslint-plugin-next": "16.3.3",
     "@playwright/test": "^1.51.1",
     "playwright": "^1.58.0",
     "puppeteer": "^24.36.0",
@@ -184,7 +184,7 @@
     "postcss-import": "^16.1.1",
     "prettier": "^3.7.4",
     "typescript": "^5.6.2",
-    "vite": "^8.0.8",
+    "vite": "8.0.16",
     "vitest": "^4.0.16"
   }
 }

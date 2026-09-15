@@ -781,7 +781,11 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
           </div>
         </div>
 
-        <aside className="min-w-0 space-y-2 border-t border-border pt-4 @3xl:border-s @3xl:border-t-0 @3xl:ps-4 @3xl:pt-0" aria-label={t("watchlists:overview.latest.actions.label", "Latest outcome actions")}>
+        <aside
+          className="min-w-0 space-y-2 border-t border-border pt-4 @3xl:border-s @3xl:border-t-0 @3xl:ps-4 @3xl:pt-0"
+          aria-label={t("watchlists:overview.latest.actions.label", "Latest outcome actions")}
+          data-testid="watchlists-repeat-actions"
+        >
           {textReady && numberValue(output.id) !== undefined && (
             <Button
               type={audioReady ? "default" : "primary"}
@@ -848,6 +852,7 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
           <Button
             block
             className={ACTION_CLASS}
+            data-testid="watchlists-repeat-open-runs"
             aria-label={t("watchlists:overview.latest.actions.inspectAria", "Inspect run {{runId}} for {{name}}", { runId: projection.run_id, name: objectName })}
             icon={<AlertCircle className="h-4 w-4" />}
             onClick={() => onInspectRun(projection.run_id)}

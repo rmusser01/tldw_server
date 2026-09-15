@@ -1,0 +1,8 @@
+#!/bin/bash
+# Only CPython's exact refresh.sh download call is supported, after authentication.
+set -eu
+if [[ "$#" != 2 || "$1" != --location || "$2" != https://github.com/libexpat/libexpat/releases/download/R_2_8_4/expat-2.8.4.tar.gz ]]; then
+    printf 'Unexpected offline refresh download invocation\n' >&2
+    exit 64
+fi
+exec /bin/cat /work/downloads/expat-2.8.4.tar.gz

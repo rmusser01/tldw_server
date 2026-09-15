@@ -1,0 +1,149 @@
+name: Retained Candidate FFmpeg Compatibility
+
+on:
+  push:
+    branches: [codex/task-13013-7-supply-chain-design]
+    paths:
+      - '.github/workflows/candidate-compatibility.yml'
+      - 'Dockerfiles/candidates/compatibility/**'
+      - 'tldw_Server_API/tests/Supply_Chain/test_candidate_compatibility.py'
+      - 'tldw_Server_API/tests/Supply_Chain/test_candidate_provenance.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: candidate-compatibility-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ffmpeg:
+    name: Native retained-image compatibility (not release admission)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Enable native OCI image loading
+        uses: docker/setup-docker-action@e43656e248c0bd0647d3f5c195d116aacf6fcaf4
+        with:
+          daemon-config: |
+            {"features": {"containerd-snapshotter": true}}
+      - name: Retain trusted producer metadata and fixed source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          daemon_arch="$(docker info --format '{{.Architecture}}')"
+          if [[ "$daemon_arch" != x86_64 && "$daemon_arch" != amd64 ]]; then exit 1; fi
+          mkdir "$RUNNER_TEMP/compatibility-inputs" "$RUNNER_TEMP/compatibility-evidence"
+          printf 'consumer_commit=%s\nkernel=Linux\narch=x86_64\ndaemon_arch=%s\n' \
+            "$GITHUB_SHA" "$daemon_arch" > "$RUNNER_TEMP/compatibility-evidence/runner.txt"
+          gh api repos/rmusser01/tldw_server/actions/runs/34177651966 \
+            > "$RUNNER_TEMP/compatibility-evidence/run.json"
+          gh api repos/rmusser01/tldw_server/actions/artifacts/10038017399 \
+            > "$RUNNER_TEMP/compatibility-evidence/artifact.json"
+          curl --fail --location --proto '=https' --proto-redir '=https' \
+            --retry 3 --connect-timeout 30 --max-time 300 \
+            https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz \
+            --output "$RUNNER_TEMP/compatibility-inputs/ffmpeg-9.0.1.tar.xz"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: '10038017399'
+          run-id: '34177651966'
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/compatibility-inputs/combined
+          merge-multiple: true
+      - name: Verify inputs before loading retained image
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/compatibility-evidence"
+          archive="$RUNNER_TEMP/compatibility-inputs/combined/candidate.oci.tar"
+          python3 Dockerfiles/candidates/compatibility/retained-inputs.py inputs "$evidence" \
+            --archive "$archive" \
+            --baseline Dockerfiles/candidates/compatibility/baseline-capabilities.txt \
+            --source "$RUNNER_TEMP/compatibility-inputs/ffmpeg-9.0.1.tar.xz" \
+            --evaluator Helper_Scripts/Supply_Chain/ffmpeg_candidate.py > "$evidence/inputs.json"
+          python3 Dockerfiles/candidates/combined-expat/image-identity.py "$archive" \
+            --config "$(jq -r .config_digest "$evidence/inputs.json")" \
+            --commit "$(jq -r .producer.commit "$evidence/inputs.json")" > "$evidence/image-identity.json"
+          jq -e --slurpfile inputs "$evidence/inputs.json" \
+            '.subject_digest == $inputs[0].subject_digest and .archive_sha256 == $inputs[0].payload_sha256.archive' \
+            "$evidence/image-identity.json"
+          docker load --input "$archive" > "$evidence/docker-load.log" 2>&1
+          subject="$(jq -r .subject_digest "$evidence/inputs.json")"
+          docker image inspect "$subject" > "$evidence/docker-inspect.json"
+          python3 Dockerfiles/candidates/compatibility/retained-inputs.py loaded \
+            "$evidence/docker-inspect.json" > "$evidence/loaded-identity.json"
+      - name: Run exact-image software compatibility controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/compatibility-evidence"
+          mkdir "$evidence/ffmpeg"
+          chmod 0777 "$evidence/ffmpeg"
+          subject="$(jq -r .loaded_subject "$evidence/loaded-identity.json")"
+          config="$(jq -r .config_digest "$evidence/image-identity.json")"
+          set +e
+          docker run --rm --pull never --platform linux/amd64 --network none --read-only \
+            --user 10001:10001 --cap-drop ALL --security-opt no-new-privileges \
+            --pids-limit 256 --memory 4g --cpus 4 \
+            --tmpfs /tmp:rw,nosuid,nodev,size=256m,mode=1777 \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/Dockerfiles/candidates/compatibility/baseline-capabilities.txt,dst=/baseline.txt,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP/compatibility-inputs/ffmpeg-9.0.1.tar.xz,dst=/ffmpeg-9.0.1.tar.xz,readonly" \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/Helper_Scripts/Supply_Chain/ffmpeg_candidate.py,dst=/evaluate.py,readonly" \
+            --mount "type=bind,src=$evidence/ffmpeg,dst=/evidence" \
+            --entrypoint /opt/tldw-venv/bin/python "$subject" /evaluate.py \
+            --baseline /baseline.txt --source-archive /ffmpeg-9.0.1.tar.xz \
+            --candidate-image "$config" --output-dir /evidence \
+            > "$evidence/ffmpeg.log" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$evidence/ffmpeg.exit"
+          test "$status" -eq 0
+          jq -e --arg config "$config" '.compatible == true and .candidate_image == $config' \
+            "$evidence/ffmpeg/candidate-evaluation.json"
+      - name: Observe application imports in the exact candidate test process
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/compatibility-evidence"
+          mkdir "$evidence/application"
+          chmod 0777 "$evidence/application"
+          subject="$(jq -r .loaded_subject "$evidence/loaded-identity.json")"
+          sha256sum Dockerfiles/candidates/compatibility/application-provenance.py \
+            > "$evidence/application-observer.sha256"
+          set +e
+          docker run --rm --pull never --platform linux/amd64 --network none --read-only \
+            --user 10001:10001 --cap-drop ALL --security-opt no-new-privileges \
+            --pids-limit 256 --memory 8g --cpus 4 \
+            --tmpfs /tmp:rw,nosuid,nodev,size=1g,mode=1777 \
+            --tmpfs /app/Databases:rw,nosuid,nodev,size=256m,uid=10001,gid=10001 \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/Dockerfiles/candidates/compatibility/application-provenance.py,dst=/provenance.py,readonly" \
+            --mount "type=bind,src=$evidence/application,dst=/evidence" \
+            --entrypoint /bin/bash "$subject" -c \
+            'set -euo pipefail; cd /; sha256sum --check --strict /opt/combined-evidence/installed-binaries.sha256 > /evidence/python-binaries.log; exec /opt/tldw-venv/bin/python /provenance.py --report /evidence/application-tests.json' \
+            > "$evidence/application.log" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$evidence/application.exit"
+          test "$status" -eq 0
+          jq -e '.passed == true and .scope == "application-tests-with-import-provenance-not-admitted"' \
+            "$evidence/application/application-tests.json"
+      - name: Retain compatibility evidence including failures
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: candidate-compatibility-${{ github.run_id }}
+          path: ${{ runner.temp }}/compatibility-evidence/**
+          if-no-files-found: error
+          retention-days: 14

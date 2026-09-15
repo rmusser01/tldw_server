@@ -1,0 +1,170 @@
+name: Combined Expat Candidate Assembly
+
+on:
+  push:
+    branches: [codex/task-13013-7-supply-chain-design]
+    paths:
+      - '.github/workflows/combined-expat-candidate.yml'
+      - 'Dockerfiles/candidates/combined-expat/**'
+      - 'tldw_Server_API/tests/Supply_Chain/test_combined_assembly*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: combined-expat-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  assemble:
+    name: Native assembly and application controls (not release admission)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Require native checkout and retain producer metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          daemon_arch="$(docker info --format '{{.Architecture}}')"
+          if [[ "$daemon_arch" != x86_64 && "$daemon_arch" != amd64 ]]; then exit 1; fi
+          mkdir -p "$RUNNER_TEMP/combined-downloads" "$RUNNER_TEMP/combined-evidence"
+          df -h > "$RUNNER_TEMP/combined-evidence/disk-before.txt"
+          printf 'commit=%s\nkernel=Linux\narch=x86_64\ndaemon_arch=%s\n' \
+            "$GITHUB_SHA" "$daemon_arch" > "$RUNNER_TEMP/combined-evidence/runner.txt"
+          while read -r label run artifact; do
+            gh api "repos/rmusser01/tldw_server/actions/runs/$run" > "$RUNNER_TEMP/combined-downloads/$label-run.json"
+            gh api "repos/rmusser01/tldw_server/actions/artifacts/$artifact" > "$RUNNER_TEMP/combined-downloads/$label-artifact.json"
+          done <<'PRODUCERS'
+          ffmpeg 34172954787 10036487817
+          system 34170600664 10035680097
+          python 34170600664 10035842132
+          PRODUCERS
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: '10036487817'
+          run-id: '34172954787'
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/combined-downloads/ffmpeg
+          merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: '10035680097'
+          run-id: '34170600664'
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/combined-downloads/system
+          merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: '10035842132'
+          run-id: '34170600664'
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/combined-downloads/python
+          merge-multiple: true
+      - name: Verify and prepare fixed build contexts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Dockerfiles/candidates/combined-expat/assembly-inputs.py \
+            "$RUNNER_TEMP/combined-downloads" "$RUNNER_TEMP/combined-qualified" \
+            > "$RUNNER_TEMP/combined-evidence/input-verification.log" 2>&1
+          cp "$RUNNER_TEMP/combined-qualified/inputs.json" "$RUNNER_TEMP/combined-evidence/"
+          cp "$RUNNER_TEMP/combined-downloads/"*.json "$RUNNER_TEMP/combined-evidence/"
+          mkdir "$RUNNER_TEMP/combined-ffmpeg-layout" "$RUNNER_TEMP/combined-tests"
+          # Only extract after the entire archive matches the independently reviewed digest.
+          tar -xf "$RUNNER_TEMP/combined-downloads/ffmpeg/ffmpeg.oci.tar" -C "$RUNNER_TEMP/combined-ffmpeg-layout"
+          git archive HEAD conftest.py tldw_Server_API/tests | tar -x -C "$RUNNER_TEMP/combined-tests"
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+      - name: Verify attested archive and classic execution export on a tiny image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/combined-evidence/export-probe"
+          probe="$RUNNER_TEMP/combined-evidence/export-probe"
+          context=Dockerfiles/candidates/combined-expat/export-probe
+          docker buildx build --platform linux/amd64 --provenance=mode=max --sbom=true \
+            --output "type=oci,dest=$probe/candidate.oci.tar" \
+            --tag "tldw-combined-export-probe:$GITHUB_SHA" "$context" > "$probe/oci.log" 2>&1
+          docker buildx build --platform linux/amd64 --provenance=false --sbom=false --load \
+            --tag "tldw-combined-export-probe:$GITHUB_SHA" "$context" > "$probe/load.log" 2>&1
+          python3 Dockerfiles/candidates/combined-expat/image-identity.py "$probe/candidate.oci.tar" \
+            --config "$(docker image inspect "tldw-combined-export-probe:$GITHUB_SHA" --format '{{.Id}}')" \
+            --commit "$GITHUB_SHA" > "$probe/image-identity.json"
+      - name: Build candidate and retain immutable OCI
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
+        with:
+          context: .
+          file: Dockerfiles/candidates/combined-expat/Dockerfile
+          platforms: linux/amd64
+          tags: tldw-combined-expat:${{ github.sha }}
+          push: false
+          provenance: mode=max
+          sbom: true
+          build-contexts: |
+            ffmpeg=oci-layout://${{ runner.temp }}/combined-ffmpeg-layout@sha256:de2b316796fd39f58cc76617e66ce400933e9a63ab3f7a261cac66fa461f2cb4
+            qualified=${{ runner.temp }}/combined-qualified
+            tests=${{ runner.temp }}/combined-tests
+          outputs: type=oci,dest=${{ runner.temp }}/combined-evidence/candidate.oci.tar
+      # Classic Docker cannot load explicit attestations. Retain them in the
+      # canonical OCI above, then export the same cached result for execution.
+      # The following step must prove identical config bytes before any tests.
+      - name: Load cached execution representation without replacing canonical evidence
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
+        with:
+          context: .
+          file: Dockerfiles/candidates/combined-expat/Dockerfile
+          platforms: linux/amd64
+          tags: tldw-combined-expat:${{ github.sha }}
+          push: false
+          load: true
+          provenance: false
+          sbom: false
+          build-contexts: |
+            ffmpeg=oci-layout://${{ runner.temp }}/combined-ffmpeg-layout@sha256:de2b316796fd39f58cc76617e66ce400933e9a63ab3f7a261cac66fa461f2cb4
+            qualified=${{ runner.temp }}/combined-qualified
+            tests=${{ runner.temp }}/combined-tests
+      - name: Bind execution image to retained OCI
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE_CONFIG="$(docker image inspect "tldw-combined-expat:$GITHUB_SHA" --format '{{.Id}}')"
+          python3 Dockerfiles/candidates/combined-expat/image-identity.py \
+            "$RUNNER_TEMP/combined-evidence/candidate.oci.tar" \
+            --config "$CANDIDATE_CONFIG" --commit "$GITHUB_SHA" \
+            > "$RUNNER_TEMP/combined-evidence/image-identity.json"
+      - name: Run offline non-root application and rendering controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/combined-evidence/runtime"
+          chmod 0777 "$RUNNER_TEMP/combined-evidence/runtime"
+          image_config="$(jq -r .config_digest "$RUNNER_TEMP/combined-evidence/image-identity.json")"
+          docker create --name combined-expat-evidence --network none --user 10001:10001 \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --entrypoint /bin/true "$image_config"
+          docker cp combined-expat-evidence:/opt/combined-evidence "$RUNNER_TEMP/combined-evidence/build"
+          docker run --rm --pull never --network none --read-only --user 10001:10001 \
+            --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 8g --cpus 4 \
+            --tmpfs /tmp:rw,nosuid,nodev,size=1g,mode=1777 \
+            --tmpfs /app/Databases:rw,nosuid,nodev,size=256m,uid=10001,gid=10001 \
+            --mount "type=bind,src=$RUNNER_TEMP/combined-evidence/runtime,dst=/evidence" \
+            "$image_config" > "$RUNNER_TEMP/combined-evidence/runtime.log" 2>&1
+      - name: Retain candidate and evidence including failures
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: combined-expat-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/combined-evidence/**
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

@@ -789,6 +789,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
@@ -1460,6 +1461,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -1764,7 +1766,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
-              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -2289,6 +2290,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
@@ -2959,6 +2961,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -3263,7 +3266,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
-              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -3659,6 +3661,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
@@ -4329,6 +4332,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -4633,7 +4637,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
-              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -4952,6 +4955,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
@@ -5622,6 +5626,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -5926,7 +5931,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
-              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -6251,6 +6255,7 @@ jobs:
               tldw_Server_API/tests/Usage
           - name: core-utils-tooling
             paths: >-
+              tldw_Server_API/tests/Supply_Chain
               tldw_Server_API/tests/Helper_Scripts
               tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
@@ -6921,6 +6926,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_provider_payload.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -7225,7 +7231,6 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
-              tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py

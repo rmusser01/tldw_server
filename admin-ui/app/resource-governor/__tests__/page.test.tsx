@@ -5,8 +5,9 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import ResourceGovernorPage from '../page';
 import { api } from '@/lib/api-client';
+import { ConfirmProvider } from '@/components/ui/confirm-dialog';
 
-const confirmMock = vi.hoisted(() => vi.fn());
+const privilegedActionMock = vi.hoisted(() => vi.fn());
 const toastSuccessMock = vi.hoisted(() => vi.fn());
 const toastErrorMock = vi.hoisted(() => vi.fn());
 
@@ -21,11 +22,7 @@ vi.mock('@/components/ResponsiveLayout', () => ({
 }));
 
 vi.mock('@/components/ui/privileged-action-dialog', () => ({
-  usePrivilegedActionDialog: () => confirmMock,
-}));
-
-vi.mock('@/components/ui/privileged-action-dialog', () => ({
-  usePrivilegedActionDialog: () => vi.fn().mockResolvedValue(true),
+  usePrivilegedActionDialog: () => privilegedActionMock,
 }));
 
 vi.mock('@/components/ui/toast', () => ({
@@ -68,7 +65,7 @@ type ApiMock = {
 const apiMock = api as unknown as ApiMock;
 
 beforeEach(() => {
-  confirmMock.mockResolvedValue({ reason: 'test audit reason', adminPassword: '' });
+  privilegedActionMock.mockResolvedValue({ reason: 'test audit reason', adminPassword: '' });
   toastSuccessMock.mockClear();
   toastErrorMock.mockClear();
   apiMock.getResourceGovernorPolicy.mockResolvedValue({ policies: [] });
@@ -127,7 +124,7 @@ afterEach(() => {
 describe('ResourceGovernor policy form', () => {
   it('validates scope ID with accessible field error messaging', async () => {
     const user = userEvent.setup();
-    render(<ResourceGovernorPage />);
+    render(<ResourceGovernorPage />, { wrapper: ConfirmProvider });
 
     await user.click(screen.getByRole('button', { name: 'New Policy' }));
     await user.type(screen.getByRole('textbox', { name: /policy name/i }), 'Org guardrail');
@@ -146,7 +143,7 @@ describe('ResourceGovernor policy form', () => {
 
   it('submits valid payload for a new policy', async () => {
     const user = userEvent.setup();
-    render(<ResourceGovernorPage />);
+    render(<ResourceGovernorPage />, { wrapper: ConfirmProvider });
 
     await user.click(screen.getByRole('button', { name: 'New Policy' }));
     await user.type(screen.getByRole('textbox', { name: /policy name/i }), 'Org guardrail');
@@ -175,7 +172,7 @@ describe('ResourceGovernor policy form', () => {
       affected_users: 3,
       affected_requests_24h: 21,
     });
-    render(<ResourceGovernorPage />);
+    render(<ResourceGovernorPage />, { wrapper: ConfirmProvider });
 
     await user.click(screen.getByRole('button', { name: 'New Policy' }));
     await user.type(screen.getByRole('textbox', { name: /policy name/i }), 'Global guardrail');
@@ -209,7 +206,7 @@ describe('ResourceGovernor policy form', () => {
         },
       ],
     });
-    render(<ResourceGovernorPage />);
+    render(<ResourceGovernorPage />, { wrapper: ConfirmProvider });
 
     await waitFor(() => {
       expect(screen.queryByText('Loading scope context...')).not.toBeInTheDocument();
@@ -252,7 +249,7 @@ describe('ResourceGovernor policy form', () => {
         },
       ],
     });
-    render(<ResourceGovernorPage />);
+    render(<ResourceGovernorPage />, { wrapper: ConfirmProvider });
 
     const globalRow = (await screen.findByText('Global Policy')).closest('tr');
     const orgRow = (await screen.findByText('Org 99 Policy')).closest('tr');
@@ -268,7 +265,7 @@ describe('ResourceGovernor policy form', () => {
   });
 
   it('renders rate limit events table rows', async () => {
-    render(<ResourceGovernorPage />);
+    render(<ResourceGovernorPage />, { wrapper: ConfirmProvider });
 
     expect(await screen.findByText('Rate Limit Events')).toBeInTheDocument();
     const row = (await screen.findByText('User 42')).closest('tr');
@@ -299,7 +296,7 @@ describe('ResourceGovernor policy form', () => {
       ],
     });
 
-    render(<ResourceGovernorPage />);
+    render(<ResourceGovernorPage />, { wrapper: ConfirmProvider });
 
     const analyticsCard = await screen.findByTestId('rate-limit-analytics-card');
     expect(analyticsCard).toBeInTheDocument();
@@ -314,15 +311,10 @@ describe('ResourceGovernor policy form', () => {
 
   it('renders user autocomplete Select for policy resolution when users are loaded', async () => {
     const user = userEvent.setup();
-    render(<ResourceGovernorPage />);
+    render(<ResourceGovernorPage />, { wrapper: ConfirmProvider });
 
-    // Wait for scope context to finish loading
-    await waitFor(() => {
-      expect(screen.queryByText('Loading scope context...')).not.toBeInTheDocument();
-    });
-
-    // The resolution section should render a <select> (design system Select) populated with users
-    const userSelect = screen.getByLabelText('User');
+    // Wait for the loaded user selector, rather than the initial fallback input.
+    const userSelect = await screen.findByRole('combobox', { name: 'User' });
     expect(userSelect.tagName).toBe('SELECT');
 
     // Verify the user options are populated from getUsersPage mock
@@ -338,7 +330,7 @@ describe('ResourceGovernor policy form', () => {
     expect((userSelect as HTMLSelectElement).value).toBe('42');
   });
 
-  it('resolves policy scope when admins enter a username instead of a numeric id', async () => {
+  it('resolves policy scope when admins select a user by name', async () => {
     const user = userEvent.setup();
     apiMock.getResourceGovernorPolicy.mockResolvedValueOnce({
       policies: [
@@ -361,12 +353,15 @@ describe('ResourceGovernor policy form', () => {
         },
       ],
     });
-    render(<ResourceGovernorPage />);
+    render(<ResourceGovernorPage />, { wrapper: ConfirmProvider });
 
     await waitFor(() => {
       expect(screen.queryByText('Loading scope context...')).not.toBeInTheDocument();
     });
-    await user.type(screen.getByLabelText(/User ID or name/i), 'alice');
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'User' }),
+      screen.getByRole('option', { name: 'alice (ID: 42)' }),
+    );
     await user.click(screen.getByRole('button', { name: 'Resolve Policy' }));
 
     expect(

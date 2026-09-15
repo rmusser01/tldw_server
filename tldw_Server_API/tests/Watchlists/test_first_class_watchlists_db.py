@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-
+from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 
 pytestmark = pytest.mark.unit
 
@@ -53,6 +53,29 @@ def _create_source(db: WatchlistsDatabase, *, label: str, watchlist_id: int | No
         group_ids=[],
         watchlist_id=watchlist_id,
     )
+
+
+def test_updating_source_url_clears_conditional_fetch_state(tmp_path: Path) -> None:
+    db = _make_db(tmp_path)
+    source = _create_source(db, label="conditional")
+    db.update_source_scrape_meta(
+        int(source.id),
+        etag='W/"old-feed"',
+        last_modified="Sun, 30 Aug 2026 16:00:00 GMT",
+        defer_until="2026-09-01T00:00:00+00:00",
+        consec_not_modified=3,
+    )
+
+    updated = db.update_source(
+        int(source.id),
+        {"url": "https://example.com/conditional/new-feed.xml"},
+    )
+
+    assert updated.url == "https://example.com/conditional/new-feed.xml"
+    assert updated.etag is None
+    assert updated.last_modified is None
+    assert updated.defer_until is None
+    assert updated.consec_not_modified == 0
 
 
 def _create_job(db: WatchlistsDatabase, *, label: str, source_id: int, watchlist_id: int | None = None):

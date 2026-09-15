@@ -9,8 +9,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from jose import jwt
-from jose.exceptions import JWTError
+from tldw_Server_API.app.core.Utils import jwt_compat as jwt
+from tldw_Server_API.app.core.Utils.jwt_compat import JWTError
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool

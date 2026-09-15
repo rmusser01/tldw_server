@@ -45,6 +45,8 @@ type ApiMock = {
 const apiMock = api as unknown as ApiMock;
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-02-17T12:00:00Z'));
   pushMock.mockReset();
 
   apiMock.getSecurityHealth.mockResolvedValue({
@@ -98,6 +100,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.resetAllMocks();
 });
 

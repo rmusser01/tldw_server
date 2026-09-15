@@ -1,0 +1,748 @@
+{
+  "schemaVersion": 1,
+  "task": "TASK-13013.7.20",
+  "checkedAt": "2026-09-09T05:38:05.900148+00:00",
+  "scope": "Static provenance reconciliation; no fresh scanner or runtime qualification; no vulnerability disposition or release admission.",
+  "retainedInventory": {
+    "kind": "retained-evidence-reconciliation",
+    "freshScan": false,
+    "artifacts": [
+      {
+        "application": "admin-ui",
+        "variant": "baseline",
+        "archiveSHA256": "d743e4db27dde5d33b6e45787bd233e3c10578b6dbb1b7beaa30aece833a115d",
+        "subject": "sha256:efbe089030340fec6fd9617e251e8f784e93a17322818e1a5142c6bc3758943d",
+        "configDigest": "sha256:5c3427eee2cf5cbffa021bf7a0007870ac1ec4e1a055cee033d15f278abe63e0",
+        "sourceCommit": "b391e1158f16c61a9647a54ab2890c6929c099bf",
+        "observationNode": {
+          "modules": "137",
+          "napi": "10",
+          "sha256": "89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7",
+          "version": "v24.20.0"
+        },
+        "packages": [
+          {
+            "name": "node",
+            "version": "24.20.0",
+            "type": "binary",
+            "purl": "pkg:generic/node@24.20.0",
+            "metadata": {
+              "matches": [
+                {
+                  "classifier": "nodejs-binary",
+                  "location": {
+                    "path": "/usr/local/bin/node",
+                    "layerID": "sha256:42593510e34eca2ac84ebf9c6a22e16ced5956957367dc8688d9de06db2882a9",
+                    "accessPath": "/usr/local/bin/node",
+                    "annotations": {
+                      "evidence": "primary"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "zlib1g",
+            "version": "1:1.2.13.dfsg-1",
+            "type": "deb",
+            "purl": "pkg:deb/debian/zlib1g@1%3A1.2.13.dfsg-1?arch=amd64&distro=debian-12.15&upstream=zlib",
+            "metadata": {
+              "package": "zlib1g",
+              "source": "zlib",
+              "version": "1:1.2.13.dfsg-1",
+              "sourceVersion": "",
+              "architecture": "amd64",
+              "maintainer": "Mark Brown <broonie@debian.org>",
+              "installedSize": 168,
+              "provides": [
+                "libz1"
+              ],
+              "depends": [
+                "libc6 (>= 2.14)"
+              ],
+              "files": [
+                {
+                  "path": "/lib/x86_64-linux-gnu/libz.so.1.2.13",
+                  "digest": {
+                    "algorithm": "md5",
+                    "value": "c7c774d91213e966a04b2e51c787be23"
+                  },
+                  "isConfigFile": false
+                },
+                {
+                  "path": "/usr/share/doc/zlib1g/changelog.Debian.gz",
+                  "digest": {
+                    "algorithm": "md5",
+                    "value": "b46797e4e48336c9dbfe95eb2454fe57"
+                  },
+                  "isConfigFile": false
+                },
+                {
+                  "path": "/usr/share/doc/zlib1g/changelog.gz",
+                  "digest": {
+                    "algorithm": "md5",
+                    "value": "34e2d8a611bef13ec8f381b28382b107"
+                  },
+                  "isConfigFile": false
+                },
+                {
+                  "path": "/usr/share/doc/zlib1g/copyright",
+                  "digest": {
+                    "algorithm": "md5",
+                    "value": "d348307d5bf18267bcbada155a715a3e"
+                  },
+                  "isConfigFile": false
+                }
+              ]
+            }
+          }
+        ],
+        "grypeMatches": [
+          {
+            "artifact": {
+              "name": "zlib1g",
+              "version": "1:1.2.13.dfsg-1",
+              "type": "deb",
+              "purl": "pkg:deb/debian/zlib1g@1%3A1.2.13.dfsg-1?arch=amd64&distro=debian-12.15&upstream=zlib"
+            },
+            "vulnerability": {
+              "id": "CVE-2026-85091",
+              "severity": "High",
+              "namespace": "debian:distro:debian:12",
+              "dataSource": "https://security-tracker.debian.org/tracker/CVE-2026-85091",
+              "fix": {
+                "versions": [],
+                "state": "not-fixed"
+              }
+            },
+            "matchDetails": [
+              {
+                "type": "exact-indirect-match",
+                "matcher": "dpkg-matcher",
+                "searchedBy": {
+                  "distro": {
+                    "type": "debian",
+                    "version": "12.15"
+                  },
+                  "package": {
+                    "name": "zlib",
+                    "version": "1:1.2.13.dfsg-1"
+                  },
+                  "namespace": "debian:distro:debian:12"
+                },
+                "found": {
+                  "vulnerabilityID": "CVE-2026-85091",
+                  "versionConstraint": "none (unknown)"
+                }
+              }
+            ]
+          }
+        ],
+        "trivyMatches": [
+          {
+            "target": "/input@sha256:efbe089030340fec6fd9617e251e8f784e93a17322818e1a5142c6bc3758943d (debian 12.15)",
+            "VulnerabilityID": "CVE-2026-85091",
+            "PkgName": "zlib1g",
+            "InstalledVersion": "1:1.2.13.dfsg-1",
+            "FixedVersion": null,
+            "Severity": "MEDIUM"
+          }
+        ],
+        "grypeIgnoredMatchCount": 0,
+        "evidenceSHA256": {
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/admin-ui/evidence/qualification.json": "82b910e7b103750f4a8aff01a949bde27b8e23850072c83e3445006461e1fd9f",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/admin-ui/evidence/inputs.json": "7aa1fbad8dc514fecba5e78095ba286a05aa5f4dcfa94ea9abe94cc39095fbc5",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/admin-ui/evidence/baseline-grype.json": "bf5533892a9a25729b7ee17edaaa6155e929c8e56bbd96a90aabf6b9e4568df5",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/admin-ui/evidence/baseline-syft.json": "a17077b6597590dadef75d5c7351ce8232089a44d9128980cfdf50162d5524b1",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/admin-ui/evidence/baseline-trivy.json": "0343d06ee158dd00211d772afdeb289c33e7193fac76779cea487c055a17c982"
+        }
+      },
+      {
+        "application": "admin-ui",
+        "variant": "candidate",
+        "archiveSHA256": "00a88382904345e72c1c574e1d28d01de8fad3c5c96706e3a53a65b7a73158f6",
+        "subject": "sha256:032ef1c16c6deb2fb59a46f6cf2431fab8365a751a1968bd12a7adc59454302f",
+        "configDigest": "sha256:e5f0cb7c15620724d0c5207cea443dfdbef8750240283a85f230ad5fa30925d7",
+        "sourceCommit": "b391e1158f16c61a9647a54ab2890c6929c099bf",
+        "observationNode": {
+          "modules": "137",
+          "napi": "10",
+          "sha256": "89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7",
+          "version": "v24.20.0"
+        },
+        "packages": [
+          {
+            "name": "node",
+            "version": "24.20.0",
+            "type": "binary",
+            "purl": "pkg:generic/node@24.20.0",
+            "metadata": {
+              "matches": [
+                {
+                  "classifier": "nodejs-binary",
+                  "location": {
+                    "path": "/usr/local/bin/node",
+                    "layerID": "sha256:f1a326fb6b786e61b38aabb6e6ef0e6cf85527b69f43bfa172048db61b2d5c30",
+                    "accessPath": "/usr/local/bin/node",
+                    "annotations": {
+                      "evidence": "primary"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "zlib1g",
+            "version": "1:1.3.dfsg-3.1ubuntu2.2",
+            "type": "deb",
+            "purl": "pkg:deb/ubuntu/zlib1g@1%3A1.3.dfsg-3.1ubuntu2.2?arch=amd64&distro=ubuntu-24.04&upstream=zlib",
+            "metadata": {
+              "package": "zlib1g",
+              "source": "zlib",
+              "version": "1:1.3.dfsg-3.1ubuntu2.2",
+              "sourceVersion": "",
+              "architecture": "amd64",
+              "maintainer": "Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>",
+              "installedSize": 163,
+              "provides": [
+                "libz1"
+              ],
+              "depends": [
+                "libc6 (>= 2.14)"
+              ],
+              "files": [
+                {
+                  "path": "/usr/lib/x86_64-linux-gnu/libz.so.1.3",
+                  "digest": {
+                    "algorithm": "md5",
+                    "value": "3816ac59ad3053312b3286581f8d60c1"
+                  },
+                  "isConfigFile": false
+                },
+                {
+                  "path": "/usr/share/doc/zlib1g/changelog.Debian.gz",
+                  "digest": {
+                    "algorithm": "md5",
+                    "value": "db30fd81714dac61c62ebc8fc3a4a2d6"
+                  },
+                  "isConfigFile": false
+                },
+                {
+                  "path": "/usr/share/doc/zlib1g/copyright",
+                  "digest": {
+                    "algorithm": "md5",
+                    "value": "d348307d5bf18267bcbada155a715a3e"
+                  },
+                  "isConfigFile": false
+                }
+              ]
+            }
+          }
+        ],
+        "grypeMatches": [
+          {
+            "artifact": {
+              "name": "zlib1g",
+              "version": "1:1.3.dfsg-3.1ubuntu2.2",
+              "type": "deb",
+              "purl": "pkg:deb/ubuntu/zlib1g@1%3A1.3.dfsg-3.1ubuntu2.2?arch=amd64&distro=ubuntu-24.04&upstream=zlib"
+            },
+            "vulnerability": {
+              "id": "CVE-2026-85091",
+              "severity": "Medium",
+              "namespace": "ubuntu:distro:ubuntu:24.04",
+              "dataSource": "https://ubuntu.com/security/CVE-2026-85091",
+              "fix": {
+                "versions": [],
+                "state": "not-fixed"
+              }
+            },
+            "matchDetails": [
+              {
+                "type": "exact-indirect-match",
+                "matcher": "dpkg-matcher",
+                "searchedBy": {
+                  "distro": {
+                    "type": "ubuntu",
+                    "version": "24.04"
+                  },
+                  "package": {
+                    "name": "zlib",
+                    "version": "1:1.3.dfsg-3.1ubuntu2.2"
+                  },
+                  "namespace": "ubuntu:distro:ubuntu:24.04"
+                },
+                "found": {
+                  "vulnerabilityID": "CVE-2026-85091",
+                  "versionConstraint": "none (unknown)"
+                }
+              }
+            ]
+          }
+        ],
+        "trivyMatches": [],
+        "grypeIgnoredMatchCount": 0,
+        "evidenceSHA256": {
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/admin-ui/evidence/qualification.json": "82b910e7b103750f4a8aff01a949bde27b8e23850072c83e3445006461e1fd9f",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/admin-ui/evidence/inputs.json": "7aa1fbad8dc514fecba5e78095ba286a05aa5f4dcfa94ea9abe94cc39095fbc5",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/admin-ui/evidence/candidate-grype.json": "f0f648ed51935253677c54328f043cf9c17c1777ca827122d339a3295f52b229",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/admin-ui/evidence/candidate-syft.json": "1dee8b0c1c27679b74dfe302133442add9013bb328c2fbca46c4f55e5e4a2ea5",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/admin-ui/evidence/candidate-trivy.json": "1e294f9638d8d8cba5458bcdd469b339412400b513ff95ac370b8cdd16d0e671"
+        }
+      },
+      {
+        "application": "webui",
+        "variant": "baseline",
+        "archiveSHA256": "19edc5ca5b18e1112d43a3fe1fbbd5630a141d41c307e00a8718e76fbaab5d50",
+        "subject": "sha256:758481c78f9eec5a228b70928ed671cc22b0d28668a5e74aa3bee00d152c5cc1",
+        "configDigest": "sha256:308c1b36a77d1cb1d71625687b44f84da9849b887fe7b08a2f7958632ee070c1",
+        "sourceCommit": "b391e1158f16c61a9647a54ab2890c6929c099bf",
+        "observationNode": {
+          "modules": "137",
+          "napi": "10",
+          "sha256": "89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7",
+          "version": "v24.20.0"
+        },
+        "packages": [
+          {
+            "name": "node",
+            "version": "24.20.0",
+            "type": "binary",
+            "purl": "pkg:generic/node@24.20.0",
+            "metadata": {
+              "matches": [
+                {
+                  "classifier": "nodejs-binary",
+                  "location": {
+                    "path": "/usr/local/bin/node",
+                    "layerID": "sha256:42593510e34eca2ac84ebf9c6a22e16ced5956957367dc8688d9de06db2882a9",
+                    "accessPath": "/usr/local/bin/node",
+                    "annotations": {
+                      "evidence": "primary"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "zlib1g",
+            "version": "1:1.2.13.dfsg-1",
+            "type": "deb",
+            "purl": "pkg:deb/debian/zlib1g@1%3A1.2.13.dfsg-1?arch=amd64&distro=debian-12.15&upstream=zlib",
+            "metadata": {
+              "package": "zlib1g",
+              "source": "zlib",
+              "version": "1:1.2.13.dfsg-1",
+              "sourceVersion": "",
+              "architecture": "amd64",
+              "maintainer": "Mark Brown <broonie@debian.org>",
+              "installedSize": 168,
+              "provides": [
+                "libz1"
+              ],
+              "depends": [
+                "libc6 (>= 2.14)"
+              ],
+              "files": [
+                {
+                  "path": "/lib/x86_64-linux-gnu/libz.so.1.2.13",
+                  "digest": {
+                    "algorithm": "md5",
+                    "value": "c7c774d91213e966a04b2e51c787be23"
+                  },
+                  "isConfigFile": false
+                },
+                {
+                  "path": "/usr/share/doc/zlib1g/changelog.Debian.gz",
+                  "digest": {
+                    "algorithm": "md5",
+                    "value": "b46797e4e48336c9dbfe95eb2454fe57"
+                  },
+                  "isConfigFile": false
+                },
+                {
+                  "path": "/usr/share/doc/zlib1g/changelog.gz",
+                  "digest": {
+                    "algorithm": "md5",
+                    "value": "34e2d8a611bef13ec8f381b28382b107"
+                  },
+                  "isConfigFile": false
+                },
+                {
+                  "path": "/usr/share/doc/zlib1g/copyright",
+                  "digest": {
+                    "algorithm": "md5",
+                    "value": "d348307d5bf18267bcbada155a715a3e"
+                  },
+                  "isConfigFile": false
+                }
+              ]
+            }
+          }
+        ],
+        "grypeMatches": [
+          {
+            "artifact": {
+              "name": "zlib1g",
+              "version": "1:1.2.13.dfsg-1",
+              "type": "deb",
+              "purl": "pkg:deb/debian/zlib1g@1%3A1.2.13.dfsg-1?arch=amd64&distro=debian-12.15&upstream=zlib"
+            },
+            "vulnerability": {
+              "id": "CVE-2026-85091",
+              "severity": "High",
+              "namespace": "debian:distro:debian:12",
+              "dataSource": "https://security-tracker.debian.org/tracker/CVE-2026-85091",
+              "fix": {
+                "versions": [],
+                "state": "not-fixed"
+              }
+            },
+            "matchDetails": [
+              {
+                "type": "exact-indirect-match",
+                "matcher": "dpkg-matcher",
+                "searchedBy": {
+                  "distro": {
+                    "type": "debian",
+                    "version": "12.15"
+                  },
+                  "package": {
+                    "name": "zlib",
+                    "version": "1:1.2.13.dfsg-1"
+                  },
+                  "namespace": "debian:distro:debian:12"
+                },
+                "found": {
+                  "vulnerabilityID": "CVE-2026-85091",
+                  "versionConstraint": "none (unknown)"
+                }
+              }
+            ]
+          }
+        ],
+        "trivyMatches": [
+          {
+            "target": "/input@sha256:758481c78f9eec5a228b70928ed671cc22b0d28668a5e74aa3bee00d152c5cc1 (debian 12.15)",
+            "VulnerabilityID": "CVE-2026-85091",
+            "PkgName": "zlib1g",
+            "InstalledVersion": "1:1.2.13.dfsg-1",
+            "FixedVersion": null,
+            "Severity": "MEDIUM"
+          }
+        ],
+        "grypeIgnoredMatchCount": 0,
+        "evidenceSHA256": {
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/webui/evidence/qualification.json": "b2593d87517cc9a872415f3a9ce5172f9d4113b84e037dab25a174257ecf777c",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/webui/evidence/inputs.json": "2f26e7d945feecbafd1a8fbe430cc3203e0cae24778375f02e708e7fb4d167d9",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/webui/evidence/baseline-grype.json": "6079635ab329147384ea1edb211b852aa15733cf0d9725cbf3ce032dcf8e57c3",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/webui/evidence/baseline-syft.json": "66f0eca0b7b0c59dc73b275440c8d616086ea7e61f31071095dd03bf0d5a2c26",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/webui/evidence/baseline-trivy.json": "605f983638a13d263d8f501bb3a2da29ff6daea6de1370ed18fa4b152ec18913"
+        }
+      },
+      {
+        "application": "webui",
+        "variant": "candidate",
+        "archiveSHA256": "48e39cac5468db1e8a8389923e0f84d5f4e6d3d18e4c94e1dd43b6e7de7bf454",
+        "subject": "sha256:c15e7a1a28c8158313cc31a462470919c33a31366c31eb76e27e9e7a1af03dcd",
+        "configDigest": "sha256:d1fe62fc6072bd060dd434fb8a5fe3f415bc74b179f462efd3ba78c3bfc2c999",
+        "sourceCommit": "b391e1158f16c61a9647a54ab2890c6929c099bf",
+        "observationNode": {
+          "modules": "137",
+          "napi": "10",
+          "sha256": "89af8424dd53e560b1933f87ba650d8bf57c83ca5a04600eefb31f416aabbae7",
+          "version": "v24.20.0"
+        },
+        "packages": [
+          {
+            "name": "node",
+            "version": "24.20.0",
+            "type": "binary",
+            "purl": "pkg:generic/node@24.20.0",
+            "metadata": {
+              "matches": [
+                {
+                  "classifier": "nodejs-binary",
+                  "location": {
+                    "path": "/usr/local/bin/node",
+                    "layerID": "sha256:34037e2f33b163e1f0516e5264fa8564da872163ec40e54efe51642bdf4b3c4b",
+                    "accessPath": "/usr/local/bin/node",
+                    "annotations": {
+                      "evidence": "primary"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "zlib1g",
+            "version": "1:1.3.dfsg-3.1ubuntu2.2",
+            "type": "deb",
+            "purl": "pkg:deb/ubuntu/zlib1g@1%3A1.3.dfsg-3.1ubuntu2.2?arch=amd64&distro=ubuntu-24.04&upstream=zlib",
+            "metadata": {
+              "package": "zlib1g",
+              "source": "zlib",
+              "version": "1:1.3.dfsg-3.1ubuntu2.2",
+              "sourceVersion": "",
+              "architecture": "amd64",
+              "maintainer": "Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>",
+              "installedSize": 163,
+              "provides": [
+                "libz1"
+              ],
+              "depends": [
+                "libc6 (>= 2.14)"
+              ],
+              "files": [
+                {
+                  "path": "/usr/lib/x86_64-linux-gnu/libz.so.1.3",
+                  "digest": {
+                    "algorithm": "md5",
+                    "value": "3816ac59ad3053312b3286581f8d60c1"
+                  },
+                  "isConfigFile": false
+                },
+                {
+                  "path": "/usr/share/doc/zlib1g/changelog.Debian.gz",
+                  "digest": {
+                    "algorithm": "md5",
+                    "value": "db30fd81714dac61c62ebc8fc3a4a2d6"
+                  },
+                  "isConfigFile": false
+                },
+                {
+                  "path": "/usr/share/doc/zlib1g/copyright",
+                  "digest": {
+                    "algorithm": "md5",
+                    "value": "d348307d5bf18267bcbada155a715a3e"
+                  },
+                  "isConfigFile": false
+                }
+              ]
+            }
+          }
+        ],
+        "grypeMatches": [
+          {
+            "artifact": {
+              "name": "zlib1g",
+              "version": "1:1.3.dfsg-3.1ubuntu2.2",
+              "type": "deb",
+              "purl": "pkg:deb/ubuntu/zlib1g@1%3A1.3.dfsg-3.1ubuntu2.2?arch=amd64&distro=ubuntu-24.04&upstream=zlib"
+            },
+            "vulnerability": {
+              "id": "CVE-2026-85091",
+              "severity": "Medium",
+              "namespace": "ubuntu:distro:ubuntu:24.04",
+              "dataSource": "https://ubuntu.com/security/CVE-2026-85091",
+              "fix": {
+                "versions": [],
+                "state": "not-fixed"
+              }
+            },
+            "matchDetails": [
+              {
+                "type": "exact-indirect-match",
+                "matcher": "dpkg-matcher",
+                "searchedBy": {
+                  "distro": {
+                    "type": "ubuntu",
+                    "version": "24.04"
+                  },
+                  "package": {
+                    "name": "zlib",
+                    "version": "1:1.3.dfsg-3.1ubuntu2.2"
+                  },
+                  "namespace": "ubuntu:distro:ubuntu:24.04"
+                },
+                "found": {
+                  "vulnerabilityID": "CVE-2026-85091",
+                  "versionConstraint": "none (unknown)"
+                }
+              }
+            ]
+          }
+        ],
+        "trivyMatches": [],
+        "grypeIgnoredMatchCount": 0,
+        "evidenceSHA256": {
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/webui/evidence/qualification.json": "b2593d87517cc9a872415f3a9ce5172f9d4113b84e037dab25a174257ecf777c",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/webui/evidence/inputs.json": "2f26e7d945feecbafd1a8fbe430cc3203e0cae24778375f02e708e7fb4d167d9",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/webui/evidence/candidate-grype.json": "ceca8b676951ed30eccf45f256a0fcddb561354eeadf5c12058252305f6fe83c",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/webui/evidence/candidate-syft.json": "750d62c6d29588a6e0e34efd96a25c01f730d96f3fda0387cb2be0046c5cff9d",
+          "/private/tmp/task-13013-7-15-native-run-34263320099.9cl3Je/webui/evidence/candidate-trivy.json": "cd01519c4e9dfe9575a8b4028169176195b892d89d33e8fbfe9dbe12361bbb8a"
+        }
+      }
+    ]
+  },
+  "ubuntuSource": {
+    "source": "https://archive.ubuntu.com/ubuntu/pool/main/z/zlib/",
+    "signatureVerified": false,
+    "archives": {
+      "zlib_1.3.dfsg.orig.tar.xz": {
+        "sha256": "5eea0322c1c21c75cad3b607ac1c43ff5c71e014b8ac4a34300b5e2b80d02e70",
+        "fileCount": 109,
+        "gzVacateTokenFiles": [],
+        "patchTargetPaths": [],
+        "selectedFiles": {
+          "zlib-1.3.dfsg/gzwrite.c": {
+            "sha256": "469b1e58932ea11bdda2a153f6655f7b3c13254240fae157181b49ed1bc93b47",
+            "size": 19237
+          },
+          "zlib-1.3.dfsg/zlib.h": {
+            "sha256": "6f1c7ebe0ac0f0794852b770c20efae041a451f833c91f60f837b599ea81679e",
+            "size": 96778,
+            "version": "1.3"
+          }
+        }
+      },
+      "zlib_1.3.dfsg-3.1ubuntu2.2.debian.tar.xz": {
+        "sha256": "de1c2d532ecb7caf99ccb905fb03c37fe0c8117fbdc79d05be4474b71e6398c2",
+        "fileCount": 54,
+        "gzVacateTokenFiles": [],
+        "patchTargetPaths": [
+          "b/.gitignore",
+          "b/CMakeLists.txt",
+          "b/Makefile.in",
+          "b/compress.c",
+          "b/configure",
+          "b/contrib/README.contrib",
+          "b/contrib/gcc/zifunc.h",
+          "b/contrib/minizip/miniunz.c",
+          "b/contrib/minizip/zip.c",
+          "b/contrib/power/clang_workaround.h",
+          "b/contrib/power/crc32_constants.h",
+          "b/contrib/power/crc32_z_power8.c",
+          "b/contrib/power/crc32_z_resolver.c",
+          "b/contrib/power/power.h",
+          "b/contrib/s390/README.txt",
+          "b/contrib/s390/crc32-vx.c",
+          "b/contrib/s390/crc32_z_resolver.c",
+          "b/contrib/s390/dfltcc.c",
+          "b/contrib/s390/dfltcc.h",
+          "b/contrib/s390/dfltcc_deflate.h",
+          "b/crc32.c",
+          "b/deflate.c",
+          "b/deflate.h",
+          "b/gzguts.h",
+          "b/inflate.c",
+          "b/inflate.h",
+          "b/test/crc32_test.c",
+          "b/test/infcover.c",
+          "b/test/minigzip.c",
+          "b/trees.c",
+          "b/zutil.h"
+        ],
+        "selectedFiles": {
+          "debian/changelog": {
+            "sha256": "c793f729aefd96c46af15aeb960b800db83dafa740b40ee8488e4da14376663a",
+            "size": 48324
+          },
+          "debian/patches/series": {
+            "sha256": "45becaa692c107287c8561d94cfc88a89b908578c06659c31d774f4c0076fd4c",
+            "size": 240
+          },
+          "debian/rules": {
+            "sha256": "a914765380f9d446c3e0be1302884de025a15e16fd097fc555211487991ed669",
+            "size": 7606
+          }
+        }
+      }
+    }
+  },
+  "nodeSource": {
+    "tag": "v24.20.0",
+    "tagObject": "8392e555cbdef2145d2cd2a2a7d29204d88d4e15",
+    "commit": "71b8b174857e25106d39b61a9e6f30d927da8b01",
+    "githubTagSignatureVerified": true,
+    "localSignatureVerified": false,
+    "zlibHeaderVersion": "1.3.2.1-motley",
+    "defaultUseSystemZlib": 0,
+    "declaresGzwriteSource": true,
+    "tagAndCommitFilesByteEqual": true,
+    "binaryBuildConfigurationVerified": false
+  },
+  "publicInputs": [
+    {
+      "file": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/ubuntu-zlib.dsc",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/z/zlib/zlib_1.3.dfsg-3.1ubuntu2.2.dsc",
+      "sha256": "56a7cd029863cbddafce831e4e63cccfa84017f93617929cb7c02f80bb5a122a",
+      "size": 2987
+    },
+    {
+      "file": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/zlib_1.3.dfsg.orig.tar.xz",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/z/zlib/zlib_1.3.dfsg.orig.tar.xz",
+      "sha256": "5eea0322c1c21c75cad3b607ac1c43ff5c71e014b8ac4a34300b5e2b80d02e70",
+      "size": 1128572
+    },
+    {
+      "file": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/zlib_1.3.dfsg-3.1ubuntu2.2.debian.tar.xz",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/z/zlib/zlib_1.3.dfsg-3.1ubuntu2.2.debian.tar.xz",
+      "sha256": "de1c2d532ecb7caf99ccb905fb03c37fe0c8117fbdc79d05be4474b71e6398c2",
+      "size": 61316
+    },
+    {
+      "file": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/ubuntu-cve.html",
+      "url": "https://ubuntu.com/security/CVE-2026-85091",
+      "sha256": "b4794cfe31ae8e1715b604069c51a5f8c078959d6a9fa919015b32d4a25d5e65",
+      "size": 110219
+    },
+    {
+      "file": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/debian-cve.html",
+      "url": "https://security-tracker.debian.org/tracker/CVE-2026-85091",
+      "sha256": "8b8edcc4b092a24472edf46c04ec6f58f58e324eee2db7976f80a0e3a089c07c",
+      "size": 4373
+    },
+    {
+      "file": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/node-tag.json",
+      "url": "https://api.github.com/repos/nodejs/node/git/ref/tags/v24.20.0",
+      "sha256": "d171b6439621d9a483182aba18fb2d62c41b27c273413113fbf11a47a4b3bf1d",
+      "size": 368
+    },
+    {
+      "file": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/node-tag-object.json",
+      "url": "https://api.github.com/repos/nodejs/node/git/tags/8392e555cbdef2145d2cd2a2a7d29204d88d4e15",
+      "sha256": "a94a7c1d46143d88753b8415a93e0db4dbd6aedbbcd628085efc4c745f95b6e4",
+      "size": 1879
+    },
+    {
+      "file": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/node-commit-zlib.h",
+      "url": "https://raw.githubusercontent.com/nodejs/node/71b8b174857e25106d39b61a9e6f30d927da8b01/deps/zlib/zlib.h",
+      "sha256": "0ff41598d145693759a8322bb90bc4f2c57dcdcb3635fdf5b2195bf13df15b54",
+      "size": 104484
+    },
+    {
+      "file": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/node-commit-zlib.gyp",
+      "url": "https://raw.githubusercontent.com/nodejs/node/71b8b174857e25106d39b61a9e6f30d927da8b01/deps/zlib/zlib.gyp",
+      "sha256": "d57e1daed966e3fb4094b7d7b24012d1afa14472059965dbeb6e52e590abde5f",
+      "size": 9233
+    },
+    {
+      "file": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/node-commit-zlib-BUILD.gn",
+      "url": "https://raw.githubusercontent.com/nodejs/node/71b8b174857e25106d39b61a9e6f30d927da8b01/deps/zlib/BUILD.gn",
+      "sha256": "e40d08770ba695a47a7ebb5fabf7574716453ddfdd4d6185b88491a8b7f35dd0",
+      "size": 12848
+    },
+    {
+      "file": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/zlib-issue-1310.json",
+      "url": "https://api.github.com/repos/madler/zlib/issues/1310",
+      "sha256": "a41aef2a6520ba0632aab53c2a80b86c90ba4d402d84ab3257031bcf1511f31b",
+      "size": 2829
+    },
+    {
+      "file": "/private/tmp/task-13013-7-20-zlib-provenance.XAuc0T/node-release.html",
+      "url": "https://nodejs.org/en/blog/release/v24.20.0",
+      "sha256": "964bfe89671ac69eb29c2a90c50630591379c21775d525f00c1f16282c93ad2b",
+      "size": 551452
+    }
+  ],
+  "auxiliaryObservations": {
+    "checkedAt": "2026-09-09T05:43:02.410965+00:00",
+    "zlibIssue1310State": "open",
+    "nodeReleaseMentionsZlibUpdate": true
+  }
+}

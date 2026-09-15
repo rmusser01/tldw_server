@@ -170,7 +170,7 @@ describe('FlagsPage Stage 4', () => {
     const user = userEvent.setup();
     render(<FlagsPage />);
 
-    const toggleButton = await screen.findByRole('button', { name: 'Enabled' });
+    const toggleButton = await screen.findByRole('button', { name: 'Toggle flag checkout.redesign off' });
     expect(toggleButton.getAttribute('aria-pressed')).toBe('true');
     await user.click(toggleButton);
 
