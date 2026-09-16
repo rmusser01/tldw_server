@@ -1,0 +1,205 @@
+### Page
+- Page URL: http://127.0.0.1:18581/media?q=cycle5-repair-unmatched-copper-foreign
+- Page Title: Media | tldw
+### Snapshot
+```yaml
+- generic [ref=e11]:
+  - generic [ref=e36]:
+    - link "Skip to main content" [ref=e37] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e38]:
+      - button "Expand sidebar" [ref=e39] [cursor=pointer]
+      - button "New Chat" [ref=e43] [cursor=pointer]
+      - generic [ref=e46]:
+        - button "Quick Ingest" [ref=e47] [cursor=pointer]
+        - button "Chat" [ref=e51] [cursor=pointer]
+        - button "Prompts" [ref=e54] [cursor=pointer]
+        - button "Characters" [ref=e58] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e63] [cursor=pointer]
+        - button "World Books" [ref=e67] [cursor=pointer]
+        - button "Notes" [ref=e70] [cursor=pointer]
+        - button "Knowledge QA" [ref=e74] [cursor=pointer]
+        - button "Media" [ref=e82] [cursor=pointer]
+        - button "Document Workspace" [ref=e85] [cursor=pointer]
+        - button "Research Workspace" [ref=e91] [cursor=pointer]
+        - button "Kanban" [ref=e97] [cursor=pointer]
+        - button "Watchlists" [ref=e99] [cursor=pointer]
+      - generic [ref=e104]:
+        - button "Open Notes Dock" [ref=e105] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e110] [cursor=pointer]
+        - button "Settings" [ref=e113] [cursor=pointer]
+    - main [ref=e117]:
+      - generic [ref=e118]:
+        - generic [ref=e121]:
+          - generic [ref=e122]:
+            - button "Expand sidebar" [ref=e123] [cursor=pointer]
+            - generic [ref=e125]:
+              - img "tldw Assistant" [ref=e126]
+              - generic [ref=e127]: tldw Assistant
+              - button "Companion Home" [ref=e128] [cursor=pointer]
+              - button "Show shortcuts" [ref=e132] [cursor=pointer]
+          - generic [ref=e135]:
+            - button "Search - Open command palette" [ref=e136] [cursor=pointer]:
+              - generic [ref=e140]: Search
+              - generic [ref=e141]: ⌘K
+            - button "Open settings" [ref=e142] [cursor=pointer]
+            - generic [ref=e154]:
+              - button "Notifications, 0 unread" [ref=e200] [cursor=pointer]
+              - status [ref=e158]: Notifications are active
+            - button "Switch to light theme" [ref=e159] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e166] [cursor=pointer]:
+              - generic [ref=e167]: "?"
+        - generic [ref=e631]:
+          - generic [ref=e633]:
+            - generic [ref=e634]:
+              - generic [ref=e635]:
+                - heading "Media Inspector" [level=1] [ref=e636]
+                - generic [ref=e637]:
+                  - generic [ref=e638]: 0 / 0
+                  - button "Trash" [ref=e639] [cursor=pointer]
+                  - button "Bulk" [ref=e643] [cursor=pointer]
+              - generic [ref=e646]:
+                - button "Show media only" [pressed] [ref=e647] [cursor=pointer]:
+                  - generic [ref=e648]: Media
+                  - generic [ref=e649]: "0"
+                - button "Show notes only" [ref=e650] [cursor=pointer]:
+                  - generic [ref=e651]: Notes
+                  - generic [ref=e652]: "0"
+            - generic [ref=e654]:
+              - generic [ref=e655]:
+                - generic [ref=e656]: Find media
+                - button "Collapse find media panel" [expanded] [ref=e658] [cursor=pointer]
+              - generic [ref=e661]:
+                - generic [ref=e662]:
+                  - generic [ref=e663]:
+                    - textbox "Search media (title/content)" [ref=e667]: cycle5-repair-unmatched-copper-foreign
+                    - button "Clear search" [ref=e843] [cursor=pointer]
+                  - button "Search syntax help" [ref=e669] [cursor=pointer]: "?"
+                - button "Search" [ref=e670] [cursor=pointer]
+                - generic [ref=e671]:
+                  - generic [ref=e672]:
+                    - generic [ref=e673]: Filters
+                    - button "Clear all" [ref=e677] [cursor=pointer]
+                  - generic [ref=e678]:
+                    - generic [ref=e679]: Search mode
+                    - generic [ref=e680]:
+                      - button "Full-text search" [pressed] [ref=e681] [cursor=pointer]: Full-text
+                      - button "Metadata search" [ref=e682] [cursor=pointer]: Metadata
+                  - generic [ref=e683]:
+                    - generic [ref=e684]: Sort by
+                    - generic [ref=e685] [cursor=pointer]:
+                      - generic [ref=e686]:
+                        - generic "Relevance" [ref=e687]
+                        - combobox [ref=e688]
+                      - img "down" [ref=e690]
+                  - generic [ref=e693]:
+                    - generic [ref=e694]: Date range
+                    - generic [ref=e695]:
+                      - generic [ref=e696]:
+                        - text: Start date
+                        - textbox "Start date" [ref=e697]
+                      - generic [ref=e698]:
+                        - text: End date
+                        - textbox "End date" [ref=e699]
+                  - button "Advanced search" [ref=e701] [cursor=pointer]
+                  - generic [ref=e705] [cursor=pointer]:
+                    - checkbox "Favorites only" [ref=e706]
+                    - generic [ref=e709]: Favorites only
+                  - generic [ref=e710]:
+                    - button "Media types" [ref=e711] [cursor=pointer]
+                    - generic [ref=e717] [cursor=pointer]:
+                      - checkbox "Filter by Document" [ref=e718]
+                      - generic [ref=e719]: Document
+                  - button "Keywords" [ref=e721] [cursor=pointer]
+                  - generic [ref=e726]:
+                    - generic [ref=e727]: Exclude keywords
+                    - generic [ref=e729]:
+                      - generic [ref=e730]:
+                        - generic: Exclude keyword
+                        - combobox "Exclude keyword" [ref=e732]
+                      - img "down" [ref=e734]
+                    - generic [ref=e737]: Use excluded keywords to remove items containing those terms.
+                    - generic [ref=e738]: 0 exclude keyword suggestions available
+                - generic [ref=e739]:
+                  - generic [ref=e740]:
+                    - generic [ref=e741]: Collection
+                    - combobox "Collection" [ref=e742]:
+                      - option "All items" [selected]
+                  - paragraph [ref=e743]: Create collections from bulk selection to organize related items.
+            - generic [ref=e744]:
+              - generic [ref=e746]:
+                - generic [ref=e747]:
+                  - generic [ref=e748]:
+                    - generic [ref=e749]: Results
+                    - generic [ref=e750]: 0 / 0
+                  - generic [ref=e751]:
+                    - button "Standard view" [pressed] [ref=e752] [cursor=pointer]
+                    - button "Compact view" [ref=e758] [cursor=pointer]
+                - generic [ref=e865]:
+                  - paragraph [ref=e866]: No media found. Use Quick ingest in the header to add media from your recordings and files.
+                  - paragraph [ref=e867]: Try broader terms, or ingest new content to search.
+                  - generic [ref=e868]:
+                    - button "Clear search" [ref=e869] [cursor=pointer]
+                    - button "Open Quick Ingest" [ref=e871] [cursor=pointer]
+              - generic [ref=e791]:
+                - generic [ref=e792]: 0 of 0 results
+                - button "? for shortcuts" [ref=e798] [cursor=pointer]:
+                  - generic [ref=e799]: "?"
+                  - generic [ref=e800]: for shortcuts
+            - button "Library tools" [ref=e802] [cursor=pointer]
+          - button "Collapse sidebar" [ref=e807] [cursor=pointer]
+          - generic [ref=e813]:
+            - button "Create study pack" [disabled] [ref=e815]
+            - generic [ref=e817]:
+              - heading "No media item selected" [level=2] [ref=e825]
+              - paragraph [ref=e826]: Select a media item from the left sidebar to view its content and analyses here.
+              - button "Keyboard Shortcuts" [ref=e827] [cursor=pointer]
+              - button "Open Quick Ingest" [ref=e829] [cursor=pointer]
+      - generic [ref=e873]:
+        - dialog "Quick Ingest" [active]:
+          - generic [ref=e874]:
+            - button "Close" [ref=e875] [cursor=pointer]:
+              - generic "Close" [ref=e876]:
+                - img "close" [ref=e877]
+            - generic [ref=e880]: Quick Ingest
+            - generic [ref=e882]:
+              - navigation "Ingest wizard progress" [ref=e883]:
+                - list [ref=e884]:
+                  - listitem [ref=e885]:
+                    - 'button "Step 1: Add (completed)" [ref=e966] [cursor=pointer]':
+                      - generic [ref=e890]: Add
+                      - generic [ref=e969]: 1 items
+                  - listitem [ref=e892]:
+                    - 'button "Step 2: Configure (completed)" [ref=e1062] [cursor=pointer]':
+                      - generic [ref=e897]: Configure
+                      - generic [ref=e1065]: Quick
+                  - listitem [ref=e899]:
+                    - 'button "Step 3: Review (completed)" [ref=e1088] [cursor=pointer]':
+                      - generic [ref=e904]: Review
+                      - generic [ref=e1091]: Reviewed
+                  - listitem [ref=e906]:
+                    - 'button "Step 4: Processing (completed)" [ref=e1137] [cursor=pointer]':
+                      - generic [ref=e911]: Processing
+                  - listitem [ref=e913]:
+                    - 'button "Step 5: Results (current)" [disabled] [ref=e1140]':
+                      - generic [ref=e918]: Results
+              - generic [ref=e1141]:
+                - generic [ref=e1142]:
+                  - region "Completed items" [ref=e1143]:
+                    - heading "Succeeded (1)" [level=3] [ref=e1144]
+                    - generic [ref=e1148]:
+                      - generic "cycle5-repair-public-ingest.txt" [ref=e1152]
+                      - button "Open cycle5-repair-public-ingest.txt in Media" [ref=e1154] [cursor=pointer]: Open in Media
+                  - generic [ref=e1159]:
+                    - paragraph [ref=e1160]: What's next?
+                    - generic [ref=e1161]:
+                      - button "Search your ingested content in Knowledge QA" [ref=e1162] [cursor=pointer]: Search in Knowledge
+                      - button "Open document in Document Workspace" [ref=e1166] [cursor=pointer]: Open in Workspace
+                - generic [ref=e1169]:
+                  - paragraph [ref=e1170]: "Total: 1 succeeded, 0 failed · 1s elapsed"
+                  - generic [ref=e1171]:
+                    - button "Start a new ingest" [ref=e1172] [cursor=pointer]: Ingest More
+                    - button "Close the ingest wizard" [ref=e1173] [cursor=pointer]: Done
+  - button "Open Next.js Dev Tools" [ref=e32] [cursor=pointer]
+  - alert [ref=e10]: Media | tldw
+```

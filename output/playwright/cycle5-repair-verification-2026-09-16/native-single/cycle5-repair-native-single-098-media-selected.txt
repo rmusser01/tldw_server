@@ -1,0 +1,283 @@
+### Open tabs
+- 0: (current) [Media | tldw](http://127.0.0.1:18580/media?id=1)
+- 1: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 2: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 3: [Describe the attached image. State the color of the speech bubble and how many d | tldw](http://127.0.0.1:18580/chat)
+### Page
+- Page URL: http://127.0.0.1:18580/media?id=1
+- Page Title: Media | tldw
+### Snapshot
+```yaml
+- generic [ref=f5e11]:
+  - generic [ref=f5e12]:
+    - generic [ref=f5e14]:
+      - link "Skip to main content" [ref=f5e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f5e16]:
+        - button "Expand sidebar" [ref=f5e17] [cursor=pointer]
+        - button "New Chat" [ref=f5e21] [cursor=pointer]
+        - generic [ref=f5e24]:
+          - button "Quick Ingest" [ref=f5e25] [cursor=pointer]
+          - button "Chat" [ref=f5e29] [cursor=pointer]
+          - button "Prompts" [ref=f5e32] [cursor=pointer]
+          - button "Characters" [ref=f5e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f5e41] [cursor=pointer]
+          - button "World Books" [ref=f5e45] [cursor=pointer]
+          - button "Notes" [ref=f5e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=f5e52] [cursor=pointer]
+          - button "Media" [ref=f5e60] [cursor=pointer]
+          - button "Document Workspace" [ref=f5e63] [cursor=pointer]
+          - button "Research Workspace" [ref=f5e69] [cursor=pointer]
+          - button "Kanban" [ref=f5e75] [cursor=pointer]
+          - button "Watchlists" [ref=f5e77] [cursor=pointer]
+        - generic [ref=f5e82]:
+          - button "Open Notes Dock" [ref=f5e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f5e88] [cursor=pointer]
+          - button "Settings" [ref=f5e91] [cursor=pointer]
+      - main [ref=f5e95]:
+        - generic [ref=f5e96]:
+          - generic [ref=f5e99]:
+            - generic [ref=f5e100]:
+              - button "Expand sidebar" [ref=f5e101] [cursor=pointer]
+              - generic [ref=f5e103]:
+                - img "tldw Assistant" [ref=f5e104]
+                - generic [ref=f5e105]: tldw Assistant
+                - button "Companion Home" [ref=f5e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=f5e110] [cursor=pointer]
+            - generic [ref=f5e113]:
+              - button "Search - Open command palette" [ref=f5e114] [cursor=pointer]:
+                - generic [ref=f5e118]: Search
+                - generic [ref=f5e119]: ⌘K
+              - button "Open settings" [ref=f5e120] [cursor=pointer]
+              - generic [ref=f5e132]:
+                - button "Notifications, 0 unread" [ref=f5e133] [cursor=pointer]
+                - status [ref=f5e137]: Notifications are active
+              - button "Switch to light theme" [ref=f5e138] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f5e145] [cursor=pointer]:
+                - generic [ref=f5e146]: "?"
+          - generic [ref=f5e148]:
+            - generic [ref=f5e150]:
+              - generic [ref=f5e151]:
+                - generic [ref=f5e152]:
+                  - heading "Media Inspector" [level=1] [ref=f5e153]
+                  - generic [ref=f5e154]:
+                    - generic [ref=f5e155]: 1 / 1
+                    - button "Trash" [ref=f5e156] [cursor=pointer]
+                    - button "Bulk" [ref=f5e160] [cursor=pointer]
+                - generic [ref=f5e163]:
+                  - button "Show media only" [pressed] [ref=f5e164] [cursor=pointer]:
+                    - generic [ref=f5e165]: Media
+                    - generic [ref=f5e166]: "1"
+                  - button "Show notes only" [ref=f5e167] [cursor=pointer]:
+                    - generic [ref=f5e168]: Notes
+                    - generic [ref=f5e169]: "0"
+              - generic [ref=f5e171]:
+                - generic [ref=f5e172]:
+                  - generic [ref=f5e173]: Find media
+                  - button "Collapse find media panel" [expanded] [ref=f5e175] [cursor=pointer]
+                - generic [ref=f5e178]:
+                  - generic [ref=f5e179]:
+                    - textbox "Search media (title/content)" [ref=f5e184]
+                    - button "Search syntax help" [ref=f5e186] [cursor=pointer]: "?"
+                  - button "Search" [ref=f5e187] [cursor=pointer]
+                  - generic [ref=f5e188]:
+                    - generic [ref=f5e189]:
+                      - generic [ref=f5e190]: Filters
+                      - button "Clear all" [ref=f5e194] [cursor=pointer]
+                    - generic [ref=f5e195]:
+                      - generic [ref=f5e196]: Search mode
+                      - generic [ref=f5e197]:
+                        - button "Full-text search" [pressed] [ref=f5e198] [cursor=pointer]: Full-text
+                        - button "Metadata search" [ref=f5e199] [cursor=pointer]: Metadata
+                    - generic [ref=f5e200]:
+                      - generic [ref=f5e201]: Sort by
+                      - generic [ref=f5e202] [cursor=pointer]:
+                        - generic [ref=f5e203]:
+                          - generic "Relevance" [ref=f5e204]
+                          - combobox [ref=f5e205]
+                        - img "down" [ref=f5e207]
+                    - generic [ref=f5e210]:
+                      - generic [ref=f5e211]: Date range
+                      - generic [ref=f5e212]:
+                        - generic [ref=f5e213]:
+                          - text: Start date
+                          - textbox "Start date" [ref=f5e214]
+                        - generic [ref=f5e215]:
+                          - text: End date
+                          - textbox "End date" [ref=f5e216]
+                    - button "Advanced search" [ref=f5e218] [cursor=pointer]
+                    - generic [ref=f5e222] [cursor=pointer]:
+                      - checkbox "Favorites only" [ref=f5e223]
+                      - generic [ref=f5e226]: Favorites only
+                    - generic [ref=f5e227]:
+                      - button "Media types" [ref=f5e228] [cursor=pointer]
+                      - generic [ref=f5e234] [cursor=pointer]:
+                        - checkbox "Filter by Document" [ref=f5e235]
+                        - generic [ref=f5e236]: Document
+                    - button "Keywords" [ref=f5e238] [cursor=pointer]
+                    - generic [ref=f5e243]:
+                      - generic [ref=f5e244]: Exclude keywords
+                      - generic [ref=f5e246]:
+                        - generic [ref=f5e247]:
+                          - generic: Exclude keyword
+                          - combobox "Exclude keyword" [ref=f5e249]
+                        - img "down" [ref=f5e251]
+                      - generic [ref=f5e254]: Use excluded keywords to remove items containing those terms.
+                      - generic [ref=f5e255]: 0 exclude keyword suggestions available
+                  - generic [ref=f5e256]:
+                    - generic [ref=f5e257]:
+                      - generic [ref=f5e258]: Collection
+                      - combobox "Collection" [ref=f5e259]:
+                        - option "All items" [selected]
+                    - paragraph [ref=f5e260]: Create collections from bulk selection to organize related items.
+              - generic [ref=f5e261]:
+                - generic [ref=f5e263]:
+                  - generic [ref=f5e264]:
+                    - generic [ref=f5e265]:
+                      - generic [ref=f5e266]: Results
+                      - generic [ref=f5e267]: 1 / 1
+                    - generic [ref=f5e268]:
+                      - button "Standard view" [pressed] [ref=f5e269] [cursor=pointer]
+                      - button "Compact view" [ref=f5e275] [cursor=pointer]
+                  - 'button "Select media: cycle5-single-native-public-source" [active] [ref=f5e278] [cursor=pointer]':
+                    - generic [ref=f5e279]:
+                      - button "Add to favorites" [ref=f5e284]
+                      - generic [ref=f5e287]:
+                        - generic [ref=f5e288]:
+                          - generic [ref=f5e289]: MEDIA
+                          - generic [ref=f5e290]: document
+                          - generic [ref=f5e291]: 6h ago
+                        - generic [ref=f5e292]: cycle5-single-native-public-source
+                - generic [ref=f5e293]:
+                  - generic [ref=f5e294]:
+                    - generic [ref=f5e295]: 1 of 1 results
+                    - generic [ref=f5e296]:
+                      - generic [ref=f5e297]: "Per page:"
+                      - combobox "Per page:" [ref=f5e298]:
+                        - option "20" [selected]
+                        - option "50"
+                        - option "100"
+                  - button "? for shortcuts" [ref=f5e300] [cursor=pointer]:
+                    - generic [ref=f5e301]: "?"
+                    - generic [ref=f5e302]: for shortcuts
+              - button "Library tools" [ref=f5e304] [cursor=pointer]
+            - button "Collapse sidebar" [ref=f5e309] [cursor=pointer]
+            - generic [ref=f5e313]:
+              - generic [ref=f5e345]:
+                - generic [ref=f5e346] [cursor=pointer]:
+                  - checkbox "Show chapters/sections panel" [checked] [ref=f5e347]
+                  - generic [ref=f5e348]: Show chapters/sections panel
+                - generic [ref=f5e349] [cursor=pointer]:
+                  - checkbox "Allow generated fallback structure" [checked] [ref=f5e350]
+                  - generic [ref=f5e351]: Allow generated fallback structure
+                - generic [ref=f5e352]: "Generated sections: 1"
+              - generic [ref=f5e314]:
+                - complementary "Chapters and sections" [ref=f5e353]:
+                  - generic [ref=f5e354]:
+                    - generic [ref=f5e355]: Chapters/Sections
+                    - textbox "Jump to 12.5 or title" [ref=f5e360]
+                    - generic [ref=f5e361]: Project Cedar is a fictional community library. Jonah Patel coordinates the library. The library...
+                  - tree [ref=f5e362]:
+                    - button "1 Project Cedar is a fictional community library. Jonah Patel coordinates the library. The library..." [ref=f5e366] [cursor=pointer]:
+                      - generic [ref=f5e367]: "1"
+                      - generic [ref=f5e368]: Project Cedar is a fictional community library. Jonah Patel coordinates the library. The library...
+                - generic [ref=f5e315]:
+                  - button "Create study pack" [ref=f5e317] [cursor=pointer]
+                  - generic [ref=f5e318]:
+                    - generic [ref=f5e319]: Showing cycle5-single-native-public-source
+                    - generic [ref=f5e370]:
+                      - generic [ref=f5e371]:
+                        - button "Previous" [disabled] [ref=f5e372]
+                        - generic [ref=f5e375]: 1/1
+                        - button "Next" [disabled] [ref=f5e376]
+                      - heading "cycle5-single-native-public-source" [level=3] [ref=f5e379]
+                      - generic [ref=f5e380]:
+                        - button "Chat with this media" [ref=f5e381] [cursor=pointer]
+                        - button "Analyze" [ref=f5e384] [cursor=pointer]
+                        - button "Actions" [ref=f5e388] [cursor=pointer]
+                    - generic [ref=f5e394]:
+                      - generic [ref=f5e395]:
+                        - generic [ref=f5e396]: document
+                        - generic "2026-09-16T08:33:21.453Z" [ref=f5e397]: Ingested 6h ago
+                        - generic "2026-09-16T08:35:07.468Z" [ref=f5e398]: Updated 6h ago
+                        - generic [ref=f5e399]: 41 Words
+                        - generic [ref=f5e403]: 1 min read
+                        - generic "Reading progress" [ref=f5e404]: 0% read
+                        - generic [ref=f5e405]: "Chunking: Completed"
+                        - generic [ref=f5e406]: "Vector: Pending"
+                      - button "Metadata details Show" [ref=f5e408] [cursor=pointer]:
+                        - generic [ref=f5e409]: Metadata details
+                        - generic [ref=f5e410]: Show
+                      - generic [ref=f5e412]:
+                        - generic [ref=f5e413]:
+                          - generic: Add keywords...
+                          - combobox [ref=f5e415]
+                        - img "down" [ref=f5e417]
+                      - generic [ref=f5e420]:
+                        - generic [ref=f5e421]:
+                          - button "Content" [ref=f5e422] [cursor=pointer]
+                          - generic [ref=f5e426]:
+                            - generic [ref=f5e427] [cursor=pointer]:
+                              - generic [ref=f5e428]:
+                                - generic "Auto" [ref=f5e429]
+                                - combobox "Display mode" [ref=f5e430]
+                              - img "down" [ref=f5e432]
+                            - group "Text size" [ref=f5e435]:
+                              - button "Text size S" [ref=f5e436] [cursor=pointer]: S
+                              - button "Text size M" [pressed] [ref=f5e437] [cursor=pointer]: M
+                              - button "Text size L" [ref=f5e438] [cursor=pointer]: L
+                            - button "Edit content" [ref=f5e439] [cursor=pointer]
+                            - button "Find in content" [ref=f5e442] [cursor=pointer]
+                        - region "Media content" [ref=f5e449]:
+                          - paragraph [ref=f5e451]: Project Cedar is a fictional community library. Jonah Patel coordinates the library. The library opens on 22 November 2026. The book return is beside the north entrance. The public reading room has seven oak tables. Volunteers meet each Thursday at 18:00.
+                      - generic [ref=f5e452]:
+                        - generic [ref=f5e453]:
+                          - button "Analysis" [ref=f5e454] [cursor=pointer]
+                          - generic [ref=f5e458]:
+                            - button "Generate" [ref=f5e459] [cursor=pointer]
+                            - button "Send analysis to chat" [ref=f5e463] [cursor=pointer]
+                            - button "Copy analysis" [ref=f5e467] [cursor=pointer]
+                            - button "Edit analysis" [ref=f5e471] [cursor=pointer]
+                        - generic [ref=f5e475]:
+                          - generic [ref=f5e476]:
+                            - generic [ref=f5e477]: Analysis
+                            - generic [ref=f5e478] [cursor=pointer]:
+                              - generic [ref=f5e479]:
+                                - generic "Analysis" [ref=f5e480]
+                                - combobox "Analysis" [ref=f5e481]
+                              - img "down" [ref=f5e483]
+                          - generic [ref=f5e486]:
+                            - generic [ref=f5e487]:
+                              - generic [ref=f5e488]: Analysis
+                              - button "Copy analysis to clipboard" [ref=f5e490] [cursor=pointer]
+                            - paragraph [ref=f5e496]: Project Cedar, coordinated by Jonah Patel, is a community library opening on 22 November 2026, with a book return located beside the north entrance.
+                      - generic [ref=f5e497]:
+                        - button "Statistics" [ref=f5e498] [cursor=pointer]
+                        - generic [ref=f5e503]:
+                          - generic [ref=f5e504]:
+                            - generic [ref=f5e505]: Words
+                            - generic [ref=f5e506]: "41"
+                          - generic [ref=f5e507]:
+                            - generic [ref=f5e508]: Characters
+                            - generic [ref=f5e509]: "255"
+                          - generic [ref=f5e510]:
+                            - generic [ref=f5e511]: Paragraphs
+                            - generic [ref=f5e512]: "1"
+                      - button "Metadata" [ref=f5e514] [cursor=pointer]
+                      - button "Document Intelligence" [ref=f5e519] [cursor=pointer]
+                      - button "Version History" [ref=f5e525] [cursor=pointer]
+                      - button "Delete item" [ref=f5e535] [cursor=pointer]
+    - 'tooltip "Title: cycle5-single-native-public-source Type: document Ingested: 6h ago" [ref=f5e540]':
+      - generic [ref=f5e541]:
+        - generic [ref=f5e542]:
+          - generic [ref=f5e543]: "Title:"
+          - generic [ref=f5e544]: cycle5-single-native-public-source
+        - generic [ref=f5e545]:
+          - generic [ref=f5e546]: "Type:"
+          - generic [ref=f5e547]: document
+        - generic [ref=f5e548]:
+          - generic [ref=f5e549]: "Ingested:"
+          - generic [ref=f5e550]: 6h ago
+  - button "Open Next.js Dev Tools" [ref=f5e340] [cursor=pointer]
+  - alert [ref=f5e10]: Media | tldw
+```

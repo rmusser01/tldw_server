@@ -1,6 +1,6 @@
 {
   "mode": "multi",
-  "retainedAt": "2026-09-16T09:37:23.556Z",
+  "retainedAt": "2026-09-16T13:27:18.524Z",
   "knownCredentialMatches": 0,
   "jwtOrPrivateKeyPatternMatches": 0,
   "files": [
@@ -11,8 +11,8 @@
     },
     {
       "file": "cycle5-multi-native-FINAL_REPORT.md",
-      "bytes": 8473,
-      "sha256": "23ca8baedd15bdde28dadb10101b8b4b03e045e350189930d8b6871e26c63ac5"
+      "bytes": 8773,
+      "sha256": "91f1cd3a4e747dc26f8479f4a362ed846600bc64f4673f6a1714ac699ed19a13"
     },
     {
       "file": "cycle5-multi-native-admin-delete-confirm-open.txt",
@@ -910,6 +910,11 @@
       "sha256": "15c3fb7da262a3bf3b538a0918579f9e16463ab93bd09c60b36c5e9efcbcb26f"
     },
     {
+      "file": "cycle5-multi-native-manifest.json",
+      "bytes": 66199,
+      "sha256": "8c90f7f6b90e4f697a9d5faffb2fdb87c5d166362088cd088ac46b5a678e086a"
+    },
+    {
       "file": "cycle5-multi-native-media-actions-state.txt",
       "bytes": 18984,
       "sha256": "fdffd66f606f8162d006e2ddc210754e4f91661e6b2312a44e16c79e3e055a84"
@@ -1575,6 +1580,11 @@
       "sha256": "490c04d9be51cf7459cf710f70f406afeed98c664186d457473d0928f7ff07e6"
     },
     {
+      "file": "cycle5-multi-native-scan-evidence.mjs",
+      "bytes": 2108,
+      "sha256": "0d174c8df8c7abee66c9c82e9bee3d850ad3b87e43c5dd640ac9ecdf370e580f"
+    },
+    {
       "file": "cycle5-multi-native-scheduled-cram-after.txt",
       "bytes": 10549,
       "sha256": "dd50124dcc9014297249cad22dd64ed692b8c27c5fced5085d96572ed1d3bebf"
@@ -1643,6 +1653,11 @@
       "file": "cycle5-multi-native-scheduled-deck-selected.txt",
       "bytes": 389,
       "sha256": "5f2563d0e38b6c16ffb49ecd4079125f96fccb913e12b157b55fb4daf0bebead"
+    },
+    {
+      "file": "cycle5-multi-native-secret-scan.json",
+      "bytes": 257,
+      "sha256": "7ae37d855d6975aff26cd34d21948c0df6b53606f990fc95a3856408191da4e9"
     },
     {
       "file": "cycle5-multi-native-setup.txt",

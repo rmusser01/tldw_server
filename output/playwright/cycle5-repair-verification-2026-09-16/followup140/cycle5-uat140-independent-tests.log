@@ -26,7 +26,7 @@ Error: Test timed out in 5000ms.
 If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
  ❯ src/components/Common/Settings/tabs/__tests__/ConversationTab.input-number.test.tsx:131:3
     129|   })
-    130| 
+    130|
     131|   it("persists edits only on blur and restores all six values after re…
        |   ^
     132|     const view = mountConversation()
@@ -39,4 +39,3 @@ If this is a long-running test, pass a timeout value as the last argument or con
       Tests  1 failed | 19 passed (20)
    Start at  08:21:19
    Duration  12.94s (transform 251ms, setup 345ms, import 1.10s, tests 9.84s, environment 1.23s)
-

@@ -1,0 +1,1761 @@
+{
+  "at": "2026-09-16T09:39:05.575Z",
+  "product": "ab527eb3b4",
+  "entries": [
+    {
+      "path": "/private/tmp/cycle5-multi-native-DETAILED_EVIDENCE_INDEX.md",
+      "bytes": 19334,
+      "sha256": "d0d45c52088c7a44eee52f2d1576633491a31b0be7b17189418282735067e745"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-FINAL_REPORT.md",
+      "bytes": 8773,
+      "sha256": "91f1cd3a4e747dc26f8479f4a362ed846600bc64f4673f6a1714ac699ed19a13"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-delete-confirm-open.txt",
+      "bytes": 421,
+      "sha256": "5eb55048ab1449e506fb012e3eb6b794fce8d329acf0f3d0617eeff68ca1638f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-delete-confirm.txt",
+      "bytes": 15651,
+      "sha256": "6fe1d92d160c654354368126bf261874565fd425080a621970d7ee793af86927"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-empty-media.txt",
+      "bytes": 4525,
+      "sha256": "5444ee21f82a081bfb349fd3f1453a6afba830b854398a68e96546ea46157ea2"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-exit-settings.txt",
+      "bytes": 441,
+      "sha256": "d39d700bc1efa0147b65edc92dfc0a76f2e09d435ad89b933b3e64a58622a861"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-fixture-run.txt",
+      "bytes": 75,
+      "sha256": "f7ae27ac6b0cf3009deca87d23a2c296953d6ffd78d0825ed52103feb2cdb798"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-fixture.json",
+      "bytes": 2506,
+      "sha256": "297a2e0b7c0772cc6b192acd8be0fdbdfa80892804e2b64cd7d0c0eaa6ce116e"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-fixture.mjs",
+      "bytes": 2179,
+      "sha256": "e7da7bfb280889cd2c3178ac45cbb63c547508a63cff520e83c655b78c36258b"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-login-result.txt",
+      "bytes": 392,
+      "sha256": "1899931569ec66a9daeab9d7ebf8baeb93190016a59a26e0e97decb9c0040552"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-login.txt",
+      "bytes": 10753,
+      "sha256": "cc2904b26a5a1f8f7bac1e17605f29bfb805feeb743fafb273d918a9647e71c1"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-logout.txt",
+      "bytes": 495,
+      "sha256": "f7276f62d9010564f98cae746f36771b76388dd813a4b88b05ea959f427169a3"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-media-open.txt",
+      "bytes": 417,
+      "sha256": "c716be337d1642a50cfce23ea89f3092d91a1d8b2bde4d4fc9da6d35cb5d768e"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-media-select.txt",
+      "bytes": 529,
+      "sha256": "a3c3dba20fbce8dcea6d7335c1065850728fa4ec8dff275191c0e6e6dc159081"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-media-selected.txt",
+      "bytes": 14617,
+      "sha256": "2e0dc1fd32ea70a054780ac8816ea47def99dd02201fe7051c2d0d65561f161d"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-media.txt",
+      "bytes": 9549,
+      "sha256": "33420eb7aacd09107e0bc68f4bc0c0000c3935a38d7f7007f705a557aa358708"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-restore-wire.txt",
+      "bytes": 1327,
+      "sha256": "a23def700df113b74ebf93578199fa533f89daa71868a952c62a1b35032886bb"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-restored-open.txt",
+      "bytes": 417,
+      "sha256": "03c2f4448ae386d7af70473d24cbe99c1c77670f3b1696488b5bcdd679ea9398"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-restored.txt",
+      "bytes": 9547,
+      "sha256": "ef52ca0d5df0ec2021ad0fa93b019e3033750d4d3f27db75a7524a4c0bb104aa"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-return-form.txt",
+      "bytes": 11880,
+      "sha256": "f688e3be6315b732b03c4b9b70c60617168101c4082bb1decaba3bab6c499d4f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-return-private1.txt",
+      "bytes": 36,
+      "sha256": "f0b307bc7d5810fa766864a55181992c66b742f3a964c807d634272c6b4c6674"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-return-private2.txt",
+      "bytes": 36,
+      "sha256": "f0b307bc7d5810fa766864a55181992c66b742f3a964c807d634272c6b4c6674"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-return.txt",
+      "bytes": 534,
+      "sha256": "4de9e95936fbd003f5d17343f7367dc2b992386a044e738b05eae3a42bab6574"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-trash-open.txt",
+      "bytes": 512,
+      "sha256": "af9eea7f48dad301e78c4f3d1bf47d758d22facedc98b467f5d4c54444526229"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-trash-wire.txt",
+      "bytes": 763,
+      "sha256": "e4f5ce94154456b8446dcceda332e99d0fbac80da5a3aae48dfb3cca9b93110f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-admin-trash.txt",
+      "bytes": 4657,
+      "sha256": "bf679f364c63367b64a7df73575cc2dbab8effe5cc3d35ab1d0b4b72e0d1048d"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-after-end-settled.txt",
+      "bytes": 10958,
+      "sha256": "8de2d9e2de7b3f4cec9f5a3137c2ea81f2e5684ac332b4a451463e19fd28344f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-alice-home.txt",
+      "bytes": 12006,
+      "sha256": "af37d081c5d137ea2ad1c5cd31e5c6722a98b7086913ab9381129fced1d79814"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-alice-logout.txt",
+      "bytes": 535,
+      "sha256": "11bcc21fa88b7cba664a0902989f7c32069090e4b1556735e0499e7a8e50bf8d"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-alice-return-form.txt",
+      "bytes": 11864,
+      "sha256": "3237c38c2e799d73bf97f225619fd362c1e29a5858b9a266e9d3f7aa326c287e"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-alice-return-login.txt",
+      "bytes": 534,
+      "sha256": "b9e6cd0452b926ab8759fecc3b1d57bc1f559d62c0ef9ff17bb805b0b6184ef9"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-alice-return-notes-open.txt",
+      "bytes": 417,
+      "sha256": "90a3f140252040a912c3d951f1d1a3ca713f369f35ea30f63dae11180ed346a6"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-alice-return-notes-settled.txt",
+      "bytes": 14996,
+      "sha256": "2d149caf1861a0ccb72081cd48e0be9cf05036b15e956a9d02f79ac366202269"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-alice-return-notes.txt",
+      "bytes": 10404,
+      "sha256": "d0f1df7acb5c2648c9677e88914b6b72dacf57ec05518e3762f44b121cde9311"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-alice-return-private1.txt",
+      "bytes": 36,
+      "sha256": "f0b307bc7d5810fa766864a55181992c66b742f3a964c807d634272c6b4c6674"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-alice-return-private2.txt",
+      "bytes": 36,
+      "sha256": "f0b307bc7d5810fa766864a55181992c66b742f3a964c807d634272c6b4c6674"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-alice-return-qa-open.txt",
+      "bytes": 429,
+      "sha256": "3e5531d6ecc744e66bb596a0bdb6298432d47e7ec23c9d15227389f18dba9548"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-alice-return-qa.txt",
+      "bytes": 7048,
+      "sha256": "a093b8c913cdf25494352c0391011a8744f834bd34b42396d190118d85414a9a"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-analysis-config-open.txt",
+      "bytes": 583,
+      "sha256": "efe977396f6746e9c581a5d3de94c2fde096a565d8126fe71b262b0235880b69"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-analysis-config.txt",
+      "bytes": 19611,
+      "sha256": "e2813f06977d31beef3f3dae529ca4180ce206c901aa5645d8e6a7104c0eec1f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-analysis-details.txt",
+      "bytes": 17209,
+      "sha256": "2549b261051dc43cb378e18887ca079d2239aa6f10f08452a2987a1fad4e7e2a"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-analysis-open.txt",
+      "bytes": 540,
+      "sha256": "b62d4bbb091789503c6ca4d2625a5ed28d90d4eb3616e787b6ff645a0538eefb"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-analysis-prompt.txt",
+      "bytes": 285,
+      "sha256": "c2767b154c1288acfdf8da64a85e0d168c3bd40b9461b8ad9c6d4950432da4a8"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-analysis-saved.txt",
+      "bytes": 17403,
+      "sha256": "ed0fe2ee3fd484dffef19b4c73a995022344a5a392a82084725c0aaddad121c2"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-analysis-select.txt",
+      "bytes": 513,
+      "sha256": "7fd9e53f1623aff3b763272cade056c8b3ceac7eae5f9161de77047f183c5f13"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-analysis-state.txt",
+      "bytes": 9489,
+      "sha256": "1051bd7667dd9686d39df0905ac35c0f89ff645283cf0921c33bb7546d3a39ff"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-analysis-wire.txt",
+      "bytes": 5113,
+      "sha256": "23cae1fb721357e215875019b38f5ea9d0ebed78abf29b056ee821cb72b8cef7"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-answer-menu.txt",
+      "bytes": 14652,
+      "sha256": "a5c144e52f3b2ccece293ffa74fe238bef36bae2a8a55ac67968c1e7de82fd58"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-answer-note-create.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-answer-note-ui.txt",
+      "bytes": 12548,
+      "sha256": "4a33e5ed17e89009d3250edfde543167f6e00d513ac98f0eed9b5035e1313d08"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-aurora-public.txt",
+      "bytes": 964,
+      "sha256": "d075fa5cfd2c6d63cf4021c7ab563d5e8277b38def3960e9d6898f2cd454591a"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-biology-generate-form.txt",
+      "bytes": 15847,
+      "sha256": "bbab3484a88bb620671b0e8add1c11259b686cdbdf6a544eb7f4ae3965052dd8"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-biology-generate-wire.txt",
+      "bytes": 8592,
+      "sha256": "e8498b2345a0d34e85396153f96fcdc78a792d612c11f2545c15bc901770b899"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-biology-generated.txt",
+      "bytes": 19174,
+      "sha256": "ca485b3ae7dc2e8b17193c76c5c3996e8b04a02c797034a55238628b29f9b132"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-biology-note-save.txt",
+      "bytes": 1351,
+      "sha256": "ad41ea7456541ed728aba0316d272af210381ead5ba3406fdff03c2f11ab7d0f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-biology-save-wire.txt",
+      "bytes": 5781,
+      "sha256": "8e6870721fc4d2bbf2542d3c02b30f239392beb29c8401d068179600d8521df5"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-biology-saved.txt",
+      "bytes": 14862,
+      "sha256": "16fe42a3e35a8d94c610f080825742b32a3c8cf0653a2027ded182e511df3540"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-biology-start.txt",
+      "bytes": 12447,
+      "sha256": "2abd1e25c8f45860760e8019a9ac3993918d3eaa100f4f09b3916dc4c6968e63"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-back-state.txt",
+      "bytes": 11209,
+      "sha256": "7e77d62236c808b6a4f99f976229a9a8f34e00308e1a0a646e3519e982d9d776"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-back1.txt",
+      "bytes": 559,
+      "sha256": "1513a0fabeb289668585d8d367e504a27dc411e6dddba2ee7469c20b298ace60"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-back2.txt",
+      "bytes": 551,
+      "sha256": "3caced90dfa1800c4e3c18b64dcb365cb6641291b11834d61023939fa143dc97"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-form.txt",
+      "bytes": 24630,
+      "sha256": "c43b05fc9b486c1735132189609a88ae544404cfc6d6d33b634bdd111c0a47c1"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-login-form.txt",
+      "bytes": 11721,
+      "sha256": "2d3100ebaa00838b2cc3620e6f66914e539359e5e4e365d2075b31bb1d93fd4b"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-login.txt",
+      "bytes": 534,
+      "sha256": "dcbc1141f01258370749094f08290c1d329bd1ddcaccae6bafaf85ddce5cee2a"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-logout.txt",
+      "bytes": 535,
+      "sha256": "15bf090c50085da6acbe0716039bc695063369a7cbd28d69d38057c8935312ab"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-note-content.txt",
+      "bytes": 154,
+      "sha256": "980d763ec1354b966d2484deb9c75911c52f9694ab42e937e64cf4621634a2cb"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-note-save.txt",
+      "bytes": 774,
+      "sha256": "930e8189bd69ef861f84f49cf1f4bf2f5cb6d7cb62b1e77c450100e77852b18d"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-note-title.txt",
+      "bytes": 131,
+      "sha256": "6216047f5b3b3b22ce6704566d9daab0dac53ed4a7325a354fa4be2f54a2cda6"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-notes-open.txt",
+      "bytes": 417,
+      "sha256": "aa837c87c14282d28632474e6f754b3b86ca6a4ad95e48de22c4f1f976869b85"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-notes-settled.txt",
+      "bytes": 11379,
+      "sha256": "f91542b2d5f83c5c5fafc849d068761a6c0789416e7710b58cef50112610b647"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-notes.txt",
+      "bytes": 9848,
+      "sha256": "e9c541f95aa4ed62058a046e2176ee381a4484661963091703a0ad3f78adfc7f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-private-fill1.txt",
+      "bytes": 36,
+      "sha256": "f0b307bc7d5810fa766864a55181992c66b742f3a964c807d634272c6b4c6674"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-private-fill2.txt",
+      "bytes": 36,
+      "sha256": "f0b307bc7d5810fa766864a55181992c66b742f3a964c807d634272c6b4c6674"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-qa-correct-route.txt",
+      "bytes": 429,
+      "sha256": "f2aa067c8c43e7389cb2af92e9d6fe92ee8645adb98ef7453864257844439ce9"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-qa-open.txt",
+      "bytes": 499,
+      "sha256": "9feeb4d1b2a4a4cac4394ef86df8c27d701481da68cf9c841c076f2f6bae12bf"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-qa-state.txt",
+      "bytes": 6705,
+      "sha256": "89a18602c687a9092275fc9dcfe2a51fca20130d719ecce819dac0c6c562d998"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-qa.txt",
+      "bytes": 3784,
+      "sha256": "f07ca5f8375e5a4f79c79f9db2e1cbbb7421df382eba6056c41e6bbfa4266692"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-settings-state.txt",
+      "bytes": 11522,
+      "sha256": "3305a0ddfe49c0def49939ffbd04c6047461a949229fb287ae84390adfc4c555"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-bob-settings.txt",
+      "bytes": 441,
+      "sha256": "3071e9e3fa1794c7940437e01cd655093469321680e4b3b4c1766713527a9d28"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-card-draft-state.txt",
+      "bytes": 13663,
+      "sha256": "0ab952519a1d84e93b689ef38daaacd203dbe0d4cc2504d5dfc66c0e7a36f473"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-card-draft.txt",
+      "bytes": 640,
+      "sha256": "28d43e54146abee8353c181bc653e69df3200aa3afa3739c1e78ccb73a91549a"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-card-question.txt",
+      "bytes": 154,
+      "sha256": "2b5983e7495289a379aa306928789c8b55afd91e334e34ae18aba15e2ab9964c"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-card-ready.txt",
+      "bytes": 14843,
+      "sha256": "25c6676bb5e548fa72eb4ffd1e221ed003c7a4e294be562e1dcca7462560e3a9"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-card-tab.txt",
+      "bytes": 304,
+      "sha256": "febf346ff1f58f3cab84735b088495adf9e448274a0b28f85d3938f7647f8c95"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-chat-ready.txt",
+      "bytes": 11069,
+      "sha256": "b5a8865eb646a0ad252f04315889b13b15fdda6de8721a039b4bda3a50c2c650"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-cold.txt",
+      "bytes": 20977,
+      "sha256": "9c522f86b574cfc88f9075b39751ebc5230e7da5f0de21d3ba6db18e54fedf55"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-create.txt",
+      "bytes": 1123,
+      "sha256": "d988c67b56a2a05b150bd459b7ddb354cb0f0f0c2354953fb5cd0c0f80447add"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-created.txt",
+      "bytes": 14195,
+      "sha256": "0a10a9bb4548beb0574717813d4e6012ca0de7cdb15465e4a6eae5e3ae1d7bc0"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-current.txt",
+      "bytes": 13525,
+      "sha256": "2d5f84bf2744ee0a0bdfa8b51cb019c849bf95435497a99189979f7a023b51d6"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-errors.txt",
+      "bytes": 521,
+      "sha256": "bd793f2c40a5940fae944a738ac716a81924a0cb544a5081e08a5162a48e8d84"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-reload-canonical.txt",
+      "bytes": 11402,
+      "sha256": "f4c83fad3bf5637e4fc25040a1bfdb0e0149484af46ac2d4a7405e23d51d0ece"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-reload.txt",
+      "bytes": 11920,
+      "sha256": "349db945f4aa5d6b9a06bc9eedaad7eb05e92a0c4ddd44cd161b32cab2d4cf90"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-reopen.txt",
+      "bytes": 20986,
+      "sha256": "e7245cec307e869007744ba740dc771de34d9e2b14d4029251fde17ac2dd4ab0"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-replacement-before.txt",
+      "bytes": 11920,
+      "sha256": "ed5107a48fafbc2e37c05306e560c42d857786f2015f45957d7ef08874b7f4f8"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-replacement-result.txt",
+      "bytes": 12009,
+      "sha256": "4d95c0d2454ff587b542c1fd463715b1a5ffe1889e697d5d1f851c04a75a31eb"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-replacement-selector.txt",
+      "bytes": 13886,
+      "sha256": "d15b758c14c917ac720ce04a01e9a5c4f5a5a7088834a38db5200d2ad983a5ee"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-replacement-settled.txt",
+      "bytes": 11920,
+      "sha256": "651fcd86cb6fbe9e6b045170e01f111a177888956ba051590578e7469bb2e72f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-reply-wire.txt",
+      "bytes": 948317,
+      "sha256": "bfc3fd05dd713306c7bc86ffa42fd6bc7e7cdfafed8f4062275ed39343b0011f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-reply.txt",
+      "bytes": 12197,
+      "sha256": "96ee1478e01bdc6d7a06d2fea6ae829013ec1128eae5f1c06be4dd1ca79a074b"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-start.txt",
+      "bytes": 12733,
+      "sha256": "675502d521acae8914cf45a773ff2662e78438aa0c2f3adfae83821cb6abe6fd"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-target-identities-final.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-target-identities.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-character-warnings.txt",
+      "bytes": 385,
+      "sha256": "505734b5742184defbc7c71f50c29cc0127a14ecdc40b860e11fba7ecb162702"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-characters-identity-state.txt",
+      "bytes": 13278,
+      "sha256": "4ea0a762ab3c3db7480fb54b5aa93c4b236676e6ab5cca7eb32ae4f8ac5fb181"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-chat-card-save.txt",
+      "bytes": 1108,
+      "sha256": "a27e4d0e827444e159a2350b78b7b3db802ad8b4c40606a26ced2faf1ce20caf"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-chat-empty.txt",
+      "bytes": 9314,
+      "sha256": "6289609ce1e3829a4d1f3688e4548a3e2926bd5054bbdbc856e61c4022e9ab8e"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-chatcard-answer.txt",
+      "bytes": 11838,
+      "sha256": "a2e821d3d0aa6272b3155c3a8fd36078faa1cb730c33d54115db082ed4c78300"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-chatcard-complete.txt",
+      "bytes": 9772,
+      "sha256": "b54ec8f5a2443555e75ca73bbba313408854cc5b64cf4130a4db9db8a17d33c9"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-chatcard-menu.txt",
+      "bytes": 14760,
+      "sha256": "6b3243b3e945d7f08b797529f55cf2aaeb178a2ce6acfd080ba2e40ff5366cad"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-chatcard-reveal.txt",
+      "bytes": 507,
+      "sha256": "91ff4ed2458ec6754c93277ebbfc21fce1dab05018d66eebd94e25ea10231a5f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-chatcard-review.txt",
+      "bytes": 1572,
+      "sha256": "5dc865dbfe5bbf0a4fe197992f14442e0e0b13d69bd90cb561c06f88749f1ed0"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-chatcard-study-question.txt",
+      "bytes": 9947,
+      "sha256": "60a006495d10f7c0a3105fb1cc3236fab2c9d441b3ae06cf74dbe41e69dadc61"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-chatcard-study-start.txt",
+      "bytes": 503,
+      "sha256": "75108c1da84b78cda459af2054c9d6fe33b25bbf6af9902725ce0e9a38549e51"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-create-alice-submit.txt",
+      "bytes": 306,
+      "sha256": "f01470bd3f5cfd18258f8ba19a89bc56b44cfdca0ed19eef67f7568706e0650c"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-create-alice.txt",
+      "bytes": 23414,
+      "sha256": "d764dfbb5cbc7796a8eed9ac92d2d183df2776982dab7542ad0bf6d9f37b869f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-create-bob-submit.txt",
+      "bytes": 340,
+      "sha256": "4c38be88350ae38807dacae5e153d1202cffe84c0b74f26447c253722a669157"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-create-bob.txt",
+      "bytes": 24322,
+      "sha256": "85b9a1454f96dc0d6f094b3b73debff0eefcfec37fad2e1ad763d4e86b4ef654"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-default-assistant-dom-identity.txt",
+      "bytes": 524,
+      "sha256": "3cb37444ab9c058e8f1df177d56f9d7fae8ac554338fa5686a7cf385de12843b"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-execution-checklist.md",
+      "bytes": 15094,
+      "sha256": "f1d9f8210c561d4caa0636d2572fb88bc1c7fc651f7b299f12844793879990f2"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-expiry-issued.txt",
+      "bytes": 857,
+      "sha256": "dcb71ab27e9da7b70ebb78af639e6c6d40bd0b7a13cfc6d8ac03da9bcd462bbb"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-expiry-late-status.txt",
+      "bytes": 835,
+      "sha256": "de5493f0e3d9d6ebb8f7becee9af64e5a6d14be285691842c955e234c8775a49"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-expiry-login-form.txt",
+      "bytes": 10716,
+      "sha256": "17a887fae8621b3b1507ff571e5162f652f25a2320d2d167eddf8846839e7bb9"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-expiry-relogin-form.txt",
+      "bytes": 11568,
+      "sha256": "8fe5d5cdac8d50903be224683fed8cfcb0b27e740742950624eb3760fa150f7b"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-expiry-return.txt",
+      "bytes": 4627,
+      "sha256": "27ed06c3381fed247621e75c6b09d35f8b8cdd0adc20dc3ce6da3c911f55e9f5"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-expiry-state.txt",
+      "bytes": 11299,
+      "sha256": "731b14bab49c5aa601e7bd22287e66158978426f5d51fde194ff30ab526d233f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-first-open.txt",
+      "bytes": 351,
+      "sha256": "3cc53d5e0c244c0c3523bea63c5bce95eac40d9d02f84510dd765d152717c7b6"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-answer-off.txt",
+      "bytes": 399,
+      "sha256": "aead83ce431a4caccfd1cc201935b64351986a5489ee24fb4478ff0a4fd23d94"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-before-search.txt",
+      "bytes": 7687,
+      "sha256": "14091470502e06e0fce14c0552bdae1c92df1f61008ea7e72261adc5015babc1"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-categories-none.txt",
+      "bytes": 388,
+      "sha256": "f743b2f75b8764e73749adc791e33356829c6f8ecb88ceded942d969d1d9641a"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-categories.txt",
+      "bytes": 13397,
+      "sha256": "60a5ed79f2b342f2e9fb17c0c45426dc25acf028ca1eab19b8bd092406de7571"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-category-open.txt",
+      "bytes": 416,
+      "sha256": "b30ae6b10fa3c92dad4af98318441ecc368c7901a8577e69f78fb052567dbac3"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-documents-only.txt",
+      "bytes": 420,
+      "sha256": "834c66f24a937685a7e7f5fad3a1b596d68702871cfed0d4d3d05c67a0288d40"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-filter-dismiss.txt",
+      "bytes": 399,
+      "sha256": "2bf60e5a27f33e73baa87d5119e7fb110ce69c30452cb644eed93f826f796919"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-filter-dismissed.txt",
+      "bytes": 9648,
+      "sha256": "94ebc423b1900922873bacc66ed1d84db5b90a8a77821bf62f2e627b7ce5f4e0"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-qa-open.txt",
+      "bytes": 429,
+      "sha256": "1e7677868e7289d82b3e51cb8cf24856cb8d64cecc00bbfab5de5be1294d6f95"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-qa-ready.txt",
+      "bytes": 6952,
+      "sha256": "02dbb9f8f4143c9ec054170affb18309ac5679d39917866bbc3718f279de284c"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-question.txt",
+      "bytes": 163,
+      "sha256": "5c48aa4c5d1fe4025181422a9d2c472897639f85af35b37261d9a0b68cc5428b"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-result.png",
+      "bytes": 118253,
+      "sha256": "5a269244eec3ff2540056182dd65367aeb7324df984b20c20378187caa39a085"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-result.txt",
+      "bytes": 7257,
+      "sha256": "b9e09b73032530dcd20620c6faa4d822b922377022ef2345afe17f378420b8fd"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-scope-close.txt",
+      "bytes": 402,
+      "sha256": "f0fdd02a7d59a0cb67acf2f14eba3e7937155db2849cfc61590b619daa366194"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-screenshot.txt",
+      "bytes": 375,
+      "sha256": "e5d5debf4b36e3e9a2ba6c27acfede15876ffafde697274c317f6071f87b000b"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-search-wire.txt",
+      "bytes": 8430,
+      "sha256": "3d0670913b9e11c09842284eecbc8b2ba9bf2a0dbe2fcfa2b5bde4efefa22582"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-selected.txt",
+      "bytes": 498,
+      "sha256": "78fa92f541201d5596ed1ba71c039d3ca3dce7c90606f3319860efe8b1080c3f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-settings-done.txt",
+      "bytes": 388,
+      "sha256": "ac9aece38ecf9bb2cd9e31c1eaaa44e89f4d92b0e208f486b0bd5fbb71120f8d"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-settings-open.txt",
+      "bytes": 410,
+      "sha256": "8fd3bf3ee9b947c1c3f73bab46b34007867a9bbdfceb1974ba7016f555868d7c"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-settings.txt",
+      "bytes": 14060,
+      "sha256": "bedb87dab332fdfad096ff83da04cb5bc82d3443b14d1a6164643f0adc7ddc32"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-source.txt",
+      "bytes": 235,
+      "sha256": "6d15280cff6fbb672d5d81339e92a9e89120a767018a2895c1eec377efa82ec4"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-sources-open.txt",
+      "bytes": 411,
+      "sha256": "08cf29a76390c15698c26431ea574a7da4b78fb66e74b426f0c66399bb77d5e7"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-sources.txt",
+      "bytes": 9487,
+      "sha256": "f357a2894e67ba4dae38c17422eddbef08c1c8fddefd5b0852bd80c9cb5609b1"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-specific-open.txt",
+      "bytes": 403,
+      "sha256": "e226e5b62cc59bde9622db30a1a865f3741e234b5eea0c0704d047bc9e4982e3"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-specific.txt",
+      "bytes": 16721,
+      "sha256": "1c4095af2bd026cde8f52738203e17cf89762813c2ca4c99bbd9596623b933c6"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-upload-run.txt",
+      "bytes": 75,
+      "sha256": "235d64f59e12db8ab26ac1ec2c1fca35bf6ab9d0b1e45c9b86c695eec864bdb2"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-upload.json",
+      "bytes": 2812,
+      "sha256": "c39b8409ba4967554484fa1899e11650a40ed807617117422709c8ee3f7840da"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-indigo-upload.mjs",
+      "bytes": 2127,
+      "sha256": "5d9bc901dacb0619c628a9e7adf060174d3ff2b9ccb1e5304076e6d84e0ef1c6"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-0826-status.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-added.txt",
+      "bytes": 12159,
+      "sha256": "a62e11123c03a099380cddbd1dcc7327e8ae08f4e767949a70a14f463de1f2c9"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-advanced.txt",
+      "bytes": 17731,
+      "sha256": "6df68ac5a42d8ea0901f07a3994dbce6319a12462010ef76d940bfef8f0f40c5"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-background.txt",
+      "bytes": 13662,
+      "sha256": "25b34cbf0efc05e6d10da758ea0b9264446488d3e7e7e447f3785ac9b18b28f2"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-configure.txt",
+      "bytes": 14398,
+      "sha256": "48849f476d1bbf91bc8282bc10726f36d33d863449a3b9835cd22c2af16c3e27"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-minimized.txt",
+      "bytes": 438,
+      "sha256": "1482555cde7abfdc3596ac456c5869064a235406c0f3ba513cbce5bf44db47d1"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-processing.txt",
+      "bytes": 11620,
+      "sha256": "250ec96fd2871987430b8c629e5de9db7c719fb07460390a4b84ba5c22f10544"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-provider.txt",
+      "bytes": 14494,
+      "sha256": "cc1f260509ad9029d8da4a60608028629a818ba2a2ad5729e63a2dbea0ce62f7"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-results.txt",
+      "bytes": 18323,
+      "sha256": "38cde092ae62c429f3e84503bddb5f41419aabedef4aa961865c1ed7410c5c9f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-resume-terminal.txt",
+      "bytes": 2158,
+      "sha256": "a3182844b6029d24b7b8312a6549bc234d528d026e1cb82a6f97ac5bae4c79f1"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-resume-wire.txt",
+      "bytes": 1391,
+      "sha256": "cc73f4cab30aadf556a26b271390a845dc4e81866a34e04d8aa9a6022d9a895a"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-resumed.png",
+      "bytes": 154990,
+      "sha256": "6852867ef6164fa472f9ae66f3d08dbdbc678067589c1dd902c5defc2a8979a5"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-resumed.txt",
+      "bytes": 16301,
+      "sha256": "3ae883dfc8f8ee1529cf1987f9c2d9dc29680aed2fbb42bf70427084b5283e65"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-review.png",
+      "bytes": 143057,
+      "sha256": "feb529efaa0a6838cd185811efc68c61b34f7959c7e196aef5a51705843fb489"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-review.txt",
+      "bytes": 10982,
+      "sha256": "01bc3026dc9e0d44744dc5cdf4316ae5b0643f30d37ccf7130f2b65a0a1a3e76"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-settled.png",
+      "bytes": 143482,
+      "sha256": "04cfb69ff1b6b4df51e8102cc2c67554c3457a43f75296529019d9b33158cd02"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-settled.txt",
+      "bytes": 18323,
+      "sha256": "d60152e0914eb4937f264015fb6bc36518260e6d83bc849d7741c11800a6a2a2"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-start.txt",
+      "bytes": 11177,
+      "sha256": "c0cf17eb57de0284e3f60fbe90eb13b3903654c6aa659434c1326f72f8f28820"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-status.txt",
+      "bytes": 16301,
+      "sha256": "70ad626f9f245433a00a7ae1bb60a288257dbc360b8cd75040306f7b99b1f82f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-submit.txt",
+      "bytes": 862,
+      "sha256": "09f584f411a5eeb1e736502127f13be30a6486cff1ef6dfd518d130d0c28d49b"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ingest-terminal-wire.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-isolation-api.json",
+      "bytes": 31712,
+      "sha256": "3d1b44fa5ad41c95a572a8e8e7e700893faec1d3e88c496ea4eb2b05b7bd70d0"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-isolation-run.txt",
+      "bytes": 245,
+      "sha256": "7351d214444bfdf0ba2a59da2582be31ef4706bf0ad69f53f63bc3392a6f6219"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-isolation-settings-open.txt",
+      "bytes": 549,
+      "sha256": "a07c5285b6781e09c41faf75976c9f45ee8930fad606cc24b6f5cc62a50b707d"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-isolation-settings.txt",
+      "bytes": 11473,
+      "sha256": "9e58fcf1c24995a31f033bf9481668bc5fcc23763f7569681b62da8105e9e549"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-isolation.mjs",
+      "bytes": 4375,
+      "sha256": "0ea59e5a2f7352f2048984ef61a17971314a016cc52df96e6a435ec31b16aeef"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-main-login.txt",
+      "bytes": 11577,
+      "sha256": "15c3fb7da262a3bf3b538a0918579f9e16463ab93bd09c60b36c5e9efcbcb26f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-media-actions-state.txt",
+      "bytes": 18984,
+      "sha256": "fdffd66f606f8162d006e2ddc210754e4f91661e6b2312a44e16c79e3e055a84"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-media-actions.txt",
+      "bytes": 493,
+      "sha256": "e48a1e75cecbf03e5a81714cd8324221c617060436294beed381bdd070983d5a"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-media-open-wire.txt",
+      "bytes": 969,
+      "sha256": "de6f7a8a562a2b3836e77def81eba2fe43c708d8380b4a3fc8210c0eecd0e791"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-media-open.txt",
+      "bytes": 9788,
+      "sha256": "34719598b6e217507766e5afbe7513b138adc5b5166847e0a83f2429265801f8"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-media-search-ui.txt",
+      "bytes": 16478,
+      "sha256": "aafeb142699f638fc09bb1715ee821dc120d3d7f815e45925f7bce2317f64131"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-media-search.txt",
+      "bytes": 1013,
+      "sha256": "7400061a5c6b10f994e966d8dd93ae7c38dbb70c3f916b9f52356922efdd25fb"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-media-selected.txt",
+      "bytes": 16311,
+      "sha256": "8e1ae4f2a2b34634ebe2232389cc6bf874a44c7033d3e5b41bf506a1f3f98a08"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-mixed-study-open.txt",
+      "bytes": 540,
+      "sha256": "5e30fa91372cf2475115302133bfe518de91fde7591f3303bbf1ca1ba961e790"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-mixed-study-settled.txt",
+      "bytes": 10160,
+      "sha256": "92ae1d6a089cd2abc41e181de5101eb256b5507efe32eea260c7102215c37f46"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-mixed-study.txt",
+      "bytes": 6320,
+      "sha256": "ef63921f3e3b5f0c93cab90ec047dd52a048dff71e15b5acff3cb29403b3d49d"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-note-backlink.txt",
+      "bytes": 12704,
+      "sha256": "e1b08fb558857a0152134c091cba7ed953ce96952a0ba3e07be057c597528bed"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-note-list.txt",
+      "bytes": 641,
+      "sha256": "220163388f02361289e09f08b266b0d4ed578117daab5b02d201ef1b65bd2adc"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-note-menu.txt",
+      "bytes": 14151,
+      "sha256": "3fdea4dddca50beb060447a8450ffc3421f90a2896e17d425fb204ba16c83385"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-note-open.txt",
+      "bytes": 13035,
+      "sha256": "4aee6cda4ee39e50401acf7803757fc0d8ff41bb62f7920b375363ce2359eb16"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-notes.txt",
+      "bytes": 12072,
+      "sha256": "6b10e78e024ae970a31d487d91d73007437f26e1dc68562cf27f04bdc6a55a91"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-offline-notes-open.txt",
+      "bytes": 417,
+      "sha256": "fc525855f10054650acca4117cba7f43ce63fc695799827a83ac6a32dd145ddb"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-offline-notes-settled.txt",
+      "bytes": 1222,
+      "sha256": "dbbb6a3eff81c75564e3f13bbe69eb2b4c9b2439e845854c3c8a62dbc40bbfd1"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-offline-notes.png",
+      "bytes": 20158,
+      "sha256": "e0a577b53c2521c9a0fe14bbc541ac30bc8655d67a5de090e0f93c84258ed4e3"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-offline-notes.txt",
+      "bytes": 809,
+      "sha256": "99e424077232795fd02bddec0f92591964a51aa96c9f441a898cc05621c2adfe"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-offline-ready.txt",
+      "bytes": 11615,
+      "sha256": "47e718a2a656fa4ae0e2203c2775105a5d7e993333651b80e520d9a77f775cce"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-offline-screenshot.txt",
+      "bytes": 375,
+      "sha256": "20a775e928297295b0a30d79844b49a307bc5d977fdb1860d442f7b031e88e43"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-offline-settings-open.txt",
+      "bytes": 441,
+      "sha256": "918b4512b90910e0c820bd4a6b9e5bfbb667f0fecf180cf81ddd12e5103f2329"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-offline-test-ui.txt",
+      "bytes": 12634,
+      "sha256": "87c113e00b9a96ad69cdb7a641ab864f66d2ebd34de8d09b980e571224092750"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-offline-test-wire.txt",
+      "bytes": 1394,
+      "sha256": "36c2103d4f145ef484d4fd4b8c36b745045e6b478a228f521249c75093234a64"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-operator-provider.json",
+      "bytes": 585,
+      "sha256": "7e7a87b655ce1e64811e65bc9e59f3a0b4071494954d166414e36e7987b4ca65"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ordinary-reload-canonical.txt",
+      "bytes": 3043,
+      "sha256": "6f613670d001ffd7c931522dde5acf2a532181e9c7023fc6696aa7fb6e341a40"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ordinary-reload.txt",
+      "bytes": 12346,
+      "sha256": "af7c8ee175c062a7cf7348960a17273ec1536d5a804954946a040e759be525bc"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ordinary-turn1-wire.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ordinary-turn1.txt",
+      "bytes": 9966,
+      "sha256": "c50e8cc4c5d0f4d43659db2a803b43802140f6b23c441c5ece5d3e8e11a90dc9"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ordinary-turn2-wire.txt",
+      "bytes": 1773,
+      "sha256": "eecaa658acba3c041320d3ad749ec29215c49ef833f99eb085a5b0e7855df508"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-ordinary-turn2.txt",
+      "bytes": 11463,
+      "sha256": "c1acefd98874fa2f88369e5e41a40a3e3f480d00cc03efa60da07cb34434f82b"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-canonical.txt",
+      "bytes": 3301,
+      "sha256": "41d24f46df56edc8cccfd0cf567e6de90c2208e1c1823d7f3b5ee1aebd1416d2"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-chat.txt",
+      "bytes": 16016,
+      "sha256": "58a0cc05415d9b4a14a6695f8ae9eac2666571114e7d35c025fac11af05bfd92"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-clear-assistant.txt",
+      "bytes": 531,
+      "sha256": "bb6fc445402bf44e69d32a1c1b810c23aef9d3f5e56ffcf708b7b18203f6cb55"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-composer.txt",
+      "bytes": 12267,
+      "sha256": "b2035cc665f5a7a19125d1b81e5ec82a0290a541ef8b334bef69c67142e7910f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-context-open.txt",
+      "bytes": 522,
+      "sha256": "52cef2c74a8de70faa47fe69aca7408838b85bb64430139b3ce40f50de6d83b6"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-context.txt",
+      "bytes": 21042,
+      "sha256": "891d5699d7ec92fe22bf8ac19e9b119a8675dedc888c53acea4e8ba5e8aebbd0"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-dismiss.txt",
+      "bytes": 87,
+      "sha256": "137a36cf4aea83f625a21e1d071f61e702b59f49d3edeeb3cacef1141160146f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-explore-state.txt",
+      "bytes": 12289,
+      "sha256": "a6142c7d2eed3a05fdeb3dc3708c83969f124a334f9accebd0ae6b78b05a197e"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-explore.txt",
+      "bytes": 522,
+      "sha256": "14d5377353014866cd518ca4e8348dfb4a4ac777bf5e5bc3e636403196de9799"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-handoff.txt",
+      "bytes": 529,
+      "sha256": "8b833e1c35b5c808b0396e5d3f2235f25006a26bb91235c4020d011f3b1e655c"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-menu-open.txt",
+      "bytes": 621,
+      "sha256": "19d48deea576f5941b011fed443036e84715395f2180ab91c935c70c1351d247"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-menu.txt",
+      "bytes": 15904,
+      "sha256": "05014e02bea134d8ff1514870dc28a086acf6a889c83f98504255f00323810be"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-modes-click.txt",
+      "bytes": 547,
+      "sha256": "514b0cf5d38be8ec9a8c4f982db795daf650025fc97ca21f854f8c6815ba9110"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-modes.txt",
+      "bytes": 11438,
+      "sha256": "36a9b4b8c09a516e2997ed1ae731c2eea0331bb70507899d5f32732101beba8b"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-new-saved.txt",
+      "bytes": 501,
+      "sha256": "ac548f19a11684eeedfd1415725ac60788317478b2c2bc445405bacfcddecf73"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-new-state.txt",
+      "bytes": 10209,
+      "sha256": "12bbebfcc550cd134fbffa57f4762b74435b98adb8c143065027494bdb11d5f4"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-open.txt",
+      "bytes": 531,
+      "sha256": "53de5cf0bf3693a9b6d5f2cbcbd47e16033f6de910fbf90d03646df690b5dd1e"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-question.txt",
+      "bytes": 113,
+      "sha256": "30660111b3f98a71a0be2e482886724738f944d5a9590938df95c71c8f089f84"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-ready.txt",
+      "bytes": 14812,
+      "sha256": "a3f40d5081480fffc4499ef7fbb21aff6154d205099756ecabff6a7facdd4397"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-reload.txt",
+      "bytes": 20274,
+      "sha256": "2b41321348e277d3b3e497688740082ff9ea95bf791383ec2104cc5ebd454bc8"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-result.txt",
+      "bytes": 19049,
+      "sha256": "d50d292834d52da1a47b00e6008ccf7ae786a891a121b8b15dab8d6827803bff"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-resume.txt",
+      "bytes": 10769,
+      "sha256": "acaf9d6af82961b6f651a49701767ad3c944361e4e7de43a8191db7b992cabfa"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-selector-dismiss.txt",
+      "bytes": 87,
+      "sha256": "137a36cf4aea83f625a21e1d071f61e702b59f49d3edeeb3cacef1141160146f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-selector-open.txt",
+      "bytes": 121,
+      "sha256": "7cfeca3506f8f590344ee111bd68a3f79063382d48ee7d9b548794c9e1d1f1ac"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-selector.txt",
+      "bytes": 12740,
+      "sha256": "4e206181bf36e0dac5954ae4271cf96e68bd33bde94c236fe9f20a8160f655fa"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-send-ready.txt",
+      "bytes": 17392,
+      "sha256": "f7c8adcae59cbde63c09322cd05bab977050a1df5a45ddb8436fc72f2849f291"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-standard.txt",
+      "bytes": 17328,
+      "sha256": "43fb316a1fa4efc57d1048caf2e3b5c5911bb9012c5dbaaeb5fe9d3cc8a5fbb1"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-system-apply.txt",
+      "bytes": 584,
+      "sha256": "c92394f0750c91a51da9dbe15c08693607e8510f16fe7af5001e57404cdc3a63"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-tab-return.txt",
+      "bytes": 322,
+      "sha256": "4e5be743af7a9712eeab500d511988e8b73f6612d9b0c87113aa95fd95754bb8"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-pirate-wire.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-practice-current.txt",
+      "bytes": 10523,
+      "sha256": "2403a86e620ae55bf1edc7f12f7b74d61777c200bd2d434825f1700573e2431c"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-practice-rerate.txt",
+      "bytes": 1341,
+      "sha256": "bca4a06e6f7e55af7a9638c385da072599b9229344901b5eba1a24640f4da2bd"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-practice-reveal.txt",
+      "bytes": 507,
+      "sha256": "f91548a3c23836a8be8f495aa0c398b0090c16ec029210a63d070fea9de44eb9"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-practice-review.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-practice-start.txt",
+      "bytes": 510,
+      "sha256": "529994373bbd0e6d31f16689fbcd05e72400316ab05cfafae0d45e1ec99648c2"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-practice-state.txt",
+      "bytes": 10524,
+      "sha256": "0bc154f57e36e58dea794218bad128c40445924e15c6af9dc8e36df944f35b1c"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-prompt-after-save.txt",
+      "bytes": 19818,
+      "sha256": "1822508c2c90cf0f2f043736bf2e64ade186aae6c6f5996d4234374e61ff15ec"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-prompt-collections-error.txt",
+      "bytes": 621,
+      "sha256": "18937df8913d31e22823ebc864a3321def6d84de1ade1e1103111de284c6b88f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-prompt-collections-reload.txt",
+      "bytes": 672,
+      "sha256": "76a8711a0d05f564243a5f9d108fa1f4bb21943d0ab72365c9d5a910905e4ccf"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-prompt-editor.png",
+      "bytes": 81988,
+      "sha256": "6eecb92daff931710fa1214d47847473207f792c037f43b0127a61fb8de09c14"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-prompt-editor.txt",
+      "bytes": 16717,
+      "sha256": "152d3c1573207d9f025ecd26ab9f490ca6c13d9fef287b4d9496683700f37d60"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-prompt-errors.txt",
+      "bytes": 383,
+      "sha256": "cf34a0867bb2da5dee835e8b071d95621ea7cfea7f2a0dfd40897527819ebd40"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-prompt-reloaded.txt",
+      "bytes": 14915,
+      "sha256": "3a056598494babe53f90a28d6e1dc27bbdd64f0d3750b7d7825f382ff385b07e"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-prompt-save.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-prompts-start.txt",
+      "bytes": 13947,
+      "sha256": "84afb57f1561c8d114225d10a232aeabe6e861f8ef58780949b7c9fec077ede4"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-qa-model.txt",
+      "bytes": 8852,
+      "sha256": "e85cbdc1e78790f36c09c64f433d8f39c63aaeb0005363f0a288f657609a01c7"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-qa-model2.txt",
+      "bytes": 9041,
+      "sha256": "2fe03577f3811c685681bab07dd2dd2bcb0b5dfe6b87b4cb14c4d1e042b49d5f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-qa-ready.txt",
+      "bytes": 7310,
+      "sha256": "1942540e3dc27cda8027e658bb82a3136f8f28738dd597d23472bf488b6504a8"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-qa-result.txt",
+      "bytes": 15609,
+      "sha256": "a203f991c295ef15f120bea06cb227381536817daf094cf11db3bcb82ed5565a"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-qa-scope.txt",
+      "bytes": 9409,
+      "sha256": "6d17618a4ac0f14c81da5a1d03c867d60f03fe2209a7fe74f266f04ab81ea52d"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-qa-settings.txt",
+      "bytes": 14089,
+      "sha256": "e031951251aafd762e665537287abf1ee07a06d8181a20e3999aa3d57e97cae3"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-qa-source.txt",
+      "bytes": 16603,
+      "sha256": "409c3bf1f990c69b2c5a402f71f7ae1de195ea6c32e1616706d082881448fbc1"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-qa-specific.txt",
+      "bytes": 12201,
+      "sha256": "b777094c1f1bab76933b8cf2a655c948ae28daa149d805c143d47936b80aae14"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-qa-start.txt",
+      "bytes": 7228,
+      "sha256": "ebad178a0c2c9e1e65bbd1767437787c024f6f6d1f809b74f20fcd71754b0102"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-qa-wire.txt",
+      "bytes": 9397,
+      "sha256": "e9dddbe695c19bbc1bcf44eb820b9183e75fbd5930357246d50b29d5bbfb30ec"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-actual-state.txt",
+      "bytes": 21075,
+      "sha256": "feb05923866c81efaeae5c93ddff241faefe7251f5b4e7327d459aa6080afd32"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-failure-wire.txt",
+      "bytes": 3443,
+      "sha256": "971d070f0022e6184c1e1410883c71374d60101797352a2cff46001fd8681c04"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-failure.txt",
+      "bytes": 21131,
+      "sha256": "21fa5bbca248bd891ec4e56a05c8f6a70031d0036aa383bd90e70a5429ee1c53"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-model-dropdown.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-model-open.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-model-options.txt",
+      "bytes": 21675,
+      "sha256": "c7b36306a4539664dfbac6164de9649ac2edc8823db07fceee3e9e8c1ff05e75"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-model-restore-open.txt",
+      "bytes": 419,
+      "sha256": "dae736fddef274dd2d33377af102d30a63038233dd5332f8cee5f0b16c8fc18b"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-model-restored.txt",
+      "bytes": 408,
+      "sha256": "bea718a4b690f2f9e7bdf14bc3df861a369530639a6dc6250122d832202ad0bc"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-model-value-click.txt",
+      "bytes": 375,
+      "sha256": "ff3bb6b401de3691fc0346e9024cbb0202bf3591c2784f8316e5c4da0370c769"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-open.txt",
+      "bytes": 432,
+      "sha256": "ea14acf05fc9506de62d4b5cb9432f7fe42a458ccebfefa3e17f8878764c208f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-prompt.txt",
+      "bytes": 276,
+      "sha256": "fa9651eb8bf44262a65fc605bd296d62f510653bde69dc6bdb922f41a84e0272"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-reload.txt",
+      "bytes": 2437,
+      "sha256": "ad65a4f01e33556819ff5f1d8e4ed5dfe340be459749ec325fbdcde54ad9798a"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-reloaded-ui.txt",
+      "bytes": 17312,
+      "sha256": "926634ac9aa5aa15d40a3bde4890fe4a60d04c2aa4bcdee6f65ccfc24d6c6068"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-restore-dropdown.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-restore-options.txt",
+      "bytes": 21612,
+      "sha256": "198b172fcdec8a9fb2543cb28b6eb5e6ed58551f67594a1423df701006535dfb"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-success-wire.txt",
+      "bytes": 7383,
+      "sha256": "0c5cd14e93d2b59e5b36d6c585e9be5965b7df72018885ded96cbe5fd1ff18c6"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reanalysis-unavailable-select.txt",
+      "bytes": 368,
+      "sha256": "cfe798adb8e02194005edf3d11a6a3368c04e58831c4242ff5483279d4cf47a1"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reconnect-notes-canonical.txt",
+      "bytes": 6902,
+      "sha256": "c623758bd6224e10a7af755e53d8625019c865aa35f299b791dbce3c9c1e4065"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reconnect-notes-ui.txt",
+      "bytes": 15035,
+      "sha256": "309996864dc9573c5952e5dcf8e591bfc11be44a70bc0e66eb16fae1c61284d7"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-reconnect-notes.txt",
+      "bytes": 1747,
+      "sha256": "10902316d85c3fb68d0969a00bdc8d18e64278d5a4efb68eb82093c56d3a9442"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-replacement-receipt-before.txt",
+      "bytes": 10973,
+      "sha256": "5e46c8bfb250be09eb5cf654048895b4f06a13d2c02dcc4c7f0fdf9c1f2dde3b"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-replacement-receipt-open.txt",
+      "bytes": 818,
+      "sha256": "ceab2b4f543256cd86c65a819a3fcf0237e419deac0ee124b8cec7992cf1a694"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-replacement-receipt-reload.txt",
+      "bytes": 533,
+      "sha256": "ba858302a8a2e9a4d9728db5d347694ddf312d2071517ed1f2a3dc75f1f69904"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-replacement-receipt-settled.txt",
+      "bytes": 12422,
+      "sha256": "9bd7531d2ca26dfa3d0f9498ac8fffa429cfc38f52ed641f18cd343d7bf2a217"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-replacement-receipt-tab.txt",
+      "bytes": 326,
+      "sha256": "0c8021a7bd55465dcc933ca56927298e9325181e8b7bb93c2e8b613ece33db62"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-replacement-receipt.txt",
+      "bytes": 880,
+      "sha256": "fa966566e143672eb595b725e47a5fa3c59d04d68ce60ad539da86ceab9fca9d"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-retry-failure-ui.txt",
+      "bytes": 12130,
+      "sha256": "3ee4316fd8180d6236f0ca4db418c6573fd70676fa56c33500f62266eedd5bc8"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-retry-failure-wire.txt",
+      "bytes": 1519,
+      "sha256": "2ebd7716faa5bb76beb62e8b034570172ecfc0c8a0fe3809f85f8cccd6620552"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-retry-final-canonical.txt",
+      "bytes": 2240,
+      "sha256": "5cac29fafcdd9950ec17ee87530c240e6b28506d52670900c70eac4d246042ab"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-retry-final-ui.txt",
+      "bytes": 11350,
+      "sha256": "f7c90a225669a553ae509b708d5d9ac1733585a0d155630590e748b06e71e2c7"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-retry-models.txt",
+      "bytes": 10867,
+      "sha256": "07930b58b1a4d80a18fed0ad7946cf727bfdf01b445b6d078948e5b983719ba3"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-retry-new.txt",
+      "bytes": 9317,
+      "sha256": "1b4b910008fad5a39a959e36b378dd0b435b5e1a16a1eb0310f8cf4f399df2e1"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-retry-preretry-canonical.txt",
+      "bytes": 2040,
+      "sha256": "9b6ba395734ad6b11b6a9bc6cc4d49bc07cf33b23cec35bcf26f6f32ab305f2e"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-retry-preretry-ui.txt",
+      "bytes": 12385,
+      "sha256": "4bdc39a23c7f259d783c655db3d5d310196fe7ef9b1f59880a15c9eb9a3a7fa1"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-retry-restore-model.txt",
+      "bytes": 14361,
+      "sha256": "eec055ffffc5098a1965cc2860dfdfa4cb23100c54e59cb20860aa3a78ed62e1"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-retry-success-ui.txt",
+      "bytes": 11517,
+      "sha256": "f0b38ced6fd028f97d926bdc6f196a41f071fc9ea453f61dfade98720239199b"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-retry-success-wire.txt",
+      "bytes": 92320,
+      "sha256": "f76ca84e965577c330140d826b0489d98ae4fdd7529b455ac06912561f28450e"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-retry-unavailable-selected.txt",
+      "bytes": 9071,
+      "sha256": "6bc71a26b399378ca14c3d9b28ea12d0c6e367f38f2fd5890b33977819510fb3"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-review-open.txt",
+      "bytes": 626,
+      "sha256": "5b7f9fdbcf3b6837ab4af90481cee9e16f7f4a3fda745c404f0e3ab4b8a9f435"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-review-reprocess-open.txt",
+      "bytes": 515,
+      "sha256": "be89b756e08bc05d390627861e8bfccf5d0ffe31707a77e3709d27686113df39"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-review-reprocess.txt",
+      "bytes": 13324,
+      "sha256": "558a5b4bc85b9caa4b98d7c6ff409e7f0478af00d8ded59da22624e8c5806f2e"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-review-select.txt",
+      "bytes": 511,
+      "sha256": "547e4abee10d58e8e0b2717bac057670fba8a95c653c6c665da50d9c564aad28"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-review-selected.txt",
+      "bytes": 10834,
+      "sha256": "e7d9194157378a77ee4fbbe98bf55aede7969b87308be1dfd5948daba5956d47"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-review-stack.txt",
+      "bytes": 504,
+      "sha256": "61bf971fdc1c706454c760d822487f7ba0b922dc4b0bd1aeb39ce5845a8becd0"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-review-stacked.txt",
+      "bytes": 12750,
+      "sha256": "a8e36eb47d7148659e02bd7f02e8f7637b026bb0513fae40da5fb3aae85c02bd"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-review-state.txt",
+      "bytes": 9499,
+      "sha256": "faac80ba5d76ce3a08261716e8df1460e21780c257648885192e3caf619c3772"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-running-tracker.md",
+      "bytes": 15351,
+      "sha256": "490c04d9be51cf7459cf710f70f406afeed98c664186d457473d0928f7ff07e6"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scan-evidence.mjs",
+      "bytes": 2108,
+      "sha256": "0d174c8df8c7abee66c9c82e9bee3d850ad3b87e43c5dd640ac9ecdf370e580f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scheduled-cram-after.txt",
+      "bytes": 10549,
+      "sha256": "dd50124dcc9014297249cad22dd64ed692b8c27c5fced5085d96572ed1d3bebf"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scheduled-cram-controls.txt",
+      "bytes": 10135,
+      "sha256": "efc736aa048cdc24b559186697a2c9a0dd667ec04a6e79cc3e652558d6bbca27"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scheduled-cram-end.txt",
+      "bytes": 798,
+      "sha256": "8785249b24ad88bb8d4efffc5375a2c0caa5e7ad001f9b14915336a11c4df427"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scheduled-cram-ended.txt",
+      "bytes": 10968,
+      "sha256": "3672830a18a5663bfdf7b8d4251bee85d678caccf655a75fff6af2bac26439b6"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scheduled-cram-open.txt",
+      "bytes": 432,
+      "sha256": "66aae6613ac8a854c0ad17828a02ac35d0dc9dc54973ddb1cec6f9157bd5b77b"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scheduled-cram-ready.txt",
+      "bytes": 10145,
+      "sha256": "bd457f5dd59ff464c96bf5f13319aa42ba48848bdc4cc09b4e836c7c9af2ba0a"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scheduled-cram-review.txt",
+      "bytes": 1160,
+      "sha256": "bb246f2c033a914564fe30a661cbe908e9ef09091ba674988123a73958ab7f0f"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scheduled-cram-selected.txt",
+      "bytes": 372,
+      "sha256": "835571e683c04b5d64b825c456806280e874c036c9c5ec7f6c3a7e584e50789c"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scheduled-cram-settled.txt",
+      "bytes": 9247,
+      "sha256": "b3f528c2999024f1414192b896d4e405a3d0467341ed49963af356a3b6c6ede7"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scheduled-cram-start-state.txt",
+      "bytes": 6320,
+      "sha256": "b1478f58e40dc8bd00ea80d7a99a1f28cb93d32f36ca486bd9802791b3d80ac6"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scheduled-cram-toggle.txt",
+      "bytes": 104,
+      "sha256": "ca29b0f0353c004628bd54c1b9f19ddae3a34f9f347fd0bcaa5cee9cffd1f578"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scheduled-deck-open.txt",
+      "bytes": 376,
+      "sha256": "941274927c7bf99c1a8ea4b32831275a7df8f4d8619ea04d80fd765976ad9ae2"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scheduled-deck-options.txt",
+      "bytes": 9775,
+      "sha256": "f4fc3b3bc1fbeb20680647e442d32e9626c061e9f07877e4d8450ec1e7881395"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-scheduled-deck-selected.txt",
+      "bytes": 389,
+      "sha256": "5f2563d0e38b6c16ffb49ecd4079125f96fccb913e12b157b55fb4daf0bebead"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-setup.txt",
+      "bytes": 1692,
+      "sha256": "85b5733e53a6ac617f15b5e2422a4f23deb1f60c97385673f3300fb4424b8a2e"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-source-chat-ready.txt",
+      "bytes": 14773,
+      "sha256": "eb3791623c65b59aaf58824677d361116cb815dc8366d0ec7d192dfe07c08ebc"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-source-chat-result.txt",
+      "bytes": 14821,
+      "sha256": "da6f0ec81e8349c3025013dddb2ccdb51c6ffb3ff0fa74b0498dbe380cc3c5c8"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-source-chat-wire.txt",
+      "bytes": 3039,
+      "sha256": "a82b085f734be87136752b8ed4ac2a2b3b52f651824688b6fbbe4d60792ae793"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-source-media.txt",
+      "bytes": 15333,
+      "sha256": "efcf86eeee897de14b7decb373a15d1d1225ffb347e6d6b5c6107adb83bad31d"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-study-card1-answer.txt",
+      "bytes": 11685,
+      "sha256": "d3d063e307e158e2ecdada03092beb93fb035a5aa8611c548c045d5f2d8860e7"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-study-card1.txt",
+      "bytes": 9700,
+      "sha256": "87e7d0e45449c4d1c7cdb28d6b9a3555c8114d4e28e0f2d483422cf9a6efbcea"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-study-card2.txt",
+      "bytes": 10831,
+      "sha256": "d89ab31b0b6c40758ce5978c2c55d3f41083a7fde82b4d6d4adfee20d3ca94e6"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-study-complete.txt",
+      "bytes": 10660,
+      "sha256": "acd2fd925b0dff1f6337c6e002f7c6df67f8d9e9af52c5fd698fe505e76478ba"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-study-controls-restored.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-study-due-restored.txt",
+      "bytes": 376,
+      "sha256": "7fb05daf6a41c31310a98128c325c4c5f0199f625a5da5a1440be2bbd216f6d8"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-study-reload-sessions.txt",
+      "bytes": 907,
+      "sha256": "5ad4dc5717a029a507a4e4519f464f460c48084b93f9a211b9d0994b6a605b6d"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-study-reload.txt",
+      "bytes": 8616,
+      "sha256": "c121510520b31d14adb9a874962f807825bdf5433018bcd630caebfc42871553"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-study-review1.txt",
+      "bytes": 2175,
+      "sha256": "46f0c27a482028b9acd0b356743ea6907258a18b547b02da78cbb7cf14730953"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-study-reviews2-5.txt",
+      "bytes": 7374,
+      "sha256": "ac834bc4e6b9e0a5ee35379e158341419f9c9ba6275a4582e1b0df0578ffe909"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-study-start.txt",
+      "bytes": 9758,
+      "sha256": "9c584060c76cfcf7ed0d3c14cc93f33ba78ed96f36ba451286ff38a54292e478"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-wikipedia-add.txt",
+      "bytes": 15005,
+      "sha256": "34682ffddaf18f566ca2cace97b58f9265604603dc47f5a495368e3db7ae2a43"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-wikipedia-config.txt",
+      "bytes": 18226,
+      "sha256": "ca0f1551d2afc7cf63b9bb41e9c753f670baac6d38a55c7648bff31f80a33ca8"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-wikipedia-context.txt",
+      "bytes": 13005,
+      "sha256": "83b637ee6675db380b23d02e744746cfcc7ce35136af0c152bc35c2ae5066128"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-wikipedia-processing.txt",
+      "bytes": 15189,
+      "sha256": "0d35c73394d94074fc9ec7163850a3bb7f2253813d4b9b3bf462f969883c9d57"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-wikipedia-result.txt",
+      "bytes": 15189,
+      "sha256": "0d35c73394d94074fc9ec7163850a3bb7f2253813d4b9b3bf462f969883c9d57"
+    },
+    {
+      "path": "/private/tmp/cycle5-multi-native-wikipedia-submit.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

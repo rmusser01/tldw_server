@@ -1,0 +1,9 @@
+### Ran Playwright code
+```js
+await page.getByTestId('model-selector').click();
+```
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Page Title: Chat | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T14-18-37-289Z.yml)

@@ -1,0 +1,9 @@
+### Result
+{
+  "visibility": "visible",
+  "focus": false
+}
+### Ran Playwright code
+```js
+await page.evaluate('() => (({visibility: document.visibilityState, focus: document.hasFocus()}))');
+```

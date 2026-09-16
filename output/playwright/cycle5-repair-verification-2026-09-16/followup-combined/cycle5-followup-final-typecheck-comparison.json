@@ -1,0 +1,9 @@
+{
+  "baselineFile": "/private/tmp/cycle5-repair-combined-typecheck.log",
+  "currentFile": "/private/tmp/cycle5-followup-final-typecheck.log",
+  "baselineDiagnostics": 90,
+  "currentDiagnostics": 90,
+  "added": [],
+  "removed": [],
+  "note": "Compare diagnostic signatures with source positions removed; pre-existing compiler failures are not a passing typecheck."
+}

@@ -1903,7 +1903,7 @@ Ignored nodes: comments, script, style
     175|     expect(screen.getByRole("spinbutton", { name: "Depth" })).toBeEnab…
        |                   ^
     176|   })
-    177| 
+    177|
 
 ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
 
@@ -2593,4 +2593,3 @@ Ignored nodes: comments, script, style
       Tests  4 failed | 8 passed (12)
    Start at  08:16:32
    Duration  18.62s (transform 240ms, setup 258ms, import 964ms, tests 16.15s, environment 944ms)
-

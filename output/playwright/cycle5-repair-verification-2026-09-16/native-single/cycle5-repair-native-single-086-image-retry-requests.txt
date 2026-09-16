@@ -1,0 +1,13 @@
+### Result
+228. [POST] http://127.0.0.1:18500/api/v1/chats/ => [201] Created
+230. [GET] http://127.0.0.1:18500/api/v1/chats/53c1610e-20eb-4dd6-9148-eb459ea6fe17/research-runs => [200] OK
+231. [GET] http://127.0.0.1:18500/api/v1/chats/53c1610e-20eb-4dd6-9148-eb459ea6fe17/settings?scope_type=global => [200] OK
+232. [GET] http://127.0.0.1:18500/api/v1/chats/53c1610e-20eb-4dd6-9148-eb459ea6fe17/messages?scope_type=global&include_deleted=false&include_metadata=true&include_images=true&render_placeholders=false&limit=200&offset=0 => [200] OK
+233. [GET] http://127.0.0.1:18500/api/v1/chats/53c1610e-20eb-4dd6-9148-eb459ea6fe17/messages?scope_type=global&include_deleted=false&include_metadata=true&include_images=true&render_placeholders=false&limit=200&offset=0 => [200] OK
+234. [GET] http://127.0.0.1:18500/api/v1/chats/53c1610e-20eb-4dd6-9148-eb459ea6fe17/messages?scope_type=global&include_deleted=false&include_metadata=true&include_images=true&render_placeholders=false&limit=200&offset=0 => [200] OK
+235. [GET] http://127.0.0.1:18500/api/v1/chats/53c1610e-20eb-4dd6-9148-eb459ea6fe17/messages?scope_type=global&include_deleted=false&include_metadata=true&include_images=true&render_placeholders=false&limit=200&offset=0 => [200] OK
+236. [GET] http://127.0.0.1:18500/api/v1/chats/53c1610e-20eb-4dd6-9148-eb459ea6fe17/messages?scope_type=global&include_deleted=false&include_metadata=true&include_images=true&render_placeholders=false&limit=200&offset=0 => [200] OK
+237. [GET] http://127.0.0.1:18500/api/v1/chats/53c1610e-20eb-4dd6-9148-eb459ea6fe17/messages?scope_type=global&include_deleted=false&include_metadata=true&include_images=true&render_placeholders=false&limit=200&offset=0 => [200] OK
+255. [GET] http://127.0.0.1:18500/api/v1/chats/53c1610e-20eb-4dd6-9148-eb459ea6fe17/research-runs => [200] OK
+
+Note: 149 static requests not shown, run with --static option to see them.

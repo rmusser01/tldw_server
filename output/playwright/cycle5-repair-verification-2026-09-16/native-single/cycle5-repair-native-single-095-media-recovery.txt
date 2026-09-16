@@ -1,0 +1,248 @@
+### Open tabs
+- 0: (current) [Media | tldw](http://127.0.0.1:18580/media)
+- 1: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 2: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 3: [Describe the attached image. State the color of the speech bubble and how many d | tldw](http://127.0.0.1:18580/chat)
+### Page
+- Page URL: http://127.0.0.1:18580/media
+- Page Title: Media | tldw
+- Console: 122 errors, 71 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f4e1]:
+  - generic [ref=f4e4]:
+    - link "Skip to main content" [ref=f4e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f4e6]:
+      - button "Expand sidebar" [ref=f4e7] [cursor=pointer]
+      - button "New Chat" [ref=f4e11] [cursor=pointer]
+      - generic [ref=f4e14]:
+        - button "Quick Ingest" [ref=f4e15] [cursor=pointer]
+        - button "Chat" [ref=f4e19] [cursor=pointer]
+        - button "Prompts" [ref=f4e22] [cursor=pointer]
+        - button "Characters" [ref=f4e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f4e31] [cursor=pointer]
+        - button "World Books" [ref=f4e35] [cursor=pointer]
+        - button "Notes" [ref=f4e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f4e42] [cursor=pointer]
+        - button "Media" [ref=f4e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f4e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f4e59] [cursor=pointer]
+        - button "Kanban" [ref=f4e65] [cursor=pointer]
+        - button "Watchlists" [ref=f4e67] [cursor=pointer]
+      - generic [ref=f4e72]:
+        - button "Open Notes Dock" [ref=f4e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f4e78] [cursor=pointer]
+        - button "Settings" [ref=f4e81] [cursor=pointer]
+    - main [ref=f4e85]:
+      - generic [ref=f4e86]:
+        - generic [ref=f4e89]:
+          - generic [ref=f4e90]:
+            - button "Expand sidebar" [ref=f4e91] [cursor=pointer]
+            - generic [ref=f4e93]:
+              - img "tldw Assistant" [ref=f4e94]
+              - generic [ref=f4e95]: tldw Assistant
+              - button "Companion Home" [ref=f4e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f4e100] [cursor=pointer]
+          - generic [ref=f4e103]:
+            - button "Search - Open command palette" [ref=f4e104] [cursor=pointer]:
+              - generic [ref=f4e108]: Search
+              - generic [ref=f4e109]: ⌘K
+            - button "Open settings" [ref=f4e110] [cursor=pointer]
+            - generic [ref=f4e122]:
+              - button "Notifications, 0 unread" [ref=f4e123] [cursor=pointer]
+              - status [ref=f4e127]: Notifications are active
+            - button "Switch to light theme" [ref=f4e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f4e135] [cursor=pointer]:
+              - generic [ref=f4e136]: "?"
+        - generic [ref=f4e556]:
+          - generic [ref=f4e558]:
+            - generic [ref=f4e559]:
+              - generic [ref=f4e560]:
+                - heading "Media Inspector" [level=1] [ref=f4e561]
+                - generic [ref=f4e562]:
+                  - generic [ref=f4e563]: 1 / 1
+                  - button "Trash" [ref=f4e564] [cursor=pointer]
+                  - button "Bulk" [ref=f4e568] [cursor=pointer]
+              - generic [ref=f4e571]:
+                - button "Show media only" [pressed] [ref=f4e572] [cursor=pointer]:
+                  - generic [ref=f4e573]: Media
+                  - generic [ref=f4e574]: "1"
+                - button "Show notes only" [ref=f4e575] [cursor=pointer]:
+                  - generic [ref=f4e576]: Notes
+                  - generic [ref=f4e577]: "0"
+            - generic [ref=f4e579]:
+              - generic [ref=f4e580]:
+                - generic [ref=f4e581]: Find media
+                - button "Collapse find media panel" [expanded] [ref=f4e583] [cursor=pointer]
+              - generic [ref=f4e586]:
+                - generic [ref=f4e587]:
+                  - textbox "Search media (title/content)" [ref=f4e592]
+                  - button "Search syntax help" [ref=f4e594] [cursor=pointer]: "?"
+                - button "Search" [ref=f4e595] [cursor=pointer]
+                - generic [ref=f4e596]:
+                  - generic [ref=f4e597]:
+                    - generic [ref=f4e598]: Filters
+                    - button "Clear all" [ref=f4e602] [cursor=pointer]
+                  - generic [ref=f4e603]:
+                    - generic [ref=f4e604]: Search mode
+                    - generic [ref=f4e605]:
+                      - button "Full-text search" [pressed] [ref=f4e606] [cursor=pointer]: Full-text
+                      - button "Metadata search" [ref=f4e607] [cursor=pointer]: Metadata
+                  - generic [ref=f4e608]:
+                    - generic [ref=f4e609]: Sort by
+                    - generic [ref=f4e610] [cursor=pointer]:
+                      - generic [ref=f4e611]:
+                        - generic "Relevance" [ref=f4e612]
+                        - combobox [ref=f4e613]
+                      - img "down" [ref=f4e615]
+                  - generic [ref=f4e618]:
+                    - generic [ref=f4e619]: Date range
+                    - generic [ref=f4e620]:
+                      - generic [ref=f4e621]:
+                        - text: Start date
+                        - textbox "Start date" [ref=f4e622]
+                      - generic [ref=f4e623]:
+                        - text: End date
+                        - textbox "End date" [ref=f4e624]
+                  - button "Advanced search" [ref=f4e626] [cursor=pointer]
+                  - generic [ref=f4e630] [cursor=pointer]:
+                    - checkbox "Favorites only" [ref=f4e631]
+                    - generic [ref=f4e634]: Favorites only
+                  - generic [ref=f4e635]:
+                    - button "Media types" [ref=f4e636] [cursor=pointer]
+                    - generic [ref=f4e642] [cursor=pointer]:
+                      - checkbox "Filter by Document" [ref=f4e643]
+                      - generic [ref=f4e644]: Document
+                  - button "Keywords" [ref=f4e646] [cursor=pointer]
+                  - generic [ref=f4e651]:
+                    - generic [ref=f4e652]: Exclude keywords
+                    - generic [ref=f4e654]:
+                      - generic [ref=f4e655]:
+                        - generic: Exclude keyword
+                        - combobox "Exclude keyword" [ref=f4e657]
+                      - img "down" [ref=f4e659]
+                    - generic [ref=f4e662]: Use excluded keywords to remove items containing those terms.
+                    - generic [ref=f4e663]: 0 exclude keyword suggestions available
+                - generic [ref=f4e664]:
+                  - generic [ref=f4e665]:
+                    - generic [ref=f4e666]: Collection
+                    - combobox "Collection" [ref=f4e667]:
+                      - option "All items" [selected]
+                  - paragraph [ref=f4e668]: Create collections from bulk selection to organize related items.
+            - generic [ref=f4e669]:
+              - generic [ref=f4e671]:
+                - generic [ref=f4e672]:
+                  - generic [ref=f4e673]:
+                    - generic [ref=f4e674]: Results
+                    - generic [ref=f4e675]: 1 / 1
+                  - generic [ref=f4e676]:
+                    - button "Standard view" [pressed] [ref=f4e677] [cursor=pointer]
+                    - button "Compact view" [ref=f4e683] [cursor=pointer]
+                - 'button "Select media: cycle5-single-native-public-source" [ref=f4e686] [cursor=pointer]':
+                  - generic [ref=f4e687]:
+                    - button "Add to favorites" [ref=f4e692]
+                    - generic [ref=f4e695]:
+                      - generic [ref=f4e696]:
+                        - generic [ref=f4e697]: MEDIA
+                        - generic [ref=f4e698]: document
+                        - generic [ref=f4e699]: 6h ago
+                      - generic [ref=f4e700]: cycle5-single-native-public-source
+              - generic [ref=f4e701]:
+                - generic [ref=f4e702]:
+                  - generic [ref=f4e703]: 1 of 1 results
+                  - generic [ref=f4e704]:
+                    - generic [ref=f4e705]: "Per page:"
+                    - combobox "Per page:" [ref=f4e706]:
+                      - option "20" [selected]
+                      - option "50"
+                      - option "100"
+                - button "? for shortcuts" [ref=f4e708] [cursor=pointer]:
+                  - generic [ref=f4e709]: "?"
+                  - generic [ref=f4e710]: for shortcuts
+            - button "Library tools" [ref=f4e712] [cursor=pointer]
+          - button "Collapse sidebar" [ref=f4e717] [cursor=pointer]
+          - generic [ref=f4e723]:
+            - button "Create study pack" [disabled] [ref=f4e725]
+            - generic [ref=f4e727]:
+              - heading "No media item selected" [level=2] [ref=f4e735]
+              - paragraph [ref=f4e736]: Select a media item from the left sidebar to view its content and analyses here.
+              - button "Keyboard Shortcuts" [ref=f4e737] [cursor=pointer]
+              - button "Open Quick Ingest" [ref=f4e739] [cursor=pointer]
+  - generic:
+    - generic [ref=f4e764]:
+      - generic [ref=f4e765]:
+        - navigation [ref=f4e767]:
+          - button [disabled] [ref=f4e768]:
+            - img "previous" [ref=f4e769]
+          - generic [ref=f4e771]:
+            - generic [ref=f4e772]: 1/
+            - text: "2"
+          - button [ref=f4e773] [cursor=pointer]:
+            - img "next" [ref=f4e774]
+        - link "Next.js 16.1.4 (stale) Turbopack" [ref=f4e777] [cursor=pointer]:
+          - /url: https://nextjs.org/docs/messages/version-staleness
+          - generic "There is a newer version (16.3.5) available, upgrade recommended!" [ref=f4e780]: Next.js 16.1.4 (stale)
+          - generic [ref=f4e781]: Turbopack
+      - dialog "Runtime Error" [ref=f4e783]:
+        - generic [ref=f4e786]:
+          - generic [ref=f4e787]:
+            - generic [ref=f4e788]:
+              - generic [ref=f4e789]: Runtime Error
+              - generic [ref=f4e791]:
+                - button "Copy Error Info" [ref=f4e792] [cursor=pointer]
+                - button "No related documentation found" [disabled] [ref=f4e795]
+                - button "Attach Node.js inspector" [ref=f4e798] [cursor=pointer]
+            - generic [ref=f4e807]: Failed to fetch (GET /api/v1/media?page=1&results_per_page=20&include_keywords=true)
+          - generic [ref=f4e809]:
+            - generic [ref=f4e810]:
+              - paragraph [ref=f4e812]:
+                - generic [ref=f4e818]: ../packages/ui/src/services/background-proxy.ts (1054:19) @ buildRequestError
+                - button "Open in editor" [ref=f4e819] [cursor=pointer]
+              - generic [ref=f4e824]:
+                - generic [ref=f4e825]: 1052 | return createAbortError(msg, status, details)
+                - generic [ref=f4e826]: "1053 | }"
+                - generic [ref=f4e827]: "> 1054 | const error = new Error(`${msg} (${method} ${path})`) as Error & {"
+                - generic [ref=f4e828]: "| ^"
+                - generic [ref=f4e829]: "1055 | status?: number"
+                - generic [ref=f4e830]: "1056 | code?: string"
+                - generic [ref=f4e831]: "1057 | details?: unknown"
+            - generic [ref=f4e832]:
+              - paragraph [ref=f4e834]:
+                - text: Call Stack
+                - generic [ref=f4e835]: "4"
+              - generic [ref=f4e836]:
+                - generic [ref=f4e837]:
+                  - text: buildRequestError
+                  - button "Open buildRequestError in editor" [ref=f4e838] [cursor=pointer]
+                - text: ../packages/ui/src/services/background-proxy.ts (1054:19)
+              - generic [ref=f4e841]:
+                - generic [ref=f4e842]:
+                  - text: handleFailedResponse
+                  - button "Open handleFailedResponse in editor" [ref=f4e843] [cursor=pointer]
+                - text: ../packages/ui/src/services/background-proxy.ts (1200:28)
+              - generic [ref=f4e846]:
+                - generic [ref=f4e847]:
+                  - text: async bgRequestImpl
+                  - button "Open async bgRequestImpl in editor" [ref=f4e848] [cursor=pointer]
+                - text: ../packages/ui/src/services/background-proxy.ts (1445:21)
+              - generic [ref=f4e851]:
+                - generic [ref=f4e852]:
+                  - text: async useMediaSearch.useCallback[runSearch]
+                  - button "Open async useMediaSearch.useCallback[runSearch] in editor" [ref=f4e853] [cursor=pointer]
+                - text: ../packages/ui/src/components/Review/hooks/useMediaSearch.ts (404:27)
+        - generic [ref=f4e856]: "1"
+        - generic [ref=f4e857]: "2"
+    - generic [ref=f4e506] [cursor=pointer]:
+      - button "Open Next.js Dev Tools" [ref=f4e507]
+      - generic [ref=f4e858]:
+        - button "Open issues overlay" [ref=f4e859]:
+          - generic [ref=f4e860]:
+            - generic [aria-hidden] [ref=f4e861]: "1"
+            - generic [ref=f4e862]: "2"
+          - generic [ref=f4e863]:
+            - text: Issue
+            - generic [aria-hidden] [ref=f4e864]: s
+        - button "Collapse issues badge" [ref=f4e865]
+  - alert [ref=f4e511]: Media | tldw
+```

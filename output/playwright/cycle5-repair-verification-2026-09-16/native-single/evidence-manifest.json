@@ -1,0 +1,968 @@
+{
+  "retainedAt": "2026-09-16T15:02:47.952Z",
+  "sourceCheckpoint": "3c30685611a26d0495dafabd38f594fee93a1655",
+  "status": "Targeted acceptance checkpoint; not full UAT sign-off",
+  "secretScan": {
+    "knownRuntimeSecrets": 14,
+    "jwtPattern": true,
+    "findings": 0
+  },
+  "files": [
+    {
+      "file": "cycle5-repair-native-single-001-open.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-001-open.txt",
+      "bytes": 386,
+      "sha256": "ec062a825f5a1ad97725d9cc0f5df79c9ed6b887fb9b34a92f63af8b5b920705"
+    },
+    {
+      "file": "cycle5-repair-native-single-002-snapshot.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-002-snapshot.txt",
+      "bytes": 10559,
+      "sha256": "ecd428c6b81a4613812e66367ee11d2c4a33581cce293d345c00189aa1ea422d"
+    },
+    {
+      "file": "cycle5-repair-native-single-003-save.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-003-save.txt",
+      "bytes": 389,
+      "sha256": "9f930395e17519de8ec352abc703289b76ba6bc38929d85948d39d6afdbcb842"
+    },
+    {
+      "file": "cycle5-repair-native-single-004-connected.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-004-connected.txt",
+      "bytes": 11933,
+      "sha256": "5eefb35adb89788e5e3af38fd68b561d1fd7eda425da48aaa29d5d805fc27735"
+    },
+    {
+      "file": "cycle5-repair-native-single-005-flashcards.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-005-flashcards.txt",
+      "bytes": 313,
+      "sha256": "aa0aa6785eb7dfa0bcc6a53f5d16ba3eea6afecfe9cde721aa53136b2f8bface"
+    },
+    {
+      "file": "cycle5-repair-native-single-006-flashcards-ready.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-006-flashcards-ready.txt",
+      "bytes": 11245,
+      "sha256": "4c1510b6441bfe4f02ff9447920e62282b8584f9853510f358c0786e71b8fcb6"
+    },
+    {
+      "file": "cycle5-repair-native-single-007-import-tab.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-007-import-tab.txt",
+      "bytes": 281,
+      "sha256": "0cab88d9caa21b5146b57e6e0be7e7ce58b1e4d708db8c36b58d7b2752bbaaff"
+    },
+    {
+      "file": "cycle5-repair-native-single-008-import-snapshot.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-008-import-snapshot.txt",
+      "bytes": 11327,
+      "sha256": "5215b40d9570c72c0d2edbcc43939c19c1dc488b1900a7034b0f721f1faa5f84"
+    },
+    {
+      "file": "cycle5-repair-native-single-009-study-tab.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-009-study-tab.txt",
+      "bytes": 265,
+      "sha256": "b6871fbce7e6d88c2bf2619bcc387168ed4c323d31eec9c0f6610e275eceae18"
+    },
+    {
+      "file": "cycle5-repair-native-single-010-study-reload.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-010-study-reload.txt",
+      "bytes": 291,
+      "sha256": "f534301da1a77e726ccf792428f48200bdf7ab6ca4ff6fa4532dbb7a99227a14"
+    },
+    {
+      "file": "cycle5-repair-native-single-011-study-reloaded.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-011-study-reloaded.txt",
+      "bytes": 11149,
+      "sha256": "5d1a90a29dbf500afbfc1462f88b86954d63e008ceaa8bfbbb3b59e59c0395bc"
+    },
+    {
+      "file": "cycle5-repair-native-single-012-deck-cram.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-012-deck-cram.txt",
+      "bytes": 361,
+      "sha256": "d775bcece64645d214d038ec44625bdbcccc6b02cca32641e881d62cbedc1638"
+    },
+    {
+      "file": "cycle5-repair-native-single-013-cram-ready.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-013-cram-ready.txt",
+      "bytes": 9812,
+      "sha256": "69a82a7ac8a4e1d741388c90b0d19663dfdd4fa6d13a3f97abf3d747bf43cd8f"
+    },
+    {
+      "file": "cycle5-repair-native-single-014-schedule-on.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-014-schedule-on.txt",
+      "bytes": 283,
+      "sha256": "0bfedc211627daedcb7c2dbc18e7b6f48cab1a1e8cd11b70bfe81f7dc3e6ff8d"
+    },
+    {
+      "file": "cycle5-repair-native-single-015-answer1.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-015-answer1.txt",
+      "bytes": 274,
+      "sha256": "b345e7dc6379fb6476c724743ddef855a5e2707f036b30ad5a49e276acbf1325"
+    },
+    {
+      "file": "cycle5-repair-native-single-016-rating1.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-016-rating1.txt",
+      "bytes": 11723,
+      "sha256": "a0b17313634a89e78f26d40f7024cc767c0faa18a6432bf520ed4e9c7019154f"
+    },
+    {
+      "file": "cycle5-repair-native-single-017-cards-before.json",
+      "source": "/private/tmp/cycle5-repair-native-single-017-cards-before.json",
+      "bytes": 7350,
+      "sha256": "4d1e8f82dc81868d5fae76cb55c4ded0375e7a964ee43da6a5a001500dbdf0ba"
+    },
+    {
+      "file": "cycle5-repair-native-single-018-sessions-before.json",
+      "source": "/private/tmp/cycle5-repair-native-single-018-sessions-before.json",
+      "bytes": 1383,
+      "sha256": "026bc35c75fee8ddf7f5623956fa4a9c88c0cfba77814fc3f5b781e1df3022bd"
+    },
+    {
+      "file": "cycle5-repair-native-single-019-good1.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-019-good1.txt",
+      "bytes": 269,
+      "sha256": "8fd6cb49ac7f8a6c0e9c2407e3b295303e1f46b8f06ef0c8ba8f4467f199ab3b"
+    },
+    {
+      "file": "cycle5-repair-native-single-020-after1.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-020-after1.txt",
+      "bytes": 10953,
+      "sha256": "fea8f921e1385e21d98ce1c034452a24073521cee9c7ebff35b721dacddfa395"
+    },
+    {
+      "file": "cycle5-repair-native-single-021-answer2.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-021-answer2.txt",
+      "bytes": 274,
+      "sha256": "875887e60436b61e54f1ece659e5f52c0c4f92f4a1ce13453bba3faea88ae6b8"
+    },
+    {
+      "file": "cycle5-repair-native-single-022-good2.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-022-good2.txt",
+      "bytes": 77,
+      "sha256": "5041197db9503dfc04f88038bd89b52fab5cd55bfee9581884bdab7581d0a7fa"
+    },
+    {
+      "file": "cycle5-repair-native-single-023-rerate2.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-023-rerate2.txt",
+      "bytes": 93,
+      "sha256": "fa4a2dd1392831b4f4f39ff4599c4145adeb344a87a08de1a61e69021b52c336"
+    },
+    {
+      "file": "cycle5-repair-native-single-024-rerate-ready.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-024-rerate-ready.txt",
+      "bytes": 12606,
+      "sha256": "f458091b86d105a13547c7021489712ef36a4fe1e4fecdb5f08cd468f25b2f9b"
+    },
+    {
+      "file": "cycle5-repair-native-single-025-rerated-good.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-025-rerated-good.txt",
+      "bytes": 269,
+      "sha256": "637589b38dd6915eeb5402ebda1fa4bb86d648cc3a748273de750baa2b363320"
+    },
+    {
+      "file": "cycle5-repair-native-single-026-after-rerate.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-026-after-rerate.txt",
+      "bytes": 10747,
+      "sha256": "ed9f295ec5fd4c39a540b2414880e34f4dacc1ef811fb08b6107d720585b5312"
+    },
+    {
+      "file": "cycle5-repair-native-single-027-answer3.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-027-answer3.txt",
+      "bytes": 85,
+      "sha256": "6a9d6056c451c4fb775227bedbb4291b5534bfea840488474b860db5abb2a7d4"
+    },
+    {
+      "file": "cycle5-repair-native-single-028-good3.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-028-good3.txt",
+      "bytes": 77,
+      "sha256": "5041197db9503dfc04f88038bd89b52fab5cd55bfee9581884bdab7581d0a7fa"
+    },
+    {
+      "file": "cycle5-repair-native-single-029-after3.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-029-after3.txt",
+      "bytes": 10720,
+      "sha256": "5714a2d3f1404ca5452fbe0ccdf069e498fb711940d2365ae6c1ccea402813f2"
+    },
+    {
+      "file": "cycle5-repair-native-single-030-answer4.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-030-answer4.txt",
+      "bytes": 85,
+      "sha256": "6a9d6056c451c4fb775227bedbb4291b5534bfea840488474b860db5abb2a7d4"
+    },
+    {
+      "file": "cycle5-repair-native-single-031-good4.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-031-good4.txt",
+      "bytes": 77,
+      "sha256": "5041197db9503dfc04f88038bd89b52fab5cd55bfee9581884bdab7581d0a7fa"
+    },
+    {
+      "file": "cycle5-repair-native-single-032-after4.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-032-after4.txt",
+      "bytes": 10738,
+      "sha256": "c3ebb1dbd6e37a5ceeeef3f6d88f63e6467eb9b22c21f8504bd1f4ffe4dd2d77"
+    },
+    {
+      "file": "cycle5-repair-native-single-033-answer5.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-033-answer5.txt",
+      "bytes": 85,
+      "sha256": "6a9d6056c451c4fb775227bedbb4291b5534bfea840488474b860db5abb2a7d4"
+    },
+    {
+      "file": "cycle5-repair-native-single-034-good5.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-034-good5.txt",
+      "bytes": 77,
+      "sha256": "5041197db9503dfc04f88038bd89b52fab5cd55bfee9581884bdab7581d0a7fa"
+    },
+    {
+      "file": "cycle5-repair-native-single-035-completion.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-035-completion.txt",
+      "bytes": 11749,
+      "sha256": "d173cb2b5252c4683e2e0a037a3e6e8db6afb9f22f9915984132079f317a5be5"
+    },
+    {
+      "file": "cycle5-repair-native-single-036-cards-after.json",
+      "source": "/private/tmp/cycle5-repair-native-single-036-cards-after.json",
+      "bytes": 7353,
+      "sha256": "3ad8b7f46d79de1a76f345b3f67e8b52e07531b4c18029faf0e1f8614657e203"
+    },
+    {
+      "file": "cycle5-repair-native-single-037-sessions-after.json",
+      "source": "/private/tmp/cycle5-repair-native-single-037-sessions-after.json",
+      "bytes": 1810,
+      "sha256": "e5fbb86f4f2a47a55067693440618b3bdbe0709cd247de98ffe2a855feef13de"
+    },
+    {
+      "file": "cycle5-repair-native-single-038-card-schedule-diff.json",
+      "source": "/private/tmp/cycle5-repair-native-single-038-card-schedule-diff.json",
+      "bytes": 5566,
+      "sha256": "51a232ba0abda93f24d1681485fdabd5f90052c3cc1ef06a613ec4a8f19a8289"
+    },
+    {
+      "file": "cycle5-repair-native-single-039-practice-only.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-039-practice-only.txt",
+      "bytes": 283,
+      "sha256": "da3003d751b6360dde33a80eefa4df7c492f68389b4286adedbad799d28645ad"
+    },
+    {
+      "file": "cycle5-repair-native-single-040-practice-state.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-040-practice-state.txt",
+      "bytes": 10919,
+      "sha256": "28276293615ec188aefb4ce635e726b58de7c883ca689bace213a51fb4b14412"
+    },
+    {
+      "file": "cycle5-repair-native-single-041-practice-again.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-041-practice-again.txt",
+      "bytes": 277,
+      "sha256": "db425b5f4560f8d26a02047727d463350faca4632e687512dc2edbac95f2ad2e"
+    },
+    {
+      "file": "cycle5-repair-native-single-042-practice-start.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-042-practice-start.txt",
+      "bytes": 10428,
+      "sha256": "baa9a8384e9712e4fb1f06cff61e9f2f8a1f6664768b58ef679ddbe0cd4c52b6"
+    },
+    {
+      "file": "cycle5-repair-native-single-043-practice-answer.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-043-practice-answer.txt",
+      "bytes": 85,
+      "sha256": "6a9d6056c451c4fb775227bedbb4291b5534bfea840488474b860db5abb2a7d4"
+    },
+    {
+      "file": "cycle5-repair-native-single-044-practice-rating.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-044-practice-rating.txt",
+      "bytes": 77,
+      "sha256": "5041197db9503dfc04f88038bd89b52fab5cd55bfee9581884bdab7581d0a7fa"
+    },
+    {
+      "file": "cycle5-repair-native-single-045-practice-next.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-045-practice-next.txt",
+      "bytes": 10968,
+      "sha256": "901de895debe5ef2cefa2417cb7bf886fe6c8f58b7c980b133015f2168641469"
+    },
+    {
+      "file": "cycle5-repair-native-single-046-practice-cards-after.json",
+      "source": "/private/tmp/cycle5-repair-native-single-046-practice-cards-after.json",
+      "bytes": 7353,
+      "sha256": "2325e004087471d3010c014479dc725579bcd1291796bc18db301a3256ca021d"
+    },
+    {
+      "file": "cycle5-repair-native-single-047-practice-sessions-after.json",
+      "source": "/private/tmp/cycle5-repair-native-single-047-practice-sessions-after.json",
+      "bytes": 1810,
+      "sha256": "779c15ac9f71b6d87be66205138e1e1d9492c7b2c45ee5732a03c1f4ed2ff39d"
+    },
+    {
+      "file": "cycle5-repair-native-single-048-practice-canonical-check.json",
+      "source": "/private/tmp/cycle5-repair-native-single-048-practice-canonical-check.json",
+      "bytes": 63,
+      "sha256": "9ee823c2919b596525cf0ed8e69a11e79567a3e5d71631e5b56954efa9b1c571"
+    },
+    {
+      "file": "cycle5-repair-native-single-049-media.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-049-media.txt",
+      "bytes": 361,
+      "sha256": "b2cc50204975c90a49929b73161c87988d8952878f85623d91040ee42142a4c3"
+    },
+    {
+      "file": "cycle5-repair-native-single-050-chat-model.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-050-chat-model.txt",
+      "bytes": 301,
+      "sha256": "0d09b6bb121728caf0b2345c01f0af1be6c77d5257cfaccd6b82d48fe3b6ecb3"
+    },
+    {
+      "file": "cycle5-repair-native-single-051-chat-ready.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-051-chat-ready.txt",
+      "bytes": 9170,
+      "sha256": "c805cbd6b4b3cab16f2b5af7901c18350a0bd855e2ede032ffd853d3b319b095"
+    },
+    {
+      "file": "cycle5-repair-native-single-052-model-picker.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-052-model-picker.txt",
+      "bytes": 236,
+      "sha256": "2e8be0babcb1cf6b8544bb61149586fe51b36a50135982ed18050e892c16eb9c"
+    },
+    {
+      "file": "cycle5-repair-native-single-053-model-options.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-053-model-options.txt",
+      "bytes": 10946,
+      "sha256": "fca572337e0ba1bf4da5bd78196995eaad83907f574a6a9259b3f19d4641c578"
+    },
+    {
+      "file": "cycle5-repair-native-single-054-gemma-selected.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-054-gemma-selected.txt",
+      "bytes": 259,
+      "sha256": "0d7e681dcd256d86deea820db6de9b035dc4073ebcf014919224e72dbffa03fc"
+    },
+    {
+      "file": "cycle5-repair-native-single-055-media-source.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-055-media-source.txt",
+      "bytes": 313,
+      "sha256": "3aee81accdacca645ea3cccf59dafb9af3934bce7890c97c1f4d282bae707a09"
+    },
+    {
+      "file": "cycle5-repair-native-single-056-media-ready.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-056-media-ready.txt",
+      "bytes": 15368,
+      "sha256": "8019416f0befb75b3cf340211057fd86d45b6667145fb3b0f61297fd9d6a473b"
+    },
+    {
+      "file": "cycle5-repair-native-single-057-analysis-open.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-057-analysis-open.txt",
+      "bytes": 347,
+      "sha256": "dfc182ba5a0ac2f0c45608bca15327301d868d7b382aeadfd56ea7820caff975"
+    },
+    {
+      "file": "cycle5-repair-native-single-058-analysis-first-selection.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-058-analysis-first-selection.txt",
+      "bytes": 18728,
+      "sha256": "6fb008d248d125cdf8e698249f7c1ce34deb13e4e26231b09ac6b831f655b088"
+    },
+    {
+      "file": "cycle5-repair-native-single-059-billing-settings-requests.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-059-billing-settings-requests.txt",
+      "bytes": 87,
+      "sha256": "3f1b8ba97b0e9aa8cd0d9b8a111f900925b1ec76967630d079c357180f5cb208"
+    },
+    {
+      "file": "cycle5-repair-native-single-060-settings-tab.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-060-settings-tab.txt",
+      "bytes": 566,
+      "sha256": "84ae4aae09668fa9644d57f952e2b2638db1544333db7edf7cb4361415405729"
+    },
+    {
+      "file": "cycle5-repair-native-single-061-settings-before-outage.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-061-settings-before-outage.txt",
+      "bytes": 12006,
+      "sha256": "014f9808c6ac6fd1c82c40820ded676f2160685082244f0eb7cb874a32ebad72"
+    },
+    {
+      "file": "cycle5-repair-native-single-062-settings-request-check.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-062-settings-request-check.txt",
+      "bytes": 87,
+      "sha256": "4759c1251bc1905e2bb5a9105fe84fff7568eec2fdb5d1fa1534981d5dd6fe3c"
+    },
+    {
+      "file": "cycle5-repair-native-single-063-knowledge-tab.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-063-knowledge-tab.txt",
+      "bytes": 686,
+      "sha256": "c889650e1f7dd810b8f6bf60d0ee025f79f6ade273121232d9d425947884fe0d"
+    },
+    {
+      "file": "cycle5-repair-native-single-064-knowledge-before-outage.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-064-knowledge-before-outage.txt",
+      "bytes": 6426,
+      "sha256": "12c2114e0cb16294cbaa92dc46052e6c15412814323a0bf5870f717ebb66243d"
+    },
+    {
+      "file": "cycle5-repair-native-single-065-knowledge-ready.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-065-knowledge-ready.txt",
+      "bytes": 6426,
+      "sha256": "12c2114e0cb16294cbaa92dc46052e6c15412814323a0bf5870f717ebb66243d"
+    },
+    {
+      "file": "cycle5-repair-native-single-066-knowledge-outage.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-066-knowledge-outage.txt",
+      "bytes": 6564,
+      "sha256": "6acc8ff611d4d54cccb7f30fbd5d076988aa9d0e41a55f15f6d0151970c01839"
+    },
+    {
+      "file": "cycle5-repair-native-single-067-outage-requests.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-067-outage-requests.txt",
+      "bytes": 698,
+      "sha256": "882d346ccab55565684d6044ba73891ee794dbf360be5de7ccaeec6fcacc8480"
+    },
+    {
+      "file": "cycle5-repair-native-single-068-settings-outage-tab.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-068-settings-outage-tab.txt",
+      "bytes": 296,
+      "sha256": "fefecdef55fbe6b9cae6ebc789f1e551b4c37151b5f3329c06c111b72bd116cd"
+    },
+    {
+      "file": "cycle5-repair-native-single-069-settings-outage-ready.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-069-settings-outage-ready.txt",
+      "bytes": 12019,
+      "sha256": "1209cfa10060e41c82419a9e49609e2d85020ecba2889a0ae05613bfb5ec7a61"
+    },
+    {
+      "file": "cycle5-repair-native-single-070-test-outage.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-070-test-outage.txt",
+      "bytes": 605,
+      "sha256": "1753d9feeb32553aab38d924246722491e0d8566182564d9628492b946200096"
+    },
+    {
+      "file": "cycle5-repair-native-single-071-knowledge-outage-tab.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-071-knowledge-outage-tab.txt",
+      "bytes": 292,
+      "sha256": "3639e4857cc3488571ff9aa2aaa3647f533b6afcdeeb6ef830aad0028a73ec62"
+    },
+    {
+      "file": "cycle5-repair-native-single-072-knowledge-diagnostics.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-072-knowledge-diagnostics.txt",
+      "bytes": 4684,
+      "sha256": "57a7ed73d2328925bf55700a0752234f89262700b875b78fca3119b3a3d977bb"
+    },
+    {
+      "file": "cycle5-repair-native-single-073-image-chat.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-073-image-chat.txt",
+      "bytes": 772,
+      "sha256": "9132de0cb22980d4475b5c91ec11276a8c801e82f16774d430076107bc9bc408"
+    },
+    {
+      "file": "cycle5-repair-native-single-074-image-chat-ready.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-074-image-chat-ready.txt",
+      "bytes": 898,
+      "sha256": "17164f43a752e693ffe207e6190b11278cc72713aab275e57851c249b99ef866"
+    },
+    {
+      "file": "cycle5-repair-native-single-075-image-chat-settled.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-075-image-chat-settled.txt",
+      "bytes": 9320,
+      "sha256": "6f9a295774ef706a6568049047a1983d5aa87dda59dc0d9dded73ce9608070a3"
+    },
+    {
+      "file": "cycle5-repair-native-single-076-attach-control.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-076-attach-control.txt",
+      "bytes": 541,
+      "sha256": "f0750a2462daff40c1d5540be20445cc4eeba8aac4921135a860785f1ff00ca2"
+    },
+    {
+      "file": "cycle5-repair-native-single-077-image-attached.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-077-image-attached.txt",
+      "bytes": 588,
+      "sha256": "50b3c1b957486d07190769c4cf9a7618e25431690168488e34f02ac3763a2fd4"
+    },
+    {
+      "file": "cycle5-repair-native-single-078-image-preview.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-078-image-preview.txt",
+      "bytes": 10298,
+      "sha256": "13e8e9248c585608996b7fb99d23414dc8bdd80dab3a3aadc0afc67d2e4e17fa"
+    },
+    {
+      "file": "cycle5-repair-native-single-079-image-question.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-079-image-question.txt",
+      "bytes": 179,
+      "sha256": "0df7a21c61a9e65a4dff30feb65267ea500f7ffa6c94658d8eae790941ad27a5"
+    },
+    {
+      "file": "cycle5-repair-native-single-080-image-ready-to-send.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-080-image-ready-to-send.txt",
+      "bytes": 9304,
+      "sha256": "e1436996685ed534628d393ab3775a6d8601580f2e2e5689fca3c66bae6b03c2"
+    },
+    {
+      "file": "cycle5-repair-native-single-081-image-send.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-081-image-send.txt",
+      "bytes": 777,
+      "sha256": "cd05caec9ad95a91189ccd1f5c9f0cb2efd1f35c4ec5ba85d25d7e7d1647a707"
+    },
+    {
+      "file": "cycle5-repair-native-single-082-image-result.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-082-image-result.txt",
+      "bytes": 11663,
+      "sha256": "f99cd4c3afc7cbcf0005e37669f7ceb45f581b9eaf68202bbcb8263a805600dc"
+    },
+    {
+      "file": "cycle5-repair-native-single-083-image-request-status.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-083-image-request-status.txt",
+      "bytes": 1778,
+      "sha256": "5c26475c3c4bd82bfaf5498cd0dea202f0feffc07be68150d62f442d437e1e03"
+    },
+    {
+      "file": "cycle5-repair-native-single-084-image-retry.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-084-image-retry.txt",
+      "bytes": 779,
+      "sha256": "1f7b0ea6cb14fcf797c726a337511243000cd43d9895a35105df69418bb8b6c3"
+    },
+    {
+      "file": "cycle5-repair-native-single-085-image-retry-result.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-085-image-retry-result.txt",
+      "bytes": 12267,
+      "sha256": "787992d2b70bd3b8a37d8783931b9c8917d0b624037ae94970484e78e337d04a"
+    },
+    {
+      "file": "cycle5-repair-native-single-086-image-retry-requests.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-086-image-retry-requests.txt",
+      "bytes": 1888,
+      "sha256": "ae483fb758f84e4a07b2f973c7808937faa1a1bbcfb8347c855f40fc14d537b2"
+    },
+    {
+      "file": "cycle5-repair-native-single-087-image-reload.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-087-image-reload.txt",
+      "bytes": 513,
+      "sha256": "5480afc62adea5e1002b92813307ebbcaad076ea8f335e55554105e366f1e0d1"
+    },
+    {
+      "file": "cycle5-repair-native-single-088-image-reloaded.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-088-image-reloaded.txt",
+      "bytes": 12375,
+      "sha256": "64f8b7f4858c8af9dde93944a37624db1f3b845ebc2bbced75fa6d4f357a5a6d"
+    },
+    {
+      "file": "cycle5-repair-native-single-089-image-canonical.json",
+      "source": "/private/tmp/cycle5-repair-native-single-089-image-canonical.json",
+      "bytes": 505,
+      "sha256": "e5109d7ccbdc1f4c2bee573b7331144a15e25bc3d5ed9107049af92d574d6a06"
+    },
+    {
+      "file": "cycle5-repair-native-single-090-image-reloaded.png",
+      "source": "/private/tmp/cycle5-repair-native-single-090-image-reloaded.png",
+      "bytes": 116050,
+      "sha256": "f9b7538cf68e88fb8235301ccd3d77c00d518def8306a1935eccdc62d19aff40"
+    },
+    {
+      "file": "cycle5-repair-native-single-091-analyze-ready.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-091-analyze-ready.txt",
+      "bytes": 14504,
+      "sha256": "f7f711186a13d4ab471d0ab3336214b3f3871bad8f663bd97c0d76ee3f19bc8f"
+    },
+    {
+      "file": "cycle5-repair-native-single-092-settings-recovery.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-092-settings-recovery.txt",
+      "bytes": 13154,
+      "sha256": "98ae6e0f36d4ed7849244e2b8f55a1b0505fc8e2138e54e54bce600c23692dce"
+    },
+    {
+      "file": "cycle5-repair-native-single-093-settings-recovered.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-093-settings-recovered.txt",
+      "bytes": 12255,
+      "sha256": "17965f7f9842160f0b8d72830d7f58639d9a0b2372a9ab8ae89bfad3cfec3a1e"
+    },
+    {
+      "file": "cycle5-repair-native-single-094-knowledge-recovered.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-094-knowledge-recovered.txt",
+      "bytes": 6579,
+      "sha256": "e8f738f6e4f7861dec5897f9ada7715a1a9f707cba8b8aa28a22de535d8bad9e"
+    },
+    {
+      "file": "cycle5-repair-native-single-095-media-recovery.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-095-media-recovery.txt",
+      "bytes": 13398,
+      "sha256": "5f070185d765fdd718bc2e4b2440eed3f4d880a61ce754cd44822f6ea14dfe51"
+    },
+    {
+      "file": "cycle5-repair-native-single-096-media-reload.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-096-media-reload.txt",
+      "bytes": 593,
+      "sha256": "91f9ecba3a1d1b6943a02d02ad2008438b38c7611488c2a67891f4c4b6a5682b"
+    },
+    {
+      "file": "cycle5-repair-native-single-097-media-recovered.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-097-media-recovered.txt",
+      "bytes": 9333,
+      "sha256": "1fabbac4df507d6475a7a895a60bce15fc45617a6a07ff81e5082cbf55fa1ad2"
+    },
+    {
+      "file": "cycle5-repair-native-single-098-media-selected.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-098-media-selected.txt",
+      "bytes": 16994,
+      "sha256": "340cd3e0a16613e90383c8e5fb4d4f1e36f321ad508f4d24a19e42c581e60cc7"
+    },
+    {
+      "file": "cycle5-repair-native-single-099-analyze-reopened.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-099-analyze-reopened.txt",
+      "bytes": 19306,
+      "sha256": "f03fea757701fed42864d35c07e8343eb02b1158a4cc4bea325c1692bfc00585"
+    },
+    {
+      "file": "cycle5-repair-native-single-100-analysis-generating.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-100-analysis-generating.txt",
+      "bytes": 16552,
+      "sha256": "a469589a2fbe0797a9ec7ee88e1a3dce784c7acd3ddcbd8f818c533a6b306f7a"
+    },
+    {
+      "file": "cycle5-repair-native-single-101-analysis-requests.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-101-analysis-requests.txt",
+      "bytes": 25371,
+      "sha256": "08dd890d0746a4be53d2f7f6cec74a92c477b2506464e49b1718ff3e7b7107c4"
+    },
+    {
+      "file": "cycle5-repair-native-single-102-analysis-result.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-102-analysis-result.txt",
+      "bytes": 15886,
+      "sha256": "a9f15366f83a371320008d7ae0f4126e21280e43e30a5771eb9a7c69784ab48b"
+    },
+    {
+      "file": "cycle5-repair-native-single-103-analysis-request.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-103-analysis-request.txt",
+      "bytes": 594,
+      "sha256": "8a10d3e0bb98096a3ba50bf3cae98cf87ae580baee7039e5d6ead1ef530cca3e"
+    },
+    {
+      "file": "cycle5-repair-native-single-104-analysis-canonical.json",
+      "source": "/private/tmp/cycle5-repair-native-single-104-analysis-canonical.json",
+      "bytes": 4121,
+      "sha256": "03b4af56ad8aa4cf6386f3ceefbba6a4a6abffa2863e61bce6bf2dd631544840"
+    },
+    {
+      "file": "cycle5-repair-native-single-105-image-retry-picker.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-105-image-retry-picker.txt",
+      "bytes": 12287,
+      "sha256": "96caeace5de6df27b5390768c0c9d858f7ea789a9a9530f27d28909b0c17ac8e"
+    },
+    {
+      "file": "cycle5-repair-native-single-106-image-models.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-106-image-models.txt",
+      "bytes": 17166,
+      "sha256": "c2b4bdb20f3ac11133d0fa9f0bcc04edc3c61e68119ebac310ee18f17624b6ab"
+    },
+    {
+      "file": "cycle5-repair-native-single-107-image-model-options.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-107-image-model-options.txt",
+      "bytes": 17926,
+      "sha256": "a8bd082b6dd7f4429dc20875151531cf452c563676ebf584add9d85b997aac54"
+    },
+    {
+      "file": "cycle5-repair-native-single-108-retry-history.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-108-retry-history.txt",
+      "bytes": 8229,
+      "sha256": "f4009f6d73ff714535c00230d104020abca7d75eb755dd5448e9f3fc9dbd4b7c"
+    },
+    {
+      "file": "cycle5-repair-native-single-109-retry-history-settled.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-109-retry-history-settled.txt",
+      "bytes": 14171,
+      "sha256": "d54d6637631b4cf5af4e7ddad5a6041dcb5655f42cb7f7235e7f812e5492df75"
+    },
+    {
+      "file": "cycle5-repair-native-single-110-retry-before.json",
+      "source": "/private/tmp/cycle5-repair-native-single-110-retry-before.json",
+      "bytes": 4271,
+      "sha256": "7486c7f726843acaaa46c1a962c7012ce80f2cbf2600b1120635c6fa5f2c1467"
+    },
+    {
+      "file": "cycle5-repair-native-single-111-retry-provider.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-111-retry-provider.txt",
+      "bytes": 16172,
+      "sha256": "a8073ddd98c36906470a66cdfee4300bc67ac61aae1cb9d411d563515f3a0355"
+    },
+    {
+      "file": "cycle5-repair-native-single-112-retry-ready.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-112-retry-ready.txt",
+      "bytes": 14932,
+      "sha256": "9b8fbf42501f73e8f27b4efe18290e25891342d07904c516a97a3378147447f7"
+    },
+    {
+      "file": "cycle5-repair-native-single-113-retry-failure.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-113-retry-failure.txt",
+      "bytes": 16864,
+      "sha256": "e665ade6b8c9ffe89d6d1c16018e00610c6aeb9ded64756f8db0c1ccce2594a4"
+    },
+    {
+      "file": "cycle5-repair-native-single-114-retry-failure-requests.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-114-retry-failure-requests.txt",
+      "bytes": 167,
+      "sha256": "5beab3121b3116cb0d14f49cbc85b3857434c9ac8f83c94fb5d6a6472b917e4c"
+    },
+    {
+      "file": "cycle5-repair-native-single-115-retry-failed-canonical.json",
+      "source": "/private/tmp/cycle5-repair-native-single-115-retry-failed-canonical.json",
+      "bytes": 4767,
+      "sha256": "2257687e2f8c6b19b39adfb6bf00c0737c7aec83a5b011baf110c5d3cd27d202"
+    },
+    {
+      "file": "cycle5-repair-native-single-116-retry-recover-model.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-116-retry-recover-model.txt",
+      "bytes": 18817,
+      "sha256": "4e7b63eface8288ba246f155e2de3634173962aed30644efaf83e5919e5fbf6a"
+    },
+    {
+      "file": "cycle5-repair-native-single-117-retry-generating.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-117-retry-generating.txt",
+      "bytes": 16341,
+      "sha256": "6817eedd8150c17d3f29c937100b9cb8b4d8b79abffa971da63d6bc4dd3e78e4"
+    },
+    {
+      "file": "cycle5-repair-native-single-118-retry-status.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-118-retry-status.txt",
+      "bytes": 238,
+      "sha256": "a18a1a1996ca83e3e4f236e7cf2d1e41e8ca4c4f0f4c0e05bf9f537b81867124"
+    },
+    {
+      "file": "cycle5-repair-native-single-119-retry-result.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-119-retry-result.txt",
+      "bytes": 16416,
+      "sha256": "5d6d3bb4019ade2e919865f64eeea6d0c95937b0968afef652b1d501701195c6"
+    },
+    {
+      "file": "cycle5-repair-native-single-120-retry-request.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-120-retry-request.txt",
+      "bytes": 1439,
+      "sha256": "8e919a2291ed2995cb7bd62791f5e63d7e90a186c54c0e85529c89d20c924e36"
+    },
+    {
+      "file": "cycle5-repair-native-single-121-retry-success-canonical.json",
+      "source": "/private/tmp/cycle5-repair-native-single-121-retry-success-canonical.json",
+      "bytes": 5223,
+      "sha256": "71348ffbd7487853f27b2bd7128f7a6a68e6492dbdb0190b0f4a1a7180fda552"
+    },
+    {
+      "file": "cycle5-repair-native-single-122-retry-reload.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-122-retry-reload.txt",
+      "bytes": 640,
+      "sha256": "2070f12ea0d762e780e31fcabea7957266e61f93610e59ad5067397fa9a816cb"
+    },
+    {
+      "file": "cycle5-repair-native-single-123-retry-reloaded.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-123-retry-reloaded.txt",
+      "bytes": 17000,
+      "sha256": "62f204c539c6431565ea6712f35329288d14db16e453d531f210f4537efe5f1f"
+    },
+    {
+      "file": "cycle5-repair-native-single-124-image-model-selector.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-124-image-model-selector.txt",
+      "bytes": 12700,
+      "sha256": "04f363d0ca1da378b61a2c5753b099bf17e04d7495c5788f93b041ea75fdade5"
+    },
+    {
+      "file": "cycle5-repair-native-single-125-image-model-catalog.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-125-image-model-catalog.txt",
+      "bytes": 14386,
+      "sha256": "433e6ae5618cd35f79c6619d094f2244b195cd29a81413bed90a08be203e08d2"
+    },
+    {
+      "file": "cycle5-repair-native-single-126-image-full-catalog.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-126-image-full-catalog.txt",
+      "bytes": 14209,
+      "sha256": "0a9a4560095b29679001d86a90c9aac6f6202e87c2c373c71941a2636a37bd7f"
+    },
+    {
+      "file": "cycle5-repair-native-single-127-image-attached.png",
+      "source": "/private/tmp/cycle5-repair-native-single-127-image-attached.png",
+      "bytes": 115492,
+      "sha256": "c816b8be6f906e8be633eed5c5ff32ba20d70f80e28b655876aad9556aaf9119"
+    },
+    {
+      "file": "cycle5-repair-native-single-128-image-visible.png",
+      "source": "/private/tmp/cycle5-repair-native-single-128-image-visible.png",
+      "bytes": 106538,
+      "sha256": "1e55943b7c2d250fc5f9c6daa2df6dd94bd72f5d9479fc9ac0c3151c052d5555"
+    },
+    {
+      "file": "cycle5-repair-native-single-129-retry-comparison.json",
+      "source": "/private/tmp/cycle5-repair-native-single-129-retry-comparison.json",
+      "bytes": 1572,
+      "sha256": "5747e484cab1b0ee584bb23d85b8de697c802c322372a4f6849c528eea7571b1"
+    },
+    {
+      "file": "cycle5-repair-native-single-130-home-entry.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-130-home-entry.txt",
+      "bytes": 655,
+      "sha256": "63bbfe5ac1c6feeb19f225ff9dbac6bdf0bd1a4bdc12b33c50d40bbb5c61c318"
+    },
+    {
+      "file": "cycle5-repair-native-single-131-home-settled.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-131-home-settled.txt",
+      "bytes": 13095,
+      "sha256": "0131685c7a338519449c8346c1ce47791a972ec2c25c262f6003468780bdc79d"
+    },
+    {
+      "file": "cycle5-repair-native-single-132-home-ingest.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-132-home-ingest.txt",
+      "bytes": 15563,
+      "sha256": "0960016e1d0e520b47528d0b4dd9c1cad5874e7f807459d465ea9ff81d4d1953"
+    },
+    {
+      "file": "cycle5-repair-native-single-133-home-file-added.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-133-home-file-added.txt",
+      "bytes": 16545,
+      "sha256": "f49d71ccc316d72454771bad447928db4d82d072c63ad292e00acbb3a9067d14"
+    },
+    {
+      "file": "cycle5-repair-native-single-134-home-configure.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-134-home-configure.txt",
+      "bytes": 18379,
+      "sha256": "77938c6a71627794cfe9c6159d16472b6803c0b639d887748ec5f5a3d0028365"
+    },
+    {
+      "file": "cycle5-repair-native-single-135-ingest-standard.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-135-ingest-standard.txt",
+      "bytes": 18784,
+      "sha256": "4b63e13cb19a907a7b9dc0ba2829b36a27ac27d65e9d8b1790cabbbd843447df"
+    },
+    {
+      "file": "cycle5-repair-native-single-136-ingest-provider-blocked.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-136-ingest-provider-blocked.txt",
+      "bytes": 18896,
+      "sha256": "c27d3c75b7cb5be973969eefb3f94c3d22f4e115291142e943a1ec68a5a0496e"
+    },
+    {
+      "file": "cycle5-repair-native-single-137-home-ingest-review.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-137-home-ingest-review.txt",
+      "bytes": 15341,
+      "sha256": "dbd044529a12fc0b66c36d7046cdc56b7e7a6dc9cc660faa1bfee0538f3c3b58"
+    },
+    {
+      "file": "cycle5-repair-native-single-137-task-created.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-137-task-created.txt",
+      "bytes": 1767,
+      "sha256": "50d7dd00ffc198b9e872a75f5d1381d32b5f194157452146b6eadff8f7c6e09e",
+      "original_sha256": "9b9c7cfa31d5a6f61255bc19971d615700965278d508416007e7f5ee2be4e464",
+      "normalization": "One terminal blank line removed; private source unchanged."
+    },
+    {
+      "file": "cycle5-repair-native-single-138-home-ingest-started.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-138-home-ingest-started.txt",
+      "bytes": 15579,
+      "sha256": "556b112242b9fb8966dfc428036db82045226f996d0db02a18d9c457d0df5eb8"
+    },
+    {
+      "file": "cycle5-repair-native-single-139-home-source-ready.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-139-home-source-ready.txt",
+      "bytes": 12835,
+      "sha256": "dabff490479d9ed3a8f3171bed681259cf7dcb18185d35eeab999f495d4a5c18"
+    },
+    {
+      "file": "cycle5-repair-native-single-140-home-chat-handoff.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-140-home-chat-handoff.txt",
+      "bytes": 17528,
+      "sha256": "547f2eef42200749e3d5231320fc114d4aebfb93ce5dbadd73a1338bd0385e5d"
+    },
+    {
+      "file": "cycle5-repair-native-single-141-home-handoff-requests.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-141-home-handoff-requests.txt",
+      "bytes": 3150,
+      "sha256": "b0ec9e8124597692845d7cbe78fda5e400b81d252ef9bb1f488ccf4cdcc4e0ff"
+    },
+    {
+      "file": "cycle5-repair-native-single-142-home-chat-settled.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-142-home-chat-settled.txt",
+      "bytes": 17426,
+      "sha256": "96e407b358db9578e40d7551026ba19fd87733377ee62eafc036b01fd238d3ba"
+    },
+    {
+      "file": "cycle5-repair-native-single-143-home-selected-mode.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-143-home-selected-mode.txt",
+      "bytes": 18719,
+      "sha256": "c10e12adda07d716a15c41771e3ea427de032fee957c96a48a1a656788b4c504"
+    },
+    {
+      "file": "cycle5-repair-native-single-144-home-send-requests.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-144-home-send-requests.txt",
+      "bytes": 362,
+      "sha256": "0a38abff7d7f7756b787f6d4d64e7bde8fd801ebdb9482b087db196940aaf286"
+    },
+    {
+      "file": "cycle5-repair-native-single-145-home-send-body.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-145-home-send-body.txt",
+      "bytes": 1578,
+      "sha256": "dd9752a47c0ccbf9e28e46daef1c0fe1913509a32ad6fd7b36720023aa99fc4c"
+    },
+    {
+      "file": "cycle5-repair-native-single-146-home-answer.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-146-home-answer.txt",
+      "bytes": 18352,
+      "sha256": "9b4e08c2af6effcf957879a1de0fbef8aa7acbf42ebf4b31555927c9258452c4"
+    },
+    {
+      "file": "cycle5-repair-native-single-147-manage-entry.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-147-manage-entry.txt",
+      "bytes": 718,
+      "sha256": "326e0ffc9f375152f89a127ccbadd37f181eca21628de32afe5c63316416c41a"
+    },
+    {
+      "file": "cycle5-repair-native-single-148-manage-active.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-148-manage-active.txt",
+      "bytes": 15905,
+      "sha256": "d4fac1c2e08349cbf25c1a12548885b51688848284f23b04629a75c84c72456f"
+    },
+    {
+      "file": "cycle5-repair-native-single-149-manage-trash.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-149-manage-trash.txt",
+      "bytes": 4921,
+      "sha256": "04f51971981d1930b5c5aa9a3ae1989961724f34966ed6b5153057753edc1de8"
+    },
+    {
+      "file": "cycle5-repair-native-single-150-manage-console.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-150-manage-console.txt",
+      "bytes": 393,
+      "sha256": "906aceece4957e0b6f0ab7812bf1ef131ac12a3de343c9afb26a90078bec9ccc"
+    },
+    {
+      "file": "cycle5-repair-native-single-151-temp-chat-entry.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-151-temp-chat-entry.txt",
+      "bytes": 667,
+      "sha256": "16344f788b7485b603d20235c5a8e8c4f5771492c6513653e2a91294de2b284d"
+    },
+    {
+      "file": "cycle5-repair-native-single-152-temp-chat-ready.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-152-temp-chat-ready.txt",
+      "bytes": 18313,
+      "sha256": "7d78a5d4b4abdb01bd99a1275601e96040947735b748e570ab781421370b0fbf"
+    },
+    {
+      "file": "cycle5-repair-native-single-153-temp-chat-created.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-153-temp-chat-created.txt",
+      "bytes": 9879,
+      "sha256": "6ecf0ddc73ea64ade1b6ee30ba43f972505fa5db22ade44c07a29e43df6b70c2"
+    },
+    {
+      "file": "cycle5-repair-native-single-154-temp-chat-requests.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-154-temp-chat-requests.txt",
+      "bytes": 2713,
+      "sha256": "79c92588fec13a3fdd9b507fdb12bb9b2acb1a5e1f0ea77477899268c6100a82"
+    },
+    {
+      "file": "cycle5-repair-native-single-155-temp-chat-answer.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-155-temp-chat-answer.txt",
+      "bytes": 9642,
+      "sha256": "5bc217bb2dfad970a10ca21116b718f0f3c9b3180a9ae98e6a387e9cb4ee2e7f"
+    },
+    {
+      "file": "cycle5-repair-native-single-156-temp-chat-body.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-156-temp-chat-body.txt",
+      "bytes": 404,
+      "sha256": "11d3b7ceef46895a39aac211bec5dcfac8b83120c2be5239b136e016251c28e3"
+    },
+    {
+      "file": "cycle5-repair-native-single-157-temp-chat-settled-requests.txt",
+      "source": "/private/tmp/cycle5-repair-native-single-157-temp-chat-settled-requests.txt",
+      "bytes": 2713,
+      "sha256": "79c92588fec13a3fdd9b507fdb12bb9b2acb1a5e1f0ea77477899268c6100a82"
+    },
+    {
+      "file": "cycle5-repair-native-single-RUNNING_TRACKER.md",
+      "source": "/private/tmp/cycle5-repair-native-single-RUNNING_TRACKER.md",
+      "bytes": 8186,
+      "sha256": "49907b6966162556518222f71ea7a9b0a3d68101658f2d36650eb32646db20c1"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Test Connection' }).click();
+```
+### Open tabs
+- 0: [Media | tldw](http://127.0.0.1:18580/media)
+- 1: (current) [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 2: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+### Page
+- Page URL: http://127.0.0.1:18580/settings/tldw
+- Page Title: Server Settings | tldw
+- Console: 56 errors, 35 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T14-24-09-132Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T14-20-56-463Z.log#L68-L100

@@ -1,0 +1,170 @@
+### Page
+- Page URL: http://127.0.0.1:18581/media?q=cycle5-multi-native-aurora-public
+- Page Title: Media | tldw
+### Snapshot
+```yaml
+- generic [ref=e11]:
+  - generic [ref=e36]:
+    - link "Skip to main content" [ref=e37] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e38]:
+      - button "Expand sidebar" [ref=e39] [cursor=pointer]
+      - button "New Chat" [ref=e43] [cursor=pointer]
+      - generic [ref=e46]:
+        - button "Quick Ingest" [ref=e47] [cursor=pointer]
+        - button "Chat" [ref=e51] [cursor=pointer]
+        - button "Prompts" [ref=e54] [cursor=pointer]
+        - button "Characters" [ref=e58] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e63] [cursor=pointer]
+        - button "World Books" [ref=e67] [cursor=pointer]
+        - button "Notes" [ref=e70] [cursor=pointer]
+        - button "Knowledge QA" [ref=e74] [cursor=pointer]
+        - button "Media" [ref=e82] [cursor=pointer]
+        - button "Document Workspace" [ref=e85] [cursor=pointer]
+        - button "Research Workspace" [ref=e91] [cursor=pointer]
+        - button "Kanban" [ref=e97] [cursor=pointer]
+        - button "Watchlists" [ref=e99] [cursor=pointer]
+      - generic [ref=e104]:
+        - button "Open Notes Dock" [ref=e105] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e110] [cursor=pointer]
+        - button "Settings" [ref=e113] [cursor=pointer]
+    - main [ref=e117]:
+      - generic [ref=e118]:
+        - generic [ref=e121]:
+          - generic [ref=e122]:
+            - button "Expand sidebar" [ref=e123] [cursor=pointer]
+            - generic [ref=e125]:
+              - img "tldw Assistant" [ref=e126]
+              - generic [ref=e127]: tldw Assistant
+              - button "Companion Home" [ref=e128] [cursor=pointer]
+              - button "Show shortcuts" [ref=e132] [cursor=pointer]
+          - generic [ref=e135]:
+            - button "Search - Open command palette" [ref=e136] [cursor=pointer]:
+              - generic [ref=e140]: Search
+              - generic [ref=e141]: ⌘K
+            - button "Open settings" [ref=e142] [cursor=pointer]
+            - generic [ref=e154]:
+              - button "Notifications, 0 unread" [ref=e200] [cursor=pointer]
+              - status [ref=e158]: Notifications are active
+            - button "Switch to light theme" [ref=e159] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e166] [cursor=pointer]:
+              - generic [ref=e167]: "?"
+        - generic [ref=e631]:
+          - generic [ref=e633]:
+            - generic [ref=e634]:
+              - generic [ref=e635]:
+                - heading "Media Inspector" [level=1] [ref=e636]
+                - generic [ref=e637]:
+                  - generic [ref=e638]: 1 / 1
+                  - button "Trash" [ref=e639] [cursor=pointer]
+                  - button "Bulk" [ref=e643] [cursor=pointer]
+              - generic [ref=e646]:
+                - button "Show media only" [pressed] [ref=e647] [cursor=pointer]:
+                  - generic [ref=e648]: Media
+                  - generic [ref=e649]: "1"
+                - button "Show notes only" [ref=e650] [cursor=pointer]:
+                  - generic [ref=e651]: Notes
+                  - generic [ref=e652]: "0"
+            - generic [ref=e654]:
+              - generic [ref=e655]:
+                - generic [ref=e656]: Find media
+                - button "Collapse find media panel" [expanded] [ref=e658] [cursor=pointer]
+              - generic [ref=e661]:
+                - generic [ref=e662]:
+                  - generic [ref=e663]:
+                    - textbox "Search media (title/content)" [ref=e667]: cycle5-multi-native-aurora-public
+                    - button "Clear search" [ref=e843] [cursor=pointer]
+                  - button "Search syntax help" [ref=e669] [cursor=pointer]: "?"
+                - button "Search" [active] [ref=e670] [cursor=pointer]
+                - generic [ref=e671]:
+                  - generic [ref=e672]:
+                    - generic [ref=e673]: Filters
+                    - button "Clear all" [ref=e677] [cursor=pointer]
+                  - generic [ref=e678]:
+                    - generic [ref=e679]: Search mode
+                    - generic [ref=e680]:
+                      - button "Full-text search" [pressed] [ref=e681] [cursor=pointer]: Full-text
+                      - button "Metadata search" [ref=e682] [cursor=pointer]: Metadata
+                  - generic [ref=e683]:
+                    - generic [ref=e684]: Sort by
+                    - generic [ref=e685] [cursor=pointer]:
+                      - generic [ref=e686]:
+                        - generic "Relevance" [ref=e687]
+                        - combobox [ref=e688]
+                      - img "down" [ref=e690]
+                  - generic [ref=e693]:
+                    - generic [ref=e694]: Date range
+                    - generic [ref=e695]:
+                      - generic [ref=e696]:
+                        - text: Start date
+                        - textbox "Start date" [ref=e697]
+                      - generic [ref=e698]:
+                        - text: End date
+                        - textbox "End date" [ref=e699]
+                  - button "Advanced search" [ref=e701] [cursor=pointer]
+                  - generic [ref=e705] [cursor=pointer]:
+                    - checkbox "Favorites only" [ref=e706]
+                    - generic [ref=e709]: Favorites only
+                  - generic [ref=e710]:
+                    - button "Media types" [ref=e711] [cursor=pointer]
+                    - generic [ref=e717] [cursor=pointer]:
+                      - checkbox "Filter by Document" [ref=e718]
+                      - generic [ref=e719]: Document
+                  - button "Keywords" [ref=e721] [cursor=pointer]
+                  - generic [ref=e726]:
+                    - generic [ref=e727]: Exclude keywords
+                    - generic [ref=e729]:
+                      - generic [ref=e730]:
+                        - generic: Exclude keyword
+                        - combobox "Exclude keyword" [ref=e732]
+                      - img "down" [ref=e734]
+                    - generic [ref=e737]: Use excluded keywords to remove items containing those terms.
+                    - generic [ref=e738]: 0 exclude keyword suggestions available
+                - generic [ref=e739]:
+                  - generic [ref=e740]:
+                    - generic [ref=e741]: Collection
+                    - combobox "Collection" [ref=e742]:
+                      - option "All items" [selected]
+                  - paragraph [ref=e743]: Create collections from bulk selection to organize related items.
+            - generic [ref=e744]:
+              - generic [ref=e746]:
+                - generic [ref=e747]:
+                  - generic [ref=e748]:
+                    - generic [ref=e749]: Results
+                    - generic [ref=e750]: 1 / 1
+                  - generic [ref=e751]:
+                    - button "Standard view" [pressed] [ref=e752] [cursor=pointer]
+                    - button "Compact view" [ref=e758] [cursor=pointer]
+                - 'button "Select media: cycle5-multi-native-aurora-public" [ref=e847] [cursor=pointer]':
+                  - generic [ref=e848]:
+                    - button "Add to favorites" [ref=e853]
+                    - generic [ref=e856]:
+                      - generic [ref=e857]:
+                        - generic [ref=e858]: MEDIA
+                        - generic [ref=e859]: document
+                        - generic [ref=e860]: 5h ago
+                      - generic [ref=e861]: cycle5-multi-native-aurora-public
+              - generic [ref=e791]:
+                - generic [ref=e792]:
+                  - generic [ref=e793]: 1 of 1 results
+                  - generic [ref=e862]:
+                    - generic [ref=e863]: "Per page:"
+                    - combobox "Per page:" [ref=e864]:
+                      - option "20" [selected]
+                      - option "50"
+                      - option "100"
+                - button "? for shortcuts" [ref=e798] [cursor=pointer]:
+                  - generic [ref=e799]: "?"
+                  - generic [ref=e800]: for shortcuts
+            - button "Library tools" [ref=e802] [cursor=pointer]
+          - button "Collapse sidebar" [ref=e807] [cursor=pointer]
+          - generic [ref=e813]:
+            - button "Create study pack" [disabled] [ref=e815]
+            - generic [ref=e817]:
+              - heading "No media item selected" [level=2] [ref=e825]
+              - paragraph [ref=e826]: Select a media item from the left sidebar to view its content and analyses here.
+              - button "Keyboard Shortcuts" [ref=e827] [cursor=pointer]
+              - button "Open Quick Ingest" [ref=e829] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=e32] [cursor=pointer]
+  - alert [ref=e10]: Media | tldw
+```

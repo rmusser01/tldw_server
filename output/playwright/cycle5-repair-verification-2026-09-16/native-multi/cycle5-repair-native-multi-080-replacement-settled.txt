@@ -1,0 +1,258 @@
+### Page
+- Page URL: http://127.0.0.1:18581/chat?mode=character&characterId=1&chatId=0735df9e-26ae-48a9-89ab-447cb1cd0e4b
+- Page Title: Default Assistant Chat (20260916_142239) | tldw
+### Snapshot
+```yaml
+- generic [ref=f4e1]:
+  - generic [ref=f4e4]:
+    - link "Skip to main content" [ref=f4e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f4e6]:
+      - button "Expand sidebar" [ref=f4e7] [cursor=pointer]
+      - button "New Chat" [ref=f4e11] [cursor=pointer]
+      - generic [ref=f4e14]:
+        - button "Quick Ingest" [ref=f4e15] [cursor=pointer]
+        - button "Chat" [ref=f4e19] [cursor=pointer]
+        - button "Prompts" [ref=f4e22] [cursor=pointer]
+        - button "Characters" [ref=f4e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f4e31] [cursor=pointer]
+        - button "World Books" [ref=f4e35] [cursor=pointer]
+        - button "Notes" [ref=f4e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f4e42] [cursor=pointer]
+        - button "Media" [ref=f4e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f4e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f4e59] [cursor=pointer]
+        - button "Kanban" [ref=f4e65] [cursor=pointer]
+        - button "Watchlists" [ref=f4e67] [cursor=pointer]
+      - generic [ref=f4e72]:
+        - button "Open Notes Dock" [ref=f4e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f4e78] [cursor=pointer]
+        - button "Settings" [ref=f4e81] [cursor=pointer]
+    - main [ref=f4e85]:
+      - generic [ref=f4e86]:
+        - generic [ref=f4e89]:
+          - generic [ref=f4e90]:
+            - button "Expand sidebar" [ref=f4e91] [cursor=pointer]
+            - generic [ref=f4e93]:
+              - img "tldw Assistant" [ref=f4e94]
+              - generic [ref=f4e95]: tldw Assistant
+              - button "Companion Home" [ref=f4e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f4e100] [cursor=pointer]
+            - button "Default Assistant Chat (20260916_142239)" [ref=f4e523] [cursor=pointer]
+            - generic [ref=f4e103]:
+              - generic "Saved chat. History is persisted." [ref=f4e104]: Saved
+              - generic "Character mode is active." [ref=f4e105]: "Character: Default Assistant"
+          - generic [ref=f4e111]:
+            - button "Search - Open command palette" [ref=f4e112] [cursor=pointer]:
+              - generic [ref=f4e116]: Search
+              - generic [ref=f4e117]: ⌘K
+            - button "New saved chat" [ref=f4e118] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f4e122] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f4e123] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f4e124] [cursor=pointer]
+            - button "Open settings" [ref=f4e131] [cursor=pointer]
+            - generic [ref=f4e143]:
+              - button "Notifications, 0 unread" [ref=f4e524] [cursor=pointer]
+              - status [ref=f4e147]: Notifications are active
+            - button "Switch to light theme" [ref=f4e148] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f4e155] [cursor=pointer]:
+              - generic [ref=f4e156]: "?"
+        - generic [ref=f4e157]:
+          - heading "Chat" [level=1] [ref=f4e158]
+          - generic [ref=f4e161]:
+            - paragraph [ref=f4e162]: Context rail hidden. Runtime rail visible.
+            - generic [ref=f4e163]:
+              - main [ref=f4e164]:
+                - generic [ref=f4e165]:
+                  - generic [ref=f4e167]:
+                    - generic [ref=f4e168]:
+                      - generic [ref=f4e169]:
+                        - text: Character Chat
+                        - generic [ref=f4e170]: Default Assistant
+                      - generic [ref=f4e171]: Conversation timeline
+                    - generic [ref=f4e172]:
+                      - button "Switch to light theme" [ref=f4e173] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f4e180] [cursor=pointer]:
+                        - generic [ref=f4e186]: Focus
+                      - button "Shortcuts" [ref=f4e187] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f4e191]
+                  - log "Chat messages" [ref=f4e204]:
+                    - generic [ref=f4e206]:
+                      - article "Assistant message 1 of 3" [ref=f4e528]:
+                        - generic [ref=f4e534]:
+                          - generic [ref=f4e536]:
+                            - generic [ref=f4e537]: Default Assistant
+                            - generic [ref=f4e538]: • 7:22 AM
+                            - generic [ref=f4e539]: greeting
+                          - paragraph [ref=f4e542]: Hello! How can I help you today?
+                          - generic [ref=f4e543]:
+                            - generic [ref=f4e544]:
+                              - generic [ref=f4e545]: Was this helpful?
+                              - generic [ref=f4e546]:
+                                - button "Helpful" [ref=f4e547] [cursor=pointer]
+                                - button "Not helpful" [ref=f4e550] [cursor=pointer]
+                                - button "More feedback" [ref=f4e553] [cursor=pointer]
+                            - button "More actions" [ref=f4e559] [cursor=pointer]: •••
+                      - article "User message 2 of 3" [ref=f4e560]:
+                        - generic [ref=f4e563]:
+                          - generic [ref=f4e565]:
+                            - generic [ref=f4e566]: You
+                            - generic [ref=f4e567]: • 7:22 AM
+                          - paragraph [ref=f4e569]: Cycle5 repair replacement check. Reply with exactly MAPLE READY.
+                          - button "More actions" [ref=f4e572] [cursor=pointer]: •••
+                      - article "Assistant message 3 of 3" [ref=f4e576]:
+                        - generic [ref=f4e582]:
+                          - generic [ref=f4e584]:
+                            - generic [ref=f4e585]: Default Assistant
+                            - generic [ref=f4e586]: • 7:22 AM
+                          - generic [ref=f4e587]:
+                            - button "collapsed Model’s reasoning (optional)" [ref=f4e590] [cursor=pointer]:
+                              - img "collapsed" [ref=f4e592]
+                              - generic [ref=f4e595]: Model’s reasoning (optional)
+                            - paragraph [ref=f4e599]: MAPLE READY
+                          - generic [ref=f4e600]:
+                            - generic [ref=f4e601]:
+                              - generic [ref=f4e602]: Was this helpful?
+                              - generic [ref=f4e603]:
+                                - button "Helpful" [ref=f4e604] [cursor=pointer]
+                                - button "Not helpful" [ref=f4e607] [cursor=pointer]
+                                - button "More feedback" [ref=f4e610] [cursor=pointer]
+                            - button "More actions" [ref=f4e616] [cursor=pointer]: •••
+                  - generic [ref=f4e241]:
+                    - generic [ref=f4e242]: Composer
+                    - generic [ref=f4e253]:
+                      - button [aria-hidden] [ref=f4e254]
+                      - button [aria-hidden] [ref=f4e255]
+                      - generic [ref=f4e256]:
+                        - generic [ref=f4e258]:
+                          - button "Hide composer options" [expanded] [ref=f4e259] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f4e264]
+                          - generic [ref=f4e265]:
+                            - button "Improve prompt" [ref=f4e268] [cursor=pointer]
+                            - generic [ref=f4e273]:
+                              - button "Send message" [ref=f4e617] [cursor=pointer]:
+                                - generic [ref=f4e275]: Send
+                              - button "Open message delivery options" [ref=f4e277] [cursor=pointer]
+                        - generic [ref=f4e282]:
+                          - generic [ref=f4e284]:
+                            - group "Mode and context controls" [ref=f4e285]:
+                              - button "Modes" [ref=f4e286] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f4e293] [cursor=pointer]':
+                                - generic [ref=f4e294]:
+                                  - generic [ref=f4e295]: MCP
+                                  - generic [ref=f4e296]: None
+                              - button "Search & Context" [ref=f4e299] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f4e304] [cursor=pointer]:
+                                - generic [ref=f4e307]: Prompt
+                              - button "Default Assistant" [ref=f4e308] [cursor=pointer]
+                              - button "Role-play setup" [ref=f4e313] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f4e320] [cursor=pointer]
+                            - group "Run input controls" [ref=f4e326]:
+                              - button "OpenUI" [ref=f4e327] [cursor=pointer]
+                              - button "Start dictation" [ref=f4e621] [cursor=pointer]
+                              - generic [ref=f4e337]:
+                                - button "Attach image" [ref=f4e339] [cursor=pointer]
+                                - button "More attachments" [ref=f4e343] [cursor=pointer]
+                              - button "More tools" [ref=f4e346] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f4e349] [cursor=pointer]:
+                                - generic [ref=f4e353]: Chat Settings
+                          - generic "Active context" [ref=f4e354]:
+                            - button "LLaMa.cpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f4e622] [cursor=pointer]:
+                              - generic "Provider status" [ref=f4e361]: Healthy
+                            - button "Character Default Assistant" [ref=f4e362] [cursor=pointer]:
+                              - generic [ref=f4e363]: Character
+                              - generic [ref=f4e364]: Default Assistant
+                            - 'generic "Character context: Included" [ref=f4e365]':
+                              - generic [ref=f4e366]: Character context
+                              - generic [ref=f4e367]: Included
+                            - button "Chat 3 messages" [ref=f4e625] [cursor=pointer]:
+                              - generic [ref=f4e626]: Chat
+                              - generic [ref=f4e627]: 3 messages
+                            - button "Configure context window size" [ref=f4e369] [cursor=pointer]:
+                              - generic [ref=f4e370]: 582 + ~0 = 582 tokens
+                            - button "Saved" [ref=f4e372] [cursor=pointer]
+                            - button "Advanced controls" [ref=f4e374] [cursor=pointer]
+                        - status [ref=f4e378]:
+                          - generic [ref=f4e379]: Add expression images for Default Assistant.
+                          - generic [ref=f4e380]:
+                            - link "Edit expressions" [ref=f4e381] [cursor=pointer]:
+                              - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=1
+                            - button "Dismiss expression image setup" [ref=f4e382] [cursor=pointer]: Dismiss
+              - complementary "Chat cockpit runtime" [ref=f4e392]:
+                - generic [ref=f4e393]:
+                  - generic [ref=f4e394]: Runtime
+                  - generic [ref=f4e395]:
+                    - button "Collapse runtime sidechannel" [expanded] [ref=f4e396] [cursor=pointer]
+                    - tooltip "Collapse runtime sidechannel"
+                - generic [ref=f4e401]:
+                  - region "Runtime state" [ref=f4e402]:
+                    - generic [ref=f4e403]:
+                      - heading "Runtime" [level=2] [ref=f4e404]
+                      - button "Collapse Runtime" [expanded] [ref=f4e405] [cursor=pointer]
+                    - generic [ref=f4e408]:
+                      - generic [ref=f4e409]:
+                        - paragraph [ref=f4e411]: Ready
+                        - generic [ref=f4e413]: Turn idle
+                      - generic [ref=f4e414]:
+                        - term [ref=f4e415]: Provider
+                        - definition [ref=f4e416]: tldw
+                        - term [ref=f4e417]: Model
+                        - definition [ref=f4e418]: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                      - generic [ref=f4e419]:
+                        - paragraph [ref=f4e420]: Provider route
+                        - paragraph [ref=f4e421]: tldw:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                        - paragraph [ref=f4e422]: Route tldw:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                  - region "Model route" [ref=f4e424]:
+                    - generic [ref=f4e425]:
+                      - heading "Model route" [level=2] [ref=f4e426]
+                      - button "Collapse Model route" [expanded] [ref=f4e427] [cursor=pointer]
+                    - generic [ref=f4e430]:
+                      - button "Open model settings" [ref=f4e432] [cursor=pointer]: Model settings
+                      - generic [ref=f4e436]:
+                        - paragraph [ref=f4e437]: Provider:model settings
+                        - paragraph [ref=f4e438]: Default settings for this provider:model.
+                  - region "Assistant" [ref=f4e439]:
+                    - generic [ref=f4e440]:
+                      - heading "Assistant" [level=2] [ref=f4e441]
+                      - button "Collapse Assistant" [expanded] [ref=f4e442] [cursor=pointer]
+                    - generic [ref=f4e445]:
+                      - generic [ref=f4e446]:
+                        - generic [ref=f4e447]:
+                          - paragraph [ref=f4e448]: Default Assistant
+                          - paragraph [ref=f4e449]: Character selected
+                        - generic [ref=f4e450]: Character
+                      - generic [ref=f4e451]:
+                        - button "Select character or persona" [ref=f4e452] [cursor=pointer]: Select assistant
+                        - button "Manage assistant" [ref=f4e456] [cursor=pointer]
+                        - button "Clear assistant" [ref=f4e460] [cursor=pointer]
+                        - button "Open Scene Director" [ref=f4e464] [cursor=pointer]: Scene Director
+                  - region "MCP tools" [ref=f4e466]:
+                    - generic [ref=f4e467]:
+                      - heading "MCP tools" [level=2] [ref=f4e468]
+                      - button "Collapse MCP tools" [expanded] [ref=f4e469] [cursor=pointer]
+                    - generic [ref=f4e473]:
+                      - generic [ref=f4e478]:
+                        - paragraph [ref=f4e479]: Chat tool access
+                        - paragraph [ref=f4e480]: No MCP tools available
+                      - button "Configure MCP tools" [ref=f4e481] [cursor=pointer]
+                  - region "Run controls" [ref=f4e483]:
+                    - generic [ref=f4e484]:
+                      - heading "Run controls" [level=2] [ref=f4e485]
+                      - button "Collapse Run controls" [expanded] [ref=f4e486] [cursor=pointer]
+                    - generic [ref=f4e489]:
+                      - generic [ref=f4e490]:
+                        - generic [ref=f4e491]:
+                          - button "Stop generation" [disabled] [ref=f4e492]
+                          - paragraph [ref=f4e495]: No turn is running.
+                        - button "Regenerate last response" [ref=f4e497] [cursor=pointer]
+                      - generic [ref=f4e502]:
+                        - paragraph [ref=f4e503]: Timeline
+                        - paragraph [ref=f4e504]: 3 messages
+                        - paragraph [ref=f4e505]: Search closed
+              - generic [ref=f4e506]:
+                - button "Restore context sidechannel" [ref=f4e507] [cursor=pointer]:
+                  - generic [ref=f4e511]: Context rail
+                - tooltip "Restore context sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f4e517] [cursor=pointer]
+  - alert [ref=f4e521]
+```

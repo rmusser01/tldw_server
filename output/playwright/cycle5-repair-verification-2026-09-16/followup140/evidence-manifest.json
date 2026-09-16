@@ -18,11 +18,15 @@
     },
     {
       "file": "cycle5-repair-140-green.log",
-      "sha256": "6b952e29bdc64e78c44b977808e8e9720a30b37ab7f3ae8e999676998c65a3e0"
+      "sha256": "61f1df5e19200661061058056cce4d6a84fb770bcb150980f6b7dbe2a20bc982",
+      "original_sha256": "6b952e29bdc64e78c44b977808e8e9720a30b37ab7f3ae8e999676998c65a3e0",
+      "normalization": "Trim trailing horizontal whitespace and final empty lines only; raw source preserved in /private/tmp."
     },
     {
       "file": "cycle5-repair-140-label-accessibility-red.log",
-      "sha256": "5d8bafe52c98edb5e6ceea748765b38014ae8770e373a4ed69b6df4fd09d2d61"
+      "sha256": "6e06d3fb772084fea6bcab393aff68b4099c5619f25f9fa525067696e1ac3373",
+      "original_sha256": "5d8bafe52c98edb5e6ceea748765b38014ae8770e373a4ed69b6df4fd09d2d61",
+      "normalization": "Trim trailing horizontal whitespace and final empty lines only; raw source preserved in /private/tmp."
     },
     {
       "file": "cycle5-repair-140-manifest.json",
@@ -30,7 +34,9 @@
     },
     {
       "file": "cycle5-repair-140-red.log",
-      "sha256": "5e71e160c4370edbde547881e4eb9276538c2c968a6687cc50812ddfcb5a56bb"
+      "sha256": "ff92acfc42c8ac2249c96589ca5d3f3a664d020140b64f49e35b98cf7a70a082",
+      "original_sha256": "5e71e160c4370edbde547881e4eb9276538c2c968a6687cc50812ddfcb5a56bb",
+      "normalization": "Trim trailing horizontal whitespace and final empty lines only; raw source preserved in /private/tmp."
     },
     {
       "file": "cycle5-repair-140-report.md",
@@ -42,11 +48,15 @@
     },
     {
       "file": "cycle5-repair-140-timeout-green.log",
-      "sha256": "299d94b75670d4ab47e36286233f1d2e24cc98e055b7572cbef2fc8d8cddab45"
+      "sha256": "f20ed8290a5a567e542c4849d7a80bec85d352f9df2e5855523c968f2f5a8f03",
+      "original_sha256": "299d94b75670d4ab47e36286233f1d2e24cc98e055b7572cbef2fc8d8cddab45",
+      "normalization": "Trim trailing horizontal whitespace and final empty lines only; raw source preserved in /private/tmp."
     },
     {
       "file": "cycle5-uat140-independent-focused-rerun.log",
-      "sha256": "d01246ea8f59c5f53041814741b5dc8439d9b05b5bd45409956677d0f107c688"
+      "sha256": "e3b7faf2e754ad5f72f55063ebd3c4b3dfffce3ccde19ad6e44b5f8b4b616eca",
+      "original_sha256": "d01246ea8f59c5f53041814741b5dc8439d9b05b5bd45409956677d0f107c688",
+      "normalization": "Trim trailing horizontal whitespace and final empty lines only; raw source preserved in /private/tmp."
     },
     {
       "file": "cycle5-uat140-independent-review.md",
@@ -54,7 +64,9 @@
     },
     {
       "file": "cycle5-uat140-independent-tests.log",
-      "sha256": "f2b082491d9090fc8b04122802e03cd4dcded9503d70f763d376e12bb72adbeb"
+      "sha256": "a9708acf7460a46d1c089de12f2c72b1ae51e79a0ae01a92152f8fa13e09d55e",
+      "original_sha256": "f2b082491d9090fc8b04122802e03cd4dcded9503d70f763d376e12bb72adbeb",
+      "normalization": "Trim trailing horizontal whitespace and final empty lines only; raw source preserved in /private/tmp."
     }
   ],
   "secretFindings": 0,

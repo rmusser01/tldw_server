@@ -1,0 +1,15 @@
+### Ran Playwright code
+```js
+await page.reload();
+```
+### Open tabs
+- 0: [Media | tldw](http://127.0.0.1:18580/media)
+- 1: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 2: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 3: (current) [](http://127.0.0.1:18580/chat)
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T14-28-34-061Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T14-25-45-880Z.log#L11-L12

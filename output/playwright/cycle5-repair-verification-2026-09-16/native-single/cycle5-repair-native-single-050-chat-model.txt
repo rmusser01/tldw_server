@@ -1,0 +1,10 @@
+### Ran Playwright code
+```js
+await page.goto('http://127.0.0.1:18580/chat');
+```
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T14-18-15-028Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T14-18-11-074Z.log#L1-L7

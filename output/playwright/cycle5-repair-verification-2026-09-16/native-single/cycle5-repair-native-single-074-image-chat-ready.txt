@@ -1,0 +1,24 @@
+### Open tabs
+- 0: [Media | tldw](http://127.0.0.1:18580/media)
+- 1: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 2: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 3: (current) [](http://127.0.0.1:18580/chat)
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Console: 2 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=e11]:
+  - status [ref=e14]:
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - generic [ref=e18]: Retrying
+        - generic [ref=e19]:
+          - heading "Retrying server readiness" [level=2] [ref=e20]
+          - generic [ref=e21]: The WebUI is retrying the health check before opening the app.
+      - button "Waiting" [disabled] [ref=e23]
+  - button "Open Next.js Dev Tools" [ref=e29] [cursor=pointer]
+  - alert [ref=e10]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T14-25-45-880Z.log#L3-L4

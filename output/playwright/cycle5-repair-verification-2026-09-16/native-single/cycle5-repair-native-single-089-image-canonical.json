@@ -1,0 +1,22 @@
+{
+  "checkedAt": "2026-09-16T14:29:30.237Z",
+  "method": "GET",
+  "endpoint": "/api/v1/chats/53c1610e-20eb-4dd6-9148-eb459ea6fe17/messages?include_images=true&include_metadata=true&limit=200",
+  "status": 200,
+  "body": {
+    "messages": [],
+    "total": 0,
+    "limit": 200,
+    "offset": 0,
+    "pagination": {
+      "mode": "offset",
+      "limit": 200,
+      "offset": 0,
+      "total": 0,
+      "has_more": false,
+      "next_offset": null
+    },
+    "has_more": false,
+    "next_offset": null
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "retainedAt": "2026-09-16T16:05:19.779Z",
+  "status": "Hidden-page native check remains unverified",
+  "probe": "Isolated about:blank Chrome, explicit --headed launch, actual Browser.setWindowBounds minimized; returned minimized bounds but visibility visible. Browser closed afterward. No application runtime, visibility override or auth data used.",
+  "files": [
+    {
+      "file": "cycle5-uat114-harness-reassessment.md",
+      "sha256": "0f5ee8cd72afc6691f92c7b8907ddc1e51711760359e33904db277a2399dc247",
+      "bytes": 6199
+    },
+    {
+      "file": "cycle5-uat114-native-minimize-probe.txt",
+      "sha256": "3eb36e4ca5def763653fe1c0baa93070c918a8bfd23c18dcd4c93a828f7a1977",
+      "bytes": 681
+    },
+    {
+      "file": "cycle5-uat114-minimized-state.txt",
+      "sha256": "123af75a6b44f7dda57612beb90aa179b20453ded92c72e72a3353bc75de5365",
+      "bytes": 194
+    },
+    {
+      "file": "cycle5-uat114-minimize-bounds-result.txt",
+      "sha256": "3b721b3ae130c7232644fa98c0228656b1da885a7a1b940fe62093911cb3bd55",
+      "bytes": 950
+    }
+  ]
+}

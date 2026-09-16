@@ -1,42 +1,44 @@
 # Cycle5 fresh multi-user UAT — final
 
-**Execution complete; acceptance fails.** Product remained frozen at `ab527eb3b4`. No product/Backlog/shared-tracker edits or commits by this agent. All12rows have outcomes or explicit limits; no pending native work.
+**Execution complete; acceptance fails.** Product stayed frozen at `ab527eb3b4`. All 12 rows have outcomes or explicit limits. This agent made no product, Backlog, shared-tracker or Git changes.
 
 ## Environment
 
-Fresh private config/data, API18501/UI18581, existing dependencies reused. First browser navigation08:00:01Z, final result~09:32Z on2026-09-16. Root owned processes/config/source. Root operator provider adaptation08:04:45Z and restart to API PID20095 preceded main Alice testing; this is **not a multi wizard pass**. Root later stopped20095 for real offline verification and restarted unchanged profile as69593. Root paused runtimes after completion.
+Fresh private configuration/data, API18501 and UI18581, with existing dependencies reused. First navigation was08:00:01Z; final native result was approximately09:32Z on2026-09-16. Root owned processes/configuration. The operator provider adaptation at08:04:45Z and restart to API PID20095 preceded Alice testing; this is **not a multi-user wizard pass**. Root later stopped20095 for the outage control and restarted the unchanged profile as69593, then paused all UAT runtimes after completion.
 
-Real llama.cpp9099/Gemma used under serialized leases; unavailable Ollama supplied real failures. Last model lease released after reanalysis terminal/reload~09:21Z. No mocked responses, token/clock changes, permission/ACL changes, permanent deletion or subsequent inference. Separate isolated browser proved natural expiry without background app refresh.
+Real llama.cpp9099/Gemma generations used serialized leases. Existing unavailable Ollama supplied real failures. The final model lease was released after reanalysis and reload at approximately09:21Z. No mocked responses, token/clock changes, permission changes or permanent deletion occurred.
 
-## Twelve-row matrix
+## Final 12-row matrix
 
-|#|Workflow|Final outcome|
+|#|Workflow|Outcome|
 |---|---|---|
-|1|Fresh setup/provider/first Chat|**PASS, operator adaptation.** Real admin UI creates Alice/Bob default Users; unverified admin TestConnection works. Alice real first response succeeds.|
-|2|Auth/reload/logout/offline/reconnect/expiry|**PARTIAL: UAT134.** Normal account switches/reloads pass. Natural parked expiry1830.947s→refresh200→ownedNotes200. Real outage shows useful guidance/readiness gate; Retry after unchanged restart restoresNotes200. Later active expiry loops auth/sessions401.|
-|3|Ordinary2turns/reload/failure→Retry|**PASS.** Initial5canonicalrows; separate realOllama502→GemmaRetry reuses exact user once, excludes displayerror, final reload3rows.|
-|4|Publicfile→search→QA/citation/sourceChat|**FAIL UAT127/132.** Real Minimize/nav/resume preserves job2 without duplicatePOST. Backend Warning+savedMedia1 but UIstuckProcessing0/1. Explicit Media continuation independently proves useful citedQA, correctsourcepreview/jump and groundedChat. Query filtering returns nonmatching ownitems(UAT132).|
-|5|ExactWikipedia→search→Chat|**EXTERNALLY BLOCKED.** ExactURL once; honestAccessblocked/0success1fail. Article/search/Chat dependents blocked. Separate completedexpirycontext used as approved adaptation; brokenmainjob2 untouched.|
-|6|BiologyNote→exact5cards→distinctreviews|**PASS.** Exactfivefacts, realgrounded5cards, save5, distinctreveal/rate5 with settlednextfetches; session1completed5/reload.|
-|7|SavedPirate→appliedChat|**PARTIAL UAT129/131.** Save/reloadSynced#1, actualUseinchat→SystemInstruction, realpiratereplyliteralARRR; canonicalexactsystem+answer. Collections401(UAT129), duplicatecanonicalgreetings(UAT131). DirectoutgoingPiratebody unavailable; no repeatedsend to manufactureevidence.|
-|8|Charactercreation/replacement/reply/reload|**FAIL reopenedUAT068.** Coldcancel/reopen/create201TestBot4, freshentryclearspriorcontext, realBEEPBOOP/savedroute/reloadpass. SavedselectorDefaultAssistant1 fails toretaintarget; explicitsecondclickreceipt+2.148ssettlement/no dialog. No wrongidentitygeneration.|
-|9|ChatNote/backlink/CardStudy/mixed/practice/End|**PASS tested save/reuse/study/End; Undo limited.** Actualprovenance/backlink, reviewedcard201→review200/completion1, correctmixed6cardpractice. ScheduledCramone rating→session3→actualEnd200completed1/4remaining. No positivemultiUndo certification or repeatedreratecycle(known128).|
-|10|Mediaanalysis→Review→reanalysis/reload|**PASS, explicit continuation.** Actualanalysisv2, Reviewraw/formattedinspection, unavailableanalysis502preservesprior, restoredGemmareanalysis200/save201v3/reload200unchangedraw. ReviewReprocess was chunk/embedonly, notanalysis.|
-|11|PermissionDelete/soleadminTrash/restore|**PASS, APIfixture adaptation.** OrdinaryDelete disabled withguidance. Adminemptylibrary→one syntheticAPIupload→actualTrashDELETE200→empty0/0keepsTrash→Restore200→list1/1. Sourcepreserved.|
-|12|ReciprocalAPI/browser/confidentiality|**PASS tested boundaries; draft limit.** OwnvalidNotes201/read+update200 precede foreignGET+PUT404bothways; Chatown200/foreign404; jobowner200/Bob403; QAhistoryAlice1/Bob0. BobUI/BackexcludeAlice; AlicereturnexcludesBob. Indigoexistingsecurityfilterexcluded1/retained0/noanswer/excerpt; AuroraactualcitedQApositive. Dedicatedunsaveddraftcrossaccountrestoration notexercised.|
+|1|Fresh setup/provider/first Chat|**PASS with operator adaptation.** Actual admin UI created Alice/Bob with default User roles. Unverified admin Test Connection worked. Alice received a useful real first reply.|
+|2|Authentication/reload/logout/offline/reconnect/expiry|**PARTIAL — UAT134.** Account switches and reloads passed. Separate parked expiry1830.947s→refresh200→owned Notes200 passed. Real outage showed guidance and a readiness gate; Retry after restart restored Notes200. A later active expiry looped auth/sessions401.|
+|3|Two ordinary turns/reload/failure→Retry|**PASS.** Initial five canonical rows. Separate real Ollama502→Gemma Retry reused the exact user once, excluded display-error content, and reloaded three canonical rows.|
+|4|Public file→search→cited QA/source Chat|**FAIL — UAT127/132.** Minimize/navigation/resume preserved job2 without another POST. Backend completed with Warning and saved Media1, while UI stayed Processing0/1. Explicit Media continuation independently passed cited QA, source preview/jump and grounded Chat. Nonmatching search queries returned own items (UAT132).|
+|5|Exact Wikipedia→search→Chat|**EXTERNALLY BLOCKED.** Exact URL attempted once; honest Access blocked/0 succeeded/1 failed. Article-dependent steps remained blocked. Approved alternate expiry context preserved broken main job2.|
+|6|Biology Note→five cards→five distinct reviews|**PASS.** Exact five facts, five grounded generated/saved cards, five distinct reveal/rating events with settled next-card fetches, session1 completed5 and reload verified.|
+|7|Saved Pirate Prompt→applied Chat|**PARTIAL — UAT129/131.** Saved/reloaded Synced#1; actual Use in chat→System Instruction; real pirate reply with literal ARRR and canonical exact system text. Collections401 and duplicate canonical greetings remain. Direct outgoing Pirate body was unavailable; no repeat send manufactured evidence.|
+|8|Character creation/replacement/reply/reload|**FAIL — reopened UAT068.** Cold cancel/reopen/create201, fresh TestBot4 entry, real BEEP BOOP, saved route and reload passed. Saved selector→Default Assistant1 did not retain the replacement. Explicit second-click receipt shows same route/mode after2.148s, no dialog. No wrong-identity generation.|
+|9|Chat Note/backlink/card/Study/practice/manual End|**PASS for tested reuse, Study and End; Undo limited.** Actual provenance/backlink, reviewed card201→review200/completion1, correct six-card practice pool. Scheduled Cram reviewed once and actual End200 completed session3 with one review/four remaining. Positive multi-user Undo was not established.|
+|10|Analysis→Review→reanalysis/save/reload|**PASS with explicit continuation.** Actual analysis saved asv2 and displayed in Review. Unavailable analysis502 preserved it. Restored Gemma reanalysis200/save201v3/reload200 preserved the raw source and prior version. Review Reprocess was chunk/embed only, not analysis.|
+|11|Permission-aware Delete/sole admin source Trash/restore|**PASS with API fixture adaptation.** Ordinary Delete remained disabled with guidance. Admin’s sole synthetic source moved to Trash200, empty library retained Trash access, Restore200 returned the same source.|
+|12|Reciprocal API/browser ownership and confidentiality|**PASS for tested boundaries; draft limit.** Valid own Notes201/read+update200 preceded reciprocal foreign GET+PUT404; own Chat200/foreign404; job owner200/Bob403; QA history Alice1/Bob0. Bob UI/Back excluded Alice; Alice return excluded Bob. Indigo filtering excluded1/retained0 with no answer/excerpt; public Aurora QA was positive. Dedicated unsaved-draft restoration across accounts was not exercised.|
 
-## Confirmed failures
+## Confirmed findings
 
-- **UAT127/TASK13260.67:** job2 completed08:23:07 withWarning andownMedia1; resumedUIstaysProcessing0/1. Nevercancelled/reset/resubmitted.
-- **UAT129:** Promptscollections401 despite otherauthenticated200; actualPromptsaved/reloaded.
-- **UAT068/TASK13260.15 reopened:** TestBot4→DefaultAssistant1 selector doesnotretainreplacement. Click08:55:05.145Z→observation08:55:07.293Z, same savedroute/mode, no dialog.
-- **UAT131:** oneweatherSend; canonicalidenticalgreetings68450214…08:56:28.974Z and2988cf09…08:57:06.483Z. EarlierUIalreadyhadgreetings; exactcreationrequestcausalitynotcaptured.
-- **UAT132/TASK13260.73:** correctPOST/media/search `{query:<marker>}` returns ownnonmatchingitem; no foreignleak, no query-filterpass.
-- **UAT134/existingTASK13260.24:** parkedexpiryproofpasses; lateractiveexpirycontextgets twoauth/sessions401 in6.5s09:17:20–26. No tokenmutation/repeatedprobe.
+- **UAT127 / TASK13260.67:** job2 completed08:23:07 with Warning and saved Media1; resumed UI remained Processing0/1. It was never cancelled, reset or resubmitted.
+- **UAT129:** Prompt collections returned401 despite other authenticated200 responses; actual Prompt save/reload still passed.
+- **UAT068 / TASK13260.15 reopened:** saved TestBot4→Default Assistant1 replacement reverted. Click08:55:05.145Z; settled observation08:55:07.293Z; no confirmation dialog.
+- **UAT131:** one weather send, but two identical canonical greetings:68450214… at08:56:28.974Z and2988cf09… at08:57:06.483Z. Creation-request causality was not captured.
+- **UAT132 / TASK13260.73:** the documented `{query:<marker>}` search body returned the caller’s own nonmatching item. No foreign content leaked; this is not a query-filter pass.
+- **UAT134 / TASK13260.24:** the earlier natural refresh passed; a later active expiry produced two auth/sessions401 responses in a6.5s observation. No token mutation or repeated probing followed.
 
-## Key evidence (all under `/private/tmp/cycle5-multi-native-`)
+## Evidence index
 
-|Control|Artifacts|
+All files below are under **`/private/tmp/cycle5-multi-native-`**.
+
+|Control|Key artifacts|
 |---|---|
 |Expiry/outage/reconnect|`expiry-issued.txt`, `expiry-return.txt`, `expiry-late-status.txt`, `offline-test-wire.txt`, `offline-notes-settled.txt`, `reconnect-notes-canonical.txt`|
 |Ordinary/Retry|`ordinary-reload-canonical.txt`, `retry-preretry-canonical.txt`, `retry-success-wire.txt`, `retry-final-canonical.txt`|
@@ -48,12 +50,14 @@ Real llama.cpp9099/Gemma used under serialized leases; unavailable Ollama suppli
 |Ownership/permission|`isolation-api.json`, `bob-note-save.txt`, `bob-back-state.txt`, `alice-return-notes-settled.txt`, `admin-trash-wire.txt`, `admin-restore-wire.txt`|
 |Confidentiality|`indigo-upload.json`, `indigo-search-wire.txt`, `indigo-result.txt/.png`|
 
-CanonicalIDs/dataimpact and detailed chronological qualifications: **`cycle5-multi-native-DETAILED_EVIDENCE_INDEX.md`** and **`cycle5-multi-native-running-tracker.md`**. All syntheticrecords retained. Sixcards; persistedreviewevents5+1+1 acrosssessions1/2/3; two schedule-offpracticeevents arelocalonly. Adminsource restored. AliceAuroraMedia1/raw963chars/v1-v3 preserved; IndigoMedia2 added; BobprivateMedia1distinctnamespace. No failedconversation/source overwritten.
+Complete IDs/data impact: **`DETAILED_EVIDENCE_INDEX.md`**. Chronology: **`running-tracker.md`**. Six cards were retained; persisted review events were5+1+1 across sessions1/2/3. Two schedule-off practice events were local only. Admin’s source was restored. Alice’s Aurora source/raw963characters/versions1–3, Indigo source2, Bob’s distinct source1 and all synthetic account records remain preserved.
 
-## Limits and adaptations
+## Limits
 
-- ExplicitAPIfixtures for isolation/adminrestore/Indigo are not UIingestionpasses. RealpublicAuroraQA is the confidentialitypositive; IndigogenerationOFF returns excluded1/retained0/no documents,citations,answer and native securityguidance. No9099call fornegative.
-- Requestobserver mismatches/timeouts and streambodyunavailability are retained, not counted as productfailures or silentlyrepeatedactions. Lastreanalysis capturesbothgeneration+versionssave. InitialAPIloginJSON422 corrected to actualOAuthform beforefixtures; guessedKnowledge404 corrected to observedroute; AntDesignoverlaidinputs used visiblelabels. No forcedDOM/state mutation.
-- ReviewReprocess actedimmediately duringinspection; rootverified chunk/embedPOST200 and no9099concurrency. It is not a reanalysispass.
-- Nativehidden-tabnotifications, newlycompletedreasoning-onlynegative, successfulvision/recovery, dedicatedunsaveddraftownerrestoration and positiveUndo remainexplicitlimits. No broaderplatform/fullcleaninstallclaim.
-- Broadrequestinventory was automaticallyrejected for credentialrisk and not retried; specificsafeobservers used. Evidencecredentials/JWTscan and hashes accompanyreport. No furtherbrowser/network/codeactions afterrootpause.
+API fixtures for isolation, admin restore and Indigo are explicit adaptations, not UI ingestion passes. Indigo used generation off and unchanged security policy; no9099 request occurred. The positive public control was the earlier actual cited Aurora answer.
+
+Missed observers, unavailable stream bodies and harness corrections are retained and not treated as product failures or reasons to repeat completed actions. The final reanalysis captures both generation and canonical save. Review Reprocess acted immediately during inspection; root verified chunk/embed POST200 and no concurrent LLM call.
+
+Native hidden-tab notification cancellation, a newly completed reasoning-only negative, successful vision recovery, dedicated unsaved-draft restoration and positive multi-user Undo remain unverified. No clean-install or broader platform certification is implied.
+
+A broad request inventory was automatically rejected for credential risk and not retried; safe endpoint observers replaced it. Credential/JWT scanning and hashes accompany the report. No further browser, network or source actions occurred after root paused the runtimes.

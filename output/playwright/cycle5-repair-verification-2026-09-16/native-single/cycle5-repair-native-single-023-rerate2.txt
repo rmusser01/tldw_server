@@ -1,0 +1,5 @@
+### Ran Playwright code
+```js
+// Press Control+z
+await page.keyboard.press('Control+z');
+```

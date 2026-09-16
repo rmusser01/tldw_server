@@ -1,0 +1,12 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Save' }).click();
+```
+### Page
+- Page URL: http://127.0.0.1:18580/settings/tldw
+- Page Title: Server Settings | tldw
+- Console: 0 errors, 2 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T14-06-04-997Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T14-04-33-668Z.log#L8-L9

@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 09:37'
+updated_date: '2026-09-16 16:05'
 labels:
   - uat
   - testing
@@ -162,6 +162,12 @@ Prepared bounded post-cycle5 design Docs/Design/2026-09-16-uat-cycle-5-repairs.m
 Cycle5 checkpoint09:23UTC: frozen ab527eb3b4 remains source-clean. New findings126-133 plus reopened068 tracked; task72 owns Retry context ordering133, task73 owns FTS fallback132. Both real Media reanalysis/failure-preservation workflows pass. Both new Character completion/reload pass but picker replacement fails. Reciprocal owner API/browser controls pass with search filtering kept separate. Natural away-return expiry passes; later active sessions401 polling under diagnosis. Single intentional API offline window now beginning after successful visible disconnect/key reentry. 636 evidence captures independently verified by SHA256/length at latest checkpoint; no credential matches. Design and new plan updated before implementation.
 
 Cycle5 execution closed around09:32UTC on unchanged ab527eb3b4. Root read both final reports and independently checked key native/canonical evidence, including correct failures, synthetic Indigo exclusion and ownership. Ten new findings126-135 plus reopened068: twoP3/nineP2. Final runtime pause verified only owned Next18580/18581 and API18500/18501. Same profiles/data preserved. Plan cycle5 Stage1 complete, Stage2 ready for bounded disjoint repair release after final evidence checkpoint. No full acceptance or fresh clean-machine claim; explicit missing coverage retained in tracker/reports.
+
+User correction from side conversation, 2026-09-16: do not start another full UAT until every previously identified issue has a reconciled disposition backed by repair and original-scenario verification evidence. Implemented code, passing automated suites, stale Done labels, or the previously quoted 48 formally closed records do not alone satisfy this gate. Reconcile all 135 unique issue IDs; explicitly retain reopened068, cycle5 findings126-135, hidden-tab114, image-recovery118 and required PostgreSQL execution TASK13260.75 as unresolved until their acceptance evidence exists. Record issue ID, repair revision, regression result, targeted acceptance evidence and remaining blockers; keep unavailable coverage blocked, never passed. This side conversation changes only the shared tracker/plan gate, leaving active product/runtime work in the main task. Official MCP workflow resources were read; task_view hung and was terminated, so the official CLI fallback is used.
+
+2026-09-16 follow-up checkpoint: independent UAT013165/9 plus unchanged source-intent probe pass; notification139/141/142150/6 plus5 original probes pass. Retained exact hashes/reviews in output/playwright/cycle5-repair-verification-2026-09-16/followup013 and followup139-142. WebUI final332/17 passes. Expanded UI150-suite run exposes UAT143/TASK13260.82:27failed/3107passed and3unhandled errors; all27 reproduce against3c30685611 from stale fixtures/guards, bounded test-only correction underway. Both owned Next frontends paused; preserved APIs and PG18 container running. Native acceptance and fresh SQLite/PostgreSQL matrix remain pending; image was actually attached/retried/reloaded under unsupported-model refusal, not counted as canonical image Retry pass.
+
+2026-09-16 16:00 checkpoint: reviewed frontend commits013=3f50f408df, notifications139/141/142=d547be4719, stale-tests143=08d7728e0d. Final3143UI/150suites and332WebUI/17suites pass separately;90existing compiler signatures,0added/removed. Current144-row ledger:130verified,11awaiting exact acceptance,2blocked,1unresolved. New normal-runtime PostgreSQL startup UAT144/task83 is being fixed: explicit PG selection silently falls back toSQLite, while bootstrap expectsPG. Official empty holder remainsalive; nativePGprofile never startedserver. Separate true native-window minimize probe still returned visible and was closed, retaining114 tool limit. Full UAT gate remainsblocked.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

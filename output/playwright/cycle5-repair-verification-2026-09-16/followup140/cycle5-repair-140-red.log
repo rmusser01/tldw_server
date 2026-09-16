@@ -39,7 +39,7 @@ AssertionError: expected [ …(11) ] to deeply equal []
     109|     expect(deprecations).toEqual([])
        |                          ^
     110|   })
-    111| 
+    111|
 
 ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
 
@@ -48,4 +48,3 @@ AssertionError: expected [ …(11) ] to deeply equal []
       Tests  1 failed | 4 skipped (5)
    Start at  08:16:00
    Duration  2.39s (transform 203ms, setup 73ms, import 871ms, tests 1.13s, environment 224ms)
-

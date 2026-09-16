@@ -1,0 +1,265 @@
+### Open tabs
+- 0: [Media | tldw](http://127.0.0.1:18580/media?id=1)
+- 1: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 2: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 3: [Describe the attached image. State the color of the speech bubble and how many d | tldw](http://127.0.0.1:18580/chat)
+- 4: (current) [Chat with this media: cycle5-single-native-public-source Project Cedar is a fic | tldw](http://127.0.0.1:18580/chat)
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Page Title: Chat with this media: cycle5-single-native-public-source Project Cedar is a fic | tldw
+### Snapshot
+```yaml
+- generic [ref=f2e1]:
+  - generic [ref=f2e4]:
+    - link "Skip to main content" [ref=f2e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f2e6]:
+      - button "Expand sidebar" [ref=f2e7] [cursor=pointer]
+      - button "New Chat" [ref=f2e11] [cursor=pointer]
+      - generic [ref=f2e14]:
+        - button "Quick Ingest" [ref=f2e15] [cursor=pointer]
+        - button "Chat" [ref=f2e19] [cursor=pointer]
+        - button "Prompts" [ref=f2e22] [cursor=pointer]
+        - button "Characters" [ref=f2e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f2e31] [cursor=pointer]
+        - button "World Books" [ref=f2e35] [cursor=pointer]
+        - button "Notes" [ref=f2e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f2e42] [cursor=pointer]
+        - button "Media" [ref=f2e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f2e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f2e59] [cursor=pointer]
+        - button "Kanban" [ref=f2e65] [cursor=pointer]
+        - button "Watchlists" [ref=f2e67] [cursor=pointer]
+      - generic [ref=f2e72]:
+        - button "Open Notes Dock" [ref=f2e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f2e78] [cursor=pointer]
+        - button "Settings" [ref=f2e81] [cursor=pointer]
+    - main [ref=f2e85]:
+      - generic [ref=f2e86]:
+        - generic [ref=f2e89]:
+          - generic [ref=f2e90]:
+            - button "Expand sidebar" [ref=f2e91] [cursor=pointer]
+            - generic [ref=f2e93]:
+              - img "tldw Assistant" [ref=f2e94]
+              - generic [ref=f2e95]: tldw Assistant
+              - button "Companion Home" [ref=f2e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f2e100] [cursor=pointer]
+            - 'button "Chat with this media: cycle5-single-native-public-source Project Cedar is a fic" [ref=f2e660] [cursor=pointer]'
+            - generic "Saved chat. History is persisted." [ref=f2e662]: Saved
+          - generic [ref=f2e103]:
+            - button "Search - Open command palette" [ref=f2e104] [cursor=pointer]:
+              - generic [ref=f2e108]: Search
+              - generic [ref=f2e109]: ⌘K
+            - button "New saved chat" [ref=f2e663] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f2e667] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f2e668] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f2e669] [cursor=pointer]
+            - button "Open settings" [ref=f2e110] [cursor=pointer]
+            - generic [ref=f2e122]:
+              - button "Notifications, 0 unread" [ref=f2e123] [cursor=pointer]
+              - status [ref=f2e127]: Notifications are active
+            - button "Switch to light theme" [ref=f2e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f2e135] [cursor=pointer]:
+              - generic [ref=f2e136]: "?"
+        - generic [ref=f2e137]:
+          - heading "Chat" [level=1] [ref=f2e676]
+          - generic [ref=f2e679]:
+            - paragraph [ref=f2e680]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f2e681]:
+              - main [ref=f2e682]:
+                - generic [ref=f2e683]:
+                  - generic [ref=f2e685]:
+                    - generic [ref=f2e686]:
+                      - generic [ref=f2e687]: Standard chat
+                      - generic [ref=f2e688]: Conversation timeline
+                    - generic [ref=f2e689]:
+                      - button "Switch to light theme" [ref=f2e690] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f2e697] [cursor=pointer]:
+                        - generic [ref=f2e703]: Focus
+                      - button "Shortcuts" [ref=f2e704] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f2e708]
+                  - log "Chat messages" [ref=f2e710]:
+                    - generic [ref=f2e712]:
+                      - article "System message 1 of 11" [ref=f2e1166]:
+                        - generic [ref=f2e719]:
+                          - generic [ref=f2e721]:
+                            - generic [ref=f2e722]: System prompt
+                            - generic [ref=f2e723]: • 1:55 AM
+                          - paragraph [ref=f2e725]: You are a helpful AI assistant.
+                          - generic [ref=f2e1230]:
+                            - generic [ref=f2e1231]:
+                              - generic [ref=f2e1232]: Was this helpful?
+                              - generic [ref=f2e1233]:
+                                - button "Helpful" [ref=f2e1234] [cursor=pointer]
+                                - button "Not helpful" [ref=f2e1237] [cursor=pointer]
+                                - button "More feedback" [ref=f2e1240] [cursor=pointer]
+                            - button "More actions" [ref=f2e1246] [cursor=pointer]: •••
+                      - article "User message 2 of 11" [ref=f2e1167]:
+                        - generic [ref=f2e746]:
+                          - generic [ref=f2e748]:
+                            - generic [ref=f2e749]: You
+                            - generic [ref=f2e750]: • 1:55 AM
+                          - paragraph [ref=f2e752]: "Chat with this media: cycle5-single-native-public-source Project Cedar is a fictional community library. Jonah Patel coordinates the library. The library opens on 22 November 2026. The book return is beside the north entrance. The public reading room has seven oak tables. Volunteers meet each Thursday at 18:00. According only to this source, who coordinates Project Cedar and where is its book return?"
+                          - button "More actions" [ref=f2e1249] [cursor=pointer]: •••
+                      - article "Assistant message 3 of 11" [ref=f2e1168]:
+                        - generic [ref=f2e765]:
+                          - generic [ref=f2e767]:
+                            - generic [ref=f2e768]: Assistant
+                            - generic [ref=f2e769]: • 1:56 AM
+                          - paragraph [ref=f2e1250]: Jonah Patel coordinates Project Cedar, and its book return is beside the north entrance.
+                          - generic [ref=f2e1251]:
+                            - generic [ref=f2e1252]:
+                              - generic [ref=f2e1253]: Was this helpful?
+                              - generic [ref=f2e1254]:
+                                - button "Helpful" [ref=f2e1255] [cursor=pointer]
+                                - button "Not helpful" [ref=f2e1258] [cursor=pointer]
+                                - button "More feedback" [ref=f2e1261] [cursor=pointer]
+                            - button "More actions" [ref=f2e1267] [cursor=pointer]: •••
+                      - article "User message 4 of 11" [ref=f2e1170]:
+                        - generic [ref=f2e793]:
+                          - generic [ref=f2e795]:
+                            - generic [ref=f2e796]: You
+                            - generic [ref=f2e797]: • 2:00 AM
+                          - paragraph [ref=f2e799]: Greet a visitor to Project Cedar in one short sentence.
+                          - button "More actions" [ref=f2e1270] [cursor=pointer]: •••
+                      - article "Assistant message 5 of 11" [ref=f2e1171]:
+                        - generic [ref=f2e812]:
+                          - generic [ref=f2e814]:
+                            - generic [ref=f2e815]: Assistant
+                            - generic [ref=f2e816]: • 2:00 AM
+                          - paragraph [ref=f2e1271]: Ahoy, welcome to Project Cedar, ARRR!
+                          - generic [ref=f2e1272]:
+                            - generic [ref=f2e1273]:
+                              - generic [ref=f2e1274]: Was this helpful?
+                              - generic [ref=f2e1275]:
+                                - button "Helpful" [ref=f2e1276] [cursor=pointer]
+                                - button "Not helpful" [ref=f2e1279] [cursor=pointer]
+                                - button "More feedback" [ref=f2e1282] [cursor=pointer]
+                            - button "More actions" [ref=f2e1288] [cursor=pointer]: •••
+                      - article "User message 6 of 11" [ref=f2e1173]:
+                        - generic [ref=f2e840]:
+                          - generic [ref=f2e842]:
+                            - generic [ref=f2e843]: You
+                            - generic [ref=f2e844]: • 2:15 AM
+                          - paragraph [ref=f2e846]: "For this fictional test, reply with exactly: CEDAR RETRY READY."
+                          - button "More actions" [ref=f2e1291] [cursor=pointer]: •••
+                      - article "Assistant message 7 of 11" [ref=f2e1174]:
+                        - generic [ref=f2e859]:
+                          - generic [ref=f2e861]:
+                            - generic [ref=f2e862]: Assistant
+                            - generic [ref=f2e863]: • 2:17 AM
+                          - paragraph [ref=f2e1292]: Jonah Patel coordinates the library, and the book return is beside the north entrance.
+                          - generic [ref=f2e1293]:
+                            - generic [ref=f2e1294]:
+                              - generic [ref=f2e1295]: Was this helpful?
+                              - generic [ref=f2e1296]:
+                                - button "Helpful" [ref=f2e1297] [cursor=pointer]
+                                - button "Not helpful" [ref=f2e1300] [cursor=pointer]
+                                - button "More feedback" [ref=f2e1303] [cursor=pointer]
+                            - button "More actions" [ref=f2e1309] [cursor=pointer]: •••
+                      - article "User message 8 of 11" [ref=f2e1176]:
+                        - generic [ref=f2e902]:
+                          - generic [ref=f2e904]:
+                            - generic [ref=f2e905]: You
+                            - generic [ref=f2e906]: • 7:40 AM
+                          - paragraph [ref=f2e908]: "For this fictional test, reply with exactly: CEDAR RETRY VERIFIED."
+                          - button "More actions" [ref=f2e1312] [cursor=pointer]: •••
+                      - article "Assistant message 9 of 11" [ref=f2e1177]:
+                        - generic [ref=f2e921]:
+                          - generic [ref=f2e923]:
+                            - generic [ref=f2e924]: Assistant
+                            - generic [ref=f2e925]: • 7:42 AM
+                          - paragraph [ref=f2e1313]: CEDAR RETRY VERIFIED.
+                          - generic [ref=f2e1314]:
+                            - generic [ref=f2e1315]:
+                              - generic [ref=f2e1316]: Was this helpful?
+                              - generic [ref=f2e1317]:
+                                - button "Helpful" [ref=f2e1318] [cursor=pointer]
+                                - button "Not helpful" [ref=f2e1321] [cursor=pointer]
+                                - button "More feedback" [ref=f2e1324] [cursor=pointer]
+                            - generic [ref=f2e1329]:
+                              - generic [ref=f2e1330]:
+                                - button "Previous response" [ref=f2e1331] [cursor=pointer]
+                                - generic [ref=f2e1334]: 2 of 2
+                                - button "Next response" [disabled] [ref=f2e1335]
+                              - button "More actions" [ref=f2e1338] [cursor=pointer]: •••
+                      - article "User message 10 of 11" [ref=f2e1180]:
+                        - generic [ref=f2e1183]:
+                          - generic [ref=f2e1185]:
+                            - generic [ref=f2e1186]: You
+                            - generic [ref=f2e1187]: • 7:53 AM
+                          - paragraph [ref=f2e1189]: "Chat with this media: cycle5-home-handoff-proof-20260916.md Summarize this source."
+                          - button "More actions" [ref=f2e1341] [cursor=pointer]: •••
+                      - article "Assistant message 11 of 11" [ref=f2e1196]:
+                        - generic [ref=f2e1208]:
+                          - generic [ref=f2e1210]:
+                            - generic [ref=f2e1211]: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                            - generic [ref=f2e1212]: • 7:53 AM
+                          - paragraph [ref=f2e1343]: Project Cedar is a fictional community library coordinated by Jonah Patel. It is scheduled to open on November 22, 2026. The library features a public reading room with seven oak tables, and the book return is located next to the north entrance. Additionally, volunteers are scheduled to meet every Thursday at 18:00.
+                          - generic [ref=f2e1344]:
+                            - generic [ref=f2e1345]:
+                              - generic [ref=f2e1346]: Was this helpful?
+                              - generic [ref=f2e1347]:
+                                - button "Helpful" [ref=f2e1348] [cursor=pointer]
+                                - button "Not helpful" [ref=f2e1351] [cursor=pointer]
+                                - button "More feedback" [ref=f2e1354] [cursor=pointer]
+                            - button "More actions" [ref=f2e1360] [cursor=pointer]: •••
+                  - generic [ref=f2e954]:
+                    - generic [ref=f2e955]: Composer
+                    - generic [ref=f2e963]:
+                      - button [aria-hidden] [ref=f2e964]
+                      - button [aria-hidden] [ref=f2e965]
+                      - generic [ref=f2e966]:
+                        - generic [ref=f2e968]:
+                          - button "Hide composer options" [expanded] [ref=f2e969] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f2e974]
+                          - generic [ref=f2e975]:
+                            - button "Improve prompt" [ref=f2e978] [cursor=pointer]
+                            - generic [ref=f2e983]:
+                              - button "Send message" [ref=f2e1361] [cursor=pointer]:
+                                - generic [ref=f2e985]: Send
+                              - button "Open message delivery options" [ref=f2e990] [cursor=pointer]
+                        - generic [ref=f2e995]:
+                          - generic [ref=f2e997]:
+                            - group "Mode and context controls" [ref=f2e998]:
+                              - button "Modes" [ref=f2e999] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f2e1006] [cursor=pointer]':
+                                - generic [ref=f2e1007]:
+                                  - generic [ref=f2e1008]: MCP
+                                  - generic [ref=f2e1009]: None
+                              - button "Search & Context" [ref=f2e1012] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f2e1017] [cursor=pointer]:
+                                - generic [ref=f2e1020]: Prompt
+                              - button "Select character or persona" [ref=f2e1021] [cursor=pointer]
+                              - button "Role-play setup" [ref=f2e1026] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f2e1033] [cursor=pointer]
+                            - group "Run input controls" [ref=f2e1039]:
+                              - button "OpenUI" [ref=f2e1040] [cursor=pointer]
+                              - button "Start dictation" [ref=f2e1046] [cursor=pointer]
+                              - generic [ref=f2e1053]:
+                                - button "Attach image" [ref=f2e1055] [cursor=pointer]
+                                - button "More attachments" [ref=f2e1059] [cursor=pointer]
+                              - button "More tools" [ref=f2e1062] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f2e1065] [cursor=pointer]:
+                                - generic [ref=f2e1069]: Chat Settings
+                          - generic "Active context" [ref=f2e1070]:
+                            - button "Custom OpenAI API / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f2e1124] [cursor=pointer]:
+                              - generic "Provider status" [ref=f2e1077]: Healthy
+                            - button "Chat 11 messages" [ref=f2e1229] [cursor=pointer]:
+                              - generic [ref=f2e1079]: Chat
+                              - generic [ref=f2e1080]: 11 messages
+                            - button "Configure context window size" [ref=f2e1082] [cursor=pointer]:
+                              - generic [ref=f2e1083]: 313 + ~0 = 313 tokens
+                            - button "Saved" [ref=f2e1085] [cursor=pointer]
+                            - button "Advanced controls" [ref=f2e1087] [cursor=pointer]
+              - generic [ref=f2e1091]:
+                - button "Restore context sidechannel" [ref=f2e1092] [cursor=pointer]:
+                  - generic [ref=f2e1096]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f2e1097]:
+                - button "Restore runtime sidechannel" [ref=f2e1098] [cursor=pointer]:
+                  - generic [ref=f2e1099]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f2e334] [cursor=pointer]
+  - alert [ref=f2e338]: Chat | tldw
+```

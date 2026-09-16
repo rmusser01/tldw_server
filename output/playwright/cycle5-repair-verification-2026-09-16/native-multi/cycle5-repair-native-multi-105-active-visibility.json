@@ -1,0 +1,10 @@
+### Result
+{
+  "at": "2026-09-16T14:32:44.723Z",
+  "visibility": "visible",
+  "path": "/chat"
+}
+### Ran Playwright code
+```js
+await page.evaluate('() => ({at:new Date().toISOString(), visibility:document.visibilityState, path:location.pathname})');
+```

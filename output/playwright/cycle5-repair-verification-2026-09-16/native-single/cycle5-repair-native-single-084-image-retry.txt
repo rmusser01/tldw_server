@@ -1,0 +1,17 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Retry same model' }).click();
+```
+### Open tabs
+- 0: [Media | tldw](http://127.0.0.1:18580/media)
+- 1: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 2: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 3: (current) [Describe the attached image. State the color of the speech bubble and how many d | tldw](http://127.0.0.1:18580/chat)
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Page Title: Describe the attached image. State the color of the speech bubble and how many d | tldw
+- Console: 4 errors, 0 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T14-28-32-572Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T14-25-45-880Z.log#L10

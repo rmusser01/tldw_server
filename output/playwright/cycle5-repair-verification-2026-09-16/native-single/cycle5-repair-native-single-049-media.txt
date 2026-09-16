@@ -1,0 +1,11 @@
+### Ran Playwright code
+```js
+await page.getByTestId('chat-sidebar-shortcut-watchlists').click();
+```
+### Page
+- Page URL: http://127.0.0.1:18580/watchlists
+- Console: 2 errors, 2 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T14-17-42-804Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T14-06-13-555Z.log#L11-L17

@@ -1,0 +1,96 @@
+### Open tabs
+- 0: [Media | tldw](http://127.0.0.1:18580/media?id=1)
+- 1: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 2: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 3: [Describe the attached image. State the color of the speech bubble and how many d | tldw](http://127.0.0.1:18580/chat)
+- 4: (current) [Flashcards | tldw](http://127.0.0.1:18580/flashcards?tab=manage)
+### Page
+- Page URL: http://127.0.0.1:18580/flashcards?tab=manage
+- Page Title: Flashcards | tldw
+### Snapshot
+```yaml
+- generic [ref=f3e2]:
+  - generic [ref=f3e5]:
+    - link "Skip to main content" [ref=f3e6] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f3e7]:
+      - button "Expand sidebar" [ref=f3e8] [cursor=pointer]
+      - button "New Chat" [ref=f3e12] [cursor=pointer]
+      - generic [ref=f3e15]:
+        - button "Quick Ingest" [ref=f3e16] [cursor=pointer]
+        - button "Chat" [ref=f3e20] [cursor=pointer]
+        - button "Prompts" [ref=f3e23] [cursor=pointer]
+        - button "Characters" [ref=f3e27] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f3e32] [cursor=pointer]
+        - button "World Books" [ref=f3e36] [cursor=pointer]
+        - button "Notes" [ref=f3e39] [cursor=pointer]
+        - button "Knowledge QA" [ref=f3e43] [cursor=pointer]
+        - button "Media" [ref=f3e51] [cursor=pointer]
+        - button "Document Workspace" [ref=f3e54] [cursor=pointer]
+        - button "Research Workspace" [ref=f3e60] [cursor=pointer]
+        - button "Kanban" [ref=f3e66] [cursor=pointer]
+        - button "Watchlists" [ref=f3e68] [cursor=pointer]
+      - generic [ref=f3e73]:
+        - button "Open Notes Dock" [ref=f3e74] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f3e79] [cursor=pointer]
+        - button "Settings" [ref=f3e82] [cursor=pointer]
+    - main [ref=f3e86]:
+      - generic [ref=f3e87]:
+        - generic [ref=f3e90]:
+          - generic [ref=f3e91]:
+            - button "Expand sidebar" [ref=f3e92] [cursor=pointer]
+            - generic [ref=f3e94]:
+              - img "tldw Assistant" [ref=f3e95]
+              - generic [ref=f3e96]: tldw Assistant
+              - button "Companion Home" [ref=f3e97] [cursor=pointer]
+              - button "Show shortcuts" [ref=f3e101] [cursor=pointer]
+          - generic [ref=f3e104]:
+            - button "Search - Open command palette" [ref=f3e105] [cursor=pointer]:
+              - generic [ref=f3e109]: Search
+              - generic [ref=f3e110]: ⌘K
+            - button "Open settings" [ref=f3e111] [cursor=pointer]
+            - generic [ref=f3e123]:
+              - button "Notifications, 0 unread" [ref=f3e124] [cursor=pointer]
+              - status [ref=f3e128]: Notifications are active
+            - button "Switch to light theme" [ref=f3e129] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f3e136] [cursor=pointer]:
+              - generic [ref=f3e137]: "?"
+        - generic [ref=f3e139]:
+          - generic [ref=f3e141]:
+            - generic [ref=f3e143]:
+              - generic [ref=f3e144]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f3e145]
+            - navigation "Flashcards modes" [ref=f3e146]:
+              - generic [ref=f3e147]: Study
+              - generic [ref=f3e148]: Manage
+              - generic [ref=f3e149]: Import / Export
+              - generic [ref=f3e150]: Templates
+              - generic [ref=f3e151]: Scheduler
+          - generic [ref=f3e154]:
+            - tablist [ref=f3e155]:
+              - generic [ref=f3e157]:
+                - tab "Study" [ref=f3e159] [cursor=pointer]
+                - tab "Manage" [selected] [ref=f3e161] [cursor=pointer]
+                - tab "Import / Export" [ref=f3e163] [cursor=pointer]
+                - tab "Templates" [ref=f3e165] [cursor=pointer]
+                - tab "Scheduler" [ref=f3e167] [cursor=pointer]
+              - generic [ref=f3e169]:
+                - button "Test with Quiz" [disabled] [ref=f3e171]
+                - button "Keyboard Shortcuts" [ref=f3e172] [cursor=pointer]
+            - tabpanel "Manage" [ref=f3e179]:
+              - generic [ref=f3e180]:
+                - radiogroup "segmented control" [ref=f3e183]:
+                  - generic [ref=f3e184]:
+                    - generic [ref=f3e185] [cursor=pointer]:
+                      - radio "Cards"
+                      - generic "Cards" [ref=f3e186]
+                    - generic [ref=f3e187] [cursor=pointer]:
+                      - radio "Trash" [checked] [active]
+                      - generic [ref=f3e188]: Trash
+                - generic [ref=f3e540]: Deleted cards appear here for 30 seconds.
+                - generic [ref=f3e542]:
+                  - img "No data" [ref=f3e544]
+                  - generic [ref=f3e556]: Deleted cards appear here for 30 seconds.
+  - button "Open Next.js Dev Tools" [ref=f3e536] [cursor=pointer]
+  - alert [ref=f3e1]
+```

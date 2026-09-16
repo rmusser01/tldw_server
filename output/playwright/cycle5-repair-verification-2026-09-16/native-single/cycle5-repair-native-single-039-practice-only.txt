@@ -1,0 +1,9 @@
+### Ran Playwright code
+```js
+await page.getByTestId('flashcards-review-cram-update-schedule').click();
+```
+### Page
+- Page URL: http://127.0.0.1:18580/flashcards?tab=review
+- Page Title: Flashcards | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T14-14-00-426Z.yml)

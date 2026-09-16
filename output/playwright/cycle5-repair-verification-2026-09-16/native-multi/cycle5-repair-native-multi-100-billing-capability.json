@@ -1,0 +1,10 @@
+{
+  "sourceRequest": 473,
+  "path": "/openapi.json",
+  "status": 200,
+  "billingPaths": [
+    "/api/v1/admin/billing/analytics",
+    "/api/v1/billing/subscriptions"
+  ],
+  "pathCount": 2097
+}

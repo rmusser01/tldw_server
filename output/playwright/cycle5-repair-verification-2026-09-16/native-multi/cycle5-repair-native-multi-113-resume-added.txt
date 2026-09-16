@@ -1,0 +1,297 @@
+### Open tabs
+- 0: [Cycle5 Alice TestBot Chat (20260916_084418) | tldw](http://127.0.0.1:18581/chat)
+- 1: (current) [Notes | tldw](http://127.0.0.1:18581/notes)
+### Page
+- Page URL: http://127.0.0.1:18581/notes
+- Page Title: Notes | tldw
+### Snapshot
+```yaml
+- generic [ref=e1]:
+  - generic [ref=e4]:
+    - link "Skip to main content" [ref=e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e6]:
+      - button "Expand sidebar" [ref=e7] [cursor=pointer]
+      - button "New Chat" [ref=e11] [cursor=pointer]
+      - generic [ref=e14]:
+        - button "Quick Ingest" [ref=e15] [cursor=pointer]
+        - button "Chat" [ref=e19] [cursor=pointer]
+        - button "Prompts" [ref=e22] [cursor=pointer]
+        - button "Characters" [ref=e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e31] [cursor=pointer]
+        - button "World Books" [ref=e35] [cursor=pointer]
+        - button "Notes" [ref=e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=e42] [cursor=pointer]
+        - button "Media" [ref=e50] [cursor=pointer]
+        - button "Document Workspace" [ref=e53] [cursor=pointer]
+        - button "Research Workspace" [ref=e59] [cursor=pointer]
+        - button "Kanban" [ref=e65] [cursor=pointer]
+        - button "Watchlists" [ref=e67] [cursor=pointer]
+      - generic [ref=e72]:
+        - button "Open Notes Dock" [ref=e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e78] [cursor=pointer]
+        - button "Settings" [ref=e81] [cursor=pointer]
+    - main [ref=e85]:
+      - generic [ref=e86]:
+        - generic [ref=e89]:
+          - generic [ref=e90]:
+            - button "Expand sidebar" [ref=e91] [cursor=pointer]
+            - generic [ref=e93]:
+              - img "tldw Assistant" [ref=e94]
+              - generic [ref=e95]: tldw Assistant
+              - button "Companion Home" [ref=e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=e100] [cursor=pointer]
+          - generic [ref=e103]:
+            - button "Search - Open command palette" [ref=e104] [cursor=pointer]:
+              - generic [ref=e108]: Search
+              - generic [ref=e109]: ⌘K
+            - button "Open settings" [ref=e110] [cursor=pointer]
+            - generic [ref=e122]:
+              - button "Notifications, 0 unread" [ref=e386] [cursor=pointer]
+              - status [ref=e126]: Notifications are active
+            - button "Switch to light theme" [ref=e127] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e134] [cursor=pointer]:
+              - generic [ref=e135]: "?"
+        - generic [ref=e137]:
+          - link "Skip to notes list" [ref=e138] [cursor=pointer]:
+            - /url: "#notes-list-region"
+          - link "Skip to editor" [ref=e139] [cursor=pointer]:
+            - /url: "#notes-editor-region"
+          - paragraph [ref=e140]: "Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs."
+          - region "Notes list" [ref=e141]:
+            - generic [ref=e142]:
+              - generic [ref=e143]:
+                - generic [ref=e144]:
+                  - generic [ref=e145]:
+                    - generic [ref=e146]: Notes
+                    - generic [ref=e147]: 4 total
+                  - button "New note" [ref=e148] [cursor=pointer]
+                - generic [ref=e151]:
+                  - generic [ref=e152]:
+                    - button "Views" [expanded] [ref=e154] [cursor=pointer]
+                    - generic [ref=e159]:
+                      - generic [ref=e160]:
+                        - button "Notes" [ref=e161] [cursor=pointer]
+                        - button "Trash" [ref=e163] [cursor=pointer]
+                      - generic [ref=e165]:
+                        - button "List" [ref=e166] [cursor=pointer]
+                        - button "Timeline" [ref=e168] [cursor=pointer]
+                        - button "Inbox" [ref=e170] [cursor=pointer]
+                        - button "Collection" [ref=e172] [cursor=pointer]
+                        - button "Graph" [ref=e174] [cursor=pointer]
+                      - generic [ref=e183]:
+                        - button "Organize" [ref=e184] [cursor=pointer]
+                        - button "Organize help" [ref=e190] [cursor=pointer]:
+                          - img "question-circle" [ref=e191]
+                  - generic [ref=e195]:
+                    - textbox "Search notes" [ref=e202]:
+                      - /placeholder: Search titles and contents
+                    - generic [ref=e204] [cursor=pointer]:
+                      - generic [ref=e205]:
+                        - generic "Date modified (newest first)" [ref=e206]
+                        - combobox "Sort notes" [ref=e207]
+                      - img "down" [ref=e209]
+                  - generic [ref=e212]:
+                    - button "Filters" [expanded] [ref=e214] [cursor=pointer]
+                    - generic [ref=e219]:
+                      - generic [ref=e220]:
+                        - button "Captured" [ref=e221] [cursor=pointer]
+                        - button "Search tips" [ref=e223] [cursor=pointer]
+                      - generic [ref=e225]:
+                        - generic [ref=e226]:
+                          - generic: Filter by tag
+                          - combobox "Filter by tag" [ref=e228]
+                        - img "down" [ref=e230]
+                      - generic [ref=e233]:
+                        - generic [ref=e234]:
+                          - button "Browse tags" [ref=e235] [cursor=pointer]
+                          - button "Tags help" [ref=e237] [cursor=pointer]:
+                            - img "question-circle" [ref=e238]
+                        - generic [ref=e242]: 10 available
+                      - generic [ref=e243]: For in-note search, use browser Ctrl/Cmd+F.
+                  - generic [ref=e244]:
+                    - generic [ref=e245]: Recent notes
+                    - button "Cycle5 Alice Biology five facts" [ref=e247] [cursor=pointer]
+              - generic [ref=e249]:
+                - generic [ref=e251]:
+                  - generic [ref=e252]: Results
+                  - generic [ref=e253]:
+                    - button "Import" [ref=e254] [cursor=pointer]
+                    - button "Sync folder" [disabled] [ref=e256]
+                    - button "Export" [ref=e258] [cursor=pointer]
+                - list "Notes" [ref=e391]:
+                  - listitem [ref=e392]:
+                    - generic [ref=e393]:
+                      - checkbox "Select note Cycle5 alice isolation API fixture updated for bulk actions" [ref=e394]
+                      - button "Pin note Cycle5 alice isolation API fixture updated" [ref=e395] [cursor=pointer]
+                      - button "Open note Cycle5 alice isolation API fixture updated" [ref=e398] [cursor=pointer]:
+                        - generic [ref=e399]:
+                          - generic [ref=e400]: Cycle5 alice isolation API fixture updated
+                          - generic [ref=e406]: CYCLE5-ALICE-PRIVATE-BOUNDARY synthetic note.
+                          - generic [ref=e407]: 9/16/2026, 2:08:35 AM
+                  - listitem [ref=e408]:
+                    - generic [ref=e409]:
+                      - 'checkbox "Select note Snippet: Cycle5 retry identity: a fictional cobalt compass points east. Repeat this fact for bulk actions" [ref=e410]'
+                      - 'button "Pin note Snippet: Cycle5 retry identity: a fictional cobalt compass points east. Repeat this fact" [ref=e411] [cursor=pointer]'
+                      - 'button "Open note Snippet: Cycle5 retry identity: a fictional cobalt compass points east. Repeat this fact" [ref=e414] [cursor=pointer]':
+                        - generic [ref=e415]:
+                          - generic [ref=e416]: "Snippet: Cycle5 retry identity: a fictional cobalt compass points east. Repeat t..."
+                          - generic [ref=e425]: A fictional cobalt compass points east.
+                          - generic [ref=e426]: "Linked to conversation: 849ac2ca-e2ff-4c27-8c88-212839e8310b · msg 64550040-d4de-4911-8f90-f7039de6da60"
+                          - generic [ref=e427]: 9/16/2026, 1:52:23 AM
+                  - listitem [ref=e428]:
+                    - generic [ref=e429]:
+                      - checkbox "Select note Cycle5 Alice Biology five facts for bulk actions" [ref=e430]
+                      - button "Pin note Cycle5 Alice Biology five facts" [ref=e431] [cursor=pointer]
+                      - button "Open note Cycle5 Alice Biology five facts" [ref=e434] [cursor=pointer]:
+                        - generic [ref=e435]:
+                          - generic [ref=e436]: Cycle5 Alice Biology five facts
+                          - generic [ref=e442]: The mitochondria is the powerhouse of the cell.
+                          - generic [ref=e443]: 9/16/2026, 1:15:17 AM
+                  - listitem [ref=e444]:
+                    - generic [ref=e445]:
+                      - 'checkbox "Select note Snippet: Cycle5 multi memory check: the fictional Aurora station stores 23 amber lanterns for bulk actions" [ref=e446]'
+                      - 'button "Pin note Snippet: Cycle5 multi memory check: the fictional Aurora station stores 23 amber lanterns" [ref=e447] [cursor=pointer]'
+                      - 'button "Open note Snippet: Cycle5 multi memory check: the fictional Aurora station stores 23 amber lanterns" [ref=e450] [cursor=pointer]':
+                        - generic [ref=e451]:
+                          - generic [ref=e452]: "Snippet: Cycle5 multi memory check: the fictional Aurora station stores 23 amber..."
+                          - generic [ref=e461]: Aurora station stores 23 amber lanterns.
+                          - generic [ref=e462]: "Linked to conversation: 5f8b18e3-fb4e-481c-b32d-1fbf9aaf4b85 · msg c127e13a-3638-4bf3-b61d-2527516a091b"
+                          - generic [ref=e463]: 9/16/2026, 1:13:08 AM
+                - generic [ref=e465]:
+                  - generic [ref=e466]: Showing 1-4 of 4
+                  - list [ref=e467]:
+                    - listitem "Previous Page" [ref=e468]:
+                      - button [disabled] [ref=e469]:
+                        - img "left" [ref=e470]
+                    - listitem "1" [ref=e473] [cursor=pointer]
+                    - listitem "Next Page" [ref=e475]:
+                      - button [disabled] [ref=e476]:
+                        - img "right" [ref=e477]
+                    - listitem [ref=e480]:
+                      - generic [ref=e481]:
+                        - generic [ref=e482]:
+                          - generic "20 / page" [ref=e483]
+                          - combobox "Page Size" [ref=e484]
+                        - img "down" [ref=e486]
+          - button "Collapse sidebar" [ref=e269] [cursor=pointer]
+          - region "Note editor" [ref=e273]:
+            - generic [ref=e274]:
+              - generic [ref=e276]:
+                - heading "New note" [level=5] [ref=e277]
+                - status [ref=e278]: No server save status yet
+              - generic [ref=e279]:
+                - button "Save note" [disabled] [ref=e280]:
+                  - generic: Save
+                - button "Save and start another note" [disabled] [ref=e281]:
+                  - generic: Save & new
+                - group "Editor mode" [ref=e282]:
+                  - button "Edit" [pressed] [ref=e283] [cursor=pointer]
+                  - button "Split" [ref=e288] [cursor=pointer]
+                  - button "Preview" [ref=e293] [cursor=pointer]
+                - button "Create study pack" [disabled] [ref=e299]
+                - button "More actions" [ref=e300] [cursor=pointer]
+            - generic [ref=e306]:
+              - generic [ref=e307]:
+                - generic [ref=e308]: Select or create a note
+                - generic [ref=e309]: Choose a note from the list to start editing, or create a new one.
+                - button "Create note" [ref=e310] [cursor=pointer]
+                - generic [ref=e312]: "Tip: Type [[ in a note to link to another note."
+              - generic [ref=e313]:
+                - textbox "Note title" [ref=e314]:
+                  - /placeholder: Title
+                - button "Generate title from content" [disabled] [ref=e315]:
+                  - generic: Generate title
+                - button "Keyboard shortcuts" [ref=e316] [cursor=pointer]
+              - generic [ref=e319]:
+                - generic [ref=e320]:
+                  - generic: Tags
+                  - combobox "Note tags" [ref=e322]
+                - img "down" [ref=e324]
+              - generic [ref=e327]:
+                - group "Input mode" [ref=e328]:
+                  - button "Markdown" [ref=e329] [cursor=pointer]
+                  - button "WYSIWYG" [ref=e331] [cursor=pointer]
+                - generic [ref=e333]: Formatting
+                - button "Bold" [ref=e334] [cursor=pointer]
+                - button "Italic" [ref=e338] [cursor=pointer]
+                - button "Heading" [ref=e342] [cursor=pointer]
+                - button "List" [ref=e346] [cursor=pointer]
+                - button "Link" [ref=e349] [cursor=pointer]
+                - button "Attachment" [ref=e354] [cursor=pointer]
+                - button "Code" [ref=e358] [cursor=pointer]
+                - generic [ref=e365]: Assist
+                - button "Summarize" [disabled] [ref=e366]
+                - button "Expand outline" [disabled] [ref=e367]
+                - button "Suggest tags" [disabled] [ref=e368]
+              - generic [ref=e370]:
+                - textbox "Note content" [ref=e371]:
+                  - /placeholder: Write your note here... (Markdown supported)
+                - generic [ref=e372]: Markdown + LaTeX supported
+              - generic [ref=e373]:
+                - text: 0 words · 0 chars · 0 mins read
+                - generic [ref=e374]: Version pending · Not saved yet
+                - generic [ref=e375]: "Origin: Typed manually"
+      - generic [ref=e489]:
+        - dialog "Quick Ingest (1)":
+          - generic [ref=e490]:
+            - button "Close" [ref=e491] [cursor=pointer]:
+              - generic "Close" [ref=e492]:
+                - img "close" [ref=e493]
+            - generic [ref=e496]: Quick Ingest (1)
+            - generic [ref=e498]:
+              - navigation "Ingest wizard progress" [ref=e499]:
+                - list [ref=e500]:
+                  - listitem [ref=e501]:
+                    - 'button "Step 1: Add (current)" [disabled] [ref=e502]':
+                      - generic [ref=e506]: Add
+                  - listitem [ref=e508]:
+                    - 'button "Step 2: Configure" [disabled] [ref=e509]':
+                      - generic [ref=e513]: Configure
+                  - listitem [ref=e515]:
+                    - 'button "Step 3: Review" [disabled] [ref=e516]':
+                      - generic [ref=e520]: Review
+                  - listitem [ref=e522]:
+                    - 'button "Step 4: Processing" [disabled] [ref=e523]':
+                      - generic [ref=e527]: Processing
+                  - listitem [ref=e529]:
+                    - 'button "Step 5: Results" [disabled] [ref=e530]':
+                      - generic [ref=e534]: Results
+              - generic [ref=e536]:
+                - generic [ref=e537]:
+                  - button "File upload zone. Drag and drop files or press Enter to browse." [ref=e538] [cursor=pointer]:
+                    - generic [ref=e539]:
+                      - paragraph [ref=e543]: Drag and drop files
+                      - paragraph [ref=e544]: Docs, PDFs, HTML/XML/JSON, audio, and video are all welcome.
+                      - button "Browse files" [active] [ref=e545]
+                  - text: "Supported: PDF, EPUB, DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, video. Max file size: 50 MB."
+                  - generic [ref=e548]: Add URLs or files. Stored items appear in Media; analyzed and chunked items become searchable in Knowledge.
+                  - generic [ref=e549]:
+                    - text: Paste URLs
+                    - generic [ref=e550]:
+                      - textbox "Paste URLs input" [ref=e551]:
+                        - /placeholder: https://example.com, https://...
+                      - button "Add URLs to queue" [disabled] [ref=e552]:
+                        - generic: Add URLs
+                - generic [ref=e555]:
+                  - generic [ref=e556]:
+                    - generic [ref=e558]:
+                      - text: Queue
+                      - generic [ref=e559]: (1 item)
+                    - button "Clear all queued items" [ref=e560] [cursor=pointer]:
+                      - generic [ref=e561]: Clear all
+                  - generic [ref=e563]:
+                    - generic [ref=e568]:
+                      - generic [ref=e569]: cycle5-repair-resume-llama-public.txt
+                      - generic [ref=e570]:
+                        - generic [ref=e571]: 593 B
+                        - generic [ref=e572]: Document
+                        - generic [ref=e573]: (auto)
+                    - button "Remove this item from queue" [ref=e574] [cursor=pointer]
+                - generic [ref=e553]:
+                  - button "Use defaults & process" [ref=e578] [cursor=pointer]
+                  - button "Configure 1 items" [ref=e580] [cursor=pointer]:
+                    - generic [ref=e581]: Configure 1 items >
+  - button "Open Next.js Dev Tools" [ref=e381] [cursor=pointer]
+  - alert [ref=e385]
+```

@@ -1,0 +1,16 @@
+### Result
+- 0: [Media | tldw](http://127.0.0.1:18580/media?id=1)
+- 1: (current) [](http://127.0.0.1:18580/settings/tldw)
+### Ran Playwright code
+```js
+await page.goto('http://127.0.0.1:18580/settings/tldw');
+```
+### Open tabs
+- 0: [Media | tldw](http://127.0.0.1:18580/media?id=1)
+- 1: (current) [](http://127.0.0.1:18580/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18580/settings/tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T14-20-56-671Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T14-20-56-463Z.log#L1-L2

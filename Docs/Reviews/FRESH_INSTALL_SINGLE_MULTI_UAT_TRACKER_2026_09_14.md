@@ -2,6 +2,13 @@
 
 ## Run status
 
+- **Next full UAT: BLOCKED pending issue reconciliation and repair acceptance.** The user reaffirmed on2026-09-16 that identified issues must be fixed and verified before another full run. Apply the [mandatory entry gate](../../IMPLEMENTATION_PLAN_uat_cycle_5.md#mandatory-entry-gate-for-another-full-uat): reconcile all144 unique findings with repair identity, regression results, original-scenario acceptance evidence and blockers. The48 previously quoted formally closed records are not a complete count of verified fixes; stale open/Done labels require evidence reconciliation. Required live PostgreSQL automated checks pass, but normal-runtime fresh PostgreSQL initialization now exposes UAT144. Native PostgreSQL matrix coverage and outstanding repair acceptance remain blockers. This correction changes no historical outcome and closes no issue by itself.
+
+- **PostgreSQL validation correction (2026-09-16):** earlier official-fixture skips are unresolved acceptance gaps, not waived coverage. TASK13260.75 requires live checks and PostgreSQL coverage in the next fresh matrix. After the user's explicit force-quit/restart approval, Docker29.2.0 recovered. Official fixtures started PostgreSQL18.6 in owned container `tldw_uat_cycle5_postgres_20260916`, port55475. Required checks executed with `TLDW_TEST_POSTGRES_REQUIRED=1`: backend31 passed/1 failed/17 deselected, AuthNZ2 passed, **zero skips**. Real Chat image snapshots, transactions and PostgreSQL FTS controls passed. The transcript uniqueness test failed because it expects raw database error text while the backend deliberately sanitizes errors; structured constraint verification was subsequently repaired as UAT-136/TASK13260.75.1, with independent32backend+2AuthNZ passes and zero skips. These bounded results are not native PostgreSQL UAT acceptance.
+- **Cycle5 implementation checkpoint `3c30685611`:** all eleven confirmed product repairs (126–135 plus reopened068) are independently reviewed and committed; targeted native acceptance is underway. Combined shared UI3000/128 and WebUI312/16 pass as separate, overlapping runs. Backend689pass/1existing skip across690collected tests with mandatory PostgreSQL; **no PostgreSQL skips**. The sole skip is the pre-existing decorated streaming-concurrency test at `test_streaming_utils.py:2015`, not a passing check. Full TypeScript retains90 existing diagnostics,0added/removed; Bandit10production paths has0findings/errors. [Combined evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/combined/README.md). Required bounded PostgreSQL32backend+2AuthNZ checks also independently pass with0skips. UAT136's test-only correction is verified. Targeted acceptance and reconciliation of all142 findings keep another full UAT blocked.
+
+- **Targeted native acceptance:** server configuration/data are preserved, but original CLI browser sessions closed and no recoverable persistent browser profile was established. Separate persistent repair browsers were opened and connected through visible controls; this is not a continuation of original browser-local state. Single126 actual Import/Export→Study→normal reload now retains `tab=review`. Single128 visits all five distinct Biology cards, re-rates one, and completes with5practiced; canonical session4 records6review events because re-rate is another scheduled event. The unrelated undecked card is unchanged. Multi129 actual Alice collections returns200. Other acceptance work remains underway. A minor singular-wording defect is recorded as137 below; product remains frozen while evidence is collected.
+
 - **Cycle5 execution ended2026-09-16 around09:32UTC on frozen product `ab527eb3b4`, with failures.** Ten new findings126–135 and reopened068 are tracked below. Fresh single and multi configuration/data/browser profiles reused existing dependencies. Root controlled runtime lifecycle, inference serialization and retained evidence. All four isolated runtimes were paused after native work; profile data remain. Dev`59049e094e`, freshly checked07:55Z, is included. Repairs follow [the cycle5 plan](../../IMPLEMENTATION_PLAN_uat_cycle_5.md) before another full run.
 
 - **Cycle4 execution has ended on frozen product `7c9409fad2`, with failures and explicit coverage limits.** Both mode matrices account for their named workflows. Sixteen new findings102–117 are tracked below (fourteen P2/two P3); route-title058 also has a confirmed scope omission. Single-user cited QA, Notes, generated cards, exact mixed review counts, early-End, Prompt application, source-Note navigation and sole-source restore pass. Saved Chat reload/backlinks, new-character reload, ingest minimize and model selection still fail. The exact Wikipedia source is access-blocked with accurate feedback. Single-user regular Chat requires an unchanged-code API restart after setup; Media reanalysis is blocked by115. Single source Chat ends with a truthful streaming-limit interruption; multi source Chat incorrectly completes with reasoning only117. Connection tests recover; single-user disconnected local Chat retention matches the current connection-only contract, and multi browser token-expiry refresh was not separately exercised. Existing dependencies were reused. This is not sign-off.
@@ -15,6 +22,119 @@
 - Installation path: current-checkout fresh configuration/data with existing dependencies. This does **not** certify installation of dependencies into a clean machine/environment.
 - Workflow source: frontend E2E/UAT and shared integration tests, as clarified by the user. Exact named journeys and coverage limitations are recorded below; no literal A/B/C loop mapping was found.
 - AI provider: existing llama.cpp on port 9099. Cycle4 used the advertised `../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf`; earlier cycles used `../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf`. No mock response counts as real model acceptance.
+
+## UAT-136 — PostgreSQL verification failure: transcript constraint test expects hidden error details
+
+- Mandatory live PostgreSQL execution exposed an outdated assertion in `test_fresh_postgres_schema_enforces_transcript_run_history_uniqueness`: it matches `unique|duplicate key` against the public exception, which intentionally says `PostgreSQL query execution failed`.
+- A separate real-driver probe confirmed the intended constraint names. The correction must verify SQLSTATE23505, the exact constraint, and rollback without exposing driver details through the production exception or weakening the test to accept any database error.
+- Status: verified test repair, TASK13260.75.1, commit `b3c46df52e`. Author and independent required-PG reruns pass32backend/2AuthNZ checks with0skips; exact SQLSTATE23505, both intended constraints and rollback are verified. No production change was needed. [Retained failures, passing results and independent review](../../output/playwright/cycle5-repair-verification-2026-09-16/postgres/README.md). Native PostgreSQL workflow acceptance remains separately pending.
+
+## Targeted acceptance additions — 2026-09-16 14:36 UTC
+
+- The running total is now **139 unique findings**. The mandatory rerun gate remains blocked; older totals above are historical checkpoints. New137–139 need repair after the current native freeze.
+- User-requested image attachment was actually uploaded in single-user Chat using the repository public128px PNG. Send and Retry show `Image support is not confirmed for this model`; normal reload preserves one local image-bearing user and its grouped error. Canonical chat `53c1610e-20eb-4dd6-9148-eb459ea6fe17` exists but has zero messages; no completion request was sent. This matches122's pre-dispatch guard, not a canonical118 acceptance pass. Captures076–090 under `cycle5-repair-native-single` retain the bounded evidence.
+- UAT135 main diagnosis and same-profile recovery pass:072 shows Credentials Ready and cause-neutral network guidance;093 shows Core reachable/RAG healthy and094 Sources ready8of8 without changing credentials or CORS. Separate notification wording and Media overlay defects are recorded below.
+- UAT074 now has native expired-learning overlap proof:006/011 show4available/4learning/0due and4remaining; canonical017 contains exactly four expired learning cards plus two future-review cards. No double-count to8 and no clock mutation.
+
+### Reopened UAT013 — Home source question loses its source grounding
+
+- At14:53UTC, native Home→Quick Ingest stores the distinct public Rowan file. Home's actual `Summarize this source.` opens Chat and fills its filename/question, so the original navigation correction works.
+- The existing Cedar conversation is restored. Actual completion request414 contains Cedar history plus only the Rowan filename/question, without Rowan source content or a RAG request. The real200 answer summarizes Cedar, not Rowan. Evidence139–146 under `cycle5-repair-native-single`, especially145's actual body and146's answer.
+- Status: reopened TASK13260.3; counted once within139. Producer persists `mode:rag_media`/mediaId, but effective send is ordinary Chat. Read-only mode/restore diagnosis is underway; no source change during freeze. The earlier title/prompt-only check did not establish the required selected-source context.
+
+### Additional acceptance results — 2026-09-16 14:54 UTC
+
+- UAT130 native first-open model selection and real generation pass:058/099 retain configured Gemma,103 actual request uses `custom-openai-api` with that exact model, completion200/version201 and104 canonical analysis contains correct Cedar coordinator/date.
+- UAT133 native failed Retry passes: Ollama502 then configured-model200 produces exact newest answer `CEDAR RETRY VERIFIED.` Canonical129 comparison proves one same user ID, all eight preexisting rows unchanged, nine total rows and one new correct assistant. Normal reload123 preserves the answer.
+- UAT056 native missing-provider gate passes:136 remains on Configure with Review disabled and an invalid/focused empty provider plus clear alert after Next. Historical exact native proof was also independently located; this capture supplements it.
+- UAT095 audit correction: independent follow-up found the launched-browser private-path sentinel requirement was stronger than the actual task/design. Retained real endpoint/transport/sink tests and independent review verify the original synthetic transport defect. No native private disclosure or launched-extension claim is made.
+- UAT114 remains tool-blocked: current supported native inventory offers only Codex in-app browser. Two actual probe tabs both report `document.visibilityState=visible` after switching. Both temporary tabs were closed; no visibility override or product/tooling patch was applied.
+
+## PostgreSQL startup finding and frontend verification — 2026-09-16 16:00 UTC
+
+**144 unique findings.** Final combined shared UI verification passes3143tests/150suites with no skips or unhandled errors. WebUI332tests/17suites passes separately; the runs overlap and are not summed. Full TypeScript still reports the same90existing diagnostic signatures,0added/removed. UAT143 is verified test maintenance, independently reviewed and tracked as Done under TASK13260.82. Product follow-up native acceptance remains pending.
+
+Reviewed follow-up commits are013 `3f50f408df`,139/141/142 `d547be4719`, and143 `08d7728e0d`. [Final combined evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup-combined/README.md). The new [144-row ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-144-checkpoint.json) accounts for130verified,11implemented-awaiting-acceptance,2tool/provider-blocked, and1unresolved finding. Earlier checkpoint counts remain historical.
+
+### UAT-144 — P1: Explicit single-user PostgreSQL initialization silently falls back to SQLite and fails
+
+- A new isolated targeted profile uses two empty databases supplied by the official `pg_temp_db` and `pg_temp_db_session` fixtures: PostgreSQL AuthNZ and separate shared PostgreSQL content. Normal `AuthNZ.initialize --non-interactive`, with no pytest/test-mode flags, exits1 with `Failed to ensure Postgres AuthNZ core tables`.
+- Before that error, the actual pool logs `Single-user mode: ignoring non-SQLite DATABASE_URL` and initializes fallback `Databases/users.db` within the isolated profile, despite explicit `TLDW_USER_DB_BACKEND=postgresql`. Initialization independently follows the configured PostgreSQL URL and expects a PostgreSQL pool. Earlier pytest-only controls exempt the fallback and missed this normal-runtime contradiction.
+- Status: open, TASK13260.83. Align the existing pool/fallback selection with the documented explicit backend selector while preserving incidental-DSN fallback and SQLite/multi-user behavior. Add a real PostgreSQL normal-runtime subprocess regression, verify idempotent bootstrap and absence of fallback SQLite, then repeat fresh startup. Initial redacted evidence: `/private/tmp/cycle5-native-pg-single-init-redacted.log`. No native PostgreSQL workflow pass is claimed.
+- Preserved single/multi SQLite profiles remain intact. The new official fixture holder is still alive so its databases remain owned and isolated. No application test-mode override, manually created schema, or fallback acceptance is used.
+
+UAT114 tool reassessment also remains negative: a separate blank browser launched with `--headed` was physically minimized through Chromium's native window API. Returned bounds report `windowState:minimized`, but the page still reports `visible` after focus emulation is disabled and a bounded wait. The probe browser was closed. This adds a concrete harness limit, not a hidden-page product pass; earlier real tab-switch failures remain retained.
+
+## Follow-up repair checkpoint — 2026-09-16 15:45 UTC
+
+**143 unique findings; targeted repairs continue.** Both owned frontends remain paused while the APIs and profile data are preserved. The image requested by the user was attached, retried and retained on reload; visible attachment evidence is single capture128. The selected model refuses unsupported image input, so this remains bounded local-image evidence rather than canonical image Retry acceptance.
+
+- UAT013 has passed independent165tests/9suites and its original same-value source probe. Accepted media handoffs enable retrieval and record an ephemeral intent revision so initial saved-session restoration cannot overwrite them. Saved history and intentional later restores remain covered. [Retained correction and reviews](../../output/playwright/cycle5-repair-verification-2026-09-16/followup013/README.md). Native Home→source question acceptance remains pending.
+- UAT139/141/142 pass independent150tests/6suites plus5 unchanged original probes. Notification reads/actions require verified connection; only successful inbox reads establish freshness; observed account/server changes cancel a pending View even when A→B→A changes occur in one React batch. Same-owner token refresh remains valid. [Retained correction and reviews](../../output/playwright/cycle5-repair-verification-2026-09-16/followup139-142/README.md). Native acceptance remains pending.
+- UAT137/138 are committed as010b864500; UAT140 as7c7f4093df. Independent scope reviews pass; native rechecks remain pending. The140 test's local10second timeout preserves every assertion and addresses the observed default-budget failure. Retained log whitespace was subsequently normalized, with original and retained hashes recorded explicitly.
+- The prior expanded combined run passed3107tests but failed27tests in6 of150suites, with3unhandled errors. WebUI327/17 passed and TypeScript retained exactly90existing diagnostics; these results predate the final013/142 corrections. The failures are tracked below and cannot be excluded to claim a green combined run.
+
+### UAT-143 — Verification failure: six additional Chat suites fail in expanded coverage
+
+- Newly included composer-options and llama.cpp guards fail source-string expectations. Document-processing submit tests omit a required reset callback and raise3unhandled errors; follow-up-research, image-refine and voice-visibility fixtures fail while reading missing capability/session properties. These observations do not establish a product defect until baseline diagnosis completes.
+- Status: open, TASK13260.82. Reproduce against frozen3c30685611, identify each cause, preserve meaningful controls, correct stale fixtures/guards where established, and rerun the full150-suite set without skips. Initial evidence: `/private/tmp/cycle5-followup-combined-ui.log`; exact suite list: `/private/tmp/cycle5-followup-combined-command.json`.
+
+## Additional review findings — 2026-09-16 15:23 UTC
+
+The total at this checkpoint was **142 unique findings**. The140-row reconciliation below is a preserved earlier checkpoint. UAT137/138 corrections are committed as `010b864500` after independent65tests/9suites passed; native rechecks remain pending.013/139/140 repairs and the new141/142 controls were still in progress. Another full UAT remained blocked.
+
+### UAT-141 — P3: Notifications invent a last-success timestamp
+
+- Independent actual-provider/route regression with verified core connection and every notification read failing displays “Last updated before the connection was lost (Just now)” without a successful inbox read. Initialization/failure time is incorrectly presented as success time. This is an automated-boundary discovery, not a native observation.
+- Status: open, TASK13260.80. Preserve only the real last-success time and omit it before a first success. Probe report: `/private/tmp/cycle5-uat139-independent-review.md`; two negative probes and a normal View control are retained separately from the passing137-test suite.
+
+### UAT-142 — P2: A pending notification View navigates after verification is lost
+
+- The actual provider/route probe starts View, holds mark-read, changes connection verification, then resolves the old mark-read. It still navigates to the captured media destination although View is disabled and the mutation result is discarded. Normal current View is a passing control. No native cross-account disclosure is claimed.
+- Status: open, TASK13260.81. Recheck captured authority/generation after the awaited mark-read before navigation; cover owner change and normal authorized navigation.
+
+## Repair gate snapshot — 2026-09-16 15:10 UTC
+
+**Blocked:129 verified findings, four older repairs awaiting exact acceptance, five unresolved findings, two blocked checks;140 unique findings total.** This dated snapshot combines the independently audited001–125 ledger, its095/056 corrections, and retained targeted acceptance. Reopened013 is counted once. Later repair work is recorded below and does not silently change this checkpoint.
+
+- Older exact acceptance gaps:020 expanded setup warnings,024 rejected Flashcard verification feedback,031 failed tracked-greeting export identity,064 foreign-account navigation of a pending Note-to-card handoff.
+- Unresolved at this checkpoint:013 source grounding and137–140.
+- Blocked checks:114 true hidden-tab behavior unavailable through current browser tooling;118 canonical stored-image Retry cannot be dispatched using the available model's confirmed capabilities. Actual image attachment/local refusal/Retry/reload is retained and is not a stored-image pass.
+- PostgreSQL32backend+2AuthNZ mandatory checks pass with zero skips. Native PostgreSQL fresh workflow coverage remains a required matrix gap, separate from issue counts.
+- [Single native evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native-single/README.md), [multi native report](../../output/playwright/cycle5-repair-verification-2026-09-16/native-multi/cycle5-repair-native-multi-FINAL_REPORT.md), [original reconciliation](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-125.md), and [criteria corrections](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-followup.md).
+
+Native126–135 and reopened068 are now accepted within their recorded scope.134 includes two natural research-runs-triggered refreshes, successful subsequent readiness reads, and scoped canonical session revocation followed by automatic Sign in and90seconds without additional authenticated polling. Its exact readiness-triggered refresh remains covered by the actual transport regressions. Prior image/hidden-tab and fresh-install limitations remain. UAT136's test-only PostgreSQL correction is also verified.
+
+The fresh native additions close older012/015/016/055/056/068/074/104 boundaries;095 is verified in its original actual-transport scope after independent criteria correction. Scope limits in each report remain part of these conclusions.
+
+## Targeted acceptance checkpoint — 2026-09-16 15:09 UTC
+
+- The current total is **140 unique findings**, including reopened013 once. UAT137–140 and013 need repairs; prior totals are historical checkpoints. The next full run remains blocked.
+- UAT015 temporary Chat passes its actual native send: exact public answer, actual request `save_to_db:false`, no conversation ID and no ephemeral settings request. UAT055 Manage active/Trash produces zero warnings/errors and no List deprecation. Single evidence153–157 and148–150 retain the checks.
+- UAT134 has two natural access-token rotations with successful refresh and subsequent readiness200 while signed in, notifications active and Chat preserved. Both refreshes were initiated by research-runs401; these are not claims that readiness itself triggered refresh. Exact Alice test session12 was then revoked through the admin endpoint with200; the terminal check subsequently passed at15:09:54UTC with automatic Sign in and no additional authenticated polling across about90seconds.
+
+## UAT-140 — P3: Chat Settings uses deprecated numeric-input adornments
+
+- The native multi-user Current Chat Settings → Conversation view emitted AntD's InputNumber `addonBefore` deprecation during131/068 acceptance. The form remained usable.
+- Status: open, TASK13260.79. Replace the deprecated adornment through supported existing UI markup while preserving labels, values and editing; verify the same native view has no warning. Source remains frozen until134's terminal session check finishes.
+
+## UAT-138 — P2: Media outage produces a runtime error overlay
+
+- During the owned API18500 outage, Media displays a Next Runtime Error overlay for its failed listing request; it remains after the API recovers. Captures091/095 retain the stack at `useMediaSearch.ts:404`. Source catches this network error and logs its Error object with `console.error`; an unhandled rejection is not established by that stack alone.
+- Normal reload096–097 clears the overlay and selection098 displays the preserved public source. This is an explicit recovery action, not a pass for uninterrupted recovery.
+- Status: open, TASK13260.77. Diagnose and retain contextual failure feedback without a runtime overlay; source remains frozen during current acceptance.
+
+## UAT-139 — P3: Notifications ask for sign-in during a transport outage
+
+- In single-user outage capture072, main diagnostics correctly say Credentials Ready, but the notification header says `Notifications require sign in`. Recovery094 returns `Notifications are active` without new credentials.
+- This is inaccurate cause guidance during an outage, distinct from087's stale post-refresh state. Genuine invalid/missing authentication must keep sign-in guidance.
+- Status: open, TASK13260.78. No product edit or pass is claimed.
+
+## UAT-137 — P3: Study uses plural card wording when one card remains
+
+- Targeted scheduled Cram on frozen `3c30685611` displays and announces `1 cards remaining` before the fifth card. Evidence: `cycle5-repair-native-single-032-after4.txt`. UAT039's historical quote also contains this wording but tracks a separate false-completion state.
+- Expected: singular card wording at1 and plural wording at0/multiple cards, using existing localization conventions without changing counts or queue behavior.
+- Status: open, TASK13260.76. Repair waits for the current native freeze to finish. No product edits or pass are claimed.
 
 ## Cycle 5 fresh workflow run — execution complete, repairs pending
 

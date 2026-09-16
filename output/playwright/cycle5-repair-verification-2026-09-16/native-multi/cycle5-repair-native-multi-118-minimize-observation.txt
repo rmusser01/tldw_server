@@ -1,0 +1,6 @@
+### Result
+{"at":"2026-09-16T14:44:32.510Z","url":"http://127.0.0.1:18581/notes","dialogVisible":false,"notesHeadingVisible":true}
+### Ran Playwright code
+```js
+await (async (page) => ({at:new Date().toISOString(),url:page.url(),dialogVisible:await page.getByRole("dialog").isVisible().catch(()=>false),notesHeadingVisible:await page.getByRole("region",{name:"Notes list",exact:true}).isVisible()}))(page);
+```

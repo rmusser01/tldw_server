@@ -1,0 +1,367 @@
+### Page
+- Page URL: http://127.0.0.1:18581/chat
+- Page Title: WebUI chat | tldw
+- Console: 1 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [ref=e11]:
+  - generic [ref=e12]:
+    - generic [ref=e36]:
+      - link "Skip to main content" [ref=e37] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=e38]:
+        - button "Expand sidebar" [ref=e39] [cursor=pointer]
+        - button "New Chat" [ref=e43] [cursor=pointer]
+        - generic [ref=e46]:
+          - button "Quick Ingest" [ref=e47] [cursor=pointer]
+          - button "Chat" [ref=e51] [cursor=pointer]
+          - button "Prompts" [ref=e54] [cursor=pointer]
+          - button "Characters" [ref=e58] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=e63] [cursor=pointer]
+          - button "World Books" [ref=e67] [cursor=pointer]
+          - button "Notes" [ref=e70] [cursor=pointer]
+          - button "Knowledge QA" [ref=e74] [cursor=pointer]
+          - button "Media" [ref=e82] [cursor=pointer]
+          - button "Document Workspace" [ref=e85] [cursor=pointer]
+          - button "Research Workspace" [ref=e91] [cursor=pointer]
+          - button "Kanban" [ref=e97] [cursor=pointer]
+          - button "Watchlists" [ref=e99] [cursor=pointer]
+        - generic [ref=e104]:
+          - button "Open Notes Dock" [ref=e105] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=e110] [cursor=pointer]
+          - button "Settings" [ref=e113] [cursor=pointer]
+      - main [ref=e117]:
+        - generic [ref=e118]:
+          - generic [ref=e121]:
+            - generic [ref=e122]:
+              - button "Expand sidebar" [ref=e123] [cursor=pointer]
+              - generic [ref=e125]:
+                - img "tldw Assistant" [ref=e126]
+                - generic [ref=e127]: tldw Assistant
+                - button "Companion Home" [ref=e128] [cursor=pointer]
+                - button "Show shortcuts" [ref=e132] [cursor=pointer]
+              - button "WebUI chat" [ref=e3572] [cursor=pointer]
+              - generic "Saved chat. History is persisted." [ref=e2333]: Saved
+            - generic [ref=e135]:
+              - button "Search - Open command palette" [ref=e136] [cursor=pointer]:
+                - generic [ref=e140]: Search
+                - generic [ref=e141]: ⌘K
+              - button "New saved chat" [ref=e2334] [cursor=pointer]
+              - button "Temporary chat (not saved)" [ref=e2338] [cursor=pointer]: Temp
+              - button "Character chat" [ref=e2339] [cursor=pointer]: Character
+              - button "Share conversation" [ref=e2340] [cursor=pointer]
+              - button "Open settings" [ref=e142] [cursor=pointer]
+              - generic [ref=e154]:
+                - button "Notifications, 0 unread" [ref=e200] [cursor=pointer]
+                - status [ref=e158]: Notifications are active
+              - button "Switch to light theme" [ref=e159] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=e166] [cursor=pointer]:
+                - generic [ref=e167]: "?"
+          - generic [ref=e168]:
+            - heading "Chat" [level=1] [ref=e2347]
+            - generic [ref=e2350]:
+              - paragraph [ref=e2351]: Context rail hidden. Runtime rail visible.
+              - generic [ref=e2352]:
+                - main [ref=e2353]:
+                  - generic [ref=e2354]:
+                    - generic [ref=e2356]:
+                      - generic [ref=e2357]:
+                        - generic [ref=e2358]: Standard chat
+                        - generic [ref=e2359]: Conversation timeline
+                      - generic [ref=e2360]:
+                        - button "Switch to light theme" [ref=e2361] [cursor=pointer]
+                        - button "Enter focus chat" [ref=e2368] [cursor=pointer]:
+                          - generic [ref=e2374]: Focus
+                        - button "Shortcuts" [ref=e2375] [cursor=pointer]
+                        - button "Artifacts panel closed" [disabled] [ref=e2379]
+                    - log "Chat messages" [ref=e2381]:
+                      - article "Assistant message 1 of 1" [ref=e3423]:
+                        - generic [ref=e3429]:
+                          - generic [ref=e3431]:
+                            - generic [ref=e3432]: Assistant
+                            - generic [ref=e3433]: • 7:18 AM
+                          - paragraph [ref=e3744]: Hello! How can I help you today?
+                          - generic [ref=e3438]:
+                            - generic [ref=e3575]:
+                              - generic [ref=e3576]: Was this helpful?
+                              - generic [ref=e3577]:
+                                - button "Helpful" [ref=e3578] [cursor=pointer]
+                                - button "Not helpful" [ref=e3581] [cursor=pointer]
+                                - button "More feedback" [ref=e3584] [cursor=pointer]
+                            - button "More actions" [ref=e3440] [cursor=pointer]: •••
+                    - generic [ref=e2413]:
+                      - generic [ref=e2414]: Composer
+                      - generic [ref=e2425]:
+                        - button [aria-hidden] [ref=e2426]
+                        - button [aria-hidden] [ref=e2427]
+                        - generic [ref=e2428]:
+                          - generic [ref=e2430]:
+                            - button "Hide composer options" [expanded] [ref=e2431] [cursor=pointer]
+                            - textbox "Type a message... (/ commands, @ mentions)" [ref=e2436]
+                            - generic [ref=e2437]:
+                              - button "Improve prompt" [ref=e2440] [cursor=pointer]
+                              - generic [ref=e2445]:
+                                - button "Send message" [ref=e2446] [cursor=pointer]:
+                                  - generic [ref=e2447]: Send
+                                - button "Open message delivery options" [ref=e2452] [cursor=pointer]
+                          - generic [ref=e2457]:
+                            - generic [ref=e2459]:
+                              - group "Mode and context controls" [ref=e2460]:
+                                - button "Modes" [ref=e2461] [cursor=pointer]
+                                - 'button "MCP tools: None, Not checked yet" [ref=e2468] [cursor=pointer]':
+                                  - generic [ref=e2469]:
+                                    - generic [ref=e2470]: MCP
+                                    - generic [ref=e2471]: None
+                                - button "Search & Context" [ref=e2474] [cursor=pointer]
+                                - button "Select a Prompt" [ref=e2479] [cursor=pointer]:
+                                  - generic [ref=e2482]: Prompt
+                                - button "Select character or persona" [ref=e3589] [cursor=pointer]
+                                - button "Role-play setup" [ref=e2488] [cursor=pointer]
+                                - button "Buddy & Persona" [ref=e2495] [cursor=pointer]
+                              - group "Run input controls" [ref=e2501]:
+                                - button "OpenUI" [ref=e2502] [cursor=pointer]
+                                - button "Start dictation" [ref=e2508] [cursor=pointer]
+                                - generic [ref=e2515]:
+                                  - button "Attach image" [ref=e2517] [cursor=pointer]
+                                  - button "More attachments" [ref=e2521] [cursor=pointer]
+                                - button "More tools" [ref=e2524] [cursor=pointer]
+                                - button "Current Chat Model Settings" [ref=e2527] [cursor=pointer]:
+                                  - generic [ref=e2531]: Chat Settings
+                            - generic "Active context" [ref=e2532]:
+                              - button "LLaMa.cpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=e2571] [cursor=pointer]:
+                                - generic "Provider status" [ref=e2538]: Healthy
+                              - button "Chat 1 message" [ref=e3451] [cursor=pointer]:
+                                - generic [ref=e3452]: Chat
+                                - generic [ref=e3453]: 1 message
+                              - button "Configure context window size" [ref=e2540] [cursor=pointer]:
+                                - generic [ref=e2541]: 8 + ~0 = 8 tokens
+                              - button "Saved" [ref=e2543] [cursor=pointer]
+                              - button "Advanced controls" [ref=e2545] [cursor=pointer]
+                - complementary "Chat cockpit runtime" [ref=e3460]:
+                  - generic [ref=e3461]:
+                    - generic [ref=e3462]: Runtime
+                    - generic [ref=e3463]:
+                      - button "Collapse runtime sidechannel" [expanded] [ref=e3464] [cursor=pointer]
+                      - tooltip "Collapse runtime sidechannel"
+                  - generic [ref=e3469]:
+                    - region "Runtime state" [ref=e3470]:
+                      - generic [ref=e3471]:
+                        - heading "Runtime" [level=2] [ref=e3472]
+                        - button "Collapse Runtime" [expanded] [ref=e3473] [cursor=pointer]
+                      - generic [ref=e3476]:
+                        - generic [ref=e3477]:
+                          - paragraph [ref=e3479]: Ready
+                          - generic [ref=e3480]: Turn idle
+                        - generic [ref=e3481]:
+                          - term [ref=e3482]: Provider
+                          - definition [ref=e3483]: tldw
+                          - term [ref=e3484]: Model
+                          - definition [ref=e3485]: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                        - generic [ref=e3486]:
+                          - paragraph [ref=e3487]: Provider route
+                          - paragraph [ref=e3488]: tldw:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                          - paragraph [ref=e3489]: Route tldw:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                    - region "Model route" [ref=e3490]:
+                      - generic [ref=e3491]:
+                        - heading "Model route" [level=2] [ref=e3492]
+                        - button "Collapse Model route" [expanded] [ref=e3493] [cursor=pointer]
+                      - generic [ref=e3496]:
+                        - button "Open model settings" [ref=e3498] [cursor=pointer]: Model settings
+                        - generic [ref=e3502]:
+                          - paragraph [ref=e3503]: Provider:model settings
+                          - paragraph [ref=e3504]: Default settings for this provider:model.
+                    - region "Assistant" [ref=e3505]:
+                      - generic [ref=e3506]:
+                        - heading "Assistant" [level=2] [ref=e3507]
+                        - button "Collapse Assistant" [expanded] [ref=e3508] [cursor=pointer]
+                      - generic [ref=e3511]:
+                        - generic [ref=e3512]:
+                          - generic [ref=e3513]:
+                            - paragraph [ref=e3514]: No runtime assistant selected
+                            - paragraph [ref=e3515]: No persona or character will shape replies.
+                          - generic [ref=e3516]: None
+                        - button "Select character or persona" [ref=e3518] [cursor=pointer]: Select assistant
+                    - region "MCP tools" [ref=e3532]:
+                      - generic [ref=e3533]:
+                        - heading "MCP tools" [level=2] [ref=e3534]
+                        - button "Collapse MCP tools" [expanded] [ref=e3535] [cursor=pointer]
+                      - generic [ref=e3539]:
+                        - generic [ref=e3544]:
+                          - paragraph [ref=e3545]: Chat tool access
+                          - paragraph [ref=e3546]: No MCP tools available
+                        - button "Configure MCP tools" [ref=e3547] [cursor=pointer]
+                    - region "Run controls" [ref=e3549]:
+                      - generic [ref=e3550]:
+                        - heading "Run controls" [level=2] [ref=e3551]
+                        - button "Collapse Run controls" [expanded] [ref=e3552] [cursor=pointer]
+                      - generic [ref=e3555]:
+                        - generic [ref=e3556]:
+                          - generic [ref=e3557]:
+                            - button "Stop generation" [disabled] [ref=e3558]
+                            - paragraph [ref=e3561]: No turn is running.
+                          - button "Regenerate last response" [ref=e3563] [cursor=pointer]
+                        - generic [ref=e3567]:
+                          - paragraph [ref=e3568]: Timeline
+                          - paragraph [ref=e3569]: 1 messages
+                          - paragraph [ref=e3570]: Search closed
+                - generic [ref=e2549]:
+                  - button "Restore context sidechannel" [ref=e2550] [cursor=pointer]:
+                    - generic [ref=e2554]: Context rail
+                  - tooltip "Restore context sidechannel"
+    - generic [ref=e3593]:
+      - dialog "Current Chat Model Settings":
+        - generic [ref=e3594]:
+          - button "Close" [ref=e3595] [cursor=pointer]:
+            - generic "Close" [ref=e3596]:
+              - img "close" [ref=e3597]
+          - generic [ref=e3600]: Current Chat Model Settings
+          - generic [ref=e3603]:
+            - generic [ref=e3604]:
+              - tablist [ref=e3605]:
+                - generic [ref=e3607]:
+                  - tab "Model" [ref=e3609] [cursor=pointer]
+                  - tab "Conversation" [active] [selected] [ref=e3611] [cursor=pointer]
+                  - tab "Advanced" [ref=e3613] [cursor=pointer]
+                  - tab "Scene Director" [ref=e3615] [cursor=pointer]
+              - tabpanel "Conversation" [ref=e3745]:
+                - generic [ref=e3746]:
+                  - generic [ref=e3748]:
+                    - generic "Conversation System Prompt" [ref=e3750]
+                    - generic [ref=e3751]:
+                      - generic [ref=e3754]:
+                        - textbox "Enter System Prompt" [ref=e3755]
+                        - button "Reset to default" [ref=e3757] [cursor=pointer]
+                      - generic [ref=e3759]: Applies persistently to this conversation and overrides the selected system prompt template until you reset it.
+                  - generic [ref=e3763]:
+                    - generic "Conversation tags" [ref=e3765]
+                    - generic [ref=e3766]:
+                      - generic [ref=e3769] [cursor=pointer]:
+                        - generic [ref=e3770]:
+                          - generic "in-progress" [ref=e3771]
+                          - combobox [ref=e3772]
+                        - img "down" [ref=e3774]
+                      - generic [ref=e3777]: Default state is “in-progress.” Update it as the conversation progresses.
+                  - generic [ref=e3781]:
+                    - generic "Topic label (optional)" [ref=e3783]
+                    - generic [ref=e3784]:
+                      - textbox "Topic label (optional)" [ref=e3787]
+                      - generic [ref=e3788]: Optional label for this chat; saved to the server when available.
+                  - generic [ref=e3792]:
+                    - generic "Author note" [ref=e3794]
+                    - generic [ref=e3795]:
+                      - generic [ref=e3798]:
+                        - textbox "E.g., Keep responses grounded, avoid repetition, and progress the scene." [ref=e3799]
+                        - generic: 0 / 1200
+                      - generic [ref=e3800]: Optional note injected into character prompts for this chat.
+                  - generic [ref=e3804]:
+                    - generic "Author note insertion" [ref=e3806]
+                    - generic [ref=e3807]:
+                      - generic [ref=e3811] [cursor=pointer]:
+                        - generic [ref=e3812]:
+                          - generic "Before system" [ref=e3813]
+                          - combobox [ref=e3814]
+                        - img "down" [ref=e3816]
+                      - generic [ref=e3819]: Choose whether the note is inserted before system instructions or at conversation depth N.
+                  - generic [ref=e3823]:
+                    - generic "Greeting scope" [ref=e3825]
+                    - generic [ref=e3826]:
+                      - generic [ref=e3829] [cursor=pointer]:
+                        - generic [ref=e3830]:
+                          - generic "Per chat" [ref=e3831]
+                          - combobox [ref=e3832]
+                        - img "down" [ref=e3834]
+                      - generic [ref=e3837]: Choose whether greeting behavior is resolved per chat or per character.
+                  - generic [ref=e3841]:
+                    - generic "Preset scope" [ref=e3843]
+                    - generic [ref=e3844]:
+                      - generic [ref=e3847] [cursor=pointer]:
+                        - generic [ref=e3848]:
+                          - generic "Per character" [ref=e3849]
+                          - combobox [ref=e3850]
+                        - img "down" [ref=e3852]
+                      - generic [ref=e3855]: Choose whether chat preset override or per-character preset is used by default.
+                  - generic [ref=e3859]:
+                    - generic "Chat generation override" [ref=e3861]
+                    - generic [ref=e3862]:
+                      - generic [ref=e3865]:
+                        - generic [ref=e3866] [cursor=pointer]:
+                          - generic [ref=e3867]:
+                            - generic "Override disabled" [ref=e3868]
+                            - combobox [ref=e3869]
+                          - img "down" [ref=e3871]
+                        - generic [ref=e3874]:
+                          - generic [ref=e3875]:
+                            - generic [ref=e3876]: Temp
+                            - spinbutton [disabled] [ref=e3878]
+                          - generic [ref=e3879]:
+                            - generic [ref=e3880]: Top-p
+                            - spinbutton [disabled] [ref=e3882]
+                          - generic [ref=e3883]:
+                            - generic [ref=e3884]: Rep pen
+                            - spinbutton [disabled] [ref=e3886]
+                        - textbox "Stop sequences, one per line" [disabled] [ref=e3887]
+                      - generic [ref=e3888]: Override character generation settings for this chat with explicit values.
+                  - generic [ref=e3892]:
+                    - generic "Memory scope" [ref=e3894]
+                    - generic [ref=e3895]:
+                      - generic [ref=e3898] [cursor=pointer]:
+                        - generic [ref=e3899]:
+                          - generic "Shared" [ref=e3900]
+                          - combobox [ref=e3901]
+                        - img "down" [ref=e3903]
+                      - generic [ref=e3906]: Choose whether memory is shared, per-character, or both.
+                  - generic [ref=e3910]:
+                    - generic "Turn-taking mode" [ref=e3912]
+                    - generic [ref=e3913]:
+                      - generic [ref=e3916] [cursor=pointer]:
+                        - generic [ref=e3917]:
+                          - generic "Single speaker" [ref=e3918]
+                          - combobox [ref=e3919]
+                        - img "down" [ref=e3921]
+                      - generic [ref=e3924]: Choose whether responses use one active speaker or rotate across selected participants.
+                  - generic [ref=e3928]:
+                    - generic "Participants" [ref=e3930]
+                    - generic [ref=e3931]:
+                      - generic [ref=e3935]:
+                        - generic [ref=e3936]:
+                          - generic: Select additional characters
+                          - combobox [ref=e3938]
+                        - img "down" [ref=e3940]
+                      - generic [ref=e3943]: Select additional characters for multi-character chats. The chat's primary character remains included.
+                  - generic [ref=e3947]:
+                    - generic "Directed responder" [ref=e3949]
+                    - generic [ref=e3950]:
+                      - generic [ref=e3953]:
+                        - generic [ref=e3954]:
+                          - generic: Automatic by turn-taking
+                          - combobox [ref=e3955]
+                        - img "down" [ref=e3957]
+                      - generic [ref=e3960]: "Optional: choose which participant should generate the next response."
+                  - generic [ref=e3964]:
+                    - generic "Auto summary" [ref=e3966]
+                    - generic [ref=e3967]:
+                      - generic [ref=e3970]:
+                        - generic [ref=e3971] [cursor=pointer]:
+                          - generic [ref=e3972]:
+                            - generic "Disabled" [ref=e3973]
+                            - combobox [ref=e3974]
+                          - img "down" [ref=e3976]
+                        - generic [ref=e3979]:
+                          - generic [ref=e3980]:
+                            - generic [ref=e3981]: Threshold
+                            - spinbutton [disabled] [ref=e3983]: "40"
+                          - generic [ref=e3984]:
+                            - generic [ref=e3985]: Recent window
+                            - spinbutton [disabled] [ref=e3987]: "12"
+                      - generic [ref=e3988]: Compress older unpinned messages once the threshold is reached.
+                  - generic [ref=e3992]:
+                    - generic "Pinned messages" [ref=e3994]
+                    - generic [ref=e3995]:
+                      - generic [ref=e3996]: No pinned messages in this chat.
+                      - generic [ref=e4000]: Pinned messages are excluded from auto-summary compression.
+                  - button "Prompt preview" [ref=e4004] [cursor=pointer]
+                  - button "Lorebook Debug" [ref=e4010] [cursor=pointer]
+            - button "Save" [ref=e3743] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=e32] [cursor=pointer]
+  - alert [ref=e10]: Chat | tldw
+```

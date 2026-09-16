@@ -1,0 +1,10 @@
+### Ran Playwright code
+```js
+await page.goto('http://127.0.0.1:18580/flashcards');
+```
+### Page
+- Page URL: http://127.0.0.1:18580/flashcards
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T14-06-16-668Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T14-06-13-555Z.log#L1-L4

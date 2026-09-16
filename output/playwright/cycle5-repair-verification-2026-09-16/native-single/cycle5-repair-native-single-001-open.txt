@@ -1,0 +1,11 @@
+### Browser `cycle5-repair-single-20260916` opened with pid 40495.
+### Ran Playwright code
+```js
+await page.goto('http://127.0.0.1:18580/settings/tldw');
+```
+### Page
+- Page URL: http://127.0.0.1:18580/settings/tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T14-04-52-446Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T14-04-33-668Z.log#L1-L2

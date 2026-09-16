@@ -1,0 +1,11 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Analyze' }).click();
+```
+### Page
+- Page URL: http://127.0.0.1:18580/media?id=1
+- Page Title: Media | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T14-20-04-959Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T14-19-17-464Z.log#L4-L5

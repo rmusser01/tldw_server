@@ -1,0 +1,15 @@
+{
+  "exact125": true,
+  "markdown125": true,
+  "allFields": true,
+  "revisionCount": 86,
+  "badRevisions": [],
+  "referencedFileCount": 173,
+  "changedSnapshotFiles": [],
+  "counts": {
+    "verified": 109,
+    "implemented-awaiting-acceptance": 14,
+    "blocked": 2
+  },
+  "reportBytes": 232308
+}
