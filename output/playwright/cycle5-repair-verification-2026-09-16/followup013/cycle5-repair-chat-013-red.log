@@ -1,0 +1,72 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:79869) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history (restore-first)
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history (handoff-first)
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not generate from the old conversation after empty selected-source retrieval
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not generate from the old conversation after error selected-source retrieval
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > keeps a full-content ordinary handoff on the ordinary path
+Using normalChatMode
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx (14 tests | 4 failed | 9 skipped) 589ms
+     × retrieves Rowan before generation with old Cedar history (restore-first) 193ms
+     × retrieves Rowan before generation with old Cedar history (handoff-first) 106ms
+     × does not generate from the old conversation after empty selected-source retrieval 97ms
+     × does not generate from the old conversation after error selected-source retrieval 98ms
+     ✓ keeps a full-content ordinary handoff on the ordinary path 93ms
+     ↓ consumes legacy unowned handoffs when token-derived identity is unavailable
+     ↓ waits for a resolved identity before applying or clearing an owned handoff
+     ↓ only applies a saved source owned by server-a:alice when identity matches
+     ↓ only applies a saved source owned by server-a:bob when identity matches
+     ↓ does not apply a saved source after identity changes while storage resolves
+     ↓ records normal Chat milestone only for submitted and its original owner
+     ↓ records normal Chat milestone only for failed and its original owner
+     ↓ records normal Chat milestone only for skipped and its original owner
+     ↓ sends the next prompt with OpenUI request overrides
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history (restore-first)
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history (handoff-first)
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Number of calls: 0
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx:1206:32
+    1204|     expect(useStoreMessageOption.getState().history).toHaveLength(2)
+    1205|     await send()
+    1206|     expect(sourceFlow.request).toHaveBeenCalledWith(expect.objectConta…
+       |                                ^
+    1207|       path: "/api/v1/rag/search", method: "POST",
+    1208|       body: expect.objectContaining({ include_media_ids: [42], sources…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not generate from the old conversation after empty selected-source retrieval
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not generate from the old conversation after error selected-source retrieval
+AssertionError: expected "vi.fn()" to be called 1 times, but got 0 times
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx:1224:32
+    1222|     await consume()
+    1223|     await send()
+    1224|     expect(sourceFlow.request).toHaveBeenCalledTimes(1)
+       |                                ^
+    1225|     expect(sourceFlow.stream).not.toHaveBeenCalled()
+    1226|     expect(useStoreMessageOption.getState().messages.at(-1)?.message).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 1 passed | 9 skipped (14)
+   Start at  08:15:27
+   Duration  2.56s (transform 1.11s, setup 103ms, import 1.46s, tests 589ms, environment 306ms)

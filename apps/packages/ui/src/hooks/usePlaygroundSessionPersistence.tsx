@@ -148,6 +148,15 @@ export function usePlaygroundSessionPersistence() {
 
   const { setSystemPrompt } = useStoreChatModelSettings()
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
+  // Form handoffs can arrive before initial hydration starts or while its DB
+  // read is pending, even with identical values. Observe accepted intent, not
+  // value equality; this baseline is used only for the initial saved target.
+  const initialSourceSelectionRef = useRef({
+    revision: sessionStore.sourceSelectionRevision,
+    scopeKey: sessionStore.scopeKey,
+    historyId: sessionStore.historyId,
+    serverChatId: sessionStore.serverChatId
+  })
 
   const resolveCurrentScopeKey = useCallback(async (): Promise<string> => {
     const config = await tldwClient.getConfig().catch(() => null)
@@ -533,6 +542,14 @@ export function usePlaygroundSessionPersistence() {
 
   // Restore session from persisted state
   const restoreSession = useCallback(async (): Promise<PlaygroundSessionRestoreOutcome> => {
+    const initialSelection = initialSourceSelectionRef.current
+    const selectionBeforeRestore =
+      !initialRestoreSettledRef.current &&
+      initialSelection.scopeKey === sessionStore.scopeKey &&
+      initialSelection.historyId === sessionStore.historyId &&
+      initialSelection.serverChatId === sessionStore.serverChatId
+        ? initialSelection.revision
+        : usePlaygroundSessionStore.getState().sourceSelectionRevision
     const restoreRevision =
       usePlaygroundSessionStore.getState().restoreRevision
     const isCurrentRestore = () =>
@@ -656,7 +673,15 @@ export function usePlaygroundSessionPersistence() {
           }
         }
       }
-      setChatMode(sessionStore.chatMode)
+      const sourceSelectionChanged =
+        usePlaygroundSessionStore.getState().sourceSelectionRevision !==
+        selectionBeforeRestore
+      if (!sourceSelectionChanged) {
+        setChatMode(sessionStore.chatMode)
+        if (sessionStore.ragMediaIds) {
+          setRagMediaIds(sessionStore.ragMediaIds)
+        }
+      }
       setWebSearch(sessionStore.webSearch)
       setCompareMode(sessionStore.compareMode)
       if (sessionStore.compareSelectedModels.length > 0) {
@@ -664,9 +689,6 @@ export function usePlaygroundSessionPersistence() {
       }
 
       // Restore RAG settings
-      if (sessionStore.ragMediaIds) {
-        setRagMediaIds(sessionStore.ragMediaIds)
-      }
       setRagSearchMode(sessionStore.ragSearchMode)
       if (sessionStore.ragTopK !== null) {
         setRagTopK(sessionStore.ragTopK)

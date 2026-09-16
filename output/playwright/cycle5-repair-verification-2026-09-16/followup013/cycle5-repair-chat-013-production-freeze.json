@@ -1,0 +1,21 @@
+{
+  "frozenAt": "2026-09-16T15:40:56.598Z",
+  "baseline": "3c30685611",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx",
+      "kind": "production",
+      "sha256": "ef48f381f36b1aec091d3153dc059c093bafaa8da7f5dcbc8186f0a8ec076bde"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/usePlaygroundSessionPersistence.tsx",
+      "kind": "production",
+      "sha256": "b6be2a54d4c612cd655097caec35d58882cd81e52ba5e3af25b27a75b76ce697"
+    },
+    {
+      "path": "apps/packages/ui/src/store/playground-session.tsx",
+      "kind": "production",
+      "sha256": "5d32632fc4059c9565f2d560be8361c31572367aef9c753415bd09557eff5a47"
+    }
+  ]
+}

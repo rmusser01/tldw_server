@@ -1,0 +1,63 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:90011) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > independent: accepted Home source remains authoritative when already selected before mount
+Using ragMode
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx (25 tests | 1 failed | 24 skipped) 162ms
+     ↓ retrieves Rowan before generation with old Cedar history ('restore-first', prior source=false)
+     ↓ retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=false)
+     ↓ retrieves Rowan before generation with old Cedar history ('restore-first', prior source=true)
+     ↓ retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=true)
+     ↓ retrieves Rowan before generation with old Cedar history ('handoff-before-restore', prior source=true)
+     ↓ does not generate from the old conversation after empty selected-source retrieval
+     ↓ does not generate from the old conversation after error selected-source retrieval
+     ↓ keeps a full-content ordinary handoff on the ordinary path
+     ↓ does not arm retrieval or seed the composer for a different owner's handoff
+     ↓ discards an earlier owner's storage read through A to B to A
+     ↓ does not publish a late source answer after the captured request authority is invalidated
+     × independent: accepted Home source remains authoritative when already selected before mount 161ms
+     ↓ allows a later requested restore on the same hook to replay saved source selection
+     ↓ does not apply the initial selection baseline to a different persisted conversation
+     ↓ does not apply the initial selection baseline to a different persisted account
+     ↓ hydrates the real localStorage session synchronously before the handoff owner mounts
+     ↓ consumes legacy unowned handoffs when token-derived identity is unavailable
+     ↓ waits for a resolved identity before applying or clearing an owned handoff
+     ↓ only applies a saved source owned by server-a:alice when identity matches
+     ↓ only applies a saved source owned by server-a:bob when identity matches
+     ↓ does not apply a saved source after identity changes while storage resolves
+     ↓ records normal Chat milestone only for submitted and its original owner
+     ↓ records normal Chat milestone only for failed and its original owner
+     ↓ records normal Chat milestone only for skipped and its original owner
+     ↓ sends the next prompt with OpenUI request overrides
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > independent: accepted Home source remains authoritative when already selected before mount
+AssertionError: expected [ 7 ] to deeply equal [ 42 ]
+
+- Expected
++ Received
+
+  [
+-   42,
++   7,
+  ]
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx:1327:72
+    1327|     expect(useStoreMessageOption.getState().chatMode).toBe("rag")
+    1328|   })
+    1329|
+       | ^
+    1330|   it.each(["conversation", "account"])("does not apply the initial sel…
+    1331|     render(<SourceFlowHarness />)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 24 skipped (25)
+   Start at  08:33:05
+   Duration  1.98s (transform 1.09s, setup 79ms, import 1.43s, tests 162ms, environment 222ms)

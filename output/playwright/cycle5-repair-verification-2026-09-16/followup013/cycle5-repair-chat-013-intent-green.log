@@ -1,0 +1,62 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:92152) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:92153) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/store/__tests__/playground-session-store.test.ts (4 tests) 3ms
+(node:92163) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('restore-first', prior source=false)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=false)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('restore-first', prior source=true)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=true)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-before-restore', prior source=true)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not generate from the old conversation after empty selected-source retrieval
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not generate from the old conversation after error selected-source retrieval
+Using ragMode
+
+ ✓ src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx (10 tests) 878ms
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > keeps a full-content ordinary handoff on the ordinary path
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not publish a late source answer after the captured request authority is invalidated
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > preserves an accepted same-value Rowan handoff before-restore
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > preserves an accepted same-value Rowan handoff during-restore
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > preserves an accepted same-value ordinary handoff before-restore
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > preserves an accepted same-value ordinary handoff during-restore
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > preserves accepted source intent through Rowan to Cedar to Rowan while restore is pending
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > hydrates the real localStorage session synchronously before the handoff owner mounts
+Using ragMode
+
+ ✓ src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx (29 tests) 2449ms
+
+ Test Files  3 passed (3)
+      Tests  43 passed (43)
+   Start at  08:37:08
+   Duration  4.84s (transform 1.67s, setup 345ms, import 2.97s, tests 3.33s, environment 1.13s)

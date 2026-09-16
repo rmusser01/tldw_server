@@ -1,0 +1,26 @@
+{
+  "frozenAt": "2026-09-16T15:29:26.800Z",
+  "baseline": "3c30685611",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx",
+      "kind": "production",
+      "sha256": "953247931dadcc68828b40ac533978bb8095437d01f3b3e1c6c184e412f2e9f5"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/usePlaygroundSessionPersistence.tsx",
+      "kind": "production",
+      "sha256": "52ca0f53ef87b9b0ce3a29d5b6103d18ac0e39ace6c4988905d1693627a90b1e"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx",
+      "kind": "test",
+      "sha256": "20e9eee9eb3b657ea6cc00467ff0fef3ae2514d6fd155463c8bb5c5cfbd415f1"
+    },
+    {
+      "path": "backlog/tasks/task-13260.3 - Repair-first-source-handoff-and-setup-progress-UX.md",
+      "kind": "task",
+      "sha256": "99453a9c537fec9c8cb1015409c4d14b46e45e7424a7ad8f865483dd67d4db96"
+    }
+  ]
+}

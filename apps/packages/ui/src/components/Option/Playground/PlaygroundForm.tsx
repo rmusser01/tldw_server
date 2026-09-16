@@ -2543,10 +2543,13 @@ export const PlaygroundForm = ({
       if (mode === "rag_media") {
         const mediaId = parseMediaIdAsNumber(payload);
         if (mediaId != null) {
+          usePlaygroundSessionStore.getState().markSourceSelectionIntent();
           setChatMode("rag");
           setRagMediaIds([mediaId]);
+          setFileRetrievalEnabled(true);
         }
       } else {
+        usePlaygroundSessionStore.getState().markSourceSelectionIntent();
         setChatMode("normal");
         setRagMediaIds(null);
       }
@@ -2555,7 +2558,7 @@ export const PlaygroundForm = ({
       setMessageValue(hint, { collapseLarge: true, forceCollapse: true });
       textAreaFocus();
     },
-    [setChatMode, setMessageValue, setRagMediaIds, textAreaFocus],
+    [setChatMode, setFileRetrievalEnabled, setMessageValue, setRagMediaIds, textAreaFocus],
   );
 
   // Seed composer when a media item requests discussion (e.g., from Quick ingest or Review page)

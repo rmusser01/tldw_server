@@ -1,0 +1,41 @@
+{
+  "frozenAt": "2026-09-16T15:40:56.598Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx",
+      "kind": "production",
+      "sha256": "ef48f381f36b1aec091d3153dc059c093bafaa8da7f5dcbc8186f0a8ec076bde",
+      "match": true
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/usePlaygroundSessionPersistence.tsx",
+      "kind": "production",
+      "sha256": "b6be2a54d4c612cd655097caec35d58882cd81e52ba5e3af25b27a75b76ce697",
+      "match": true
+    },
+    {
+      "path": "apps/packages/ui/src/store/playground-session.tsx",
+      "kind": "production",
+      "sha256": "5d32632fc4059c9565f2d560be8361c31572367aef9c753415bd09557eff5a47",
+      "match": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx",
+      "kind": "test",
+      "sha256": "e4fcab1cd3b36d07f864f11b622a9ce14891e9af9c61b5264c634242570d5aba",
+      "match": true
+    },
+    {
+      "path": "apps/packages/ui/src/store/__tests__/playground-session-store.test.ts",
+      "kind": "test",
+      "sha256": "c9377b12c74b1da75042831794672145da232226b2968718597cf0eb865b4809",
+      "match": true
+    },
+    {
+      "path": "backlog/tasks/task-13260.3 - Repair-first-source-handoff-and-setup-progress-UX.md",
+      "kind": "task",
+      "sha256": "d5b968e9c42f78558e336861b86fcd66c2c0d748715e1c57cf11451897639067",
+      "match": true
+    }
+  ]
+}

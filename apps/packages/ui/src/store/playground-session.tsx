@@ -45,10 +45,12 @@ export interface PlaygroundSessionData {
 
 interface PlaygroundSessionState extends PlaygroundSessionData {
   restoreRevision: number
+  sourceSelectionRevision: number
   // Actions
   saveSession: (data: Partial<PlaygroundSessionData>) => void
   clearSession: () => void
   cancelPendingRestore: () => void
+  markSourceSelectionIntent: () => void
   isSessionStale: () => boolean
   isSessionValid: (expectedScopeKey?: string | null) => boolean
 }
@@ -82,6 +84,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
     (set, get) => ({
       ...initialState,
       restoreRevision: 0,
+      sourceSelectionRevision: 0,
 
       saveSession: (data) =>
         set((state) => ({
@@ -99,6 +102,9 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
 
       cancelPendingRestore: () =>
         set((state) => ({ restoreRevision: state.restoreRevision + 1 })),
+
+      markSourceSelectionIntent: () =>
+        set((state) => ({ sourceSelectionRevision: state.sourceSelectionRevision + 1 })),
 
       isSessionStale: () => {
         const { lastUpdated } = get()

@@ -1,0 +1,10 @@
+  it("independent: accepted Home source remains authoritative when already selected before mount", async () => {
+    useStoreMessageOption.setState({ chatMode: "rag", ragMediaIds: [42], fileRetrievalEnabled: true })
+    usePlaygroundSessionStore.getState().saveSession({ chatMode: "rag", ragMediaIds: [7] })
+    render(<SourceFlowHarness />)
+    await consume()
+    await restore()
+    await send()
+    expect(sourceFlow.request.mock.calls[0][0].body.include_media_ids).toEqual([42])
+    expect(JSON.stringify(sourceFlow.stream.mock.calls[0][0])).toContain(rowanText)
+  })

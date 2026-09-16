@@ -1,0 +1,94 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:93731) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93732) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx (10 tests) 871ms
+(node:93753) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('restore-first', prior source=false)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=false)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('restore-first', prior source=true)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=true)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-before-restore', prior source=true)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not generate from the old conversation after empty selected-source retrieval
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not generate from the old conversation after error selected-source retrieval
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > keeps a full-content ordinary handoff on the ordinary path
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not publish a late source answer after the captured request authority is invalidated
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > preserves an accepted same-value Rowan handoff before-restore
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > preserves an accepted same-value Rowan handoff during-restore
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > preserves an accepted same-value ordinary handoff before-restore
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > preserves an accepted same-value ordinary handoff during-restore
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > preserves accepted source intent through Rowan to Cedar to Rowan while restore is pending
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > hydrates the real localStorage session synchronously before the handoff owner mounts
+Using ragMode
+
+ ✓ src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx (29 tests) 2307ms
+(node:93766) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/routes/__tests__/option-index.setup-flow.test.tsx (6 tests) 105ms
+(node:93780) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat/__tests__/useChatActions.service-prompts.test.tsx (28 tests) 41ms
+(node:93796) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-modes/__tests__/ragMode.sanitization.test.ts (13 tests) 7ms
+(node:93800) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat/__tests__/chat-action-utils.rag-overrides.test.ts (12 tests) 2ms
+(node:93802) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/store/__tests__/playground-session-store.test.ts (4 tests) 2ms
+(node:93804) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/media-chat-handoff.test.ts (4 tests) 2ms
+ ✓ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (59 tests) 15856ms
+     ✓ promotes accepted entry to saved route and restores its transcript on remount: /chat?mode=character&characterId=4&keep=1  319ms
+     ✓ uses canonical ordinary workflow after history load despite a persisted Character preference  345ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn false)  517ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn true)  517ms
+     ✓ preserves canonical saved identity with actual WebUI storage and six loaders: sidebar  407ms
+     ✓ uses the real picker to deliberately select Robot with a saved target  696ms
+     ✓ uses the real picker to deliberately select New choice with a saved target  626ms
+     ✓ UAT068 replaces a fully loaded saved Character from its search route without restoring it  1153ms
+     ✓ UAT068 replaces a fully loaded saved Character from its hash route without restoring it  1158ms
+     ✓ UAT068 replaces a fully loaded saved Character from its roundtrip route without restoring it  1833ms
+     ✓ UAT068 clear survives a 0ms route commit without restoring the saved Character  641ms
+     ✓ UAT068 clear survives a 70ms route commit without restoring the saved Character  634ms
+     ✓ UAT068 rejects cancel before retiring the owned saved route  492ms
+     ✓ keeps the saved conversation and preference after cancelling the real legacy picker confirmation  642ms
+
+ Test Files  9 passed (9)
+      Tests  165 passed (165)
+   Start at  08:40:59
+   Duration  18.83s (transform 2.23s, setup 670ms, import 5.86s, tests 19.19s, environment 2.46s)

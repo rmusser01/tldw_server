@@ -1,0 +1,340 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:85164) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('restore-first', prior source=false)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=false)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('restore-first', prior source=true)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=true)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-before-restore', prior source=true)
+Using ragMode
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx (22 tests | 3 failed | 17 skipped) 1262ms
+     ✓ retrieves Rowan before generation with old Cedar history ('restore-first', prior source=false)  475ms
+     × retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=false) 205ms
+     ✓ retrieves Rowan before generation with old Cedar history ('restore-first', prior source=true) 197ms
+     × retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=true) 195ms
+     × retrieves Rowan before generation with old Cedar history ('handoff-before-restore', prior source=true) 187ms
+     ↓ does not generate from the old conversation after empty selected-source retrieval
+     ↓ does not generate from the old conversation after error selected-source retrieval
+     ↓ keeps a full-content ordinary handoff on the ordinary path
+     ↓ does not arm retrieval or seed the composer for a different owner's handoff
+     ↓ discards an earlier owner's storage read through A to B to A
+     ↓ does not publish a late source answer after the captured request authority is invalidated
+     ↓ allows a later requested restore on the same hook to replay saved source selection
+     ↓ does not apply the initial selection baseline to a different persisted conversation
+     ↓ consumes legacy unowned handoffs when token-derived identity is unavailable
+     ↓ waits for a resolved identity before applying or clearing an owned handoff
+     ↓ only applies a saved source owned by server-a:alice when identity matches
+     ↓ only applies a saved source owned by server-a:bob when identity matches
+     ↓ does not apply a saved source after identity changes while storage resolves
+     ↓ records normal Chat milestone only for submitted and its original owner
+     ↓ records normal Chat milestone only for failed and its original owner
+     ↓ records normal Chat milestone only for skipped and its original owner
+     ↓ sends the next prompt with OpenUI request overrides
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=false)
+AssertionError: expected 'normal' to be 'rag' // Object.is equality
+
+Expected: "rag"
+Received: "normal"
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx:1226:55
+    1224|     expect(JSON.stringify(sourceFlow.stream.mock.calls[0][0])).toConta…
+    1225|     expect(useStoreMessageOption.getState().messages.at(-1)?.sources[0…
+    1226|     expect(useStoreMessageOption.getState().chatMode).toBe("rag")
+       |                                                       ^
+    1227|   })
+    1228|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=true)
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-before-restore', prior source=true)
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+-   ObjectContaining {
+-     "body": ObjectContaining {
++   {
++     "abortSignal": AbortSignal {
++       Symbol(kEvents): Map {},
++       Symbol(events.maxEventTargetListeners): 0,
++       Symbol(events.maxEventTargetListenersWarned): false,
++       Symbol(kHandlers): Map {},
++       Symbol(kAborted): false,
++       Symbol(kReason): undefined,
++       Symbol(kComposite): false,
++     },
++     "body": {
++       "abstention_behavior": "ask",
++       "accumulation_max_rounds": 3,
++       "adaptive_advanced_rewrites": false,
++       "adaptive_cache": true,
++       "adaptive_max_claims": 20,
++       "adaptive_max_retries": 1,
++       "adaptive_rerun_bypass_cache": false,
++       "adaptive_rerun_doc_budget": 12,
++       "adaptive_rerun_include_generation": true,
++       "adaptive_rerun_on_low_confidence": true,
++       "adaptive_rerun_time_budget_sec": 30,
++       "adaptive_time_budget_sec": 30,
++       "adaptive_unsupported_threshold": 0.4,
++       "agentic_adaptive_budgets": true,
++       "agentic_cache_ttl_sec": 600,
++       "agentic_coverage_target": 0.8,
++       "agentic_debug_trace": false,
++       "agentic_enable_metrics": false,
++       "agentic_enable_query_decomposition": true,
++       "agentic_enable_section_index": true,
++       "agentic_enable_semantic_within": true,
++       "agentic_enable_table_support": true,
++       "agentic_enable_tools": true,
++       "agentic_enable_vlm_late_chunking": false,
++       "agentic_extractive_only": false,
++       "agentic_max_redundancy": 0.9,
++       "agentic_max_tokens_read": 5000,
++       "agentic_max_tool_calls": 6,
++       "agentic_min_corroborating_docs": 2,
++       "agentic_prefer_structural_anchors": true,
++       "agentic_quote_spans": true,
++       "agentic_subgoal_max": 5,
++       "agentic_time_budget_sec": 30,
++       "agentic_top_k_docs": 12,
++       "agentic_use_llm_planner": true,
++       "agentic_use_provider_embeddings_within": false,
++       "agentic_vlm_backend": "auto",
++       "agentic_vlm_detect_tables_only": false,
++       "agentic_vlm_late_chunk_top_k_docs": 5,
++       "agentic_vlm_max_pages": 20,
++       "agentic_window_chars": 5000,
++       "apply_feedback_boost": false,
++       "batch_concurrent": 2,
++       "cache_threshold": 0.8,
++       "chunk_type_filter": [
++         "text",
++         "code",
++         "table",
++         "list",
++       ],
++       "circuit_breaker": true,
++       "citation_style": "apa",
++       "claim_extractor": "auto",
++       "claim_verifier": "hybrid",
++       "claims_concurrency": 4,
++       "claims_conf_threshold": 0.5,
++       "claims_max": 20,
++       "claims_top_k": 8,
++       "collect_feedback": false,
++       "content_filter": true,
++       "content_policy_mode": "redact",
++       "content_policy_types": [
++         "pii",
++         "phi",
++       ],
++       "debug_mode": false,
++       "detect_pii": true,
++       "doc_only_verification": false,
++       "enable_abstention": true,
++       "enable_analytics": false,
++       "enable_batch": false,
++       "enable_cache": true,
++       "enable_chunk_citations": true,
++       "enable_citations": true,
++       "enable_claims": false,
++       "enable_content_policy_filter": true,
++       "enable_document_grading": false,
++       "enable_dynamic_granularity": false,
++       "enable_evidence_accumulation": false,
++       "enable_evidence_chains": false,
++       "enable_faithfulness_eval": false,
++       "enable_fast_hallucination_check": false,
++       "enable_generation": true,
++       "enable_html_sanitizer": true,
++       "enable_injection_filter": true,
++       "enable_intent_routing": false,
++       "enable_knowledge_strips": false,
++       "enable_monitoring": false,
++       "enable_multi_turn_synthesis": false,
++       "enable_multi_vector_passages": false,
++       "enable_numeric_fidelity": false,
++       "enable_numeric_table_boost": false,
++       "enable_observability": false,
++       "enable_parent_expansion": true,
++       "enable_performance_analysis": false,
++       "enable_post_verification": false,
++       "enable_pre_retrieval_clarification": false,
++       "enable_query_decomposition": false,
++       "enable_query_rewriting_loop": false,
++       "enable_reranking": true,
++       "enable_resilience": true,
++       "enable_security_filter": true,
++       "enable_table_processing": true,
++       "enable_text_late_chunking": false,
++       "enable_utility_grading": false,
++       "enable_vlm_late_chunking": false,
++       "enable_web_fallback": false,
++       "expand_query": false,
++       "expansion_strategies": [
++         "acronym",
++         "synonym",
++         "semantic",
++         "domain",
++         "entity",
++       ],
++       "explain_only": false,
++       "fast_hallucination_timeout_sec": 5,
++       "fts_level": "chunk",
++       "generate_verification_report": false,
++       "generation_model": "gpt-4o-mini",
++       "generation_provider": "openai",
++       "grading_batch_size": 5,
++       "grading_fallback_min_score": 0.3,
++       "grading_fallback_to_score": true,
++       "grading_threshold": 0.5,
++       "grading_timeout_sec": 30,
++       "highlight_query_terms": true,
++       "highlight_results": true,
++       "html_allowed_attrs": [
++         "href",
++         "title",
++         "target",
++         "rel",
++       ],
++       "html_allowed_tags": [
++         "b",
++         "i",
++         "em",
++         "strong",
++         "a",
++         "code",
++         "pre",
++         "ul",
++         "ol",
++         "li",
++         "p",
++         "br",
++         "blockquote",
++       ],
++       "hybrid_alpha": 0.5,
+        "include_media_ids": [
+-         42,
++         7,
+        ],
++       "include_page_numbers": true,
++       "include_parent_document": false,
++       "include_sibling_chunks": true,
++       "injection_filter_strength": 0.7,
++       "low_confidence_behavior": "ask",
++       "max_generation_tokens": 800,
++       "max_query_variations": 3,
++       "max_rewrite_attempts": 2,
++       "max_strips": 20,
++       "max_subqueries": 4,
++       "metrics_k": 10,
++       "min_score": 0.2,
++       "mv_flatten_to_spans": true,
++       "mv_max_spans": 5,
++       "mv_span_chars": 1200,
++       "mv_stride": 400,
++       "nli_model": "default",
++       "numeric_fidelity_behavior": "ask",
++       "numeric_precision_mode": "standard",
++       "ocr_confidence_threshold": 0.6,
++       "parent_context_size": 500,
++       "parent_max_tokens": 800,
++       "query": "Chat with this media: Rowan.md
++
++ Summarize this source.",
++       "redact_pii": false,
++       "require_hard_citations": false,
++       "rerank_min_relevance_prob": 0.2,
++       "rerank_sentinel_margin": 0.05,
++       "rerank_top_k": 20,
++       "reranking_model": "default",
++       "reranking_strategy": "flashrank",
++       "retry_attempts": 2,
++       "rewrite_relevance_threshold": 0.3,
++       "search_mode": "hybrid",
++       "sensitivity_level": "internal",
++       "sibling_window": 1,
+        "sources": [
+          "media_db",
+        ],
++       "spell_check": true,
++       "strategy": "standard",
++       "strict_extractive": false,
++       "strip_min_relevance": 0.3,
++       "strip_size_tokens": 100,
++       "subquery_max_concurrency": 3,
++       "synthesis_draft_tokens": 400,
++       "synthesis_refine_tokens": 400,
++       "synthesis_time_budget_sec": 45,
++       "table_method": "hybrid",
++       "timeout_seconds": 45,
++       "top_k": 8,
++       "track_cost": false,
++       "use_connection_pool": true,
++       "use_embedding_cache": true,
++       "utility_grading_timeout_sec": 5,
++       "vlm_backend": "auto",
++       "vlm_detect_tables_only": false,
++       "vlm_late_chunk_top_k_docs": 5,
++       "vlm_max_pages": 20,
++       "web_fallback_merge_strategy": "prepend",
++       "web_fallback_result_count": 5,
++       "web_fallback_threshold": 0.25,
++       "web_search_engine": "duckduckgo",
+      },
+-     "headers": ObjectContaining {
++     "headers": {
++       "Content-Type": "application/json",
+        "X-TLDW-Expected-User-ID": "1",
+      },
+      "method": "POST",
+      "path": "/api/v1/rag/search",
+-     "servicePromptConfig": ObjectContaining {
++     "sanitizeRagProviderError": true,
++     "servicePromptConfig": {
++       "apiKey": "synthetic-handoff",
++       "authMode": "single-user",
++       "expectedUserId": 1,
+        "serverUrl": "https://handoff.test",
+      },
++     "timeoutMs": undefined,
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx:1217:32
+    1215|     expect(useStoreMessageOption.getState().history).toHaveLength(2)
+    1216|     await send()
+    1217|     expect(sourceFlow.request).toHaveBeenCalledWith(expect.objectConta…
+       |                                ^
+    1218|       path: "/api/v1/rag/search", method: "POST",
+    1219|       body: expect.objectContaining({ include_media_ids: [42], sources…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 2 passed | 17 skipped (22)
+   Start at  08:23:16
+   Duration  4.35s (transform 1.88s, setup 152ms, import 2.40s, tests 1.26s, environment 421ms)

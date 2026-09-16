@@ -1,0 +1,42 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:91738) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/store/__tests__/playground-session-store.test.ts (4 tests | 2 failed) 3ms
+     ✓ treats a fresh queue-only session as valid 1ms
+     ✓ rejects persisted sessions when the expected scope key changes 0ms
+     × records each accepted source intent without resetting its revision on session clear 1ms
+     × keeps source intent revision out of the persisted session payload 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/store/__tests__/playground-session-store.test.ts > playground-session-store > records each accepted source intent without resetting its revision on session clear
+TypeError: __vite_ssr_import_2__.usePlaygroundSessionStore.getState(...).markSourceSelectionIntent is not a function
+ ❯ src/store/__tests__/playground-session-store.test.ts:37:42
+     35|   it("records each accepted source intent without resetting its revisi…
+     36|     const initial = usePlaygroundSessionStore.getState().sourceSelecti…
+     37|     usePlaygroundSessionStore.getState().markSourceSelectionIntent()
+       |                                          ^
+     38|     usePlaygroundSessionStore.getState().markSourceSelectionIntent()
+     39|     usePlaygroundSessionStore.getState().clearSession()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/store/__tests__/playground-session-store.test.ts > playground-session-store > keeps source intent revision out of the persisted session payload
+TypeError: __vite_ssr_import_2__.usePlaygroundSessionStore.getState(...).markSourceSelectionIntent is not a function
+ ❯ src/store/__tests__/playground-session-store.test.ts:44:42
+     42|
+     43|   it("keeps source intent revision out of the persisted session payloa…
+     44|     usePlaygroundSessionStore.getState().markSourceSelectionIntent()
+       |                                          ^
+     45|     usePlaygroundSessionStore.getState().saveSession({ scopeKey: "scop…
+     46|     const saved = JSON.parse(localStorage.getItem("tldw-playground-ses…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed (4)
+   Start at  08:36:38
+   Duration  857ms (transform 158ms, setup 145ms, import 173ms, tests 3ms, environment 433ms)

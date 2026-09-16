@@ -1,0 +1,75 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:88951) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:88952) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('restore-first', prior source=false)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=false)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('restore-first', prior source=true)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=true)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-before-restore', prior source=true)
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not generate from the old conversation after empty selected-source retrieval
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not generate from the old conversation after error selected-source retrieval
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > keeps a full-content ordinary handoff on the ordinary path
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not publish a late source answer after the captured request authority is invalidated
+Using ragMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > hydrates the real localStorage session synchronously before the handoff owner mounts
+Using ragMode
+
+ ✓ src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx (24 tests) 1793ms
+(node:88965) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx (10 tests) 868ms
+(node:89003) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/routes/__tests__/option-index.setup-flow.test.tsx (6 tests) 124ms
+(node:89013) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat/__tests__/useChatActions.service-prompts.test.tsx (28 tests) 65ms
+(node:89019) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-modes/__tests__/ragMode.sanitization.test.ts (13 tests) 10ms
+(node:89021) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat/__tests__/chat-action-utils.rag-overrides.test.ts (12 tests) 8ms
+(node:89024) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/media-chat-handoff.test.ts (4 tests) 3ms
+ ✓ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (59 tests) 16886ms
+     ✓ uses canonical ordinary workflow after history load despite a persisted Character preference  336ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn false)  527ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn true)  523ms
+     ✓ preserves canonical saved identity with actual WebUI storage and six loaders: sidebar  440ms
+     ✓ uses the real picker to deliberately select Robot with a saved target  891ms
+     ✓ uses the real picker to deliberately select New choice with a saved target  790ms
+     ✓ UAT068 replaces a fully loaded saved Character from its search route without restoring it  1237ms
+     ✓ UAT068 replaces a fully loaded saved Character from its hash route without restoring it  1236ms
+     ✓ UAT068 replaces a fully loaded saved Character from its roundtrip route without restoring it  2067ms
+     ✓ UAT068 clear survives a 0ms route commit without restoring the saved Character  680ms
+     ✓ UAT068 clear survives a 70ms route commit without restoring the saved Character  692ms
+     ✓ UAT068 rejects cancel before retiring the owned saved route  550ms
+     ✓ keeps the saved conversation and preference after cancelling the real legacy picker confirmation  770ms
+
+ Test Files  8 passed (8)
+      Tests  156 passed (156)
+   Start at  08:30:13
+   Duration  19.75s (transform 2.47s, setup 732ms, import 6.02s, tests 19.76s, environment 2.49s)

@@ -1,0 +1,94 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:87377) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('restore-first', prior source=false)
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=false)
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('restore-first', prior source=true)
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=true)
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-before-restore', prior source=true)
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not generate from the old conversation after empty selected-source retrieval
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not generate from the old conversation after error selected-source retrieval
+Using normalChatMode
+
+stdout | src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > keeps a full-content ordinary handoff on the ordinary path
+Using normalChatMode
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx (24 tests | 7 failed | 16 skipped) 917ms
+     × retrieves Rowan before generation with old Cedar history ('restore-first', prior source=false) 201ms
+     × retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=false) 110ms
+     × retrieves Rowan before generation with old Cedar history ('restore-first', prior source=true) 102ms
+     × retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=true) 99ms
+     × retrieves Rowan before generation with old Cedar history ('handoff-before-restore', prior source=true) 108ms
+     × does not generate from the old conversation after empty selected-source retrieval 105ms
+     × does not generate from the old conversation after error selected-source retrieval 96ms
+     ✓ keeps a full-content ordinary handoff on the ordinary path 96ms
+     ↓ does not arm retrieval or seed the composer for a different owner's handoff
+     ↓ discards an earlier owner's storage read through A to B to A
+     ↓ does not publish a late source answer after the captured request authority is invalidated
+     ↓ allows a later requested restore on the same hook to replay saved source selection
+     ↓ does not apply the initial selection baseline to a different persisted conversation
+     ↓ does not apply the initial selection baseline to a different persisted account
+     ↓ hydrates the real localStorage session synchronously before the handoff owner mounts
+     ↓ consumes legacy unowned handoffs when token-derived identity is unavailable
+     ↓ waits for a resolved identity before applying or clearing an owned handoff
+     ↓ only applies a saved source owned by server-a:alice when identity matches
+     ↓ only applies a saved source owned by server-a:bob when identity matches
+     ↓ does not apply a saved source after identity changes while storage resolves
+     ↓ records normal Chat milestone only for submitted and its original owner
+     ↓ records normal Chat milestone only for failed and its original owner
+     ↓ records normal Chat milestone only for skipped and its original owner
+     ↓ sends the next prompt with OpenUI request overrides
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('restore-first', prior source=false)
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=false)
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('restore-first', prior source=true)
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=true)
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > retrieves Rowan before generation with old Cedar history ('handoff-before-restore', prior source=true)
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Number of calls: 0
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx:1226:32
+    1224|     expect(useStoreMessageOption.getState().history).toHaveLength(2)
+    1225|     await send()
+    1226|     expect(sourceFlow.request).toHaveBeenCalledWith(expect.objectConta…
+       |                                ^
+    1227|       path: "/api/v1/rag/search", method: "POST",
+    1228|       body: expect.objectContaining({ include_media_ids: [42], sources…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not generate from the old conversation after empty selected-source retrieval
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > does not generate from the old conversation after error selected-source retrieval
+AssertionError: expected "vi.fn()" to be called 1 times, but got 0 times
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx:1245:32
+    1243|     await consume()
+    1244|     await send()
+    1245|     expect(sourceFlow.request).toHaveBeenCalledTimes(1)
+       |                                ^
+    1246|     expect(sourceFlow.stream).not.toHaveBeenCalled()
+    1247|     expect(useStoreMessageOption.getState().messages.at(-1)?.message).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 1 passed | 16 skipped (24)
+   Start at  08:26:19
+   Duration  2.75s (transform 1.10s, setup 83ms, import 1.43s, tests 917ms, environment 227ms)
