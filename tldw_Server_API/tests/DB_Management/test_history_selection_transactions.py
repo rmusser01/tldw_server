@@ -127,9 +127,13 @@ def test_complete_snapshot_equal_timestamp_ties_and_constant_query_count(history
     db, cid = history_db
     with db.transaction() as conn:
         conn.executemany(
-            "INSERT INTO messages(id, conversation_id, sender, content, timestamp, client_id) VALUES (?, ?, 'user', 'same', '2026-01-01T00:00:00Z', 'alice')",
+            "INSERT INTO messages(id, conversation_id, sender, content, timestamp, last_modified, client_id) "
+            "VALUES (?, ?, 'user', 'same', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z', 'alice')",
             [(f"m{i:05d}", cid) for i in range(20001)],
         )
+        conn.execute("UPDATE messages SET last_modified = '2026-01-01T00:00:00Z' WHERE id = 'm20000'")
+        conn.execute("UPDATE messages SET last_modified = '2026-01-03T00:00:00Z' WHERE id = 'm00000'")
+    db.set_message_metadata_extra("m20000", {"review_note": "first by modification time"})
     queries = []
 
     class ObservedConnection:
@@ -146,8 +150,21 @@ def test_complete_snapshot_equal_timestamp_ties_and_constant_query_count(history
     snap = snapshot(db, cid, conn=ObservedConnection(db.get_connection()))
     assert len(queries) == 1
     assert len(snap.nodes) == 20001
-    assert [row["id"] for row in snap.nodes] == [f"m{i:05d}" for i in range(20001)]
+    assert [row["id"] for row in snap.nodes] == ["m20000", *[f"m{i:05d}" for i in range(1, 20000)], "m00000"]
     assert snap.interpretation_status["kind"] == "legacy_review_required"
+    db.upsert_conversation_settings(cid, {"temperature": 0.25})
+    configured = snapshot(db, cid)
+    assert configured.storage_context_digest != snap.storage_context_digest
+    confirm(db, cid, confirm_body(configured, path=["m20000", "m00000"]))
+    queries.clear()
+    accepted = snapshot(db, cid, projection_id="first", conn=ObservedConnection(db.get_connection()))
+    assert len(queries) == 1
+    assert len(accepted.nodes) == 20001
+    assert accepted.interpretation_status["ordered_path_ids"] == ("m20000", "m00000")
+    content = db.get_conversation_history_selected_content(
+        cid, ["m20000"], snapshot=accepted, owner_client_id="alice", owner_key=OWNER_KEY
+    )
+    assert content[0]["extra_metadata"] == {"review_note": "first by modification time"}
 
 
 def test_unversioned_chain_is_automatic_but_imported_claim_cannot_authorize_branch(history_db):

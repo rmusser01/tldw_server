@@ -115,6 +115,9 @@ class MessageStore:
 
             binary_hash = "h1_sha256(COALESCE(mi.image_data, m.image_data))"
             byte_length = "length"
+        # Keep per-conversation payloads out of the per-message window sort. Even
+        # CASE around a joined payload can materialize it once per message first.
+        # Scalar reads in the first-row CASE preserve one-statement coherence.
         # All interpolated expressions are fixed backend SQL, never caller identifiers.
         query = f"""
             WITH requested AS ({requested_sql})
@@ -122,11 +125,16 @@ class MessageStore:
                    cs.settings_version,
                    bs.status AS behavior_status, bs.schema_version AS behavior_schema_version,
                    bs.digest AS behavior_digest, bs.size_bytes AS behavior_size_bytes,
-                   {text_hash('bs.canonical_json')} AS behavior_content_hash,
-                   CASE WHEN ROW_NUMBER() OVER (ORDER BY m.timestamp, m.id, mi.position) = 1
-                        THEN cs.settings_json END AS settings_json,
-                   CASE WHEN ROW_NUMBER() OVER (ORDER BY m.timestamp, m.id, mi.position) = 1
-                        THEN p.confirmation_json END AS projection_json,
+                   CASE WHEN ROW_NUMBER() OVER (ORDER BY m.timestamp, m.last_modified, m.id, mi.position) = 1
+                        THEN {text_hash('(SELECT behavior.canonical_json FROM conversation_behavior_snapshots behavior WHERE behavior.conversation_id = c.id)')}
+                        END AS behavior_content_hash,
+                   CASE WHEN ROW_NUMBER() OVER (ORDER BY m.timestamp, m.last_modified, m.id, mi.position) = 1
+                        THEN (SELECT settings.settings_json FROM conversation_settings settings
+                              WHERE settings.conversation_id = c.id) END AS settings_json,
+                   CASE WHEN ROW_NUMBER() OVER (ORDER BY m.timestamp, m.last_modified, m.id, mi.position) = 1
+                        THEN (SELECT projection.confirmation_json FROM conversation_history_projections projection
+                              WHERE projection.conversation_id = c.id AND projection.client_id = c.client_id
+                                AND projection.owner_key = ? AND projection.projection_id = ?) END AS projection_json,
                    c.character_id, c.assistant_kind, c.assistant_id, c.persona_memory_mode,
                    c.scope_type, c.workspace_id,
                    m.id, m.parent_message_id, m.sender, m.version AS message_version,
@@ -152,14 +160,12 @@ class MessageStore:
             FROM conversations c
             LEFT JOIN conversation_settings cs ON cs.conversation_id = c.id
             LEFT JOIN conversation_behavior_snapshots bs ON bs.conversation_id = c.id
-            LEFT JOIN conversation_history_projections p ON p.conversation_id = c.id
-                AND p.client_id = c.client_id AND p.owner_key = ? AND p.projection_id = ?
             LEFT JOIN messages m ON m.conversation_id = c.id AND m.deleted = FALSE
             LEFT JOIN message_metadata mm ON mm.message_id = m.id
             LEFT JOIN message_images mi ON mi.message_id = m.id
             LEFT JOIN requested ON requested.id = m.id
             WHERE c.id = ? AND c.client_id = ? AND c.deleted = FALSE
-            ORDER BY m.timestamp, m.id, mi.position
+            ORDER BY m.timestamp, m.last_modified, m.id, mi.position
         """  # nosec B608 - fixed SQL fragments; all input values are bound
         result = conn.execute(
             query, (json.dumps(selected_ids), owner_key, projection_id, conversation_id, owner_client_id)
