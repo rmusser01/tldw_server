@@ -1,0 +1,279 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:7737) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Review/__tests__/MediaReviewReadingPane.design-system-alert.test.tsx (4 tests | 2 failed) 2448ms
+     ✓ renders failed content through the design-system Alert and keeps retry behavior  369ms
+     ✓ shows analysis persisted under the media detail processing field 26ms
+     × renders analysis formatting and copies the complete original Markdown 1026ms
+     × renders analysis links safely while preserving ordinary prose 1025ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Review/__tests__/MediaReviewReadingPane.design-system-alert.test.tsx > MediaReviewReadingPane product-state alerts > renders analysis formatting and copies the complete original Markdown
+TestingLibraryElementError: Unable to find role="heading" and name "Garden analysis"
+
+Ignored nodes: comments, script, style
+[36m<div[39m
+  [33mclass[39m=[32m"mt-3 rounded border border-border p-2"[39m
+  [33mdata-testid[39m=[32m"media-review-analysis-panel-42"[39m
+[36m>[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"flex items-center justify-between"[39m
+  [36m>[39m
+    [36m<span[39m
+      [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+    [36m>[39m
+      [0mAnalysis[0m
+    [36m</span>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"flex items-center gap-2"[39m
+    [36m>[39m
+      [36m<button[39m
+        [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-sm"[39m
+        [33mtype[39m=[32m"button"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-btn-icon"[39m
+        [36m>[39m
+          [36m<svg[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"lucide lucide-chevron-down h-4 w-4"[39m
+            [33mfill[39m=[32m"none"[39m
+            [33mheight[39m=[32m"24"[39m
+            [33mstroke[39m=[32m"currentColor"[39m
+            [33mstroke-linecap[39m=[32m"round"[39m
+            [33mstroke-linejoin[39m=[32m"round"[39m
+            [33mstroke-width[39m=[32m"2"[39m
+            [33mviewBox[39m=[32m"0 0 24 24"[39m
+            [33mwidth[39m=[32m"24"[39m
+            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+          [36m>[39m
+            [36m<path[39m
+              [33md[39m=[32m"m6 9 6 6 6-6"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+        [36m</span>[39m
+        [36m<span>[39m
+          [0mExpand[0m
+        [36m</span>[39m
+      [36m</button>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"mt-2 prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap break-words text-sm text-text leading-relaxed"[39m
+  [36m>[39m
+    [0m## Garden analysis
+
+The **public** garden.
+
+- Seven beds[0m
+  [36m</div>[39m
+[36m</div>[39m
+
+Ignored nodes: comments, script, style
+[36m<div[39m
+  [33mclass[39m=[32m"mt-3 rounded border border-border p-2"[39m
+  [33mdata-testid[39m=[32m"media-review-analysis-panel-42"[39m
+[36m>[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"flex items-center justify-between"[39m
+  [36m>[39m
+    [36m<span[39m
+      [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+    [36m>[39m
+      [0mAnalysis[0m
+    [36m</span>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"flex items-center gap-2"[39m
+    [36m>[39m
+      [36m<button[39m
+        [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-sm"[39m
+        [33mtype[39m=[32m"button"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-btn-icon"[39m
+        [36m>[39m
+          [36m<svg[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"lucide lucide-chevron-down h-4 w-4"[39m
+            [33mfill[39m=[32m"none"[39m
+            [33mheight[39m=[32m"24"[39m
+            [33mstroke[39m=[32m"currentColor"[39m
+            [33mstroke-linecap[39m=[32m"round"[39m
+            [33mstroke-linejoin[39m=[32m"round"[39m
+            [33mstroke-width[39m=[32m"2"[39m
+            [33mviewBox[39m=[32m"0 0 24 24"[39m
+            [33mwidth[39m=[32m"24"[39m
+            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+          [36m>[39m
+            [36m<path[39m
+              [33md[39m=[32m"m6 9 6 6 6-6"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+        [36m</span>[39m
+        [36m<span>[39m
+          [0mExpand[0m
+        [36m</span>[39m
+      [36m</button>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"mt-2 prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap break-words text-sm text-text leading-relaxed"[39m
+  [36m>[39m
+    [0m## Garden analysis
+
+The **public** garden.
+
+- Seven beds[0m
+  [36m</div>[39m
+[36m</div>[39m
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Review/__tests__/MediaReviewReadingPane.design-system-alert.test.tsx:227:24
+    225| 
+    226|     const panel = within(screen.getByTestId("media-review-analysis-pan…
+    227|     expect(await panel.findByRole("heading", { level: 2, name: "Garden…
+       |                        ^
+    228|     expect(panel.getByText("public").tagName).toBe("STRONG")
+    229|     expect(panel.getByRole("listitem")).toHaveTextContent("Seven beds")
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/Review/__tests__/MediaReviewReadingPane.design-system-alert.test.tsx > MediaReviewReadingPane product-state alerts > renders analysis links safely while preserving ordinary prose
+TestingLibraryElementError: Unable to find role="link" and name "Safe"
+
+Ignored nodes: comments, script, style
+[36m<div[39m
+  [33mclass[39m=[32m"mt-3 rounded border border-border p-2"[39m
+  [33mdata-testid[39m=[32m"media-review-analysis-panel-42"[39m
+[36m>[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"flex items-center justify-between"[39m
+  [36m>[39m
+    [36m<span[39m
+      [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+    [36m>[39m
+      [0mAnalysis[0m
+    [36m</span>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"flex items-center gap-2"[39m
+    [36m>[39m
+      [36m<button[39m
+        [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-sm"[39m
+        [33mtype[39m=[32m"button"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-btn-icon"[39m
+        [36m>[39m
+          [36m<svg[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"lucide lucide-chevron-down h-4 w-4"[39m
+            [33mfill[39m=[32m"none"[39m
+            [33mheight[39m=[32m"24"[39m
+            [33mstroke[39m=[32m"currentColor"[39m
+            [33mstroke-linecap[39m=[32m"round"[39m
+            [33mstroke-linejoin[39m=[32m"round"[39m
+            [33mstroke-width[39m=[32m"2"[39m
+            [33mviewBox[39m=[32m"0 0 24 24"[39m
+            [33mwidth[39m=[32m"24"[39m
+            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+          [36m>[39m
+            [36m<path[39m
+              [33md[39m=[32m"m6 9 6 6 6-6"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+        [36m</span>[39m
+        [36m<span>[39m
+          [0mExpand[0m
+        [36m</span>[39m
+      [36m</button>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"mt-2 prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap break-words text-sm text-text leading-relaxed"[39m
+  [36m>[39m
+    [0mPlain explanation.
+
+[Safe](https://example.com/) [Unsafe](javascript:alert(1))
+
+&lt;script&gt;alert(1)&lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;[0m
+  [36m</div>[39m
+[36m</div>[39m
+
+Ignored nodes: comments, script, style
+[36m<div[39m
+  [33mclass[39m=[32m"mt-3 rounded border border-border p-2"[39m
+  [33mdata-testid[39m=[32m"media-review-analysis-panel-42"[39m
+[36m>[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"flex items-center justify-between"[39m
+  [36m>[39m
+    [36m<span[39m
+      [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+    [36m>[39m
+      [0mAnalysis[0m
+    [36m</span>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"flex items-center gap-2"[39m
+    [36m>[39m
+      [36m<button[39m
+        [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-sm"[39m
+        [33mtype[39m=[32m"button"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-btn-icon"[39m
+        [36m>[39m
+          [36m<svg[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"lucide lucide-chevron-down h-4 w-4"[39m
+            [33mfill[39m=[32m"none"[39m
+            [33mheight[39m=[32m"24"[39m
+            [33mstroke[39m=[32m"currentColor"[39m
+            [33mstroke-linecap[39m=[32m"round"[39m
+            [33mstroke-linejoin[39m=[32m"round"[39m
+            [33mstroke-width[39m=[32m"2"[39m
+            [33mviewBox[39m=[32m"0 0 24 24"[39m
+            [33mwidth[39m=[32m"24"[39m
+            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+          [36m>[39m
+            [36m<path[39m
+              [33md[39m=[32m"m6 9 6 6 6-6"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+        [36m</span>[39m
+        [36m<span>[39m
+          [0mExpand[0m
+        [36m</span>[39m
+      [36m</button>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"mt-2 prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap break-words text-sm text-text leading-relaxed"[39m
+  [36m>[39m
+    [0mPlain explanation.
+
+[Safe](https://example.com/) [Unsafe](javascript:alert(1))
+
+&lt;script&gt;alert(1)&lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;[0m
+  [36m</div>[39m
+[36m</div>[39m
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Review/__tests__/MediaReviewReadingPane.design-system-alert.test.tsx:241:32
+    239| 
+    240|     const panel = screen.getByTestId("media-review-analysis-panel-42")
+    241|     expect(await within(panel).findByRole("link", { name: "Safe" })).t…
+       |                                ^
+    242|     expect(within(panel).getByText("Plain explanation.")).toBeInTheDoc…
+    243|     expect(panel.querySelector('a[href^="javascript:"], script, img[on…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed (4)
+   Start at  19:59:14
+   Duration  4.11s (transform 263ms, setup 119ms, import 1.01s, tests 2.45s, environment 433ms)
+
