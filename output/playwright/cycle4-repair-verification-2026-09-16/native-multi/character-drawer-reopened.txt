@@ -1,0 +1,336 @@
+### Open tabs
+- 0: [127.0.0.1](chrome-error://chromewebdata/)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: (current) [Characters | tldw](http://127.0.0.1:18381/characters)
+- 3: [127.0.0.1](chrome-error://chromewebdata/)
+### Page
+- Page URL: http://127.0.0.1:18381/characters
+- Page Title: Characters | tldw
+- Console: 3 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [ref=f16e11]:
+  - generic [ref=f16e12]:
+    - generic [ref=f16e14]:
+      - link "Skip to main content" [ref=f16e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f16e16]:
+        - button "Expand sidebar" [ref=f16e17] [cursor=pointer]
+        - button "New Chat" [ref=f16e21] [cursor=pointer]
+        - generic [ref=f16e24]:
+          - button "Quick Ingest" [ref=f16e25] [cursor=pointer]
+          - button "Chat" [ref=f16e29] [cursor=pointer]
+          - button "Prompts" [ref=f16e32] [cursor=pointer]
+          - button "Characters" [ref=f16e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f16e41] [cursor=pointer]
+          - button "World Books" [ref=f16e45] [cursor=pointer]
+          - button "Notes" [ref=f16e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=f16e52] [cursor=pointer]
+          - button "Media" [ref=f16e60] [cursor=pointer]
+          - button "Document Workspace" [ref=f16e63] [cursor=pointer]
+          - button "Research Workspace" [ref=f16e69] [cursor=pointer]
+          - button "Kanban" [ref=f16e75] [cursor=pointer]
+          - button "Watchlists" [ref=f16e77] [cursor=pointer]
+        - generic [ref=f16e82]:
+          - button "Open Notes Dock" [ref=f16e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f16e88] [cursor=pointer]
+          - button "Settings" [ref=f16e91] [cursor=pointer]
+      - main [ref=f16e95]:
+        - generic [ref=f16e96]:
+          - generic [ref=f16e99]:
+            - generic [ref=f16e100]:
+              - button "Expand sidebar" [ref=f16e101] [cursor=pointer]
+              - generic [ref=f16e103]:
+                - img "tldw Assistant" [ref=f16e104]
+                - generic [ref=f16e105]: tldw Assistant
+                - button "Companion Home" [ref=f16e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=f16e110] [cursor=pointer]
+            - generic [ref=f16e113]:
+              - button "Search - Open command palette" [ref=f16e114] [cursor=pointer]:
+                - generic [ref=f16e118]: Search
+                - generic [ref=f16e119]: ⌘K
+              - button "Open settings" [ref=f16e120] [cursor=pointer]
+              - generic [ref=f16e132]:
+                - button "Notifications, 0 unread" [ref=f16e505] [cursor=pointer]
+                - status [ref=f16e136]: Notifications are active
+              - button "Switch to light theme" [ref=f16e137] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f16e144] [cursor=pointer]:
+                - generic [ref=f16e145]: "?"
+          - generic [ref=f16e512]:
+            - generic [ref=f16e513]:
+              - heading "Characters" [level=1] [ref=f16e514]
+              - paragraph [ref=f16e515]: Create reusable characters you can pick from the chat header and reuse across conversations.
+            - generic [ref=f16e536]:
+              - link "Skip to characters content" [ref=f16e537] [cursor=pointer]:
+                - /url: "#characters-main-content"
+              - main [ref=f16e538]:
+                - button [aria-hidden] [ref=f16e543] [cursor=pointer]: Upload character
+                - generic [ref=f16e544]: "Keyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal"
+                - generic [ref=f16e546]:
+                  - button "New character" [ref=f16e547] [cursor=pointer]
+                  - button "Import character" [ref=f16e549] [cursor=pointer]
+                  - generic [ref=f16e554]:
+                    - textbox "Search characters" [ref=f16e555]
+                    - generic [ref=f16e556]: /
+                  - radiogroup "View mode" [ref=f16e558]:
+                    - generic [ref=f16e559]:
+                      - generic [ref=f16e560] [cursor=pointer]:
+                        - radio [checked]
+                        - generic "Table view" [ref=f16e561]
+                      - generic [ref=f16e564] [cursor=pointer]:
+                        - radio
+                        - generic "Gallery view" [ref=f16e565]
+                  - radiogroup "Character list view" [ref=f16e572]:
+                    - generic [ref=f16e573]:
+                      - generic [ref=f16e574] [cursor=pointer]:
+                        - radio "Active" [checked]
+                        - generic "Active characters" [ref=f16e575]: Active
+                      - generic [ref=f16e576] [cursor=pointer]:
+                        - radio "Trash"
+                        - generic "Recently deleted characters" [ref=f16e577]: Trash
+                  - button "Filters" [ref=f16e578] [cursor=pointer]
+                  - button "Display options" [ref=f16e583] [cursor=pointer]:
+                    - generic [ref=f16e584]: Display
+                - status [ref=f16e587]: 4 characters found
+                - generic [ref=f16e592]:
+                  - table [ref=f16e596]:
+                    - rowgroup [ref=f16e604]:
+                      - row [ref=f16e605]:
+                        - columnheader "Select all on page" [ref=f16e606]:
+                          - checkbox "Select all on page" [ref=f16e609] [cursor=pointer]
+                        - columnheader "Name" [ref=f16e611] [cursor=pointer]
+                        - columnheader "Tags" [ref=f16e622]
+                        - columnheader "Creator" [ref=f16e623] [cursor=pointer]
+                        - columnheader "Activity" [ref=f16e634] [cursor=pointer]
+                        - columnheader "Actions" [ref=f16e645]
+                    - rowgroup [ref=f16e646]:
+                      - row [ref=f16e647]:
+                        - cell "Select Helpful AI Assistant" [ref=f16e648]:
+                          - checkbox "Select Helpful AI Assistant" [ref=f16e651] [cursor=pointer]
+                        - cell [ref=f16e653]:
+                          - generic [ref=f16e660]:
+                            - generic [ref=f16e661]:
+                              - button "Edit name inline for Helpful AI Assistant" [ref=f16e663]: Helpful AI Assistant
+                              - generic [ref=f16e666]: "2"
+                            - button "Edit description inline for Helpful AI Assistant" [ref=f16e670]: A default, friendly assistant created automatically by the system.
+                        - cell [ref=f16e673]:
+                          - generic [ref=f16e674]:
+                            - button "default" [ref=f16e675] [cursor=pointer]
+                            - button "neutral" [ref=f16e677] [cursor=pointer]
+                            - button "Show and filter +1 hidden tags" [ref=f16e679]: "+1"
+                        - cell "System" [ref=f16e680]
+                        - cell "3h ago Updated 3h ago" [ref=f16e682]:
+                          - generic [ref=f16e683]:
+                            - generic [ref=f16e684]: 3h ago
+                            - generic [ref=f16e685]: Updated 3h ago
+                        - cell [ref=f16e686]:
+                          - generic [ref=f16e687]:
+                            - button "Chat as Helpful AI Assistant" [ref=f16e688] [cursor=pointer]
+                            - button "Edit character Helpful AI Assistant" [ref=f16e691] [cursor=pointer]
+                            - button "Delete character Helpful AI Assistant" [ref=f16e694] [cursor=pointer]
+                            - button "Add Helpful AI Assistant to favorites" [ref=f16e698] [cursor=pointer]
+                            - button "More actions for Helpful AI Assistant" [ref=f16e701] [cursor=pointer]
+                      - row [ref=f16e706]:
+                        - cell "Select Cycle4 Cedar Guide" [ref=f16e707]:
+                          - checkbox "Select Cycle4 Cedar Guide" [ref=f16e710] [cursor=pointer]
+                        - cell [ref=f16e712]:
+                          - generic [ref=f16e720]:
+                            - button "Edit name inline for Cycle4 Cedar Guide" [ref=f16e722]: Cycle4 Cedar Guide
+                            - generic [ref=f16e725]: "1"
+                        - cell [ref=f16e728]
+                        - cell [ref=f16e729]
+                        - cell "2h ago Updated 2h ago" [ref=f16e730]:
+                          - generic [ref=f16e731]:
+                            - generic [ref=f16e732]: 2h ago
+                            - generic [ref=f16e733]: Updated 2h ago
+                        - cell [ref=f16e734]:
+                          - generic [ref=f16e735]:
+                            - button "Chat as Cycle4 Cedar Guide" [ref=f16e736] [cursor=pointer]
+                            - button "Edit character Cycle4 Cedar Guide" [ref=f16e739] [cursor=pointer]
+                            - button "Delete character Cycle4 Cedar Guide" [ref=f16e742] [cursor=pointer]
+                            - button "Add Cycle4 Cedar Guide to favorites" [ref=f16e746] [cursor=pointer]
+                            - button "More actions for Cycle4 Cedar Guide" [ref=f16e749] [cursor=pointer]
+                      - row [ref=f16e754]:
+                        - cell "Select pixel-migu" [ref=f16e755]:
+                          - checkbox "Select pixel-migu" [ref=f16e758] [cursor=pointer]
+                        - cell [ref=f16e760]:
+                          - generic [ref=f16e761]:
+                            - img "Avatar of pixel-migu" [ref=f16e763]
+                            - generic [ref=f16e764]:
+                              - button "Edit name inline for pixel-migu" [ref=f16e767]: pixel-migu
+                              - button "Edit description inline for pixel-migu" [ref=f16e771]: A tiny turquoise pixel-art robot with a rectangular face, chunky black outlines, and long twin tails. A companion for chatting, re...
+                        - cell [ref=f16e774]:
+                          - generic [ref=f16e775]:
+                            - button "pixel-art" [ref=f16e776] [cursor=pointer]
+                            - button "robot" [ref=f16e778] [cursor=pointer]
+                            - button "Show and filter +2 hidden tags" [ref=f16e780]: "+2"
+                        - cell "User-directed pixel-migu adaptation" [ref=f16e781]
+                        - cell "3h ago Updated 3h ago" [ref=f16e783]:
+                          - generic [ref=f16e784]:
+                            - generic [ref=f16e785]: 3h ago
+                            - generic [ref=f16e786]: Updated 3h ago
+                        - cell [ref=f16e787]:
+                          - generic [ref=f16e788]:
+                            - button "Chat as pixel-migu" [ref=f16e789] [cursor=pointer]
+                            - button "Edit character pixel-migu" [ref=f16e792] [cursor=pointer]
+                            - button "Delete character pixel-migu" [ref=f16e795] [cursor=pointer]
+                            - button "Add pixel-migu to favorites" [ref=f16e799] [cursor=pointer]
+                            - button "More actions for pixel-migu" [ref=f16e802] [cursor=pointer]
+                      - row [ref=f16e807]:
+                        - cell "Select Default Assistant" [ref=f16e808]:
+                          - checkbox "Select Default Assistant" [ref=f16e811] [cursor=pointer]
+                        - cell [ref=f16e813]:
+                          - generic [ref=f16e820]:
+                            - button "Edit name inline for Default Assistant" [ref=f16e823]: Default Assistant
+                            - button "Edit description inline for Default Assistant" [ref=f16e827]: A general-purpose assistant.
+                        - cell [ref=f16e830]
+                        - cell "System" [ref=f16e831]
+                        - cell "4h ago Updated 4h ago" [ref=f16e833]:
+                          - generic [ref=f16e834]:
+                            - generic [ref=f16e835]: 4h ago
+                            - generic [ref=f16e836]: Updated 4h ago
+                        - cell [ref=f16e837]:
+                          - generic [ref=f16e838]:
+                            - button "Chat as Default Assistant" [ref=f16e839] [cursor=pointer]
+                            - button "Edit character Default Assistant" [ref=f16e842] [cursor=pointer]
+                            - button "Delete character Default Assistant" [ref=f16e845] [cursor=pointer]
+                            - button "Add Default Assistant to favorites" [ref=f16e849] [cursor=pointer]
+                            - button "More actions for Default Assistant" [ref=f16e852] [cursor=pointer]
+                  - list [ref=f16e857]:
+                    - listitem "Previous Page" [ref=f16e858]:
+                      - button [disabled] [ref=f16e859]:
+                        - img "left" [ref=f16e860]
+                    - listitem "1" [ref=f16e863] [cursor=pointer]
+                    - listitem "Next Page" [ref=f16e865]:
+                      - button [disabled] [ref=f16e866]:
+                        - img "right" [ref=f16e867]
+                    - listitem [ref=f16e870]:
+                      - generic [ref=f16e871]:
+                        - generic [ref=f16e872]:
+                          - generic "10 / page" [ref=f16e873]
+                          - combobox "Page Size" [ref=f16e874]
+                        - img "down" [ref=f16e876]
+    - dialog "New character" [ref=f16e1095]:
+      - generic [ref=f16e1097]:
+        - button "Close" [ref=f16e1098] [cursor=pointer]:
+          - img "close" [ref=f16e1099]
+        - generic [ref=f16e1102]: New character
+      - generic [ref=f16e1103]:
+        - paragraph [ref=f16e1104]: Define a reusable character you can chat with in the sidebar.
+        - button "Start from a template..." [ref=f16e1106] [cursor=pointer]
+        - generic [ref=f16e1108]:
+          - generic [ref=f16e1109]: Generate character with AI
+          - generic [ref=f16e1114]:
+            - textbox "Character concept" [ref=f16e1115]:
+              - /placeholder: Describe your character idea... (e.g., 'a wise old wizard who runs a magical library')
+            - generic [ref=f16e1116]:
+              - button "Select AI model for generation" [ref=f16e1118] [cursor=pointer]:
+                - generic [ref=f16e1121]: LLaMa.cpp - ../../../Working/Langua...
+              - button "Generate" [disabled] [ref=f16e1125]
+          - paragraph [ref=f16e1126]: AI will generate all character fields based on your concept. You can edit the results before saving.
+        - generic [ref=f16e1127]:
+          - generic [ref=f16e1129]:
+            - generic [ref=f16e1131]:
+              - text: "*"
+              - generic [ref=f16e1132]:
+                - text: Name*
+                - button "Generate with AI" [ref=f16e1133] [cursor=pointer]
+            - generic [ref=f16e1140]:
+              - textbox "* Name* Generate with AI" [active] [ref=f16e1141]:
+                - /placeholder: e.g. Writing coach
+              - generic [ref=f16e1142]: 0 / 500
+          - generic [ref=f16e1145]:
+            - generic [ref=f16e1147]:
+              - text: "*"
+              - generic [ref=f16e1148]:
+                - text: Behavior / instructions*
+                - generic [ref=f16e1149]: (required)
+                - button "Generate with AI" [ref=f16e1150] [cursor=pointer]
+            - generic [ref=f16e1154]:
+              - generic [ref=f16e1157]:
+                - textbox "* Behavior / instructions (required) Generate with AI" [ref=f16e1158]:
+                  - /placeholder: E.g., You are a patient math teacher who explains concepts step by step and checks understanding with short examples.
+                - generic: 0 / 2000
+              - generic [ref=f16e1159]:
+                - generic [ref=f16e1160]: "Explain the character's role, tone, and constraints. For example: \"You are a patient math tutor who explains concepts step by step.\""
+                - button "Show example" [ref=f16e1164] [cursor=pointer]
+          - generic [ref=f16e1166]:
+            - generic "Prompt preset" [ref=f16e1168]
+            - generic [ref=f16e1169]:
+              - generic [ref=f16e1172] [cursor=pointer]:
+                - generic [ref=f16e1173]:
+                  - generic "Default (legacy)" [ref=f16e1174]
+                  - combobox "Prompt preset" [ref=f16e1175]
+                - img "down" [ref=f16e1177]
+              - generic [ref=f16e1180]: Controls how character fields are formatted in system prompts for character chats.
+          - generic [ref=f16e1184]:
+            - generic [ref=f16e1187]:
+              - text: Greeting message (optional)
+              - button "Generate with AI" [ref=f16e1188] [cursor=pointer]
+            - generic [ref=f16e1192]:
+              - generic [ref=f16e1195]:
+                - textbox "Greeting message (optional) Generate with AI" [ref=f16e1196]:
+                  - /placeholder: Hi there! I’m your writing coach. Paste your draft and I’ll help you tighten it up.
+                - generic: 0 / 1000
+              - generic [ref=f16e1197]: Optional first message the character will send when you start a chat.
+          - generic [ref=f16e1201]:
+            - generic [ref=f16e1204]:
+              - text: Description
+              - button "Generate with AI" [ref=f16e1205] [cursor=pointer]
+            - generic [ref=f16e1209]:
+              - textbox "Description Generate with AI" [ref=f16e1212]:
+                - /placeholder: Short description
+              - generic [ref=f16e1213]: "Description: brief blurb shown in character lists and cards."
+          - generic [ref=f16e1217]:
+            - generic [ref=f16e1220]:
+              - text: Tags
+              - button "Generate with AI" [ref=f16e1221] [cursor=pointer]
+            - generic [ref=f16e1225]:
+              - generic [ref=f16e1228]:
+                - generic [ref=f16e1229]:
+                  - generic [ref=f16e1230]: "Popular:"
+                  - button "assistant (1)" [ref=f16e1231] [cursor=pointer]:
+                    - text: assistant
+                    - generic [ref=f16e1232]: (1)
+                  - button "companion (1)" [ref=f16e1233] [cursor=pointer]:
+                    - text: companion
+                    - generic [ref=f16e1234]: (1)
+                  - button "default (1)" [ref=f16e1235] [cursor=pointer]:
+                    - text: default
+                    - generic [ref=f16e1236]: (1)
+                  - button "expressions (1)" [ref=f16e1237] [cursor=pointer]:
+                    - text: expressions
+                    - generic [ref=f16e1238]: (1)
+                  - button "neutral (1)" [ref=f16e1239] [cursor=pointer]:
+                    - text: neutral
+                    - generic [ref=f16e1240]: (1)
+                - generic [ref=f16e1241]:
+                  - generic [ref=f16e1242]:
+                    - generic: Add tags
+                    - combobox [ref=f16e1244]
+                  - img "down" [ref=f16e1246]
+              - generic [ref=f16e1249]: Use tags to group characters by use case (e.g., “writing”, “teaching”).
+          - generic [ref=f16e1253]:
+            - generic "Avatar (optional)" [ref=f16e1255]
+            - generic [ref=f16e1259]:
+              - radiogroup [ref=f16e1260]:
+                - generic [ref=f16e1261] [cursor=pointer]:
+                  - radio "URL" [checked] [ref=f16e1263]
+                  - generic [ref=f16e1265]: URL
+                - generic [ref=f16e1269] [cursor=pointer]:
+                  - radio "Upload" [ref=f16e1271]
+                  - generic [ref=f16e1273]: Upload
+                - generic [ref=f16e1277] [cursor=pointer]:
+                  - radio "Generate" [ref=f16e1279]
+                  - generic [ref=f16e1281]: Generate
+              - textbox "https://example.com/avatar.png" [ref=f16e1290]
+          - button "Show advanced fields" [ref=f16e1291] [cursor=pointer]
+          - button "Hide preview" [ref=f16e1292] [cursor=pointer]
+          - generic [ref=f16e1295]:
+            - generic [ref=f16e1296]: Preview
+            - generic [ref=f16e1297]: Untitled character
+            - generic [ref=f16e1306]: Fill in the form to see a preview
+          - button "Create character" [ref=f16e1307] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f16e501] [cursor=pointer]
+  - alert [ref=f16e10]: Characters | tldw
+```

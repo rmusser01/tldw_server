@@ -141,6 +141,11 @@
       "file": "cycle4-task5-static.log",
       "bytes": 299,
       "sha256": "f11760d200148a415fc63d3ade87d08f6cce92e30969703ad411ce53e3a533b5"
+    },
+    {
+      "file": "cycle4-task5-verification-command.sh",
+      "bytes": 1012,
+      "sha256": "8ae6af3619232a0e859355cbc28f55991b643cb971c42da169c1c3c0d7dcf1cf"
     }
   ]
 }

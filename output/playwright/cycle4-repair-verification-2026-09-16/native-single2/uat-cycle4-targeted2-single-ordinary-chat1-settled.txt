@@ -1,0 +1,6 @@
+### Result
+{"chat":"- log \"Chat messages\":\n  - article \"User message 1 of 2\":\n    - text: You • 8:56 PM\n    - paragraph: Reply with exactly JUNIPER-42.\n    - button \"More actions\": •••\n  - article \"Assistant message 2 of 2\":\n    - text: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf • 8:56 PM\n    - paragraph: JUNIPER-42\n    - text: Was this helpful?\n    - button \"Helpful\"\n    - button \"Not helpful\"\n    - button \"More feedback\"\n    - button \"More actions\": •••","selectedModel":"\"tldw:custom-openai-api:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf\"","title":"Chat | tldw"}
+### Ran Playwright code
+```js
+await (async (page) => ({chat: await page.getByRole('log',{name:'Chat messages',exact:true}).ariaSnapshot(), selectedModel: await page.evaluate(()=>localStorage.getItem('selectedModel')), title: await page.title()}))(page);
+```

@@ -1,0 +1,19 @@
+### Result
+{"tabs":[{"visibility":"visible","focus":false},{"visibility":"visible","focus":false},{"visibility":"visible","focus":false},{"visibility":"visible","focus":false},{"visibility":"visible","focus":false},{"visibility":"visible","focus":true}],"events":[{"event":"start","tab":0,"at":1789530190062},{"event":"start","tab":1,"at":1789530230670},{"event":"start","tab":2,"at":1789530231491},{"event":"start","tab":3,"at":1789530232359},{"event":"start","tab":4,"at":1789530233169},{"event":"start","tab":5,"at":1789530233943},{"event":"failed","tab":0,"failure":"net::ERR_ABORTED","at":1789530389810},{"event":"start","tab":0,"at":1789530394961}],"active":6}
+### Ran Playwright code
+```js
+await (async page=>{const c=page.context();c.__uatNativeFocusSessions=[];for(const p of c.pages()){const s=await c.newCDPSession(p);c.__uatNativeFocusSessions.push(s);await s.send("Emulation.setFocusEmulationEnabled",{enabled:false});}await page.bringToFront();return {tabs:await Promise.all(c.pages().map(async p=>({visibility:await p.evaluate(()=>document.visibilityState),focus:await p.evaluate(()=>document.hasFocus())}))),events:c.__uatStreamEvents,active:c.__uatActiveStreams.size};})(page);
+```
+### Open tabs
+- 0: [Prompts | tldw](http://127.0.0.1:18381/prompts)
+- 1: [Prompts | tldw](http://127.0.0.1:18381/prompts)
+- 2: [Prompts | tldw](http://127.0.0.1:18381/prompts)
+- 3: [Prompts | tldw](http://127.0.0.1:18381/prompts)
+- 4: [Prompts | tldw](http://127.0.0.1:18381/prompts)
+- 5: (current) [Prompts | tldw](http://127.0.0.1:18381/prompts)
+### Page
+- Page URL: http://127.0.0.1:18381/prompts
+- Page Title: Prompts | tldw
+- Console: 1 errors, 22 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T03-43-53-239Z.log#L28-L31

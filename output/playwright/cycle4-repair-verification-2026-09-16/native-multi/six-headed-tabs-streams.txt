@@ -1,0 +1,17 @@
+### Result
+{"opened":[{"tab":1,"streamStatus":200},{"tab":2,"streamStatus":200},{"tab":3,"streamStatus":200},{"tab":4,"streamStatus":200},{"tab":5,"streamStatus":200}],"tabs":[{"url":"http://127.0.0.1:18381/prompts","visibility":"visible"},{"url":"http://127.0.0.1:18381/prompts","visibility":"visible"},{"url":"http://127.0.0.1:18381/prompts","visibility":"visible"},{"url":"http://127.0.0.1:18381/prompts","visibility":"visible"},{"url":"http://127.0.0.1:18381/prompts","visibility":"visible"},{"url":"http://127.0.0.1:18381/prompts","visibility":"visible"}],"events":[{"event":"start","tab":0,"at":1789530190062},{"event":"start","tab":1,"at":1789530230670},{"event":"start","tab":2,"at":1789530231491},{"event":"start","tab":3,"at":1789530232359},{"event":"start","tab":4,"at":1789530233169},{"event":"start","tab":5,"at":1789530233943}],"active":6}
+### Ran Playwright code
+```js
+await (async page => { const c=page.context();const opened=[];for(let i=0;i<5;i++){const p=await c.newPage();await p.bringToFront();const stream=p.waitForResponse(r=>r.url().includes("/api/v1/notifications/stream"),{timeout:10000}).then(r=>r.status()).catch(()=>"no stream response in 10s");await p.goto("http://127.0.0.1:18381/prompts");await p.getByRole("heading",{name:"Prompts",exact:true}).waitFor();opened.push({tab:c.pages().indexOf(p),streamStatus:await stream});}return {opened,tabs:await Promise.all(c.pages().map(async p=>({url:p.url(),visibility:await p.evaluate(()=>document.visibilityState)}))),events:c.__uatStreamEvents,active:c.__uatActiveStreams.size}; })(page);
+```
+### Open tabs
+- 0: (current) [Prompts | tldw](http://127.0.0.1:18381/prompts)
+- 1: [Prompts | tldw](http://127.0.0.1:18381/prompts)
+- 2: [Prompts | tldw](http://127.0.0.1:18381/prompts)
+- 3: [Prompts | tldw](http://127.0.0.1:18381/prompts)
+- 4: [Prompts | tldw](http://127.0.0.1:18381/prompts)
+- 5: [Prompts | tldw](http://127.0.0.1:18381/prompts)
+### Page
+- Page URL: http://127.0.0.1:18381/prompts
+- Page Title: Prompts | tldw
+- Console: 2 errors, 0 warnings

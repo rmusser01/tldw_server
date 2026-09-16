@@ -1,0 +1,9 @@
+        ];
+        if (!this._page.isStorageStatePage) {
+          const skipDefaultOverrides = browserOptions.noDefaults && this._crPage._browserContext === this._crPage._browserContext._browser._defaultContext;
+          if (this._crPage._browserContext.needsPlaywrightBinding())
+            promises2.push(this.exposePlaywrightBinding());
+          if (this._isMainFrame() && !skipDefaultOverrides)
+            promises2.push(this._client.send("Emulation.setFocusEmulationEnabled", { enabled: true }));
+          const options = this._crPage._browserContext._options;
+          if (options.bypassCSP)

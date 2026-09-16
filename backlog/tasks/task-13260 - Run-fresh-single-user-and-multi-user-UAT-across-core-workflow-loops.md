@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 03:31'
+updated_date: '2026-09-16 04:20'
 labels:
   - uat
   - testing
@@ -137,6 +137,10 @@ Further reviewed repairs committed: QA/Media failure containment + completed gen
 Cycle4 repair checkpoint: titles058/cold Character form067 committed eb8782e5fd after independent33 title and3 focused form tests; author broader135 tests/8files. Combined backend353pass/1existing skip,5production Python files Bandit0. Task5 Chat108/113/117 remains under final review, then combined frontend/compiler checks and targeted browser acceptance. Targeted single API18400 initialized and started PID16030; frontend/browser not yet started. All four verified frozen-cycle4 API/UI processes stopped gracefully; evidence/data retained. Branch codex/fresh-install-uat-fixes contains latest fetched dev59049e094e (zero dev-only commits). Historical initial baseline was missing32 dev commits and is documented without claiming original latest-dev ancestry.
 
 Final Task5 independent review clear: Retry11 focused and remaining173 focused tests,24 frozen file hashes match. Combined post-freeze frontend1155 UI tests/75suites plus144 Web tests/9suites all pass (1299/84 total); whole TypeScript retains exactly90 baseline diagnostics by path/code/full message/multiplicity, none added or removed. Combined backend353pass/1existing skip and production Bandit0. Retained code/review and combined evidence in output/playwright/cycle4-repair-verification-2026-09-16. All new code repair units ready for targeted native verification, which precedes full fresh re-UAT; no sign-off yet.
+
+Targeted native recheck reopened UAT106/TASK13260.47: fresh manual-key browser gets real first-chat200 Hello and server complete200, but UI handoff demands an unavailable protected model catalog before the browser key exists. Source guard correctly returns[], no catalog network request. Evidence native-single retained, API never restarted. Bounded correction using same-authority server-verified provider/model underway with independent review; next fullfresh run remains gated. Multi targeted titles/cold form and existing reasoning-only warning currently pass; finalmulti report pending.
+
+Targeted native checkpoint:106corrected8097 passes fresh setup and107ordinaryChat without APIrestart;103reload/111Note backlink,104Minimize,115explicitanalysis/save,110localfailurepreservation,113newCharacterreload pass bounded. Native105Warning UI misclassification and108failedRetry duplicate canonical user persistence remain under tasks46/49 repairs.114hidden-tab native remains unverified due documented harness/nativefallback limits. Root pauses browser checks during shared model edits to avoid HMR invalidating Review/QA checks; full fresh run notstarted. Devbranch historical answer unchanged:initially32commitsbehind, correctedmerges, HEAD..origin/dev0 atcheckpoint.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

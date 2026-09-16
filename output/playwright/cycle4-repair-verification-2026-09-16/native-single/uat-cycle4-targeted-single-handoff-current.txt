@@ -1,0 +1,68 @@
+### Page
+- Page URL: http://127.0.0.1:18480/
+- Page Title: Home | tldw
+- Console: 0 errors, 2 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=e11]:
+  - generic [ref=e14]:
+    - link "Skip to main content" [ref=e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - main [ref=e16]:
+      - generic [ref=e19]:
+        - generic [ref=e20]:
+          - paragraph [ref=e21]: Solo onboarding
+          - generic [ref=e22]:
+            - generic [ref=e23]:
+              - heading "First-time setup" [level=1] [ref=e24]
+              - paragraph [ref=e25]: Configure the minimum needed to reach a successful first chat.
+            - button "Skip for now" [ref=e26] [cursor=pointer]
+        - region "Setup readiness" [ref=e27]:
+          - generic [ref=e28]:
+            - generic [ref=e29]:
+              - heading "Setup readiness" [level=2] [ref=e30]
+              - paragraph [ref=e31]: Chat must be ready. RAG and speech can be configured later.
+            - button "Retry" [ref=e32] [cursor=pointer]
+          - generic [ref=e33]:
+            - generic [ref=e34]:
+              - generic [ref=e35]:
+                - generic [ref=e36]:
+                  - paragraph [ref=e37]: Chat
+                  - paragraph [ref=e38]: First-chat lane
+                - generic [ref=e39]: ready with warnings
+              - group [ref=e40]:
+                - generic "Chat details" [ref=e41] [cursor=pointer]
+            - generic [ref=e42]:
+              - generic [ref=e43]:
+                - generic [ref=e44]:
+                  - paragraph [ref=e45]: Embeddings/RAG
+                  - paragraph [ref=e46]: Optional lane
+                - generic [ref=e47]: ready with warnings
+              - group [ref=e48]:
+                - generic "Embeddings/RAG details" [ref=e49] [cursor=pointer]
+            - generic [ref=e50]:
+              - generic [ref=e51]:
+                - generic [ref=e52]:
+                  - paragraph [ref=e53]: Speech
+                  - paragraph [ref=e54]: Optional lane
+                - generic [ref=e55]: ready with warnings
+              - group [ref=e56]:
+                - generic "Speech details" [ref=e57] [cursor=pointer]
+        - region [ref=e448]:
+          - generic [ref=e453]:
+            - heading "First chat" [level=2] [ref=e454]
+            - paragraph [ref=e455]: Completion requires an actual successful response from custom_openai.
+          - generic [ref=e456]:
+            - generic [ref=e457]: Default chat target
+            - generic [ref=e458]: custom_openai / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+          - generic [ref=e459]:
+            - text: First prompt
+            - textbox "First prompt" [ref=e460]: Say hello in one short sentence.
+          - generic [ref=e464]: Hello!
+          - alert [ref=e465]: Setup state could not be completed after the first chat succeeded. The verified model is missing or ambiguous in the model list. Check the provider, then finish setup again.
+          - generic [ref=e461]:
+            - button "Back to MCP tools" [ref=e462] [cursor=pointer]
+            - button "Finish setup" [ref=e466] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=e88] [cursor=pointer]
+  - alert [ref=e10]
+```

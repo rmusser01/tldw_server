@@ -1,0 +1,6 @@
+### Result
+{"status":200,"id":4,"username":"cycle4_repair_20260916_0348","keys":["id","uuid","username","email","role","is_active","is_verified","mfa_enabled","created_at","last_login","storage_quota_mb","storage_used_mb"]}
+### Ran Playwright code
+```js
+await (async page => { const responsePromise = page.waitForResponse(r => r.request().method() === "POST" && r.url().includes("/admin/users")); await page.getByRole("dialog", {name: "Create user"}).getByRole("button", {name: "Create user", exact:true}).click(); const r = await responsePromise; const data = await r.json(); return {status:r.status(), id:data.id ?? data.user?.id, username:data.username ?? data.user?.username, keys:Object.keys(data)}; })(page);
+```

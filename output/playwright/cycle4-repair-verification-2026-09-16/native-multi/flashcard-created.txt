@@ -1,0 +1,6 @@
+### Result
+{"path":"http://127.0.0.1:18301/api/v1/flashcards","status":200}
+### Ran Playwright code
+```js
+await (async page => { const pending=page.waitForResponse(r=>r.request().method()==="POST" && r.url().includes("/flashcards")); await page.getByRole("button",{name:"Create & Add Another",exact:true}).click(); const r=await pending; const x=await r.json(); return {path:r.url().split("?")[0],status:r.status(),id:x.id||x.card?.id||x.flashcard?.id}; })(page);
+```

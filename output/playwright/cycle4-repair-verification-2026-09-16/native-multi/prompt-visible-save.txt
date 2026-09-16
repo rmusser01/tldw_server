@@ -1,0 +1,10 @@
+### Result
+{"status":201,"path":"http://127.0.0.1:18301/api/v1/prompt-studio/prompts/create","keys":["success","data","error","error_code","metadata"]}
+### Ran Playwright code
+```js
+await (async page => { const result=page.waitForResponse(r=>r.request().method()==="POST" && r.url().includes("/prompts")); await page.getByRole("button",{name:"Save",exact:true}).click(); const r=await result; const data=await r.json(); return {status:r.status(),path:r.url().split("?")[0],id:data.id,uuid:data.uuid,keys:Object.keys(data)}; })(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18381/prompts?edit=pa_d03d-c8db-cb0-5381
+- Page Title: Prompts | tldw
+- Console: 2 errors, 0 warnings

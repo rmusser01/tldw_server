@@ -1,0 +1,444 @@
+### Page
+- Page URL: http://127.0.0.1:18381/admin/server
+- Page Title: Server Admin · Admin · tldw
+### Snapshot
+```yaml
+- generic [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - generic [ref=f1e4]:
+      - link "Skip to main content" [ref=f1e5] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f1e6]:
+        - button "Expand sidebar" [ref=f1e7] [cursor=pointer]
+        - button "New Chat" [ref=f1e11] [cursor=pointer]
+        - generic [ref=f1e14]:
+          - button "Quick Ingest" [ref=f1e15] [cursor=pointer]
+          - button "Chat" [ref=f1e19] [cursor=pointer]
+          - button "Prompts" [ref=f1e22] [cursor=pointer]
+          - button "Characters" [ref=f1e26] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f1e31] [cursor=pointer]
+          - button "World Books" [ref=f1e35] [cursor=pointer]
+          - button "Notes" [ref=f1e38] [cursor=pointer]
+          - button "Knowledge QA" [ref=f1e42] [cursor=pointer]
+          - button "Media" [ref=f1e50] [cursor=pointer]
+          - button "Document Workspace" [ref=f1e53] [cursor=pointer]
+          - button "Research Workspace" [ref=f1e59] [cursor=pointer]
+          - button "Kanban" [ref=f1e65] [cursor=pointer]
+          - button "Watchlists" [ref=f1e67] [cursor=pointer]
+        - generic [ref=f1e72]:
+          - button "Open Notes Dock" [ref=f1e73] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f1e78] [cursor=pointer]
+          - button "Settings" [ref=f1e81] [cursor=pointer]
+      - main [ref=f1e85]:
+        - generic [ref=f1e86]:
+          - generic [ref=f1e89]:
+            - generic [ref=f1e90]:
+              - button "Expand sidebar" [ref=f1e91] [cursor=pointer]
+              - generic [ref=f1e93]:
+                - img "tldw Assistant" [ref=f1e94]
+                - generic [ref=f1e95]: tldw Assistant
+                - button "Companion Home" [ref=f1e96] [cursor=pointer]
+                - button "Show shortcuts" [ref=f1e100] [cursor=pointer]
+            - generic [ref=f1e103]:
+              - button "Search - Open command palette" [ref=f1e104] [cursor=pointer]:
+                - generic [ref=f1e108]: Search
+                - generic [ref=f1e109]: ⌘K
+              - button "Open settings" [ref=f1e110] [cursor=pointer]
+              - generic [ref=f1e122]:
+                - button "Notifications, 0 unread" [ref=f1e123] [cursor=pointer]
+                - status [ref=f1e127]: Notifications are active
+              - button "Switch to light theme" [ref=f1e128] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f1e135] [cursor=pointer]:
+                - generic [ref=f1e136]: "?"
+          - generic [ref=f1e138]:
+            - link "Skip to admin content" [ref=f1e139] [cursor=pointer]:
+              - /url: "#admin-content"
+            - navigation "Admin modules" [ref=f1e140]:
+              - generic [ref=f1e141]:
+                - link "Admin" [ref=f1e142] [cursor=pointer]:
+                  - /url: /admin
+                - generic [aria-hidden] [ref=f1e143]: /
+                - link "Server Admin" [ref=f1e144] [cursor=pointer]:
+                  - /url: /admin/server
+                - link "Maintenance" [ref=f1e145] [cursor=pointer]:
+                  - /url: /admin/maintenance
+                - link "Runtime Config" [ref=f1e146] [cursor=pointer]:
+                  - /url: /admin/runtime-config
+                - link "API Keys" [ref=f1e147] [cursor=pointer]:
+                  - /url: /admin/api-keys
+                - link "Roles & Permissions" [ref=f1e148] [cursor=pointer]:
+                  - /url: /admin/rbac
+                - link "Organizations & Teams" [ref=f1e149] [cursor=pointer]:
+                  - /url: /admin/orgs
+                - link "Rate Limiting" [ref=f1e150] [cursor=pointer]:
+                  - /url: /admin/rate-limiting
+                - link "Data Operations" [ref=f1e151] [cursor=pointer]:
+                  - /url: /admin/data-ops
+                - link "Sources" [ref=f1e152] [cursor=pointer]:
+                  - /url: /admin/sources
+                - link "Llama.cpp" [ref=f1e153] [cursor=pointer]:
+                  - /url: /admin/llamacpp
+                - link "MLX LM" [ref=f1e154] [cursor=pointer]:
+                  - /url: /admin/mlx
+                - link "Monitoring" [ref=f1e155] [cursor=pointer]:
+                  - /url: /admin/monitoring
+                - link "Usage Analytics" [ref=f1e156] [cursor=pointer]:
+                  - /url: /admin/usage
+                - link "Billing" [ref=f1e157] [cursor=pointer]:
+                  - /url: /admin/billing
+                - link "Workspace Integrations" [ref=f1e158] [cursor=pointer]:
+                  - /url: /admin/integrations
+                - link "Watchlists Oversight" [ref=f1e159] [cursor=pointer]:
+                  - /url: /admin/watchlists-items
+                - link "Watchlist RunsSoon" [ref=f1e160] [cursor=pointer]:
+                  - /url: /admin/watchlists-runs
+            - generic [ref=f1e163]:
+              - generic [ref=f1e165]:
+                - heading "Server Admin" [level=1] [ref=f1e166]
+                - text: Monitor core stats and configuration for your connected tldw server.
+              - generic [ref=f1e168]:
+                - generic [ref=f1e169]: Connection
+                - table [ref=f1e175]:
+                  - rowgroup [ref=f1e176]:
+                    - row [ref=f1e177]:
+                      - 'cell "Server URL : http://127.0.0.1:18301" [ref=f1e178]':
+                        - generic [ref=f1e179]:
+                          - generic [ref=f1e180]: "Server URL :"
+                          - generic [ref=f1e181]: http://127.0.0.1:18301
+                    - row [ref=f1e182]:
+                      - 'cell "Auth mode : multi-user" [ref=f1e183]':
+                        - generic [ref=f1e184]:
+                          - generic [ref=f1e185]: "Auth mode :"
+                          - generic [ref=f1e186]: multi-user
+              - generic [ref=f1e188]:
+                - generic [ref=f1e190]:
+                  - generic [ref=f1e191]: System statistics
+                  - button "Refresh" [ref=f1e193] [cursor=pointer]
+                - generic [ref=f1e196]:
+                  - generic [ref=f1e198]:
+                    - generic [ref=f1e199]: Users
+                    - table [ref=f1e202]:
+                      - rowgroup [ref=f1e203]:
+                        - row [ref=f1e204]:
+                          - 'cell "Total : 3" [ref=f1e205]':
+                            - generic [ref=f1e206]:
+                              - generic [ref=f1e207]: "Total :"
+                              - generic [ref=f1e208]: "3"
+                          - 'cell "Active : 3" [ref=f1e209]':
+                            - generic [ref=f1e210]:
+                              - generic [ref=f1e211]: "Active :"
+                              - generic [ref=f1e212]: "3"
+                          - 'cell "Admins : 1" [ref=f1e213]':
+                            - generic [ref=f1e214]:
+                              - generic [ref=f1e215]: "Admins :"
+                              - generic [ref=f1e216]: "1"
+                        - row [ref=f1e217]:
+                          - 'cell "Verified : 2" [ref=f1e218]':
+                            - generic [ref=f1e219]:
+                              - generic [ref=f1e220]: "Verified :"
+                              - generic [ref=f1e221]: "2"
+                          - 'cell "New (30d) : 3" [ref=f1e222]':
+                            - generic [ref=f1e223]:
+                              - generic [ref=f1e224]: "New (30d) :"
+                              - generic [ref=f1e225]: "3"
+                  - generic [ref=f1e227]:
+                    - generic [ref=f1e228]: Storage
+                    - table [ref=f1e231]:
+                      - rowgroup [ref=f1e232]:
+                        - row [ref=f1e233]:
+                          - 'cell "Total used : 0 B" [ref=f1e234]':
+                            - generic [ref=f1e235]:
+                              - generic [ref=f1e236]: "Total used :"
+                              - generic [ref=f1e237]: 0 B
+                          - 'cell "Total quota : 15 GiB" [ref=f1e238]':
+                            - generic [ref=f1e239]:
+                              - generic [ref=f1e240]: "Total quota :"
+                              - generic [ref=f1e241]: 15 GiB
+                          - 'cell "Average used : 0 B" [ref=f1e242]':
+                            - generic [ref=f1e243]:
+                              - generic [ref=f1e244]: "Average used :"
+                              - generic [ref=f1e245]: 0 B
+                        - row [ref=f1e246]:
+                          - 'cell "Max used : 0 B" [ref=f1e247]':
+                            - generic [ref=f1e248]:
+                              - generic [ref=f1e249]: "Max used :"
+                              - generic [ref=f1e250]: 0 B
+                  - generic [ref=f1e252]:
+                    - generic [ref=f1e253]: Sessions
+                    - table [ref=f1e256]:
+                      - rowgroup [ref=f1e257]:
+                        - row [ref=f1e258]:
+                          - 'cell "Active sessions : 3" [ref=f1e259]':
+                            - generic [ref=f1e260]:
+                              - generic [ref=f1e261]: "Active sessions :"
+                              - generic [ref=f1e262]: "3"
+                          - 'cell "Unique users : 2" [ref=f1e263]':
+                            - generic [ref=f1e264]:
+                              - generic [ref=f1e265]: "Unique users :"
+                              - generic [ref=f1e266]: "2"
+              - generic [ref=f1e268]:
+                - generic [ref=f1e270]:
+                  - generic [ref=f1e271]: Users & roles
+                  - generic [ref=f1e273]:
+                    - button "Create user" [active] [ref=f1e275] [cursor=pointer]
+                    - button "Refresh" [ref=f1e278] [cursor=pointer]
+                    - button "Refresh roles" [ref=f1e281] [cursor=pointer]
+                - generic [ref=f1e284]:
+                  - generic [ref=f1e286]:
+                    - strong [ref=f1e289]: Filters
+                    - generic [ref=f1e291] [cursor=pointer]:
+                      - generic [ref=f1e292]:
+                        - generic: Role
+                        - combobox [ref=f1e293]
+                      - img "down" [ref=f1e295]
+                    - generic [ref=f1e299] [cursor=pointer]:
+                      - generic [ref=f1e300]:
+                        - generic: Status
+                        - combobox [ref=f1e301]
+                      - img "down" [ref=f1e303]
+                  - generic [ref=f1e309]:
+                    - table [ref=f1e313]:
+                      - rowgroup [ref=f1e314]:
+                        - row [ref=f1e315]:
+                          - columnheader "Username" [ref=f1e316]
+                          - columnheader "Email" [ref=f1e317]
+                          - columnheader "Role" [ref=f1e318]
+                          - columnheader "Active" [ref=f1e319]
+                          - columnheader "Verified" [ref=f1e320]
+                          - columnheader "Storage" [ref=f1e321]
+                          - columnheader "Actions" [ref=f1e322]
+                      - rowgroup [ref=f1e323]:
+                        - row "cycle4_repair_20260916_0348 cycle4-repair-20260916-0348@example.com user down Verified 0 B / 5 GiB Reset password" [ref=f1e725]:
+                          - cell "cycle4_repair_20260916_0348" [ref=f1e726]
+                          - cell "cycle4-repair-20260916-0348@example.com" [ref=f1e727]
+                          - cell "user down" [ref=f1e728]:
+                            - generic [ref=f1e729] [cursor=pointer]:
+                              - generic [ref=f1e730]:
+                                - generic "user" [ref=f1e731]
+                                - combobox [ref=f1e732]
+                              - img "down" [ref=f1e734]
+                          - cell [ref=f1e737]:
+                            - switch [checked] [ref=f1e738] [cursor=pointer]
+                          - cell "Verified" [ref=f1e741]
+                          - cell "0 B / 5 GiB" [ref=f1e743]
+                          - cell [ref=f1e745]:
+                            - button "Reset password" [ref=f1e746] [cursor=pointer]
+                        - row "cycle4_multi_bob cycle4-multi-bob@example.com user down Verified 0 B / 5 GiB Reset password" [ref=f1e324]:
+                          - cell "cycle4_multi_bob" [ref=f1e325]
+                          - cell "cycle4-multi-bob@example.com" [ref=f1e326]
+                          - cell "user down" [ref=f1e327]:
+                            - generic [ref=f1e328] [cursor=pointer]:
+                              - generic [ref=f1e329]:
+                                - generic "user" [ref=f1e330]
+                                - combobox [ref=f1e331]
+                              - img "down" [ref=f1e333]
+                          - cell [ref=f1e336]:
+                            - switch [checked] [ref=f1e337] [cursor=pointer]
+                          - cell "Verified" [ref=f1e340]
+                          - cell "0 B / 5 GiB" [ref=f1e342]
+                          - cell [ref=f1e344]:
+                            - button "Reset password" [ref=f1e345] [cursor=pointer]
+                        - row "cycle4_multi_alice cycle4-multi-alice@example.com user down Verified 0 B / 5 GiB Reset password" [ref=f1e347]:
+                          - cell "cycle4_multi_alice" [ref=f1e348]
+                          - cell "cycle4-multi-alice@example.com" [ref=f1e349]
+                          - cell "user down" [ref=f1e350]:
+                            - generic [ref=f1e351] [cursor=pointer]:
+                              - generic [ref=f1e352]:
+                                - generic "user" [ref=f1e353]
+                                - combobox [ref=f1e354]
+                              - img "down" [ref=f1e356]
+                          - cell [ref=f1e359]:
+                            - switch [checked] [ref=f1e360] [cursor=pointer]
+                          - cell "Verified" [ref=f1e363]
+                          - cell "0 B / 5 GiB" [ref=f1e365]
+                          - cell [ref=f1e367]:
+                            - button "Reset password" [ref=f1e368] [cursor=pointer]
+                        - row "cycle4_multi_admin cycle4-multi-admin@example.test admin down Unverified 0 B / 5 GiB Reset password" [ref=f1e370]:
+                          - cell "cycle4_multi_admin" [ref=f1e371]
+                          - cell "cycle4-multi-admin@example.test" [ref=f1e372]
+                          - cell "admin down" [ref=f1e373]:
+                            - generic [ref=f1e374] [cursor=pointer]:
+                              - generic [ref=f1e375]:
+                                - generic "admin" [ref=f1e376]
+                                - combobox [ref=f1e377]
+                              - img "down" [ref=f1e379]
+                          - cell [ref=f1e382]:
+                            - switch [checked] [ref=f1e383] [cursor=pointer]
+                          - cell "Unverified" [ref=f1e386]
+                          - cell "0 B / 5 GiB" [ref=f1e388]
+                          - cell [ref=f1e390]:
+                            - button "Reset password" [ref=f1e391] [cursor=pointer]
+                    - list [ref=f1e393]:
+                      - listitem "Previous Page" [ref=f1e394]:
+                        - button [disabled] [ref=f1e395]:
+                          - img "left" [ref=f1e396]
+                      - listitem "1" [ref=f1e399] [cursor=pointer]
+                      - listitem "Next Page" [ref=f1e401]:
+                        - button [disabled] [ref=f1e402]:
+                          - img "right" [ref=f1e403]
+                      - listitem [ref=f1e406]:
+                        - generic [ref=f1e407]:
+                          - generic [ref=f1e408]:
+                            - generic "20 / page" [ref=f1e409]
+                            - combobox "Page Size" [ref=f1e410]
+                          - img "down" [ref=f1e412]
+                  - separator [ref=f1e416]
+                  - generic [ref=f1e418]:
+                    - strong [ref=f1e421]: Roles
+                    - table [ref=f1e429]:
+                      - rowgroup [ref=f1e430]:
+                        - row [ref=f1e431]:
+                          - columnheader "Name" [ref=f1e432]
+                          - columnheader "Description" [ref=f1e433]
+                          - columnheader "System" [ref=f1e434]
+                          - columnheader "Actions" [ref=f1e435]
+                      - rowgroup [ref=f1e436]:
+                        - row [ref=f1e437]:
+                          - cell "admin" [ref=f1e438]
+                          - cell "Administrator (full access)" [ref=f1e439]
+                          - cell "System" [ref=f1e440]
+                          - cell [ref=f1e442]
+                        - row [ref=f1e443]:
+                          - cell "custom" [ref=f1e444]
+                          - cell "Custom role (no default permissions)" [ref=f1e445]
+                          - cell "Custom" [ref=f1e446]
+                          - cell [ref=f1e448]:
+                            - button "Delete" [ref=f1e449] [cursor=pointer]
+                        - row [ref=f1e451]:
+                          - cell "moderator" [ref=f1e452]
+                          - cell "Moderator (curated elevated access)" [ref=f1e453]
+                          - cell "System" [ref=f1e454]
+                          - cell [ref=f1e456]
+                        - row [ref=f1e457]:
+                          - cell "reviewer" [ref=f1e458]
+                          - cell "Claims reviewer" [ref=f1e459]
+                          - cell "System" [ref=f1e460]
+                          - cell [ref=f1e462]
+                        - row [ref=f1e463]:
+                          - cell "user" [ref=f1e464]
+                          - cell "Standard user (baseline permissions)" [ref=f1e465]
+                          - cell "System" [ref=f1e466]
+                          - cell [ref=f1e468]
+                        - row [ref=f1e469]:
+                          - cell "viewer" [ref=f1e470]
+                          - cell "Read-only User" [ref=f1e471]
+                          - cell "System" [ref=f1e472]
+                          - cell [ref=f1e474]
+                    - generic [ref=f1e476]:
+                      - textbox "Role name (e.g. analyst)" [ref=f1e482]
+                      - textbox "Optional description" [ref=f1e488]
+                      - button "Create role" [ref=f1e494] [cursor=pointer]
+              - generic [ref=f1e497]:
+                - generic [ref=f1e499]:
+                  - generic [ref=f1e500]: Media ingestion budget
+                  - button "Refresh" [ref=f1e504] [cursor=pointer]
+                - generic [ref=f1e507]:
+                  - generic [ref=f1e509]:
+                    - generic [ref=f1e511] [cursor=pointer]:
+                      - generic [ref=f1e512]:
+                        - generic "cycle4_multi_bob (#3)" [ref=f1e513]
+                        - combobox [ref=f1e514]
+                      - img "down" [ref=f1e516]
+                    - textbox "Policy ID" [ref=f1e520]: media.default
+                  - generic [ref=f1e522]:
+                    - generic [ref=f1e523]: Current diagnostics
+                    - table [ref=f1e526]:
+                      - rowgroup [ref=f1e527]:
+                        - row [ref=f1e528]:
+                          - 'cell "Status : ok" [ref=f1e529]':
+                            - generic [ref=f1e530]:
+                              - generic [ref=f1e531]: "Status :"
+                              - generic [ref=f1e532]: ok
+                          - 'cell "Entity : user:3" [ref=f1e533]':
+                            - generic [ref=f1e534]:
+                              - generic [ref=f1e535]: "Entity :"
+                              - generic [ref=f1e536]: user:3
+                        - row [ref=f1e537]:
+                          - 'cell "Jobs max concurrent : 2" [ref=f1e538]':
+                            - generic [ref=f1e539]:
+                              - generic [ref=f1e540]: "Jobs max concurrent :"
+                              - generic [ref=f1e541]: "2"
+                          - 'cell "Jobs active : 0" [ref=f1e542]':
+                            - generic [ref=f1e543]:
+                              - generic [ref=f1e544]: "Jobs active :"
+                              - generic [ref=f1e545]: "0"
+                        - row [ref=f1e546]:
+                          - 'cell "Daily ingestion bytes cap : 2 GiB" [ref=f1e547]':
+                            - generic [ref=f1e548]:
+                              - generic [ref=f1e549]: "Daily ingestion bytes cap :"
+                              - generic [ref=f1e550]: 2 GiB
+                          - 'cell "Daily ingestion bytes used : 0 B" [ref=f1e551]':
+                            - generic [ref=f1e552]:
+                              - generic [ref=f1e553]: "Daily ingestion bytes used :"
+                              - generic [ref=f1e554]: 0 B
+                        - row [ref=f1e555]:
+                          - 'cell "Daily ingestion bytes remaining : 2 GiB" [ref=f1e556]':
+                            - generic [ref=f1e557]:
+                              - generic [ref=f1e558]: "Daily ingestion bytes remaining :"
+                              - generic [ref=f1e559]: 2 GiB
+                          - 'cell "Retry after (seconds) : ~20h 11m" [ref=f1e560]':
+                            - generic [ref=f1e561]:
+                              - generic [ref=f1e562]: "Retry after (seconds) :"
+                              - generic [ref=f1e563]: ~20h 11m
+              - generic [ref=f1e565]:
+                - generic [ref=f1e566]: Audio installer
+                - generic [ref=f1e570]:
+                  - generic [ref=f1e571]: Install and verify server-side STT/TTS bundles for this connected server.
+                  - generic [ref=f1e575]:
+                    - generic [ref=f1e577]:
+                      - strong [ref=f1e579]: Recommended audio bundle
+                      - generic [ref=f1e580]: Install and verify speech-model requirements on the connected server, not in this browser.
+                    - table [ref=f1e584]:
+                      - rowgroup [ref=f1e585]:
+                        - row [ref=f1e586]:
+                          - 'cell "Machine profile : Apple Silicon" [ref=f1e587]':
+                            - generic [ref=f1e588]:
+                              - generic [ref=f1e589]: "Machine profile :"
+                              - generic [ref=f1e590]: Apple Silicon
+                          - 'cell "Free disk : 12.2 GB" [ref=f1e591]':
+                            - generic [ref=f1e592]:
+                              - generic [ref=f1e593]: "Free disk :"
+                              - generic [ref=f1e594]: 12.2 GB
+                    - generic [ref=f1e596]:
+                      - strong [ref=f1e599]: Bundle
+                      - generic [ref=f1e601] [cursor=pointer]:
+                        - generic [ref=f1e602]:
+                          - generic "Apple Silicon Local" [ref=f1e603]
+                          - combobox [ref=f1e604]
+                        - img "down" [ref=f1e606]
+                      - generic [ref=f1e609]: Local bundle for Apple Silicon machines with on-device acceleration where available.
+                    - generic [ref=f1e612]:
+                      - strong [ref=f1e615]: Recommended profile
+                      - radiogroup [ref=f1e617]:
+                        - generic [ref=f1e618]:
+                          - generic [ref=f1e620] [cursor=pointer]:
+                            - generic [ref=f1e621]:
+                              - radio "Light"
+                            - text: Light
+                          - generic [ref=f1e623] [cursor=pointer]:
+                            - generic [ref=f1e624]:
+                              - radio "Balanced"
+                            - text: Balanced
+                          - generic [ref=f1e626] [cursor=pointer]:
+                            - generic [ref=f1e627]:
+                              - radio "Performance" [checked]
+                            - text: Performance
+                      - generic [ref=f1e629]:
+                        - generic [ref=f1e630]: Higher-throughput Apple Silicon speech profile using MLX Parakeet.
+                        - generic [ref=f1e631]: high
+                        - generic [ref=f1e633]: 4.5 GB
+                    - generic [ref=f1e636]:
+                      - button "Provision bundle (4.5 GB)" [ref=f1e638] [cursor=pointer]
+                      - button "Run verification" [ref=f1e641] [cursor=pointer]
+                      - button "Safe rerun" [ref=f1e644] [cursor=pointer]
+                    - generic [ref=f1e647]:
+                      - generic [ref=f1e648]: Install status
+                      - generic [ref=f1e651]: idle
+    - generic:
+      - generic: "* * * *"
+      - generic [ref=f1e749]:
+        - img "check-circle" [ref=f1e750]
+        - generic [ref=f1e753]: User created
+  - button "Open Next.js Dev Tools" [ref=f1e659] [cursor=pointer]
+  - alert [ref=f1e663]
+```

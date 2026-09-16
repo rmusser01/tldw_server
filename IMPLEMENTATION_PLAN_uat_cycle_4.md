@@ -36,6 +36,10 @@
 
 Reviewed code checkpoints: Task1/4 `14f33af27c`; Task2 `0dcca3c032`; Task3 `8128c93c1b`. Permanent regression and independent review evidence is in the tracker repair table. Native acceptance remains pending, so combined acceptance/commit bullets below stay incomplete.
 
+Targeted native setup at03:37UTC reopened Task2/UAT106: the browser has no API key during the permitted local first-run flow, so the protected model service returns an empty catalog. A real successful same-target first-chat response and server completion are incorrectly blocked by the client catalog-match requirement. Correct the handoff using the authoritative verified pair with existing canonical-provider/owner guards; retain protected catalog authentication. This correction requires an actual model-service credential-boundary regression and independent review before the next full run.
+
+Correction`8097d672d5` is independently reviewed and now passes a second fresh native setup→ordinary Chat without an API restart. Native103canonical reload/111Note backlink and104Minimize also pass. Targeted checks exposed two remaining boundaries before the full run:105projects a saved-source Warning as generic failure in the frontend, and108Retry sends correct context but duplicates the failed user row in canonical server persistence. Existing tasks46/49 own these bounded corrections. Their independent file ownership permits parallel implementation; root continues native analysis/UI checks. No full fresh run begins before these are corrected and reviewed.
+
 ### Task1: Canonical user acknowledgement — TASK13260.44/51, UAT103/111
 **Files:** `apps/packages/ui/src/models/ChatTldw.ts`, `hooks/chat-modes/chatModePipeline.ts`, `hooks/chat/useChatActions.ts`, `hooks/chat-helper/index.ts`, their existing tests; `tldw_Server_API/app/core/Chat/chat_service.py`, streaming metadata helper and associated Chat tests as needed.
 **Inputs:** `read-only-diagnoses/uat103-read-only-diagnosis.md`, `uat111-read-only-diagnosis.md`, retained RED probes; paths relative to cycle4 evidence root.

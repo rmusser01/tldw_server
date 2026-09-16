@@ -1,0 +1,1 @@
+{"status":"ready","provider":"custom_openai","model":"../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf","response_id":"chatcmpl-Pl4J16h6dpy9z4xqmkYVAJplS33NPHKQ","response_text":"Hello!","failure_category":null,"message":null}

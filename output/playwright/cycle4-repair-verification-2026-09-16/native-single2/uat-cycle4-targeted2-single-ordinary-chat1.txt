@@ -1,0 +1,20 @@
+### Result
+{"status":200,"request":{"provider":"custom-openai-api","model":"../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf","messages":[{"role":"user","content":"Reply with exactly JUNIPER-42."}]},"url":"http://127.0.0.1:18482/chat","chat":"- log \"Chat messages\":\n  - article \"User message 1 of 2\":\n    - text: You • 8:56 PM\n    - paragraph: Reply with exactly JUNIPER-42.\n    - button \"More actions\": •••\n  - article \"Assistant message 2 of 2\":\n    - text: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf • 8:56 PM\n    - paragraph: Loading content…\n    - text: Was this helpful?\n    - button \"Helpful\"\n    - button \"Not helpful\"\n    - button \"More feedback\"\n    - button \"More actions\": •••\n    - text: Response complete"}
+### Ran Playwright code
+```js
+await (async (page) => {
+ await page.getByRole('textbox',{name:'Type a message... (/ commands, @ mentions)',exact:true}).fill('Reply with exactly JUNIPER-42.');
+ const pending=page.waitForResponse(r=>r.url().endsWith('/api/v1/chat/completions')&&r.request().method()==='POST');
+ await page.getByRole('button',{name:'Send message',exact:true}).click();
+ const response=await pending;await response.finished();
+ const payload=response.request().postDataJSON();
+ await page.getByRole('log',{name:'Chat messages',exact:true}).getByText('JUNIPER-42',{exact:true}).waitFor({timeout:10000});
+ return {status:response.status(),request:{provider:payload.api_provider,model:payload.model,messages:payload.messages},url:page.url(),chat:await page.getByRole('log',{name:'Chat messages',exact:true}).ariaSnapshot()};
+})(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18482/chat
+- Page Title: Chat | tldw
+- Console: 0 errors, 2 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T03-52-46-295Z.log#L16-L20
