@@ -1,0 +1,14 @@
+{
+  "unit": "128",
+  "base": "ba5233a5a9",
+  "current": {
+    "errors": 0,
+    "warnings": 21
+  },
+  "baseline": {
+    "errors": 0,
+    "warnings": 21
+  },
+  "added": [],
+  "removed": []
+}

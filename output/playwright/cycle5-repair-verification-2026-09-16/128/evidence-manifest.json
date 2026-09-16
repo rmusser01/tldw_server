@@ -1,0 +1,88 @@
+{
+  "unit": "128",
+  "retainedAt": "2026-09-16T13:48:01.888Z",
+  "knownCredentialMatches": 0,
+  "jwtPrivateKeyPatternMatches": 0,
+  "files": [
+    {
+      "name": "cycle5-repair-128-end-label-harness-error.log",
+      "bytes": 28745,
+      "sha256": "4d3030f1a4372a8fdcc86417c1f53de6f30fcfdb8ba8032842e654e0db5a8ce4"
+    },
+    {
+      "name": "cycle5-repair-128-green-controls.log",
+      "bytes": 28745,
+      "sha256": "4d3030f1a4372a8fdcc86417c1f53de6f30fcfdb8ba8032842e654e0db5a8ce4"
+    },
+    {
+      "name": "cycle5-repair-128-green-initial.log",
+      "bytes": 11152,
+      "sha256": "1fee0204868a62db307ab7748220a5f923d7ab26b8b2a9b1a9717bfafd96958b"
+    },
+    {
+      "name": "cycle5-repair-128-green.log",
+      "bytes": 25308,
+      "sha256": "8a4d65369bd89deaf5be09e2a071c085b93d1ab19d4595be6d9e588564d93159"
+    },
+    {
+      "name": "cycle5-repair-128-independent-hashes.json",
+      "bytes": 1228,
+      "sha256": "7114363933e007221728cec3e9620b1bcb21badeaf61b5a028b2b4bacef3bae1"
+    },
+    {
+      "name": "cycle5-repair-128-independent-review.md",
+      "bytes": 2389,
+      "sha256": "378e5867e517c1dc74c866880bd8b610ce7a339a7b0f2863a985f6979f381c9d"
+    },
+    {
+      "name": "cycle5-repair-128-independent.log",
+      "bytes": 33175,
+      "sha256": "240534debe2683e23222ce687a9ec7e8af4d8c7006762efd47d4439a418345b2"
+    },
+    {
+      "name": "cycle5-repair-128-initial-harness-error.log",
+      "bytes": 21543,
+      "sha256": "ee24ea4266ac84e93fd88524a0ec6d947eb369035a8665100dc8ae36e242a1fc"
+    },
+    {
+      "name": "cycle5-repair-128-lint-baseline.json",
+      "bytes": 114170,
+      "sha256": "019045f01908495172827939963acc583f719b498038f4d423b55098fdb3faab"
+    },
+    {
+      "name": "cycle5-repair-128-lint-comparison.json",
+      "bytes": 188,
+      "sha256": "0aae29739e97cd9fbb591cf9110a6abe4494ffb19989b8451e6cb576334aa0bb"
+    },
+    {
+      "name": "cycle5-repair-128-lint-current.json",
+      "bytes": 121597,
+      "sha256": "1c5e58faea23b0ac8d2edab4a5205eb1688517df8c0fdb23e6220544ebed217f"
+    },
+    {
+      "name": "cycle5-repair-128-manifest.json",
+      "bytes": 461,
+      "sha256": "8b636ee8ff2b4afb562bed862209cdf75376899b235d80b25e59c2d62b762c6b"
+    },
+    {
+      "name": "cycle5-repair-128-red.log",
+      "bytes": 18332,
+      "sha256": "4b665d6e47d81664462258a739497c044086f643e230f2594b940b1845794324"
+    },
+    {
+      "name": "cycle5-repair-128-report.md",
+      "bytes": 1108,
+      "sha256": "02d673348b4e474bcb31900b28dffe7519edbc77f244c4c73f6706b9e264026e"
+    },
+    {
+      "name": "cycle5-repair-128-task-review.log",
+      "bytes": 27,
+      "sha256": "2f27d07f072b38f1ba6ce1fbf3d3333ed1bff4c51668fdbcc1632b493066cffd"
+    },
+    {
+      "name": "cycle5-repair-128-task-start.log",
+      "bytes": 27,
+      "sha256": "2f27d07f072b38f1ba6ce1fbf3d3333ed1bff4c51668fdbcc1632b493066cffd"
+    }
+  ]
+}

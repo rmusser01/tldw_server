@@ -174,7 +174,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const [reviewMode, setReviewMode] = React.useState<"due" | "cram">("due")
   const [cramTag, setCramTag] = React.useState("")
   const [cramUpdatesSchedule, setCramUpdatesSchedule] = React.useState(false)
-  const [cramQueueIndex, setCramQueueIndex] = React.useState(0)
+  const [practicedCramCardIds, setPracticedCramCardIds] = React.useState<Set<string>>(() => new Set())
   const [reviewFailure, setReviewFailure] = React.useState<ReviewFailureState | null>(
     null
   )
@@ -270,9 +270,12 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     : null
   const cramQueue = cramQueueQuery.data || []
   const hasCramPracticeCards = cramQueue.length > 0
+  // Due-date refetches reorder the queue after each scheduled rating. Track
+  // progress by identity while continuing to use the latest card data.
+  const pendingCramCards = cramQueue.filter(card => !practicedCramCardIds.has(card.uuid))
   const cramQueueCard =
-    reviewMode === "cram" && cramQueueIndex < cramQueue.length
-      ? cramQueue[cramQueueIndex]
+    reviewMode === "cram"
+      ? pendingCramCards[0] ?? null
       : null
   const activeCard =
     reviewMode === "cram"
@@ -290,7 +293,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const assistantRespondMutation = useFlashcardAssistantRespondMutation()
   const remainingReviewCount =
     reviewMode === "cram"
-      ? Math.max(0, cramQueue.length - reviewedCount)
+      ? pendingCramCards.length
       : dueCountsQuery.data?.total ?? 0
   const scheduledDueCount = reviewMode === "cram" ? undefined : dueCountsQuery.data?.due
   const availableNowCount =
@@ -318,7 +321,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     (deckId: number) => {
       onReviewDeckChange(deckId)
       setReviewMode("due")
-      setCramQueueIndex(0)
+      setPracticedCramCardIds(new Set())
       setSelectedStudySessionId(null)
       if (reviewOverrideCard) {
         onClearOverride?.()
@@ -330,7 +333,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     (deckId: number) => {
       onReviewDeckChange(deckId)
       setReviewMode("cram")
-      setCramQueueIndex(0)
+      setPracticedCramCardIds(new Set())
       setSelectedStudySessionId(null)
       if (reviewOverrideCard) {
         onClearOverride?.()
@@ -558,12 +561,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
 
         const advanceCramQueue = () => {
           if (reviewMode !== "cram") return
-          const currentIndex = cramQueue.findIndex((queued) => queued.uuid === card.uuid)
-          if (currentIndex >= 0) {
-            setCramQueueIndex(Math.min(currentIndex + 1, cramQueue.length))
-            return
-          }
-          setCramQueueIndex((idx) => Math.min(idx + 1, cramQueue.length))
+          setPracticedCramCardIds(ids => new Set(ids).add(card.uuid))
         }
 
         if (reviewMode === "cram" && !cramUpdatesSchedule) {
@@ -703,7 +701,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     },
     [
       activeCard,
-      cramQueue,
       cramUpdatesSchedule,
       localOverrideCard,
       message,
@@ -851,6 +848,13 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     setShowUndoButton(false)
     setUndoCountdown(0)
     setReviewedCount(undoState.nextReviewedCount)
+    if (reviewMode === "cram") {
+      setPracticedCramCardIds(ids => {
+        const next = new Set(ids)
+        next.delete(undoState.overrideCard.uuid)
+        return next
+      })
+    }
 
     const shouldRevealOnCurrent = activeCard?.uuid === undoState.overrideCard.uuid
     if (shouldRevealOnCurrent) {
@@ -867,7 +871,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
         defaultValue: "Rate this card again to update your response"
       })
     )
-  }, [activeCard?.uuid, lastReviewedCard, reviewedCount, message, t])
+  }, [activeCard?.uuid, lastReviewedCard, reviewedCount, reviewMode, message, t])
 
   const renderUndoRatingAction = () => {
     if (!showUndoButton || !lastReviewedCard) return null
@@ -929,12 +933,12 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   React.useEffect(() => {
     const exhausted = reviewMode === "due"
       ? reviewQuery.isSuccess && !reviewQuery.isFetching && reviewQuery.data === null
-      : cramQueueQuery.isSuccess && !isCramQueueLoading && cramQueueIndex >= cramQueue.length
+      : cramQueueQuery.isSuccess && !isCramQueueLoading && pendingCramCards.length === 0
     if (isActive && exhausted && !activeCard && !reviewRun.isPending && activeReviewSessionId != null) {
       void completeReviewSession("auto")
     }
   }, [isActive, reviewMode, reviewQuery.isSuccess, reviewQuery.isFetching, reviewQuery.data,
-    cramQueueQuery.isSuccess, isCramQueueLoading, cramQueueIndex, cramQueue.length, activeCard,
+    cramQueueQuery.isSuccess, isCramQueueLoading, pendingCramCards.length, activeCard,
     reviewRun.isPending, activeReviewSessionId, completeReviewSession])
 
   // Track when the answer is shown (for auto-timing)
@@ -1052,15 +1056,10 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     [activeCard, assistantRespondMutation]
   )
 
-  React.useEffect(() => {
-    if (reviewMode !== "cram") return
-    setCramQueueIndex((idx) => Math.min(idx, cramQueue.length))
-  }, [reviewMode, cramQueue.length])
-
   // Presentation state belongs to the same review scope and authenticated owner.
   React.useEffect(() => {
     setReviewedCount(0)
-    setCramQueueIndex(0)
+    setPracticedCramCardIds(new Set())
     setLocalOverrideCard(null)
     setShowUndoButton(false)
     setLastReviewedCard(null)
@@ -1908,7 +1907,8 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                         type="primary"
                         onClick={() => {
                           setReviewMode("cram")
-                          setCramQueueIndex(0)
+                          setPracticedCramCardIds(new Set())
+                          setReviewedCount(0)
                           setSelectedStudySessionId(null)
                         }}
                         data-testid="flashcards-review-practice-again"

@@ -1,0 +1,14 @@
+{
+  "frozenAt": "2026-09-16T13:37:37.005Z",
+  "base": "ba5233a5a9",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx",
+      "sha256": "ad6d55c88715a2e2c897b93950cbae2221f1bdda1da2ad1c7b9a272e0c728b97"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "sha256": "e486edb142948986718c7de0da5d504a7c30c2995a946027e12dac9615aa2179"
+    }
+  ]
+}

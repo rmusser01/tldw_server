@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ReviewTab } from "../ReviewTab"
 import { clearSetting } from "@/services/settings/registry"
+import type { Flashcard } from "@/services/flashcards"
 import {
   FLASHCARDS_REVIEW_ONBOARDING_DISMISSED_SETTING,
   FLASHCARDS_SHORTCUT_HINT_DENSITY_SETTING
@@ -11,6 +12,7 @@ import {
   useCramQueueQuery,
   useReviewQuery,
   useReviewFlashcardMutation,
+  useEndFlashcardReviewSessionMutation,
   useGlobalFlashcardTagSuggestionsQuery,
   useFlashcardAssistantQuery,
   useFlashcardAssistantRespondMutation,
@@ -76,6 +78,8 @@ vi.mock("react-router-dom", async (importOriginal) => {
 vi.mock("@/hooks/useAntdMessage", () => ({
   useAntdMessage: () => messageSpies
 }))
+
+vi.mock("@/components/StudySuggestions/StudySuggestionsPanel", () => ({ StudySuggestionsPanel: () => null }))
 
 vi.mock("@/hooks/useTTS", () => ({
   useTTS: () => ({
@@ -150,9 +154,13 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
 
 describe("ReviewTab cram mode", () => {
   const reviewMutateAsync = vi.fn()
+  const endMutateAsync = vi.fn()
 
   beforeEach(async () => {
     vi.clearAllMocks()
+    reviewMutateAsync.mockResolvedValue({ review_session_id: 77, interval_days: 1 })
+    endMutateAsync.mockResolvedValue({ id: 77 })
+    vi.mocked(useEndFlashcardReviewSessionMutation).mockReturnValue({ mutateAsync: endMutateAsync } as ReturnType<typeof useEndFlashcardReviewSessionMutation>)
     await clearSetting(FLASHCARDS_SHORTCUT_HINT_DENSITY_SETTING)
     await clearSetting(FLASHCARDS_REVIEW_ONBOARDING_DISMISSED_SETTING)
     vi.mocked(useDecksQuery).mockReturnValue({
@@ -332,5 +340,127 @@ describe("ReviewTab cram mode", () => {
       ).toBeInTheDocument()
     })
     expect(screen.getByTestId("flashcards-review-empty-card")).toBeInTheDocument()
+  })
+
+  const mountQueue = () => {
+    const template = vi.mocked(useCramQueueQuery)().data![0]
+    const cards = ["Alpha", "Bravo", "Charlie"].map((front, index) => ({
+      ...template, uuid: `card-${index}`, front,
+    })) as Flashcard[]
+    let queue = cards
+    vi.mocked(useCramQueueQuery).mockImplementation(() => ({
+      data: queue, isSuccess: true, isFetching: false, isLoading: false,
+    } as ReturnType<typeof useCramQueueQuery>))
+    const props = { onNavigateToCreate: vi.fn(), onNavigateToImport: vi.fn(), reviewDeckId: 1,
+      onReviewDeckChange: vi.fn(), isActive: true }
+    const view = render(<ReviewTab {...props} />)
+    fireEvent.click(screen.getByText("Cram"))
+    return { cards, view, props, refresh: (next: Flashcard[], changedProps: Partial<typeof props> = {}) => {
+      queue = next
+      Object.assign(props, changedProps)
+      view.rerender(<ReviewTab {...props} />)
+    } }
+  }
+
+  const rate = async (front: string, rating = 3) => {
+    await screen.findByText(front)
+    if (!screen.queryByTestId(`flashcards-review-rate-${rating}`)) {
+      fireEvent.click(screen.getByTestId("flashcards-review-show-answer"))
+    }
+    await act(async () => { fireEvent.click(screen.getByTestId(`flashcards-review-rate-${rating}`)) })
+  }
+
+  it.each([false, true])("reaches every intended card after scheduled queue refetch (reordered=%s)", async reordered => {
+    const { cards, refresh } = mountQueue()
+    fireEvent.click(screen.getByTestId("flashcards-review-cram-update-schedule"))
+    await rate("Alpha")
+    await screen.findByText("Bravo")
+    refresh(reordered ? [cards[1], cards[2], { ...cards[0], due_at: "2030-01-01" }] : cards)
+    expect(screen.getByText("Bravo")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent("2 cards remaining, 1 reviewed")
+    await rate("Bravo")
+    refresh(reordered ? [cards[2], cards[0], cards[1]] : cards)
+    await rate("Charlie")
+    expect(reviewMutateAsync.mock.calls.map(([input]) => input.cardUuid)).toEqual(cards.map(card => card.uuid))
+    await waitFor(() => expect(endMutateAsync).toHaveBeenCalledTimes(1))
+    expect(screen.getByText("Cram session complete!")).toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-review-progress")).not.toBeInTheDocument()
+  })
+
+  it.each([false, true])("re-rating preserves the remaining queue after refetch (reordered=%s)", async reordered => {
+    const { cards, refresh } = mountQueue()
+    fireEvent.click(screen.getByTestId("flashcards-review-cram-update-schedule"))
+    await rate("Alpha")
+    refresh(reordered ? [cards[1], cards[2], cards[0]] : cards)
+    fireEvent.click(screen.getByTestId("flashcards-review-undo-rating"))
+    await rate("Alpha", 2)
+    expect(screen.getByText("Bravo")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent("2 cards remaining, 1 reviewed")
+    expect(screen.queryByText("Cram session complete!")).not.toBeInTheDocument()
+    expect(endMutateAsync).not.toHaveBeenCalled()
+    expect(reviewMutateAsync.mock.calls.map(([input]) => [input.cardUuid, input.rating])).toEqual([
+      [cards[0].uuid, 3], [cards[0].uuid, 2],
+    ])
+  })
+
+  it("retains practice-only progress when scheduling starts and reads fresh pending cards", async () => {
+    const { cards, refresh } = mountQueue()
+    await rate("Alpha")
+    expect(reviewMutateAsync).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("flashcards-review-cram-update-schedule"))
+    refresh([cards[2], { ...cards[1], front: "Bravo edited" }, cards[0]])
+    await rate("Charlie")
+    await rate("Bravo edited")
+    expect(reviewMutateAsync.mock.calls.map(([input]) => input.cardUuid)).toEqual([cards[2].uuid, cards[1].uuid])
+    await waitFor(() => expect(endMutateAsync).toHaveBeenCalledTimes(1))
+    expect(screen.getByText("3 cards practiced in this cram session")).toBeInTheDocument()
+  })
+
+  it("uses the same pending cards for progress and completion when a card disappears", async () => {
+    const { cards, refresh } = mountQueue()
+    fireEvent.click(screen.getByTestId("flashcards-review-cram-update-schedule"))
+    await rate("Alpha")
+    refresh([cards[2], cards[0]])
+    expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent("1 cards remaining, 1 reviewed")
+    await rate("Charlie")
+    expect(screen.queryByTestId("flashcards-review-progress")).not.toBeInTheDocument()
+    await waitFor(() => expect(endMutateAsync).toHaveBeenCalledTimes(1))
+  })
+
+  it("starts practice again with every card pending and zero reviewed", async () => {
+    const { cards, refresh } = mountQueue()
+    await rate("Alpha")
+    refresh([cards[1], cards[2], cards[0]])
+    await rate("Bravo")
+    await rate("Charlie")
+    fireEvent.click(screen.getByTestId("flashcards-review-practice-again"))
+    expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent("3 cards remaining, 0 reviewed")
+    expect(screen.getByText("Bravo")).toBeInTheDocument()
+    expect(reviewMutateAsync).not.toHaveBeenCalled()
+    expect(endMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it.each(["deck", "tag", "account"])("clears practiced identities when the %s scope changes", async scope => {
+    const { cards, refresh } = mountQueue()
+    await rate("Alpha")
+    if (scope === "deck") refresh(cards, { reviewDeckId: 2 })
+    if (scope === "tag") fireEvent.change(screen.getByTestId("flashcards-review-cram-tag"), { target: { value: "new-tag" } })
+    if (scope === "account") await act(async () => { window.dispatchEvent(new Event("tldw:auth-principal-changed")) })
+    expect(screen.getByText("Alpha")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent("3 cards remaining, 0 reviewed")
+    expect(reviewMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it("manual End keeps the remaining cards available for the next scheduled session", async () => {
+    mountQueue()
+    fireEvent.click(screen.getByTestId("flashcards-review-cram-update-schedule"))
+    await rate("Alpha")
+    fireEvent.click(screen.getByRole("button", { name: "End Session", exact: true }))
+    await waitFor(() => expect(endMutateAsync).toHaveBeenCalledTimes(1))
+    expect(screen.getByText("Bravo")).toBeInTheDocument()
+    await rate("Bravo")
+    expect(screen.getByText("Charlie")).toBeInTheDocument()
+    expect(reviewMutateAsync.mock.calls[1][0].reviewSessionId).toBeUndefined()
+    expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent("1 cards remaining, 2 reviewed")
   })
 })

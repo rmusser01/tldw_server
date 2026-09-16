@@ -1,0 +1,512 @@
+$ vitest run src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.scope-change.guard.test.ts src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx src/components/Flashcards/hooks/__tests__/useFlashcardQueries.cram-queue.test.tsx "--maxWorkers=1" --no-file-parallelism
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:12939) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > blocks a target change before dispatch instead of sending current credentials to the old target
+Failed to submit flashcard review: Error: The server or authenticated account changed before the request was sent.
+    at createServicePromptScopeChangedError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts:151:17)
+    at resolveCurrentServicePromptConfig (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:512:11)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1425:5)
+    at reviewFlashcard (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/flashcards.ts:907:10) {
+  status: 412,
+  details: {
+    detail: {
+      code: 'request_config_scope_changed',
+      message: 'The server or authenticated account changed before the request was sent.'
+    }
+  }
+}
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > ignores a late failed rating after replacement instead of installing its error
+[tldw:request] POST /api/v1/flashcards/review 500 Old failure
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > does not replay a failed rating write and retains the acknowledged ID for an explicit retry
+[tldw:request] POST /api/v1/flashcards/review 0 Network failed
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > does not replay a failed rating write and retains the acknowledged ID for an explicit retry
+Failed to submit flashcard review: Error: Network failed (POST /api/v1/flashcards/review)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21)
+    at reviewFlashcard (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/flashcards.ts:907:10) {
+  status: 0,
+  headers: undefined,
+  retryAfterMs: undefined
+}
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > allows an explicit retry after a temporary owner-lookup failure
+[tldw:request] GET /api/v1/auth/me 503 Temporarily unavailable
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > requires an explicit new session after the retained session expires, without replaying the rating
+[tldw:request] POST /api/v1/flashcards/review 404 Flashcard review session is not active
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > requires an explicit new session after the retained session expires, without replaying the rating
+Failed to submit flashcard review: Error: Flashcard review session is not active (POST /api/v1/flashcards/review)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21)
+    at reviewFlashcard (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/flashcards.ts:907:10) {
+  status: 404,
+  details: { detail: 'Flashcard review session is not active' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > keeps a valid retained session when only the reviewed card is missing
+[tldw:request] POST /api/v1/flashcards/review 404 Flashcard not found
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > keeps a valid retained session when only the reviewed card is missing
+Failed to submit flashcard review: Error: Flashcard not found (POST /api/v1/flashcards/review)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21)
+    at reviewFlashcard (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/flashcards.ts:907:10) {
+  status: 404,
+  details: { detail: 'Flashcard not found' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through local rating without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through local rating without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through local end without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through local end without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through native rating without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through native rating without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through native end without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through native end without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through extension rating without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through extension rating without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through extension end without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through extension end without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+ ✓ src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx (45 tests) 1567ms
+(node:12964) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx (14 tests | 1 failed) 1984ms
+     ✓ shows cram controls and tag filter when cram mode is selected 204ms
+     ✓ does not call review mutation when practicing in cram mode without schedule updates 71ms
+     ✓ keeps cram queue progression unchanged when the prompt side flips 72ms
+     ✓ reaches every intended card after scheduled queue refetch (reordered=false) 181ms
+     ✓ reaches every intended card after scheduled queue refetch (reordered=true) 134ms
+     ✓ re-rating preserves the remaining queue after refetch (reordered=false) 92ms
+     ✓ re-rating preserves the remaining queue after refetch (reordered=true) 97ms
+     ✓ retains practice-only progress when scheduling starts and reads fresh pending cards 100ms
+     ✓ uses the same pending cards for progress and completion when a card disappears 87ms
+     ✓ starts practice again with every card pending and zero reviewed 88ms
+     ✓ clears practiced identities when the deck scope changes 52ms
+     ✓ clears practiced identities when the tag scope changes 54ms
+     ✓ clears practiced identities when the account scope changes 51ms
+     × manual End keeps the remaining cards available for the next scheduled session 701ms
+(node:12993) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx (1 test) 448ms
+     ✓ keeps re-rate visible after advancing and restores the reviewed card  447ms
+(node:13011) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/hooks/__tests__/useFlashcardQueries.cram-queue.test.tsx (3 tests) 168ms
+(node:13012) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/tabs/__tests__/ReviewTab.scope-change.guard.test.ts (2 tests) 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx > ReviewTab cram mode > manual End keeps the remaining cards available for the next scheduled session
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "End session"
+
+Here are the accessible roles:
+
+  combobox:
+
+  Name "":
+  [36m<input[39m
+    [33maria-autocomplete[39m=[32m"list"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"listbox"[39m
+    [33mautocomplete[39m=[32m"off"[39m
+    [33mclass[39m=[32m"ant-select-input"[39m
+    [33mid[39m=[32m"test-id"[39m
+    [33mreadonly[39m=[32m""[39m
+    [33mrole[39m=[32m"combobox"[39m
+    [33mtype[39m=[32m"search"[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  img:
+
+  Name "down":
+  [36m<span[39m
+    [33maria-label[39m=[32m"down"[39m
+    [33mclass[39m=[32m"anticon anticon-down"[39m
+    [33mrole[39m=[32m"img"[39m
+  [36m/>[39m
+
+  Name "close-circle":
+  [36m<span[39m
+    [33maria-label[39m=[32m"close-circle"[39m
+    [33mclass[39m=[32m"anticon anticon-close-circle"[39m
+    [33mrole[39m=[32m"img"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  radiogroup:
+
+  Name "segmented control":
+  [36m<div[39m
+    [33maria-label[39m=[32m"segmented control"[39m
+    [33maria-orientation[39m=[32m"horizontal"[39m
+    [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+    [33mdata-testid[39m=[32m"flashcards-review-mode-toggle"[39m
+    [33mrole[39m=[32m"radiogroup"[39m
+    [33mtabindex[39m=[32m"0"[39m
+  [36m/>[39m
+
+  Name "segmented control":
+  [36m<div[39m
+    [33maria-label[39m=[32m"segmented control"[39m
+    [33maria-orientation[39m=[32m"horizontal"[39m
+    [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+    [33mdata-testid[39m=[32m"flashcards-review-prompt-side-toggle"[39m
+    [33mrole[39m=[32m"radiogroup"[39m
+    [33mtabindex[39m=[32m"0"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  radio:
+
+  Name "Due only":
+  [36m<input[39m
+    [33mchecked[39m=[32m""[39m
+    [33mclass[39m=[32m"ant-segmented-item-input"[39m
+    [33mname[39m=[32m"test-id"[39m
+    [33mtype[39m=[32m"radio"[39m
+  [36m/>[39m
+
+  Name "Cram":
+  [36m<input[39m
+    [33mclass[39m=[32m"ant-segmented-item-input"[39m
+    [33mname[39m=[32m"test-id"[39m
+    [33mtype[39m=[32m"radio"[39m
+  [36m/>[39m
+
+  Name "Front first":
+  [36m<input[39m
+    [33mchecked[39m=[32m""[39m
+    [33mclass[39m=[32m"ant-segmented-item-input"[39m
+    [33mname[39m=[32m"test-id"[39m
+    [33mtype[39m=[32m"radio"[39m
+  [36m/>[39m
+
+  Name "Back first":
+  [36m<input[39m
+    [33mclass[39m=[32m"ant-segmented-item-input"[39m
+    [33mname[39m=[32m"test-id"[39m
+    [33mtype[39m=[32m"radio"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  textbox:
+
+  Name "":
+  [36m<input[39m
+    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl"[39m
+    [33mdata-testid[39m=[32m"flashcards-review-cram-tag"[39m
+    [33mplaceholder[39m=[32m"Filter cram by tag (optional)"[39m
+    [33mtype[39m=[32m"text"[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  switch:
+
+  Name "":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"true"[39m
+    [33mclass[39m=[32m"ant-switch css-dev-only-do-not-override-3uaqrl css-var-root ant-switch-checked"[39m
+    [33mdata-testid[39m=[32m"flashcards-review-cram-update-schedule"[39m
+    [33mrole[39m=[32m"switch"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  status:
+
+  Name "":
+  [36m<div[39m
+    [33maria-atomic[39m=[32m"true"[39m
+    [33maria-live[39m=[32m"polite"[39m
+    [33mclass[39m=[32m"mb-4 flex max-w-full flex-wrap items-center gap-2 rounded-lg bg-surface2 p-3 sm:gap-4"[39m
+    [33mdata-testid[39m=[32m"flashcards-review-progress"[39m
+    [33mrole[39m=[32m"status"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  button:
+
+  Name "Edit card (E)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Edit card (E)"[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+    [33mdata-testid[39m=[32m"flashcards-review-edit-card"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Need help?":
+  [36m<button[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+    [33mdata-testid[39m=[32m"flashcards-review-assistant-toggle"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "End Session":
+  [36m<button[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+    [33mdata-testid[39m=[32m"flashcards-review-end-session"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Show answer (Space)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Show answer (Space)"[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+    [33mdata-testid[39m=[32m"flashcards-review-show-answer"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Compact hints":
+  [36m<button[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-link ant-btn-color-link ant-btn-variant-link ant-btn-sm !h-auto !px-0 text-xs"[39m
+    [33mdata-testid[39m=[32m"flashcards-review-shortcut-hints-toggle"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Re-rate last card, 10 seconds remaining":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Re-rate last card, 10 seconds remaining"[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text text-text-muted hover:text-text min-h-11 focus:ring-2 focus:ring-primary focus:ring-offset-2"[39m
+    [33mdata-testid[39m=[32m"flashcards-review-undo-rating"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  heading:
+
+  Name "Front":
+  [36m<h5[39m
+    [33mclass[39m=[32m"ant-typography !mb-2 css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+  [36m/>[39m
+
+  Name "No completed study sessions yet.":
+  [36m<h2[39m
+    [33mclass[39m=[32m"font-semibold text-text text-sm"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"mb-2 last:mb-0"[39m
+    [33mnode[39m=[32m"[object Object]"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  timer:
+
+  Name "":
+  [36m<span[39m
+    [33maria-live[39m=[32m"polite"[39m
+    [33mclass[39m=[32m"inline-flex items-center justify-center min-w-6 h-6 px-1.5 rounded-full bg-surface2 text-xs font-medium tabular-nums"[39m
+    [33mrole[39m=[32m"timer"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"mb-3 flex flex-wrap items-center gap-2 rounded border border-border/70 bg-surface2/60 p-2"[39m
+        [33mdata-testid[39m=[32m"flashcards-review-topbar"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-select ant-select-outlined min-w-64 max-w-full flex-1 css-var-root ant-select-css-var css-dev-only-do-not-override-3uaqrl ant-select-single ant-select-allow-clear ant-select-show-arrow"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-deck-select"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-content"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-select-content-value"[39m
+              [33mstyle[39m=[32m"visibility: visible;"[39m
+              [33mtitle[39m=[32m"Biology"[39m
+            [36m>[39m
+              [0mBiology[0m
+            [36m</div>[39m
+            [36m<input[39m
+              [33maria-autocomplete[39m=[32m"list"[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-haspopup[39m=[32m"listbox"[39m
+              [33mautocomplete[39m=[32m"off"[39m
+              [33mclass[39m=[32m"ant-select-input"[39m
+              [33mid[39m=[32m"test-id"[39m
+              [33mreadonly[39m=[32m""[39m
+              [33mrole[39m=[32m"combobox"[39m
+              [33mtype[39m=[32m"search"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-suffix"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"down"[39m
+              [33mclass[39m=[32m"anticon anticon-down"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"down"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-clear"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"close-circle"[39m
+              [33mclass[39m=[32m"anticon anticon-close-circle"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"close-circle"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfill-rule[39m=[32m"evenodd"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M512 64c247.4 0 448 200.6 448 448S759.4 960 512 960 64 759.4 64 512 264.6 64 512 64zm127.98 274.82h-.04l-.08.06L512 466.75 384.14 338.88c-.04-.05-.06-.06-.08-.06a.12.12 0 00-.07 0c-.03 0-.05.01-.09.05l-45.02 45.02a.2.2 0 00-.05.09.12.12 0 000 .07v.02a.27.27 0 00.06.06L466.75 512 338.88 639.86c-.05.04-.06.06-.06.08a.12.12 0 000 .07c0 .03.01.05.05.09l45.02 45.02a.2.2 0 00.09.05.12.12 0 00.07 0c.02 0 .04-.01.08-.05L512 557.25l127.86 127.87c.04.04.06.05.08.05a.12.12 0 00.07 0c.03 0 .05-.01.09-.05l45.02-45.02a.2.2 0 00.05-.09.12.12 0 000-.07v-.02a.27.27 0 00-.05-.06L557.25 512l127.87-127.86c.04-.04.05-.06.05-.08a.12.12 0 000-.07c0-.03-.01-.05-.05-.09l-45.02-45.02a.2.2 0 00-.09-.05.12.12 0 00-.07 0z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"segmented control"[39m
+          [33maria-orientation[39m=[32m"horizontal"[39m
+          [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-mode-toggle"[39m
+          [33mrole[39m=[32m"radiogroup"[39m
+          [33mtabindex[39m=[32m"0"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-segmented-group"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented-item"[39m
+            [36m>[39m
+              [36m<input[39m
+                [33mchecked[39m=[32m""[39m
+                [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                [33mname[39m=[32m"test-id"[39m
+                [33mtype[39m=[32m"radio"[39m
+              [36m/>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                [33mtitle[39m=[32m"Due only"[39m
+              [36m>[39m
+                [0mDue only[0m
+              [36m</div>[39m
+            [36m</label>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+            [36m>[39m
+              [36m<input[39m
+                [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                [33mname[39m=[32m"test-id"[39m
+                [33mtype[39m=[32m"radio"[39m
+              [36m/>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                [33mtitle[39m=[32m"Cram"[39m
+              [36m>[39m
+                [0mCram[0m
+              [36m</div>[39m
+            [36m</label>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"segmented control"[39m
+          [33maria-orientation[39m=[32m"horizontal"[39m
+          [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-prompt-side-toggle"[39m
+          [33mrole[39m=[32m"radiogroup"[39m
+          [33mtabindex[39m=[32m"0"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-segmented-group"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented...
+ ❯ Object.getElementError ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx:458:28
+    456|     fireEvent.click(screen.getByTestId("flashcards-review-cram-update-…
+    457|     await rate("Alpha")
+    458|     fireEvent.click(screen.getByRole("button", { name: "End session", …
+       |                            ^
+    459|     await waitFor(() => expect(endMutateAsync).toHaveBeenCalledTimes(1…
+    460|     expect(screen.getByText("Bravo")).toBeInTheDocument()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  1 failed | 64 passed (65)
+   Start at  06:28:44
+   Duration  8.80s (transform 861ms, setup 304ms, import 2.73s, tests 4.17s, environment 1.11s)
+
+error: script "test" exited with code 1
