@@ -3228,7 +3228,7 @@
     "message": "You have unsaved changes. Are you sure you want to close?"
   },
   "flashcards_cardsRemaining": {
-    "message": "cards remaining"
+    "message": "{count, plural, one {card remaining} other {cards remaining}}"
   },
   "flashcards_availableNowCount": {
     "message": "Available now: {{count}}"
@@ -3243,7 +3243,7 @@
     "message": "min left"
   },
   "flashcards_progressStatus": {
-    "message": "{{remaining}} cards remaining, {{reviewed}} reviewed"
+    "message": "{count, plural, one {# card remaining} other {# cards remaining}}, {reviewed} reviewed"
   },
   "flashcards_deleteUndoHint": {
     "message": "Undo within {{seconds}}s to cancel deletion."

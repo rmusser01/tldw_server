@@ -1,0 +1,70 @@
+{
+  "files": [
+    {
+      "file": "cycle5-uat137-138-independent-hash-audit.json",
+      "sha256": "02af48a3191e126298659b29c9db2148da333e1635e1a216c8f97a951c117471"
+    },
+    {
+      "file": "cycle5-uat137-138-independent-review.md",
+      "sha256": "e2de252744b504df4c369c834101438684744dc8b25b2fe1254a84a8ac029e02"
+    },
+    {
+      "file": "cycle5-uat137-138-independent-tests.log",
+      "sha256": "9d02f8e79bd8e9c78a064592fa549ca8e5bf0236a7e3db581939ee5160da91e1"
+    },
+    {
+      "file": "cycle5-uat137-138-lint.log",
+      "sha256": "4f3ca595af16a36e73c44b9572f8bb9241f84013e953d1d1fe8e07ed560b491b"
+    },
+    {
+      "file": "cycle5-uat137-138-owned.json",
+      "sha256": "e9d09f7c0bfdd96273f1637dd78a7819799b7a0aac722e1bf7b298aecf3aac1b"
+    },
+    {
+      "file": "cycle5-uat137-138-report.md",
+      "sha256": "de9d87a109d94e59a4a7e67695a63898bac49082336bbc376a74404e8f20ffc3"
+    },
+    {
+      "file": "cycle5-uat137-green.log",
+      "sha256": "19345682bd4979d48f880e57f978bd9dbf754d2000d9be6911fe446d118e5c8d"
+    },
+    {
+      "file": "cycle5-uat137-red-direct.log",
+      "sha256": "525a2d944da9613b08a7137f8b1808825e7ee52ed1fc12fe1008b73e65e75dd0"
+    },
+    {
+      "file": "cycle5-uat137-red-icu.log",
+      "sha256": "b7fa8d25a215a88b60b21980a073527daf29f6d82c8f3367a1136c3303ddf505"
+    },
+    {
+      "file": "cycle5-uat137-red.log",
+      "sha256": "a943634d25ac80da92f1091017b9912ff155642c881929fe056c71096b4bbe7a"
+    },
+    {
+      "file": "cycle5-uat138-final.log",
+      "sha256": "e836843251524671d66d53f1e473083fe3a039d04e6bab5763a47b841a8b6e24"
+    },
+    {
+      "file": "cycle5-uat138-green.log",
+      "sha256": "7cb66b4858264b0266a4666834ead96df10a515690da36c9f23aae0e7aa81e09"
+    },
+    {
+      "file": "cycle5-uat138-lint-baseline.json",
+      "sha256": "3da30dd64537fce329ae4773328c298f4072161be2552a7e4c1d17f2ee4270fc"
+    },
+    {
+      "file": "cycle5-uat138-lint-current.json",
+      "sha256": "a0599c346b790479cead28a38bd3c6a81345e2bbd75806b538fcec806aba3ff5"
+    },
+    {
+      "file": "cycle5-uat138-red-confirmed.log",
+      "sha256": "8a77f5e7643d7a1c778d45d99895cc471191b40163c537e34e010bfb0b75ba92"
+    },
+    {
+      "file": "cycle5-uat138-red.log",
+      "sha256": "596759d56a946e90da272a275ffc20b756673ba115fb63b3e94cdc9275fbad36"
+    }
+  ],
+  "secretFindings": 0,
+  "nativeAcceptance": "pending"
+}

@@ -28,7 +28,10 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
   const estimatedMinutes = Math.ceil((remaining * avgTimePerCard) / 60)
 
   const statusMessageParts = [t("option:flashcards.progressStatus", {
-    defaultValue: "{{remaining}} cards remaining, {{reviewed}} reviewed",
+    defaultValue: remaining === 1
+      ? "{{remaining}} card remaining, {{reviewed}} reviewed"
+      : "{{remaining}} cards remaining, {{reviewed}} reviewed",
+    count: remaining,
     remaining,
     reviewed: reviewedCount
   })]
@@ -85,7 +88,10 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
         </span>
         <span className="text-2xl font-bold text-primary" aria-hidden="true">{remaining}</span>
         <span className="text-sm text-text-muted" aria-hidden="true">
-          {t("option:flashcards.cardsRemaining", { defaultValue: "cards remaining" })}
+          {t("option:flashcards.cardsRemaining", {
+            defaultValue: remaining === 1 ? "card remaining" : "cards remaining",
+            count: remaining
+          })}
         </span>
       </div>
       <div className="hidden h-8 w-px bg-border sm:block" aria-hidden="true" />

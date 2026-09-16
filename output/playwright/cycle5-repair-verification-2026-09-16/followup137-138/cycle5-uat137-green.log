@@ -1,0 +1,21 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:77154) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/components/__tests__/ReviewProgress.plurals.test.tsx (3 tests) 82ms
+(node:77168) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx (14 tests) 1630ms
+(node:77218) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/tabs/__tests__/ReviewTab.queue-state.test.tsx (13 tests) 606ms
+(node:77228) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/components/__tests__/ReviewProgress.test.tsx (2 tests) 109ms
+
+ Test Files  4 passed (4)
+      Tests  32 passed (32)
+   Start at  08:11:24
+   Duration  7.60s (transform 979ms, setup 268ms, import 3.51s, tests 2.43s, environment 1.02s)
+

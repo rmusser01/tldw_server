@@ -1,0 +1,34 @@
+[
+  {
+    "file": "apps/packages/ui/src/components/Flashcards/components/ReviewProgress.tsx",
+    "sha256": "034396fc0fc544c25c52d0554f9dc70f29d8e97d69a3ee6e1f988dc383f23ee4"
+  },
+  {
+    "file": "apps/packages/ui/src/assets/locale/en/option.json",
+    "sha256": "ef93336115327a70b7dab31bf30969cc8a3d36d2e1ea9421861c207833694d33"
+  },
+  {
+    "file": "apps/packages/ui/src/public/_locales/en/option.json",
+    "sha256": "ab984a7c6e9edcd492ca8c9f0c6e742f44c99df50b80d6900976a194af20bc9b"
+  },
+  {
+    "file": "apps/packages/ui/src/components/Flashcards/components/__tests__/ReviewProgress.test.tsx",
+    "sha256": "7ea8c994673b52229f14b791124778647400cab77cfe33691368fddaf78bfadf"
+  },
+  {
+    "file": "apps/packages/ui/src/components/Flashcards/components/__tests__/ReviewProgress.plurals.test.tsx",
+    "sha256": "7c36ba075e776909c572dea15de824421832f82f3f546389c651c17f1028a1ae"
+  },
+  {
+    "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+    "sha256": "f1938b9064390694340c85204844e49f1292af8c20b126e2e4d2b092406b3e08"
+  },
+  {
+    "file": "apps/packages/ui/src/components/Review/hooks/useMediaSearch.ts",
+    "sha256": "316dc3845a374d6e169d74cd1d95e5a96345eac7668edf6c801523721c7d7f86"
+  },
+  {
+    "file": "apps/packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx",
+    "sha256": "86bb056dba9c9047521568c4e76b4ea3eadeff81fed92256d16ae191ffa9ff21"
+  }
+]

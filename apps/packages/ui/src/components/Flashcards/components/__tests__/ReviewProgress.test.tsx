@@ -54,7 +54,7 @@ describe("ReviewProgress queue language", () => {
     const { rerender } = render(<ReviewProgress remainingCount={5} reviewedCount={0} />)
     for (let reviewed = 1; reviewed <= 4; reviewed += 1) {
       rerender(<ReviewProgress remainingCount={5 - reviewed} reviewedCount={reviewed} />)
-      expect(screen.getByRole("status")).toHaveTextContent(`${5 - reviewed} cards remaining, ${reviewed} reviewed`)
+      expect(screen.getByRole("status")).toHaveTextContent(`${5 - reviewed} ${reviewed === 4 ? "card" : "cards"} remaining, ${reviewed} reviewed`)
     }
     rerender(<ReviewProgress remainingCount={4} reviewedCount={4} />)
     expect(screen.getByRole("status")).toHaveTextContent("4 cards remaining, 4 reviewed")

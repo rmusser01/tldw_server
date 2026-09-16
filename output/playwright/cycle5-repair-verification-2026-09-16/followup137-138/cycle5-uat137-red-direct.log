@@ -1,0 +1,104 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:71951) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Flashcards/components/__tests__/ReviewProgress.plurals.test.tsx (3 tests | 1 failed) 64ms
+     × keeps visible and announced wording aligned at 1 13ms
+     ✓ keeps visible and announced wording aligned at 2 49ms
+     ✓ does not announce remaining work for an empty queue 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Flashcards/components/__tests__/ReviewProgress.plurals.test.tsx > ReviewProgress localized remaining count > keeps visible and announced wording aligned at 1
+TestingLibraryElementError: Unable to find an element with the text: card remaining. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33maria-atomic[39m=[32m"true"[39m
+      [33maria-live[39m=[32m"polite"[39m
+      [33mclass[39m=[32m"mb-4 flex max-w-full flex-wrap items-center gap-2 rounded-lg bg-surface2 p-3 sm:gap-4"[39m
+      [33mdata-testid[39m=[32m"flashcards-review-progress"[39m
+      [33mrole[39m=[32m"status"[39m
+    [36m>[39m
+      [36m<span[39m
+        [33mclass[39m=[32m"sr-only"[39m
+      [36m>[39m
+        [0m1 cards remaining, 4 reviewed[0m
+      [36m</span>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex items-center gap-2"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33maria-hidden[39m=[32m"true"[39m
+          [33mclass[39m=[32m"text-sm font-medium text-text"[39m
+        [36m>[39m
+          [0mStudy queue[0m
+        [36m</span>[39m
+        [36m<span[39m
+          [33maria-hidden[39m=[32m"true"[39m
+          [33mclass[39m=[32m"text-2xl font-bold text-primary"[39m
+        [36m>[39m
+          [0m1[0m
+        [36m</span>[39m
+        [36m<span[39m
+          [33maria-hidden[39m=[32m"true"[39m
+          [33mclass[39m=[32m"text-sm text-text-muted"[39m
+        [36m>[39m
+          [0mcards remaining[0m
+        [36m</span>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33maria-hidden[39m=[32m"true"[39m
+        [33mclass[39m=[32m"hidden h-8 w-px bg-border sm:block"[39m
+      [36m/>[39m
+      [36m<div[39m
+        [33maria-hidden[39m=[32m"true"[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"font-medium text-text"[39m
+        [36m>[39m
+          [0m4[0m
+        [36m</span>[39m
+        [0m [0m
+        [0mreviewed[0m
+      [36m</div>[39m
+      [36m<div[39m
+        [33maria-hidden[39m=[32m"true"[39m
+        [33mclass[39m=[32m"hidden h-8 w-px bg-border sm:block"[39m
+      [36m/>[39m
+      [36m<div[39m
+        [33maria-hidden[39m=[32m"true"[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0m~[0m
+        [0m1[0m
+        [0m [0m
+        [0mmin left[0m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ Object.getElementError ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/Flashcards/components/__tests__/ReviewProgress.plurals.test.tsx:25:19
+     23|     )
+     24| 
+     25|     expect(screen.getByText(label, { exact: true })).toBeVisible()
+       |                   ^
+     26|     expect(screen.getByRole("status").querySelector(".sr-only")).toHav…
+     27|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  08:00:24
+   Duration  1.48s (transform 47ms, setup 127ms, import 674ms, tests 64ms, environment 506ms)
+

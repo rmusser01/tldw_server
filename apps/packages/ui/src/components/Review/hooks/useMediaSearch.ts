@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Storage } from '@plasmohq/storage'
 import { safeStorageSerde } from '@/utils/safe-storage'
 import { bgRequest } from '@/services/background-proxy'
+import { classifyBackendUnreachableError } from '@/services/backend-unreachable'
 import { useDebounce } from '@/hooks/useDebounce'
 import {
   buildMediaSearchPayload,
@@ -486,7 +487,11 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
           actualMediaCount = 0
           setMediaTotal(0)
         } else {
-          console.error('Media search error:', err)
+          if (classifyBackendUnreachableError(err).kind === 'backend_unreachable') {
+            console.warn('Media search request failed.')
+          } else {
+            console.error('Media search error:', err)
+          }
           message.error(t('review:mediaPage.searchError', { defaultValue: 'Failed to search media' }))
         }
       }

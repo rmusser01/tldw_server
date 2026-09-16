@@ -1,0 +1,102 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:82574) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:82573) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/tabs/__tests__/ReviewTab.queue-state.test.tsx (13 tests) 728ms
+(node:82615) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx (14 tests) 1850ms
+     ✓ manual End keeps the remaining cards available for the next scheduled session  333ms
+(node:82634) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Review/__tests__/MediaReviewPage.stage3.search-filter-sort.test.tsx > MediaReviewPage stage3 search/filter/sort > renders sort control and date range group in filter controls
+Warning: You provided a `value` prop to a form field without an `onChange` handler. This will render a read-only field. If the field should be mutable use `defaultValue`. Otherwise, set either `onChange` or `readOnly`.
+    at input
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/__tests__/MediaReviewPage.stage3.search-filter-sort.test.tsx:141:8
+    at div
+    at div
+    at MediaReviewResultsList (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewResultsList.tsx:16:35)
+    at div
+    at div
+    at div
+    at div
+    at ResizablePanels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/ResizablePanels.tsx:7:3)
+    at div
+    at div
+    at MediaReviewPage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewPage.tsx:30:54)
+
+stderr | src/components/Review/__tests__/MediaReviewPage.stage3.search-filter-sort.test.tsx > MediaReviewPage stage3 search/filter/sort > sends selected sort/date filters in search payload
+Warning: You provided a `value` prop to a form field without an `onChange` handler. This will render a read-only field. If the field should be mutable use `defaultValue`. Otherwise, set either `onChange` or `readOnly`.
+    at input
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/__tests__/MediaReviewPage.stage3.search-filter-sort.test.tsx:141:8
+    at div
+    at div
+    at MediaReviewResultsList (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewResultsList.tsx:16:35)
+    at div
+    at div
+    at div
+    at div
+    at ResizablePanels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/ResizablePanels.tsx:7:3)
+    at div
+    at div
+    at MediaReviewPage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewPage.tsx:30:54)
+
+stderr | src/components/Review/__tests__/MediaReviewPage.stage3.search-filter-sort.test.tsx > MediaReviewPage stage3 search/filter/sort > shows full-content search scope copy and progress feedback
+Warning: You provided a `value` prop to a form field without an `onChange` handler. This will render a read-only field. If the field should be mutable use `defaultValue`. Otherwise, set either `onChange` or `readOnly`.
+    at input
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/__tests__/MediaReviewPage.stage3.search-filter-sort.test.tsx:141:8
+    at div
+    at div
+    at MediaReviewResultsList (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewResultsList.tsx:16:35)
+    at div
+    at div
+    at div
+    at div
+    at ResizablePanels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/ResizablePanels.tsx:7:3)
+    at div
+    at div
+    at MediaReviewPage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewPage.tsx:30:54)
+
+stderr | src/components/Review/__tests__/MediaReviewPage.stage3.search-filter-sort.test.tsx > MediaReviewPage stage3 search/filter/sort > shows removable filter chips and removes chip actions
+Warning: You provided a `value` prop to a form field without an `onChange` handler. This will render a read-only field. If the field should be mutable use `defaultValue`. Otherwise, set either `onChange` or `readOnly`.
+    at input
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/__tests__/MediaReviewPage.stage3.search-filter-sort.test.tsx:141:8
+    at div
+    at div
+    at MediaReviewResultsList (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewResultsList.tsx:16:35)
+    at div
+    at div
+    at div
+    at div
+    at ResizablePanels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/ResizablePanels.tsx:7:3)
+    at div
+    at div
+    at MediaReviewPage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewPage.tsx:30:54)
+
+ ✓ src/components/Review/__tests__/MediaReviewPage.stage3.search-filter-sort.test.tsx (4 tests) 632ms
+(node:82643) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx (1 test) 351ms
+     ✓ keeps re-rate visible after advancing and restores the reviewed card  351ms
+ ✓ src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx (3 tests) 173ms
+(node:82646) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:82647) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/components/__tests__/ReviewProgress.test.tsx (2 tests) 124ms
+ ✓ src/components/Flashcards/components/__tests__/ReviewProgress.responsive.test.tsx (1 test) 91ms
+(node:82655) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:82657) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/backend-unreachable.test.ts (24 tests) 5ms
+ ✓ src/components/Flashcards/components/__tests__/ReviewProgress.plurals.test.tsx (3 tests) 93ms
+
+ Test Files  9 passed (9)
+      Tests  65 passed (65)
+   Start at  08:19:52
+   Duration  8.10s (transform 2.45s, setup 700ms, import 7.46s, tests 4.05s, environment 2.55s)
+
