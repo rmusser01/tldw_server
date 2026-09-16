@@ -1,0 +1,24 @@
+{
+  "at": "2026-09-16T16:44:52.803Z",
+  "scope": "Authenticated actual API reads on normal fresh PostgreSQL profiles; not browser workflow acceptance.",
+  "results": [
+    {
+      "mode": "single",
+      "path": "/api/v1/reading/digests/schedules",
+      "status": 200,
+      "body": []
+    },
+    {
+      "mode": "multi",
+      "path": "/api/v1/auth/login",
+      "status": 200,
+      "tokenReturned": true
+    },
+    {
+      "mode": "multi",
+      "path": "/api/v1/reading/digests/schedules",
+      "status": 200,
+      "body": []
+    }
+  ]
+}

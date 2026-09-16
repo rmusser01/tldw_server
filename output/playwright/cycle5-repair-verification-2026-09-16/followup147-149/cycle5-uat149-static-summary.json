@@ -1,0 +1,8 @@
+{
+  "ruffBaseline": 9,
+  "ruffFinal": 9,
+  "ruffSignaturesUnchanged": true,
+  "newTestRuff": 0,
+  "banditFindings": 0,
+  "banditErrors": 0
+}

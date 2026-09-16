@@ -1,0 +1,18 @@
+{
+  "frozenAt": "2026-09-16T16:38:42.564Z",
+  "root": "/Users/macbook-dev/Documents/GitHub/tldw_server2",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "006fa7a8ebf141f7670003bbcc92bcab8a1a9739013716a874dc99acbd25efde"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_chacha_postgres_sequence_ownership.py",
+      "sha256": "2a707d6b941cbfcc3f47deb6ca0970249d2659ef054754bb0e8c5e0477a39bc7"
+    },
+    {
+      "path": "backlog/tasks/task-13260.88 - Prevent-PostgreSQL-Chat-warm-up-from-locking-Media-keyword-tables.md",
+      "sha256": "b256e5903d3da270c8809aafc7533d9fe8ddce68ede8ab563e247237d41c8fad"
+    }
+  ]
+}

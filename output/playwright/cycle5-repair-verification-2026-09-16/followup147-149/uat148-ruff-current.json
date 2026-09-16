@@ -1,0 +1,1770 @@
+[
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 48,
+      "row": 44
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from __future__ import annotations\n\nimport asyncio\nimport contextlib\nimport hashlib\nimport ipaddress\nimport json\nimport os\nimport socket\nimport threading\nimport time\nimport uuid\nfrom collections import OrderedDict\nfrom datetime import datetime\nfrom pathlib import Path\nfrom typing import Any, Optional\nfrom urllib.parse import urlsplit\n\nfrom loguru import logger\n\nfrom ....DB_Management.db_path_utils import DatabasePaths\nfrom ....DB_Management.media_db.api import (\n    create_media_database,\n    get_document_version,\n    get_latest_transcription,\n    get_media_by_id,\n    get_media_transcripts,\n    get_unvectorized_anchor_index_for_offset,\n    get_unvectorized_chunk_index_by_uuid,\n    get_unvectorized_chunks_in_range,\n    has_unvectorized_chunks,\n    permanently_delete_item,\n    search_media,\n)\nfrom ....DB_Management.media_db.errors import DatabaseError\nfrom ...persona_scope import get_explicit_scope_ids, merge_requested_ids_with_scope\nfrom ..base import BaseModule, create_resource_definition, create_tool_definition\nfrom ..disk_space import get_free_disk_space_gb\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 46
+          },
+          "location": {
+            "column": 1,
+            "row": 7
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 7
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 7,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 64,
+      "row": 112
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 64,
+            "row": 112
+          },
+          "location": {
+            "column": 51,
+            "row": 112
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 51,
+      "row": 112
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 112,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 79,
+      "row": 112
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 79,
+            "row": 112
+          },
+          "location": {
+            "column": 66,
+            "row": 112
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 66,
+      "row": 112
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 112,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 63,
+      "row": 500
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "float | None",
+          "end_location": {
+            "column": 63,
+            "row": 500
+          },
+          "location": {
+            "column": 48,
+            "row": 500
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 48,
+      "row": 500
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 500,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 48,
+      "row": 597
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 48,
+            "row": 597
+          },
+          "location": {
+            "column": 35,
+            "row": 597
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 35,
+      "row": 597
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 597,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 70,
+      "row": 597
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 70,
+            "row": 597
+          },
+          "location": {
+            "column": 57,
+            "row": 597
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 57,
+      "row": 597
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 597,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 88,
+      "row": 615
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 88,
+            "row": 615
+          },
+          "location": {
+            "column": 75,
+            "row": 615
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 75,
+      "row": 615
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 615,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 41,
+      "row": 662
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 41,
+            "row": 662
+          },
+          "location": {
+            "column": 22,
+            "row": 662
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 22,
+      "row": 662
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 662,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 33,
+      "row": 663
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 33,
+            "row": 663
+          },
+          "location": {
+            "column": 20,
+            "row": 663
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 20,
+      "row": 663
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 663,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 31,
+      "row": 664
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 31,
+            "row": 664
+          },
+          "location": {
+            "column": 18,
+            "row": 664
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 18,
+      "row": 664
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 664,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 46,
+      "row": 666
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[Any] | None",
+          "end_location": {
+            "column": 46,
+            "row": 666
+          },
+          "location": {
+            "column": 27,
+            "row": 666
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 27,
+      "row": 666
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 666,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 41,
+      "row": 689
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 41,
+            "row": 689
+          },
+          "location": {
+            "column": 22,
+            "row": 689
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 22,
+      "row": 689
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 689,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 33,
+      "row": 690
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 33,
+            "row": 690
+          },
+          "location": {
+            "column": 20,
+            "row": 690
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 20,
+      "row": 690
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 690,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 31,
+      "row": 691
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 31,
+            "row": 691
+          },
+          "location": {
+            "column": 18,
+            "row": 691
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 18,
+      "row": 691
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 691,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 46,
+      "row": 693
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[Any] | None",
+          "end_location": {
+            "column": 46,
+            "row": 693
+          },
+          "location": {
+            "column": 27,
+            "row": 693
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 27,
+      "row": 693
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 693,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 93,
+      "row": 818
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "dict[str, Any] | None",
+          "end_location": {
+            "column": 93,
+            "row": 818
+          },
+          "location": {
+            "column": 69,
+            "row": 818
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 69,
+      "row": 818
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 818,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 92,
+      "row": 826
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "dict[str, Any] | None",
+          "end_location": {
+            "column": 92,
+            "row": 826
+          },
+          "location": {
+            "column": 68,
+            "row": 826
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 68,
+      "row": 826
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 826,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 40,
+      "row": 905
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "int | None",
+          "end_location": {
+            "column": 40,
+            "row": 905
+          },
+          "location": {
+            "column": 27,
+            "row": 905
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 27,
+      "row": 905
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 905,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 39,
+      "row": 906
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 39,
+            "row": 906
+          },
+          "location": {
+            "column": 26,
+            "row": 906
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 26,
+      "row": 906
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 906,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 43,
+      "row": 1255
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 43,
+            "row": 1255
+          },
+          "location": {
+            "column": 24,
+            "row": 1255
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 24,
+      "row": 1255
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1255,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 41,
+      "row": 1256
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 41,
+            "row": 1256
+          },
+          "location": {
+            "column": 22,
+            "row": 1256
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 22,
+      "row": 1256
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1256,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 45,
+      "row": 1257
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "dict[str, Any] | None",
+          "end_location": {
+            "column": 45,
+            "row": 1257
+          },
+          "location": {
+            "column": 21,
+            "row": 1257
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 21,
+      "row": 1257
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1257,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 48,
+      "row": 1258
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 48,
+            "row": 1258
+          },
+          "location": {
+            "column": 29,
+            "row": 1258
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 29,
+      "row": 1258
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1258,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 52,
+      "row": 1259
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 52,
+            "row": 1259
+          },
+          "location": {
+            "column": 33,
+            "row": 1259
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 33,
+      "row": 1259
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1259,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 37,
+      "row": 1260
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 37,
+            "row": 1260
+          },
+          "location": {
+            "column": 24,
+            "row": 1260
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 24,
+      "row": 1260
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1260,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 46,
+      "row": 1261
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[Any] | None",
+          "end_location": {
+            "column": 46,
+            "row": 1261
+          },
+          "location": {
+            "column": 27,
+            "row": 1261
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 27,
+      "row": 1261
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1261,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 43,
+      "row": 1312
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 43,
+            "row": 1312
+          },
+          "location": {
+            "column": 24,
+            "row": 1312
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 24,
+      "row": 1312
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1312,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 41,
+      "row": 1313
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 41,
+            "row": 1313
+          },
+          "location": {
+            "column": 22,
+            "row": 1313
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 22,
+      "row": 1313
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1313,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 45,
+      "row": 1314
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "dict[str, Any] | None",
+          "end_location": {
+            "column": 45,
+            "row": 1314
+          },
+          "location": {
+            "column": 21,
+            "row": 1314
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 21,
+      "row": 1314
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1314,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 48,
+      "row": 1315
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 48,
+            "row": 1315
+          },
+          "location": {
+            "column": 29,
+            "row": 1315
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 29,
+      "row": 1315
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1315,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 52,
+      "row": 1316
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 52,
+            "row": 1316
+          },
+          "location": {
+            "column": 33,
+            "row": 1316
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 33,
+      "row": 1316
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1316,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 37,
+      "row": 1317
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 37,
+            "row": 1317
+          },
+          "location": {
+            "column": 24,
+            "row": 1317
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 24,
+      "row": 1317
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1317,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 46,
+      "row": 1318
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[Any] | None",
+          "end_location": {
+            "column": 46,
+            "row": 1318
+          },
+          "location": {
+            "column": 27,
+            "row": 1318
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 27,
+      "row": 1318
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1318,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 41,
+      "row": 1375
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 41,
+            "row": 1375
+          },
+          "location": {
+            "column": 22,
+            "row": 1375
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 22,
+      "row": 1375
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1375,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 50,
+      "row": 1376
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "dict[str, Any] | None",
+          "end_location": {
+            "column": 50,
+            "row": 1376
+          },
+          "location": {
+            "column": 26,
+            "row": 1376
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 26,
+      "row": 1376
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1376,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 46,
+      "row": 1378
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[Any] | None",
+          "end_location": {
+            "column": 46,
+            "row": 1378
+          },
+          "location": {
+            "column": 27,
+            "row": 1378
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 27,
+      "row": 1378
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1378,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 38,
+      "row": 1389
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 38,
+            "row": 1389
+          },
+          "location": {
+            "column": 25,
+            "row": 1389
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 25,
+      "row": 1389
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1389,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 41,
+      "row": 1450
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 41,
+            "row": 1450
+          },
+          "location": {
+            "column": 22,
+            "row": 1450
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 22,
+      "row": 1450
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1450,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 45,
+      "row": 1451
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "dict[str, Any] | None",
+          "end_location": {
+            "column": 45,
+            "row": 1451
+          },
+          "location": {
+            "column": 21,
+            "row": 1451
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 21,
+      "row": 1451
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1451,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 48,
+      "row": 1452
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 48,
+            "row": 1452
+          },
+          "location": {
+            "column": 29,
+            "row": 1452
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 29,
+      "row": 1452
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1452,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 52,
+      "row": 1453
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 52,
+            "row": 1453
+          },
+          "location": {
+            "column": 33,
+            "row": 1453
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 33,
+      "row": 1453
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1453,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 37,
+      "row": 1454
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 37,
+            "row": 1454
+          },
+          "location": {
+            "column": 24,
+            "row": 1454
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 24,
+      "row": 1454
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1454,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 46,
+      "row": 1455
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[Any] | None",
+          "end_location": {
+            "column": 46,
+            "row": 1455
+          },
+          "location": {
+            "column": 27,
+            "row": 1455
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 27,
+      "row": 1455
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1455,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 43,
+      "row": 1458
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 43,
+            "row": 1458
+          },
+          "location": {
+            "column": 24,
+            "row": 1458
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 24,
+      "row": 1458
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1458,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 50,
+      "row": 1459
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "dict[str, Any] | None",
+          "end_location": {
+            "column": 50,
+            "row": 1459
+          },
+          "location": {
+            "column": 26,
+            "row": 1459
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 26,
+      "row": 1459
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1459,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 42,
+      "row": 1546
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "dict[str, Any] | None",
+          "end_location": {
+            "column": 42,
+            "row": 1546
+          },
+          "location": {
+            "column": 18,
+            "row": 1546
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 18,
+      "row": 1546
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1546,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 42,
+      "row": 1608
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "dict[str, Any] | None",
+          "end_location": {
+            "column": 42,
+            "row": 1608
+          },
+          "location": {
+            "column": 18,
+            "row": 1608
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 18,
+      "row": 1608
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1608,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 29,
+      "row": 1640
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "str | None",
+          "end_location": {
+            "column": 29,
+            "row": 1640
+          },
+          "location": {
+            "column": 16,
+            "row": 1640
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 16,
+      "row": 1640
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1640,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 34,
+      "row": 1642
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "list[str] | None",
+          "end_location": {
+            "column": 34,
+            "row": 1642
+          },
+          "location": {
+            "column": 15,
+            "row": 1642
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 15,
+      "row": 1642
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1642,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 42,
+      "row": 1715
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "dict[str, Any] | None",
+          "end_location": {
+            "column": 42,
+            "row": 1715
+          },
+          "location": {
+            "column": 18,
+            "row": 1715
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 18,
+      "row": 1715
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1715,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 42,
+      "row": 1827
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "dict[str, Any] | None",
+          "end_location": {
+            "column": 42,
+            "row": 1827
+          },
+          "location": {
+            "column": 18,
+            "row": 1827
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 18,
+      "row": 1827
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 1827,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  },
+  {
+    "cell": null,
+    "code": "UP045",
+    "end_location": {
+      "column": 98,
+      "row": 2065
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/MCP_unified/modules/implementations/media_module.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "MediaDbLike | None",
+          "end_location": {
+            "column": 98,
+            "row": 2065
+          },
+          "location": {
+            "column": 77,
+            "row": 2065
+          }
+        }
+      ],
+      "message": "Convert to `X | None`"
+    },
+    "location": {
+      "column": 77,
+      "row": 2065
+    },
+    "message": "Use `X | None` for type annotations",
+    "noqa_row": 2065,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation-optional"
+  }
+]

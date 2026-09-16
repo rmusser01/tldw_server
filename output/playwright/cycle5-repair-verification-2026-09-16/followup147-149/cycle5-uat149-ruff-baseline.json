@@ -1,0 +1,336 @@
+[
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 76,
+      "row": 57
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/DB_Management/Collections_DB.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from __future__ import annotations\n\nimport contextlib\nimport functools\nimport json\nimport os\nimport re\nimport threading\nfrom collections.abc import Generator, Iterable\nfrom dataclasses import dataclass\nfrom datetime import datetime, timedelta, timezone\nfrom pathlib import Path\nfrom typing import Any\nfrom urllib.parse import urlparse\nfrom uuid import uuid4\n\nfrom loguru import logger\n\nfrom tldw_Server_API.app.core.Collections.utils import (\n    build_highlight_context,\n    find_highlight_span,\n    hash_text_sha256,\n)\nfrom tldw_Server_API.app.core.config import load_comprehensive_config, settings\nfrom tldw_Server_API.app.core.DB_Management.content_backend import (\n    backend_target_key,\n    get_content_backend,\n    load_content_db_settings,\n)\nfrom tldw_Server_API.app.core.DB_Management.schema_once import ensure_once\nfrom tldw_Server_API.app.core.exceptions import (\n    InvalidStorageUserIdError,\n    StorageUnavailableError,\n)\nfrom tldw_Server_API.app.core.testing import is_truthy\n\nfrom .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError\nfrom .backends.factory import (\n    DatabaseBackendFactory,\n    is_factory_managed_backend,\n    release_managed_backend,\n)\nfrom .backends.query_utils import prepare_backend_statement\nfrom .db_path_utils import DatabasePaths, normalize_output_storage_filename\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 59
+          },
+          "location": {
+            "column": 1,
+            "row": 14
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 14
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 14,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "UP037",
+    "end_location": {
+      "column": 44,
+      "row": 614
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/DB_Management/Collections_DB.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "CollectionsDatabase",
+          "end_location": {
+            "column": 44,
+            "row": 614
+          },
+          "location": {
+            "column": 23,
+            "row": 614
+          }
+        }
+      ],
+      "message": "Remove quotes"
+    },
+    "location": {
+      "column": 23,
+      "row": 614
+    },
+    "message": "Remove quotes from type annotation",
+    "noqa_row": 614,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/quoted-annotation"
+  },
+  {
+    "cell": null,
+    "code": "UP037",
+    "end_location": {
+      "column": 76,
+      "row": 621
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/DB_Management/Collections_DB.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "CollectionsDatabase",
+          "end_location": {
+            "column": 76,
+            "row": 621
+          },
+          "location": {
+            "column": 55,
+            "row": 621
+          }
+        }
+      ],
+      "message": "Remove quotes"
+    },
+    "location": {
+      "column": 55,
+      "row": 621
+    },
+    "message": "Remove quotes from type annotation",
+    "noqa_row": 621,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/quoted-annotation"
+  },
+  {
+    "cell": null,
+    "code": "UP037",
+    "end_location": {
+      "column": 108,
+      "row": 621
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/DB_Management/Collections_DB.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "CollectionsDatabase",
+          "end_location": {
+            "column": 108,
+            "row": 621
+          },
+          "location": {
+            "column": 87,
+            "row": 621
+          }
+        }
+      ],
+      "message": "Remove quotes"
+    },
+    "location": {
+      "column": 87,
+      "row": 621
+    },
+    "message": "Remove quotes from type annotation",
+    "noqa_row": 621,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/quoted-annotation"
+  },
+  {
+    "cell": null,
+    "code": "C409",
+    "end_location": {
+      "column": 49,
+      "row": 3380
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/DB_Management/Collections_DB.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "(",
+          "end_location": {
+            "column": 20,
+            "row": 3380
+          },
+          "location": {
+            "column": 13,
+            "row": 3380
+          }
+        },
+        {
+          "content": ")",
+          "end_location": {
+            "column": 49,
+            "row": 3380
+          },
+          "location": {
+            "column": 47,
+            "row": 3380
+          }
+        }
+      ],
+      "message": "Rewrite as a tuple literal"
+    },
+    "location": {
+      "column": 13,
+      "row": 3380
+    },
+    "message": "Unnecessary list literal passed to `tuple()` (rewrite as a tuple literal)",
+    "noqa_row": 3380,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unnecessary-literal-within-tuple-call"
+  },
+  {
+    "cell": null,
+    "code": "C409",
+    "end_location": {
+      "column": 63,
+      "row": 3432
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/DB_Management/Collections_DB.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "(",
+          "end_location": {
+            "column": 20,
+            "row": 3432
+          },
+          "location": {
+            "column": 13,
+            "row": 3432
+          }
+        },
+        {
+          "content": ")",
+          "end_location": {
+            "column": 63,
+            "row": 3432
+          },
+          "location": {
+            "column": 61,
+            "row": 3432
+          }
+        }
+      ],
+      "message": "Rewrite as a tuple literal"
+    },
+    "location": {
+      "column": 13,
+      "row": 3432
+    },
+    "message": "Unnecessary list literal passed to `tuple()` (rewrite as a tuple literal)",
+    "noqa_row": 3432,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unnecessary-literal-within-tuple-call"
+  },
+  {
+    "cell": null,
+    "code": "C409",
+    "end_location": {
+      "column": 57,
+      "row": 3679
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/DB_Management/Collections_DB.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "(",
+          "end_location": {
+            "column": 20,
+            "row": 3679
+          },
+          "location": {
+            "column": 13,
+            "row": 3679
+          }
+        },
+        {
+          "content": ")",
+          "end_location": {
+            "column": 57,
+            "row": 3679
+          },
+          "location": {
+            "column": 55,
+            "row": 3679
+          }
+        }
+      ],
+      "message": "Rewrite as a tuple literal"
+    },
+    "location": {
+      "column": 13,
+      "row": 3679
+    },
+    "message": "Unnecessary list literal passed to `tuple()` (rewrite as a tuple literal)",
+    "noqa_row": 3679,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unnecessary-literal-within-tuple-call"
+  },
+  {
+    "cell": null,
+    "code": "B007",
+    "end_location": {
+      "column": 23,
+      "row": 3769
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/DB_Management/Collections_DB.py",
+    "fix": null,
+    "location": {
+      "column": 17,
+      "row": 3769
+    },
+    "message": "Loop control variable `column` may not be used within loop body",
+    "noqa_row": 3769,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-loop-control-variable"
+  },
+  {
+    "cell": null,
+    "code": "C409",
+    "end_location": {
+      "column": 56,
+      "row": 7654
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/DB_Management/Collections_DB.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "(",
+          "end_location": {
+            "column": 29,
+            "row": 7654
+          },
+          "location": {
+            "column": 22,
+            "row": 7654
+          }
+        },
+        {
+          "content": ")",
+          "end_location": {
+            "column": 56,
+            "row": 7654
+          },
+          "location": {
+            "column": 54,
+            "row": 7654
+          }
+        }
+      ],
+      "message": "Rewrite as a tuple literal"
+    },
+    "location": {
+      "column": 22,
+      "row": 7654
+    },
+    "message": "Unnecessary list literal passed to `tuple()` (rewrite as a tuple literal)",
+    "noqa_row": 7654,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unnecessary-literal-within-tuple-call"
+  }
+]

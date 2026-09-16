@@ -1,0 +1,19 @@
+{
+  "checkedAt": "2026-09-16T16:39:34.920Z",
+  "freeze": "2026-09-16T16:37:26.311Z",
+  "allMatch": true,
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/Collections_DB.py",
+      "sha256": "1fdebaef25d7067adc7376b9246315be38d16f9e1b390ecbc21b959a401049c4",
+      "actual": "1fdebaef25d7067adc7376b9246315be38d16f9e1b390ecbc21b959a401049c4",
+      "matches": true
+    },
+    {
+      "path": "tldw_Server_API/tests/Collections/test_collections_postgres_bootstrap.py",
+      "sha256": "b37f5fe8ae28faa1ec39f4448529734f7fc78300a9fb9a35a90d10f1aa35ae5a",
+      "actual": "b37f5fe8ae28faa1ec39f4448529734f7fc78300a9fb9a35a90d10f1aa35ae5a",
+      "matches": true
+    }
+  ]
+}

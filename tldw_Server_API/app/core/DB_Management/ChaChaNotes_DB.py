@@ -921,7 +921,7 @@ class CharactersRAGDB:
 
     _POSTGRES_SEQUENCE_TABLES: tuple[tuple[str, str], ...] = (
         ("character_cards", "id"),
-        ("keywords", "id"),
+        ("chacha_keywords", "id"),
         ("keyword_collections", "id"),
         ("sync_log", "change_id"),
         ("moodboards", "id"),
