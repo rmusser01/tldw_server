@@ -1,0 +1,11 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:17393) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/utils/__tests__/chat-error-message.test.ts (12 tests) 2ms
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  12:22:54
+   Duration  385ms (transform 33ms, setup 76ms, import 15ms, tests 2ms, environment 209ms)

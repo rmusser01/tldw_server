@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 import React from "react"
+import i18n from "i18next"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useChatActions } from "../useChatActions"
-import type { Message } from "@/store/option"
+import type { ChatHistory, Message } from "@/store/option"
 import { useStoreChatModelSettings } from "@/store/model"
 import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
+import { generateID } from "@/db/dexie/helpers"
+import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 
 const {
   bgStreamMock,
@@ -49,6 +52,7 @@ const {
 }))
 
 const recoveryAuthority = vi.hoisted(() => ({ controller: new AbortController() }))
+const realErrorPersistence = vi.hoisted(() => ({ enabled: false }))
 
 const messageStoreState = vi.hoisted(() => ({
   value: {
@@ -89,21 +93,29 @@ vi.mock("@/hooks/chat-modes/documentChatMode", () => ({
   documentChatMode: vi.fn()
 }))
 
-vi.mock("@/hooks/utils/messageHelpers", () => ({
+vi.mock("@/hooks/utils/messageHelpers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/utils/messageHelpers")>()),
   validateBeforeSubmit: vi.fn(() => true),
   createSaveMessageOnSuccess: vi.fn(
     () => saveLocalSuccessMock
   ),
-  createSaveMessageOnError: vi.fn(
-    () => saveLocalErrorMock
-  )
+  createSaveMessageOnError: (...args: Parameters<typeof import("@/hooks/utils/messageHelpers").createSaveMessageOnError>) =>
+    realErrorPersistence.enabled
+      ? async (payload: unknown) => {
+          const actual = await vi.importActual<typeof import("@/hooks/utils/messageHelpers")>("@/hooks/utils/messageHelpers")
+          return actual.createSaveMessageOnError(...args)(payload)
+        }
+      : saveLocalErrorMock
 }))
 
-vi.mock("@/hooks/handlers/messageHandlers", () => ({
-  createRegenerateLastMessage: vi.fn(() => vi.fn()),
+vi.mock("@/hooks/handlers/messageHandlers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/handlers/messageHandlers")>()),
   createEditMessage: vi.fn(() => vi.fn()),
-  createStopStreamingRequest: vi.fn(() => vi.fn()),
-  createBranchMessage: vi.fn(() => vi.fn())
+  createStopStreamingRequest: vi.fn(() => vi.fn())
+}))
+
+vi.mock("@/db/dexie/chat-persistence-transaction", () => ({
+  runChatPersistenceTransaction: async (_signal: AbortSignal, operation: () => Promise<unknown>) => operation()
 }))
 
 vi.mock("@/db/dexie/helpers", () => ({
@@ -113,6 +125,9 @@ vi.mock("@/db/dexie/helpers", () => ({
   updateHistory: vi.fn(),
   updateMessage: vi.fn(),
   updateMessageMedia: vi.fn(async () => null),
+  updateLastUsedModel: vi.fn(),
+  updateLastUsedPrompt: vi.fn(),
+  updateChatHistoryCreatedAt: vi.fn(),
   removeMessageByIndex: vi.fn(),
   formatToChatHistory: vi.fn((items: unknown) => items),
   formatToMessage: vi.fn((items: unknown) => items),
@@ -277,8 +292,11 @@ const createHookOptions = () => ({
 
 describe("useChatActions character integration", () => {
   beforeEach(() => {
+    realErrorPersistence.enabled = false
+    vi.mocked(generateID).mockImplementation(() => "generated-id")
     recoveryAuthority.controller = new AbortController()
     vi.clearAllMocks()
+    addChatMessageMock.mockImplementation(async () => ({ id: "user-server-1", version: 1 }))
     useStoreChatModelSettings.getState().reset()
     normalChatModeMock.mockResolvedValue(undefined)
     createChatMock.mockResolvedValue({
@@ -319,6 +337,98 @@ describe("useChatActions character integration", () => {
       yield JSON.stringify({ choices: [{ delta: { content: "Configured reply" } }] })
     })
   }
+
+  it("retries failed complete-v2 in its original conversation with the greeting and user receipts intact", async () => {
+    // The regression is the real Retry pre-submit hook branching a failed reply.
+    // Keep the handler, branch factory, SSE parser and failed-history save real;
+    // only the remote endpoint and IndexedDB writes are substituted.
+    realErrorPersistence.enabled = true
+    await i18n.init({ lng: "en", resources: {} })
+    let localId = 0
+    vi.mocked(generateID).mockImplementation(() => `local-${++localId}`)
+    const serverRows = new Map<string, Array<{ id: string; role: string; content: string }>>()
+    createChatMock.mockImplementation(async () => {
+      const id = `conversation-${serverRows.size + 1}`
+      serverRows.set(id, [])
+      return { id, character_id: "char-tracked", title: "Guide" }
+    })
+    addChatMessageMock.mockImplementation(async (chatId: string, payload: { role: string; content: string }) => {
+      const rows = serverRows.get(chatId)!
+      const id = `${chatId}-message-${rows.length + 1}`
+      rows.push({ id, ...payload })
+      return { id, version: 1 }
+    })
+    useRealCharacterTransport()
+    bgStreamMock.mockImplementation(async function* () {
+      yield JSON.stringify({ error: { code: "provider_unavailable", message: "Ollama is unavailable" } })
+    })
+    const character = { id: "char-tracked", name: "Guide", greeting: "Welcome back" }
+    const { result } = renderHook(() => {
+      const [messages, setMessages] = React.useState<Message[]>([{
+        id: "local-greeting", isBot: true, role: "assistant", name: "Guide",
+        message: "Welcome back", messageType: "character:greeting", sources: []
+      }])
+      const [history, setHistory] = React.useState<ChatHistory>([{
+        role: "assistant", content: "Welcome back", messageType: "character:greeting"
+      }])
+      const [serverChatId, setServerChatId] = React.useState<string | null>(null)
+      const [serverChatCharacterId, setServerChatCharacterId] = React.useState<string | number | null>(null)
+      const actions = useChatActions({
+        ...createHookOptions(), messages, setMessages, history, setHistory,
+        serverChatId, setServerChatId, serverChatCharacterId, setServerChatCharacterId,
+        selectedCharacter: character,
+        selectedAssistant: { ...character, kind: "character", metadata: { selectionMode: "tracked" } }
+      } as unknown as Parameters<typeof useChatActions>[0])
+      return { ...actions, messages, history, serverChatId }
+    })
+
+    let initialResult: unknown
+    await act(async () => { initialResult = await result.current.onSubmit({ message: "One question", image: "" }) })
+    expect(initialResult).toMatchObject({ status: "failed" })
+    expect(decodeChatErrorPayload(result.current.messages.at(-1)!.message)).not.toBeNull()
+    await act(async () => { await result.current.regenerateLastMessage() })
+    await act(async () => { await result.current.regenerateLastMessage() })
+
+    expect(result.current.serverChatId).toBe("conversation-1")
+    expect([...serverRows.keys()]).toEqual(["conversation-1"])
+    expect(bgStreamMock.mock.calls.map(([request]) => request.path.split("?")[0])).toEqual([
+      "/api/v1/chats/conversation-1/complete-v2",
+      "/api/v1/chats/conversation-1/complete-v2",
+      "/api/v1/chats/conversation-1/complete-v2"
+    ])
+    expect(serverRows.get("conversation-1")).toEqual([
+      { id: "conversation-1-message-1", role: "assistant", content: "Welcome back" },
+      { id: "conversation-1-message-2", role: "user", content: "One question" }
+    ])
+    expect(result.current.messages).toHaveLength(3)
+    expect(result.current.messages[0].serverMessageId).toBe("conversation-1-message-1")
+    expect(result.current.messages[1].serverMessageId).toBe("conversation-1-message-2")
+    expect(result.current.history.map(row => row.role)).toEqual(["assistant", "user", "assistant"])
+  })
+
+  it.each(["Complete reply", "Partial reply after interruption", "__tldw_error__:malformed"])(
+    "retains server branching when regenerating actual assistant content: %s", async (reply) => {
+      useRealCharacterTransport()
+      const options = {
+        ...createHookOptions(),
+        messages: [
+          { id: "greeting", isBot: true, message: "Welcome", messageType: "character:greeting", serverMessageId: "greeting-server", sources: [] },
+          { id: "user", isBot: false, message: "Question", serverMessageId: "user-server", sources: [] },
+          { id: "assistant", isBot: true, message: reply, sources: [], generationInfo: { interrupted: true } }
+        ],
+        history: [
+          { role: "assistant", content: "Welcome", messageType: "character:greeting" },
+          { role: "user", content: "Question" },
+          { role: "assistant", content: reply }
+        ]
+      }
+      createChatMock.mockResolvedValueOnce({ id: "regenerated-branch", character_id: "char-tracked" })
+      const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+      await act(async () => { await result.current.regenerateLastMessage() })
+      expect(createChatMock).toHaveBeenCalledWith(expect.objectContaining({ parent_conversation_id: "tracked-chat-1" }), undefined)
+      expect(bgStreamMock).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/chats/regenerated-branch/complete-v2?scope_type=global" }))
+    }
+  )
 
   const scopedOptions = (scope: string, values: Record<string, number>) => {
     const store = useStoreChatModelSettings.getState()

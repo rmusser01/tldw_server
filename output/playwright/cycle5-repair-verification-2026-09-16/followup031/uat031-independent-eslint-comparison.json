@@ -1,0 +1,18 @@
+[
+  {
+    "path": "apps/packages/ui/src/hooks/chat/useChatActions.ts",
+    "baselineErrors": 0,
+    "baselineWarnings": 17,
+    "finalErrors": 0,
+    "finalWarnings": 17,
+    "identicalDiagnosticsIgnoringLocations": true
+  },
+  {
+    "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+    "baselineErrors": 0,
+    "baselineWarnings": 22,
+    "finalErrors": 0,
+    "finalWarnings": 22,
+    "identicalDiagnosticsIgnoringLocations": true
+  }
+]

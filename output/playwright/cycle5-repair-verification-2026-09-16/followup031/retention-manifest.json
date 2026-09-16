@@ -1,0 +1,98 @@
+{
+  "at": "2026-09-16T19:27:27.600Z",
+  "sourceHashesVerified": true,
+  "credentialPatternFindings": 0,
+  "normalization": "Trailing horizontal whitespace and terminal blank lines only.",
+  "files": [
+    {
+      "name": "uat031-implementation.md",
+      "original_sha256": "5af1dedfd6af5b4586938a9526ed1f544858b8fa63b534563453df2f0a2591f8",
+      "sha256": "5af1dedfd6af5b4586938a9526ed1f544858b8fa63b534563453df2f0a2591f8"
+    },
+    {
+      "name": "uat031-implementation-manifest.json",
+      "original_sha256": "cc27c6a996dfa9904023e06a23feccf2c562e90dfcaf5a28c3f8f694f6ade97d",
+      "sha256": "cc27c6a996dfa9904023e06a23feccf2c562e90dfcaf5a28c3f8f694f6ade97d"
+    },
+    {
+      "name": "uat031-red.log",
+      "original_sha256": "4ffb15cf93bf391085aa125fc2380a5615e9493b66f4e46fcd8e366893ed191d",
+      "sha256": "b2d65b2546621dc829a706e6745f5a2949fa77f1437842776a86453f330dd1f8"
+    },
+    {
+      "name": "uat031-green.log",
+      "original_sha256": "2406c23ebd0e2b5551bbd906b02c2b82ec295f72bcfdb2245252b09d6c36d7f8",
+      "sha256": "7eb4321b760b93d8d30600efe81d92e408650ac83d7a16c9dce20da362c08e81"
+    },
+    {
+      "name": "uat031-eslint.log",
+      "original_sha256": "0e026b0aebd915668a64fbf9222fa94864e4d64455d081a297906760368465e9",
+      "sha256": "0994ed7310d5e0a9cd53216b101d89744e6be5ff3e2be18ef29febeaa28b1b5d"
+    },
+    {
+      "name": "uat031-typecheck.log",
+      "original_sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e"
+    },
+    {
+      "name": "uat031-bandit.json",
+      "original_sha256": "47577a5347b1b1b7f38ca06af21f515dee21e4ff53dd3e3039cd2805db4c775a",
+      "sha256": "445b982b407a8a5b4f09535bcdbbc07828631c03db79cc5481b7e51450aa63cc"
+    },
+    {
+      "name": "uat031-eslint-source-baseline.json",
+      "original_sha256": "18f4da46374d6dd91ae26af5cf31674974bdf484027599f04c077d9645e4c67d",
+      "sha256": "18f4da46374d6dd91ae26af5cf31674974bdf484027599f04c077d9645e4c67d"
+    },
+    {
+      "name": "uat031-eslint-test-baseline.json",
+      "original_sha256": "6bb79a9660d77ddec474dd95ad43323a8de1607db79a6fe62b8043ad3a3b0093",
+      "sha256": "6bb79a9660d77ddec474dd95ad43323a8de1607db79a6fe62b8043ad3a3b0093"
+    },
+    {
+      "name": "uat031-independent-review.md",
+      "original_sha256": "395c61bfc5f6718480190905d21350b4e123c36a17aa2734885afd6ec63fc94d",
+      "sha256": "395c61bfc5f6718480190905d21350b4e123c36a17aa2734885afd6ec63fc94d"
+    },
+    {
+      "name": "uat031-independent-green.log",
+      "original_sha256": "ca4a3f422cb5ae60e5cfff9648598ab9033b9317c5f2f263a527499df7373bd4",
+      "sha256": "97bbdb7cc5d98474041630d03a3ade99150bc88a16f6fe5ad03e838edd375337"
+    },
+    {
+      "name": "uat031-independent-red.log",
+      "original_sha256": "975b3c8a86ec9fe8cec12a5fce0f7e065bfe7f42ffcd0b5347afce9ba1e3f0be",
+      "sha256": "faa2039f78d172197c3be932888536284e35279c3e93e320b884e0fd3ab5696b"
+    },
+    {
+      "name": "uat031-independent-decoder.log",
+      "original_sha256": "d7dd9c2b84b9bef0380fd09d5fc17d7760946493b30bd2e9d6106f3a0fa05e5a",
+      "sha256": "2ea411a904cf49e9655e8eff6fbf9815f4dcf9f129e1d2bef83afe04ee75957b"
+    },
+    {
+      "name": "uat031-independent-concurrent.log",
+      "original_sha256": "b96c2ca572044ab56558c648df5ff5546948542fee02b0a4ba268ba5b95437ab",
+      "sha256": "19cd23ce514cd985145dc3b193e9e5e4fde8ea9946bc10231b02fc2e73fcc909"
+    },
+    {
+      "name": "uat031-independent-eslint.json",
+      "original_sha256": "e97a94c2282e073be3d0200a7d0e0c0372ab4dcfe20fd53e22bb661b3999a6c7",
+      "sha256": "3350d13ff944340a35ef2dde8730026cb946ce336f31fefd50e4f9c07cab87cf"
+    },
+    {
+      "name": "uat031-independent-eslint-comparison.json",
+      "original_sha256": "f8dce3e0baa272ac5694282e935b270781c7471fbf52a8aed5cf069fbfab4158",
+      "sha256": "f8dce3e0baa272ac5694282e935b270781c7471fbf52a8aed5cf069fbfab4158"
+    },
+    {
+      "name": "uat031-independent-head.config.mts",
+      "original_sha256": "f2bb75b24a6cc5f7deceb05ec76f34a009549bd1498fd84a36250be5abb16c22",
+      "sha256": "f2bb75b24a6cc5f7deceb05ec76f34a009549bd1498fd84a36250be5abb16c22"
+    },
+    {
+      "name": "uat031-independent-concurrent.config.mts",
+      "original_sha256": "b6f18cce4f28b61b93722437550ec0b9cd2b2a1067815c6332c93f85971c8903",
+      "sha256": "b6f18cce4f28b61b93722437550ec0b9cd2b2a1067815c6332c93f85971c8903"
+    }
+  ]
+}

@@ -47,7 +47,7 @@ import {
 } from "@/hooks/handlers/messageHandlers"
 import { generateBranchFromMessageIds } from "@/db/dexie/branch"
 import { type UploadedFile } from "@/db/dexie/types"
-import { buildAssistantErrorContent } from "@/utils/chat-error-message"
+import { buildAssistantErrorContent, decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { buildCharacterChatAssistantErrorContent } from "./useCharacterChatMode"
 import { detectCharacterMood } from "@/utils/character-mood"
 import { WEBUI_CHARACTER_CHAT_SOURCE } from "@/utils/character-chat-session"
@@ -4506,9 +4506,12 @@ export const useChatActions = ({
     setHistory,
     setMessages,
     onSubmit,
-    beforeSubmit: async ({ nextMessages }) => {
+    beforeSubmit: async ({ lastAssistant, nextMessages }) => {
       if (!serverChatId) return
       if (selectedCharacter?.id == null && serverChatCharacterId == null) return
+      // A failed completion retries its already saved user turn. Branching here
+      // would copy the greeting and user but leave their visible receipts stale.
+      if (decodeChatErrorPayload(lastAssistant.message)) return
 
       const branchIndex = nextMessages.length - 1
       if (branchIndex < 0) return

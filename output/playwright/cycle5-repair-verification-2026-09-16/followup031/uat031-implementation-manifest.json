@@ -1,0 +1,60 @@
+{
+  "head_at_capture": "05e0c5593ef79e1b9cacc4e741f7a4ee559a6f87",
+  "files": [
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "sha256": "de948f35cca0b8624edceb2128c75c51760028f3bf617edf7587b5ce5c2ffe6a",
+      "size": 164256
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "sha256": "5ec1e78d238dfe97fc235a451ba332f00bd7fe94d2ea7857dc6b4ba8ed59909b",
+      "size": 44460
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.7 - Repair-tracked-Chat-provider-routing-and-visible-conversation-state.md",
+      "sha256": "94590a35ef0f9b383ed87410c5cac92000af7ce47d34564c9ba086e920fea4c7",
+      "size": 7580
+    },
+    {
+      "path": "/private/tmp/uat031-implementation.md",
+      "sha256": "5af1dedfd6af5b4586938a9526ed1f544858b8fa63b534563453df2f0a2591f8",
+      "size": 5505
+    },
+    {
+      "path": "/private/tmp/uat031-red.log",
+      "sha256": "4ffb15cf93bf391085aa125fc2380a5615e9493b66f4e46fcd8e366893ed191d",
+      "size": 4105
+    },
+    {
+      "path": "/private/tmp/uat031-green.log",
+      "sha256": "2406c23ebd0e2b5551bbd906b02c2b82ec295f72bcfdb2245252b09d6c36d7f8",
+      "size": 5450
+    },
+    {
+      "path": "/private/tmp/uat031-eslint.log",
+      "sha256": "0e026b0aebd915668a64fbf9222fa94864e4d64455d081a297906760368465e9",
+      "size": 8048
+    },
+    {
+      "path": "/private/tmp/uat031-typecheck.log",
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "size": 24428
+    },
+    {
+      "path": "/private/tmp/uat031-bandit.json",
+      "sha256": "47577a5347b1b1b7f38ca06af21f515dee21e4ff53dd3e3039cd2805db4c775a",
+      "size": 1038
+    },
+    {
+      "path": "/private/tmp/uat031-eslint-source-baseline.json",
+      "sha256": "18f4da46374d6dd91ae26af5cf31674974bdf484027599f04c077d9645e4c67d",
+      "size": 182041
+    },
+    {
+      "path": "/private/tmp/uat031-eslint-test-baseline.json",
+      "sha256": "6bb79a9660d77ddec474dd95ad43323a8de1607db79a6fe62b8043ad3a3b0093",
+      "size": 53723
+    }
+  ]
+}
