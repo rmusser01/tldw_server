@@ -21,6 +21,7 @@ import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQu
 import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 
 const mocks = vi.hoisted(() => ({
+  capability: true as boolean | "error",
   bgRequest: vi.fn(),
   removeMessageById: vi.fn(),
   deleteMessage: vi.fn(),
@@ -216,7 +217,10 @@ vi.mock("@/services/chat-settings", () => ({
   syncChatSettingsForServerChat: vi.fn()
 }))
 vi.mock("@/services/tldw/server-capabilities", () => ({
-  getServerCapabilities: async () => ({ hasChatSaveToDb: true })
+  getServerCapabilities: async () => {
+    if (mocks.capability === "error") throw new Error("Capabilities unavailable")
+    return { hasChatSaveToDb: mocks.capability }
+  }
 }))
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
   useChatSettingsRecord: () => ({ settings: {}, updateSettings: vi.fn() })
@@ -443,6 +447,55 @@ const seedLocalDraft = () =>
   })
 
 describe("saved normal Chat pipeline with autosave", () => {
+  it.each([
+    { name: "both ACKs / capability false", ack: "both", capability: false, expectedFallback: [] },
+    { name: "both ACKs / capability error", ack: "both", capability: "error", expectedFallback: [] },
+    { name: "both ACKs / capability true control", ack: "both", capability: true, expectedFallback: [] },
+    { name: "user ACK only / persist genuinely unsaved assistant", ack: "user", capability: false, expectedFallback: ["assistant"] },
+    { name: "assistant ACK only / persist genuinely unsaved user", ack: "assistant", capability: false, expectedFallback: ["user"] },
+    { name: "no ACK / ordinary unpersisted text fallback", ack: "none", capability: false, expectedFallback: ["user", "assistant"] },
+    { name: "no ACK / ordinary fallback on capability error", ack: "none", capability: "error", expectedFallback: ["user", "assistant"] }
+  ])("UAT157 $name", async ({ ack, capability, expectedFallback }) => {
+    mocks.capability = capability as boolean | "error"
+    mocks.realFormatter = true
+    mocks.realPersistence = true
+    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
+    const image = ack === "none" ? "" : "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="
+    const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+    mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+    mocks.getModel.mockResolvedValue({ id: "vision-test", name: "Vision model", capabilities: ["vision"] })
+    mocks.streamMessage.mockImplementation(async function* (messages, options, onChunk) {
+      expect(options.saveToDb).toBe(true)
+      expect(options.clientMessageId).toBeTruthy()
+      const stored = mocks.serverRows.get(options.conversationId)!
+      const chunk: Record<string, unknown> = { tldw_conversation_id: options.conversationId }
+      if (ack === "both" || ack === "user") {
+        stored.push({ id: "canonical-user", role: "user", content: "Image question", images: image ? [image] : [], metadata_extra: { client_message_id: options.clientMessageId } })
+        chunk.tldw_user_message_id = "canonical-user"
+      }
+      if (ack === "both" || ack === "assistant") {
+        stored.push({ id: "canonical-answer", role: "assistant", content: "A red square." })
+        chunk.tldw_message_id = "canonical-answer"
+      }
+      onChunk(chunk)
+      yield "A red square."
+    })
+    const view = renderWorkspace()
+    act(() => useStoreMessageOption.setState({ selectedModel: "vision-test" }))
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Image question", image }) })
+    // These are current stream ACKs; no server loader runs in this fixture.
+    if (ack === "both" || ack === "user") {
+      expect(mocks.rows.find(row => row.role === "user")?.serverMessageId).toBe("canonical-user")
+    }
+    if (ack === "both" || ack === "assistant") {
+      expect(mocks.rows.find(row => row.role === "assistant")?.serverMessageId).toBe("canonical-answer")
+    }
+    const roles = mocks.addChatMessage.mock.calls.map(call => call[1].role)
+    view.unmount()
+    expect(roles).toEqual(expectedFallback)
+    expect([...mocks.serverRows.values()].flat().map(row => row.role).sort()).toEqual(["assistant", "user"])
+  })
+
   it.each(["local", "server"])("deletes a qualified mirror row and clears its %s reply target using the canonical request ID", async replyKind => {
     const localId = "history-A:server:answer"
     const serverId = "canonical-answer"
@@ -739,6 +792,7 @@ describe("saved normal Chat pipeline with autosave", () => {
   })
 
   beforeEach(() => {
+    mocks.capability = true
     vi.clearAllMocks()
     mocks.rows.length = 0
     mocks.mirrorHistories.clear()

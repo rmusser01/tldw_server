@@ -1268,7 +1268,8 @@ export const useChatActions = ({
           const userContent = payload.message.trim()
           const assistantContent = payload.fullText.trim()
 
-          if (userContent.length > 0) {
+          // Current-turn save receipts take precedence over capability discovery.
+          if (userContent.length > 0 && !payload.userServerMessageId?.trim()) {
             await addMirroredMessage(
               cid,
               {
@@ -1281,7 +1282,10 @@ export const useChatActions = ({
             )
           }
 
-          if (assistantContent.length > 0) {
+          if (
+            assistantContent.length > 0 &&
+            !payload.assistantServerMessageId?.trim()
+          ) {
             await addMirroredMessage(
               cid,
               {
