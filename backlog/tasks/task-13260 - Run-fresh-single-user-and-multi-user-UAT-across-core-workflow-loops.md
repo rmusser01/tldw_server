@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 16:05'
+updated_date: '2026-09-16 19:12'
 labels:
   - uat
   - testing
@@ -168,6 +168,8 @@ User correction from side conversation, 2026-09-16: do not start another full UA
 2026-09-16 follow-up checkpoint: independent UAT013165/9 plus unchanged source-intent probe pass; notification139/141/142150/6 plus5 original probes pass. Retained exact hashes/reviews in output/playwright/cycle5-repair-verification-2026-09-16/followup013 and followup139-142. WebUI final332/17 passes. Expanded UI150-suite run exposes UAT143/TASK13260.82:27failed/3107passed and3unhandled errors; all27 reproduce against3c30685611 from stale fixtures/guards, bounded test-only correction underway. Both owned Next frontends paused; preserved APIs and PG18 container running. Native acceptance and fresh SQLite/PostgreSQL matrix remain pending; image was actually attached/retried/reloaded under unsupported-model refusal, not counted as canonical image Retry pass.
 
 2026-09-16 16:00 checkpoint: reviewed frontend commits013=3f50f408df, notifications139/141/142=d547be4719, stale-tests143=08d7728e0d. Final3143UI/150suites and332WebUI/17suites pass separately;90existing compiler signatures,0added/removed. Current144-row ledger:130verified,11awaiting exact acceptance,2blocked,1unresolved. New normal-runtime PostgreSQL startup UAT144/task83 is being fixed: explicit PG selection silently falls back toSQLite, while bootstrap expectsPG. Official empty holder remainsalive; nativePGprofile never startedserver. Separate true native-window minimize probe still returned visible and was closed, retaining114 tool limit. Full UAT gate remainsblocked.
+
+2026-09-16 19:10 UTC recovery: HEAD remains 2d5ad06c86. Prior temporary UAT profiles, launchers, native captures and agent sessions are unavailable; direct process/listener inventory confirms the six named UAT PIDs and ports18500-18503/18580-18583/9099/55475 are stopped. Cause is not established. Preserve committed evidence and record recent transcript-only findings without recreating artifacts or closing acceptance. Latest native observations reopen013 (wrong source answer, extra out-of-order rows after reload) and031 (failed character Retry creates a new conversation, then greeting Save Notes400). New155 already tracked. Native151 and timeout152/153 looked correct but need retained recapture. End source freeze, repair confirmed issues, and rebuild isolated runtime through repository fixtures before further targeted acceptance. No new full UAT is authorized by this checkpoint.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
