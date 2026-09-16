@@ -27,6 +27,14 @@ export type HistoryNodeV1 = HistoryMessageRevisionV1 & {
   readonly comparison?: { readonly cluster_id: string; readonly model_id: string | null; readonly common: boolean }
 }
 
+/** Coherently loaded content for one selected manifest member.
+ * `message` and the complete `images` array match the existing chat Message adapter.
+ */
+export type HistorySelectedContentV1 = HistoryMessageRevisionV1 & {
+  readonly message: string
+  readonly images: readonly string[]
+}
+
 export type HistorySelectionSnapshotV1 = {
   readonly version: 1
   readonly owner_key: string
@@ -74,6 +82,7 @@ export type HistorySelectionCaptureV1 = {
   readonly status: "captured"
   readonly snapshot: HistorySelectionSnapshotV1
   readonly rows: readonly HistoryNodeV1[]
+  readonly selected_content: readonly HistorySelectedContentV1[]
   readonly view: HistoryViewSelectionV1
   readonly purpose: "send" | "fork"
   readonly storage_context_digest: string

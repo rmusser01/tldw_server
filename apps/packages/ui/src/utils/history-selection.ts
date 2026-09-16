@@ -2,7 +2,7 @@ import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 import type {
   CompareHistorySelectionV1, HistoryCursorV1, HistoryNodeV1, HistoryResolutionV1,
-  HistorySelectionSnapshotV1, HistorySelectionV1, HistoryViewSelectionV1
+  HistorySelectedContentV1, HistorySelectionSnapshotV1, HistorySelectionV1, HistoryViewSelectionV1
 } from "@/types/history-selection"
 
 export class HistorySelectionError extends Error {
@@ -89,6 +89,22 @@ export const resolveLegacyProjection = (
   const at = orderedPathIds.indexOf(cursor.message_id)
   if (at < 0) throw new HistorySelectionError("missing_cursor")
   return path.slice(0, at + (cursor.kind === "after_message" ? 1 : 0))
+}
+
+/** Bind a separately loaded content payload to the exact captured path. */
+export const bindSelectedHistoryContent = (
+  rows: readonly HistoryNodeV1[], content: readonly HistorySelectedContentV1[]
+): readonly HistorySelectedContentV1[] => {
+  if (rows.length !== content.length || new Set(rows.map(row => row.id)).size !== rows.length ||
+      rows.some((row, index) => row.id !== content[index]?.id || row.revision !== content[index]?.revision)) {
+    throw new HistorySelectionError("selected_content_mismatch")
+  }
+  return Object.freeze(content.map(item => Object.freeze({
+    id: item.id,
+    revision: item.revision,
+    message: item.message,
+    images: Object.freeze([...item.images])
+  })))
 }
 
 /** The nine-member tuple is the only normal-selection digest input. */

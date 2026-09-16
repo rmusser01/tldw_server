@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
+
+
+def _wire_array(value: object) -> object:
+    """Accept a JSON array while storing its validated members as a tuple."""
+
+    return tuple(value) if isinstance(value, list) else value
 
 
 class HistoryWireModel(BaseModel):
@@ -53,7 +59,9 @@ class LegacyReviewRequiredV1(HistoryWireModel):
 
 
 class AcceptedLegacyInterpretationV1(LegacyLinearInterpretationV1):
-    ordered_path_ids: list[str]
+    ordered_path_ids: tuple[str, ...]
+
+    _freeze_path = field_validator("ordered_path_ids", mode="before")(_wire_array)
 
 
 HistoryInterpretationStatusV1 = Annotated[
@@ -79,13 +87,31 @@ class HistoryRequiredReferenceV1(HistoryWireModel):
     kind: str
 
 
+class HistoryComparisonMetadataV1(HistoryWireModel):
+    cluster_id: str
+    model_id: str | None
+    common: StrictBool
+
+
 class HistoryNodeV1(HistoryMessageRevisionV1):
     parent_id: str | None
     role: str
     settled: StrictBool
     conversation_id: str | None = None
-    metadata: list[HistoryRequiredReferenceV1] = Field(default_factory=list)
-    assets: list[HistoryRequiredReferenceV1] = Field(default_factory=list)
+    metadata: tuple[HistoryRequiredReferenceV1, ...] = ()
+    assets: tuple[HistoryRequiredReferenceV1, ...] = ()
+    comparison: HistoryComparisonMetadataV1 | None = None
+
+    _freeze_references = field_validator("metadata", "assets", mode="before")(_wire_array)
+
+
+class HistorySelectedContentV1(HistoryMessageRevisionV1):
+    """Composer input bound by ID, order and revision to selected manifest rows."""
+
+    message: str
+    images: tuple[str, ...]
+
+    _freeze_images = field_validator("images", mode="before")(_wire_array)
 
 
 class HistorySelectionSnapshotV1(HistoryWireModel):
@@ -93,10 +119,12 @@ class HistorySelectionSnapshotV1(HistoryWireModel):
     owner_key: str
     conversation_id: str
     fences: HistoryFencesV1
-    nodes: list[HistoryNodeV1]
+    nodes: tuple[HistoryNodeV1, ...]
     source_digest: str
     interpretation_status: HistoryInterpretationStatusV1
     storage_context_digest: str
+
+    _freeze_nodes = field_validator("nodes", mode="before")(_wire_array)
 
 
 class HistoryViewSelectionV1(HistoryWireModel):
@@ -116,11 +144,13 @@ class HistorySelectionV1(HistoryWireModel):
     cursor: HistoryCursorV1
     selection_revision: StrictInt = Field(ge=0)
     purpose: Literal["send", "fork"]
-    messages: list[HistoryMessageRevisionV1]
+    messages: tuple[HistoryMessageRevisionV1, ...]
     fences: HistoryFencesV1
     storage_context_digest: str
     request_context_digest: str
     selection_digest: str
+
+    _freeze_messages = field_validator("messages", mode="before")(_wire_array)
 
 
 class HistorySelectionEnvelopeV1(HistoryWireModel):
@@ -138,11 +168,13 @@ class CompareHistorySelectionV1(HistoryWireModel):
     model_id: str = Field(min_length=1)
     cluster_id: str | None
     cursor: HistoryCursorV1
-    messages: list[HistoryMessageRevisionV1]
+    messages: tuple[HistoryMessageRevisionV1, ...]
     fences: HistoryFencesV1
     storage_context_digest: str
     request_context_digest: str
     selection_digest: str
+
+    _freeze_messages = field_validator("messages", mode="before")(_wire_array)
 
 
 class NormalForkInputV1(HistoryWireModel):
@@ -174,10 +206,27 @@ class HistoryCaptureRequestV1(HistoryWireModel):
 class CapturedHistoryV1(HistoryWireModel):
     status: Literal["captured"]
     snapshot: HistorySelectionSnapshotV1
-    rows: list[HistoryNodeV1]
+    rows: tuple[HistoryNodeV1, ...]
+    selected_content: tuple[HistorySelectedContentV1, ...]
     view: HistoryViewSelectionV1
     purpose: Literal["send", "fork"]
     storage_context_digest: str
+
+    _freeze_rows = field_validator("rows", "selected_content", mode="before")(_wire_array)
+
+    @model_validator(mode="after")
+    def validate_content_binding(self) -> CapturedHistoryV1:
+        """A strict capture cannot pair content with another manifest revision."""
+
+        members = {row.id: row.revision for row in self.snapshot.nodes}
+        if len(members) != len(self.snapshot.nodes):
+            raise ValueError("duplicate_message_id")
+        if len(self.rows) != len(self.selected_content) or len({row.id for row in self.rows}) != len(self.rows):
+            raise ValueError("selected_content_mismatch")
+        for row, content in zip(self.rows, self.selected_content):
+            if members.get(row.id) != row.revision or row.id != content.id or row.revision != content.revision:
+                raise ValueError("selected_content_mismatch")
+        return self
 
 
 class HistoryFailureV1(HistoryWireModel):
@@ -197,10 +246,12 @@ class LegacyHistoryProjectionConfirmV1(HistoryWireModel):
     conversation_id: str
     source_digest: str
     fences: HistoryFencesV1
-    source_members: list[HistoryMessageRevisionV1]
-    ordered_path_ids: list[str]
+    source_members: tuple[HistoryMessageRevisionV1, ...]
+    ordered_path_ids: tuple[str, ...]
     cursor: HistoryCursorV1
     selection_revision: StrictInt = Field(ge=0)
+
+    _freeze_members = field_validator("source_members", "ordered_path_ids", mode="before")(_wire_array)
 
 
 class LegacyProjectionConfirmEnvelopeV1(HistoryWireModel):
@@ -222,5 +273,7 @@ class HistoryAdmissionReferenceV1(HistoryWireModel):
 
 
 class HistoryAdmissionV1(HistoryAdmissionReferenceV1):
-    messages: list[HistoryMessageRevisionV1]
+    messages: tuple[HistoryMessageRevisionV1, ...]
     originating_selection_revision: StrictInt = Field(ge=0)
+
+    _freeze_messages = field_validator("messages", mode="before")(_wire_array)

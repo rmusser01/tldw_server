@@ -9,6 +9,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 
@@ -56,6 +57,13 @@ class HistorySelectionV1:
     request_context_digest: str
     selection_digest: str
 
+    def __post_init__(self) -> None:
+        """Detach caller-owned nested values before a selection can be admitted."""
+
+        object.__setattr__(self, "interpretation", _freeze_json(self.interpretation))
+        object.__setattr__(self, "cursor", _freeze_json(self.cursor))
+        object.__setattr__(self, "messages", tuple(self.messages))
+
 
 @dataclass(frozen=True)
 class HistorySelectionSnapshotV1:
@@ -70,6 +78,12 @@ class HistorySelectionSnapshotV1:
     interpretation_status: Mapping[str, Any]
     storage_context_digest: str
 
+    def __post_init__(self) -> None:
+        """Freeze the complete manifest and selected interpretation evidence."""
+
+        object.__setattr__(self, "nodes", tuple(_freeze_json(row) for row in self.nodes))
+        object.__setattr__(self, "interpretation_status", _freeze_json(self.interpretation_status))
+
 
 @dataclass(frozen=True)
 class HistoryAdmissionV1:
@@ -83,6 +97,79 @@ class HistoryAdmissionV1:
     input_message_id: str
     input_message_revision: str
     originating_selection_revision: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "messages", tuple(self.messages))
+
+
+def _freeze_json(value: Any) -> Any:
+    """Copy H1's JSON-shaped captured fields into standard immutable containers."""
+
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze_json(member) for key, member in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_json(member) for member in value)
+    return value
+
+
+def _wire_json(value: Any) -> Any:
+    """Convert captured JSON values to plain wire containers without deepcopy."""
+
+    if isinstance(value, Mapping):
+        return {key: _wire_json(member) for key, member in value.items()}
+    if isinstance(value, tuple):
+        return [_wire_json(member) for member in value]
+    return value
+
+
+def selection_to_wire(selection: HistorySelectionV1) -> dict[str, Any]:
+    """Serialize a frozen core selection for strict Pydantic validation."""
+
+    return {
+        "version": selection.version,
+        "owner_key": selection.owner_key,
+        "conversation_id": selection.conversation_id,
+        "interpretation": _wire_json(selection.interpretation),
+        "cursor": _wire_json(selection.cursor),
+        "selection_revision": selection.selection_revision,
+        "purpose": selection.purpose,
+        "messages": [{"id": member.id, "revision": member.revision} for member in selection.messages],
+        "fences": {"conversation": selection.fences.conversation, "history": selection.fences.history, "settings": selection.fences.settings},
+        "storage_context_digest": selection.storage_context_digest,
+        "request_context_digest": selection.request_context_digest,
+        "selection_digest": selection.selection_digest,
+    }
+
+
+def snapshot_to_wire(snapshot: HistorySelectionSnapshotV1) -> dict[str, Any]:
+    """Serialize frozen manifest fields as ordinary JSON-shaped wire values."""
+
+    return {
+        "version": snapshot.version,
+        "owner_key": snapshot.owner_key,
+        "conversation_id": snapshot.conversation_id,
+        "fences": {"conversation": snapshot.fences.conversation, "history": snapshot.fences.history, "settings": snapshot.fences.settings},
+        "nodes": _wire_json(snapshot.nodes),
+        "source_digest": snapshot.source_digest,
+        "interpretation_status": _wire_json(snapshot.interpretation_status),
+        "storage_context_digest": snapshot.storage_context_digest,
+    }
+
+
+def bind_selected_history_content(
+    rows: Sequence[Mapping[str, Any]], content: Sequence[Mapping[str, Any]]
+) -> tuple[Mapping[str, Any], ...]:
+    """Reject content loaded at another source revision or in another order."""
+
+    if len(rows) != len(content) or len({row["id"] for row in rows}) != len(rows) or any(
+        row["id"] != item["id"] or row["revision"] != item["revision"]
+        for row, item in zip(rows, content)
+    ):
+        raise HistorySelectionError("selected_content_mismatch")
+    return tuple(
+        _freeze_json({"id": item["id"], "revision": item["revision"], "message": item["message"], "images": item["images"]})
+        for item in content
+    )
 
 
 def resolve_parent_path(

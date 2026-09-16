@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { resolveParentPath, resolveHistorySelection, selectionDigest, canonicalSelectionJson, resolveComparisonProjection, canonicalComparisonJson, comparisonDigest } from "../history-selection"
-import type { HistoryNodeV1, HistorySelectionSnapshotV1, HistoryViewSelectionV1 } from "@/types/history-selection"
+import { bindSelectedHistoryContent, resolveParentPath, resolveHistorySelection, selectionDigest, canonicalSelectionJson, resolveComparisonProjection, canonicalComparisonJson, comparisonDigest } from "../history-selection"
+import type { HistoryNodeV1, HistorySelectedContentV1, HistorySelectionSnapshotV1, HistoryViewSelectionV1 } from "@/types/history-selection"
 import vectors from "../../../../../../tldw_Server_API/tests/Chat/fixtures/history_selection_v1.json"
 
 const rows: HistoryNodeV1[] = [
@@ -49,6 +49,28 @@ it("returns a structured stale result for a missing cursor, without an admission
     cursor: { kind: "after_message", message_id: "gone" }, selection_revision: 3
   }
   expect(resolveHistorySelection(snapshot, view, "send", "request")).toEqual({ status: "stale_selection", code: "missing_cursor" })
+})
+
+it("binds captured text and multiple images to exact selected IDs, order and revisions", () => {
+  const path = resolveParentPath(rows, { kind: "after_message", message_id: "a1" })
+  const content = [
+    { id: "u1", revision: "1", message: "see both", images: ["image://1", "image://2"] },
+    { id: "a1", revision: "1", message: "response", images: [] }
+  ] satisfies HistorySelectedContentV1[]
+  const bound = bindSelectedHistoryContent(path, content)
+  expect(bound).toEqual(content)
+  content[0].images.push("image://later")
+  content[0].message = "later"
+  expect(bound[0]).toEqual({ id: "u1", revision: "1", message: "see both", images: ["image://1", "image://2"] })
+  for (const drift of [
+    [...content].reverse(),
+    [{ ...content[0], revision: "2" }, content[1]],
+    [{ ...content[0], id: "a2" }, content[1]],
+    content.slice(0, 1)
+  ]) {
+    expect(() => bindSelectedHistoryContent(path, drift)).toThrow(expect.objectContaining({ code: "selected_content_mismatch" }))
+  }
+  expect(() => bindSelectedHistoryContent([rows[0], rows[0]], [content[0], content[0]])).toThrow(expect.objectContaining({ code: "selected_content_mismatch" }))
 })
 
 it("encodes the fixed Unicode selection tuple without normalization", () => {
