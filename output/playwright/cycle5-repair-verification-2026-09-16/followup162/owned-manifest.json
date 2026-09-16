@@ -1,0 +1,51 @@
+{
+  "task": "TASK-13260.99",
+  "baseHead": "413be51cc87f81971729a070202caddf89b4b788",
+  "sourceFrozen": true,
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/TldwTimeoutSettings.tsx",
+      "sha256": "043e558b797e82ff5d48b83d4f4772d4cfeece83cb2de4878691b79799ae8d54"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/__tests__/TldwTimeoutSettings.accessibility.test.tsx",
+      "sha256": "77d6f5a65abf4715d5352edcf93973647ec3bf4a9ba769c8cbc03743b9d83261"
+    },
+    {
+      "path": ".tmp/uat162-timeout-labels-20260916/IMPLEMENTATION.md",
+      "sha256": "82e1de8998cbe69ad4c96eabf2f40fd8bf7cccaa38913899635fb62521543ba7"
+    },
+    {
+      "path": ".tmp/uat162-timeout-labels-20260916/DESIGN_PLAN.md",
+      "sha256": "05835f33c135efb1864ce25bec3c71326d1f498c6381e3ab3165255b0bca741a"
+    },
+    {
+      "path": ".tmp/uat162-timeout-labels-20260916/owned.patch",
+      "sha256": "b97c937aef5eec745155b71ec89fc77320d7ef85d0a238f8372d7b09af8935fa"
+    },
+    {
+      "path": ".tmp/uat162-timeout-labels-20260916/red.log",
+      "sha256": "449375046557b270cf90b8d4a5649277b89b6ae4b657718fce4440e767353a48"
+    },
+    {
+      "path": ".tmp/uat162-timeout-labels-20260916/green.log",
+      "sha256": "1d04c01b282eddeeb8c43687c7970818a3dee99469c72536489d085c2aa9501a"
+    },
+    {
+      "path": ".tmp/uat162-timeout-labels-20260916/typecheck.log",
+      "sha256": "bec0173b45382b5301262b98b90ca544e246d78d086a01505df69b41cb05a898"
+    },
+    {
+      "path": ".tmp/uat162-timeout-labels-20260916/typecheck-comparison.json",
+      "sha256": "64fea747d679ded55805b36e4e9879a36ac9bd90791a7ec82ed67bc11e0e782c"
+    },
+    {
+      "path": ".tmp/uat162-timeout-labels-20260916/eslint.log",
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "path": ".tmp/uat162-timeout-labels-20260916/diff-check.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

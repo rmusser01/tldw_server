@@ -84,6 +84,7 @@
 
 ## UAT-162 — P3: Advanced timeout controls have no associated accessible labels
 
+- Status: verified, TASK13260.99. One stable per-instance React ID plus eight semantic label/input associations. Independent baseline9RED/current18/2PASS; root18/2PASS; native all eight named controls have unique IDs and each visible label focuses its matching input. Saved values and Balanced remain intact. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup162/IMPLEMENTATION.md).
 - All eight numeric timeout inputs have no ID, associated label or accessible label in the actual rendered Settings form. The accessibility snapshot exposes six unnamed spinbuttons and two placeholder-only names, despite visible descriptive labels. Deliberate Custom and Balanced Save/reload values behave correctly.
 - TASK13260.99 tracks a minimal semantic label association repair with unique IDs, accessible-name/focus regressions and native verification. Original DOM/AX receipts are retained with the152/153 acceptance evidence.
 

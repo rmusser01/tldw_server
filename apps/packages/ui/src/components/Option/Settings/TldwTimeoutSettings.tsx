@@ -116,6 +116,7 @@ export const TldwTimeoutSettings = ({
   timeoutPreset,
   setTimeoutPreset
 }: TldwTimeoutSettingsProps) => {
+  const inputIdPrefix = React.useId()
   const applyTimeoutPreset = (preset: TimeoutPresetKey) => {
     const presetValues = TIMEOUT_PRESETS[preset]
     setRequestTimeoutSec(presetValues.request)
@@ -186,10 +187,11 @@ export const TldwTimeoutSettings = ({
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1">
+                  <label htmlFor={`${inputIdPrefix}-request`} className="block text-sm font-medium mb-1">
                     {t('settings:tldw.requestTimeout')}
                   </label>
                   <Input
+                    id={`${inputIdPrefix}-request`}
                     type="number"
                     min={1}
                     value={requestTimeoutSec}
@@ -213,10 +215,11 @@ export const TldwTimeoutSettings = ({
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">
+                  <label htmlFor={`${inputIdPrefix}-stream-idle`} className="block text-sm font-medium mb-1">
                     {t('settings:tldw.streamingIdle')}
                   </label>
                   <Input
+                    id={`${inputIdPrefix}-stream-idle`}
                     type="number"
                     min={1}
                     value={streamIdleTimeoutSec}
@@ -242,10 +245,11 @@ export const TldwTimeoutSettings = ({
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1">
+                  <label htmlFor={`${inputIdPrefix}-chat-request`} className="block text-sm font-medium mb-1">
                     {t('settings:tldw.chatRequest')}
                   </label>
                   <Input
+                    id={`${inputIdPrefix}-chat-request`}
                     type="number"
                     min={1}
                     value={chatRequestTimeoutSec}
@@ -267,12 +271,13 @@ export const TldwTimeoutSettings = ({
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">
+                  <label htmlFor={`${inputIdPrefix}-chat-startup`} className="block text-sm font-medium mb-1">
                     {t('settings:tldw.chatStartup', {
                       defaultValue: 'Chat startup timeout'
                     })}
                   </label>
                   <Input
+                    id={`${inputIdPrefix}-chat-startup`}
                     type="number"
                     min={1}
                     value={chatStartupTimeoutSec}
@@ -295,10 +300,11 @@ export const TldwTimeoutSettings = ({
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">
+                  <label htmlFor={`${inputIdPrefix}-chat-stream-idle`} className="block text-sm font-medium mb-1">
                     {t('settings:tldw.chatStreamIdle')}
                   </label>
                   <Input
+                    id={`${inputIdPrefix}-chat-stream-idle`}
                     type="number"
                     min={1}
                     value={chatStreamIdleTimeoutSec}
@@ -314,10 +320,11 @@ export const TldwTimeoutSettings = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">
+                  <label htmlFor={`${inputIdPrefix}-rag-request`} className="block text-sm font-medium mb-1">
                     {t('settings:tldw.ragRequest')}
                   </label>
                   <Input
+                    id={`${inputIdPrefix}-rag-request`}
                     type="number"
                     min={1}
                     value={ragRequestTimeoutSec}
@@ -333,10 +340,11 @@ export const TldwTimeoutSettings = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">
+                  <label htmlFor={`${inputIdPrefix}-media-request`} className="block text-sm font-medium mb-1">
                     {t('settings:tldw.mediaRequest')}
                   </label>
                   <Input
+                    id={`${inputIdPrefix}-media-request`}
                     type="number"
                     min={1}
                     value={mediaRequestTimeoutSec}
@@ -352,10 +360,11 @@ export const TldwTimeoutSettings = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">
+                  <label htmlFor={`${inputIdPrefix}-upload-request`} className="block text-sm font-medium mb-1">
                     {t('settings:tldw.uploadRequest')}
                   </label>
                   <Input
+                    id={`${inputIdPrefix}-upload-request`}
                     type="number"
                     min={1}
                     value={uploadRequestTimeoutSec}

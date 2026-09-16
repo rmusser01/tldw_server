@@ -1,0 +1,56 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:56953) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:56952) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+ ✓ ../packages/ui/src/components/Option/Settings/__tests__/TldwTimeoutSettings.accessibility.test.tsx (9 tests) 2757ms
+   ✓ names and focuses the numeric input through its visible label: Request Timeout (seconds)  310ms
+   ✓ keeps labels scoped to their own instance and stable when controlled values rerender  1340ms
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+stderr | ../packages/ui/src/components/Option/Settings/__tests__/tldw.timeouts.form.test.tsx > a first server connection with no stored config uses the same generation defaults
+Could not clear private Flashcards transfers after the account or server changed.
+
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+ ✓ ../packages/ui/src/components/Option/Settings/__tests__/tldw.timeouts.form.test.tsx (9 tests) 18493ms
+   ✓ ordinary Settings save persists generation defaults without opening Advanced, and reload preserves them  2860ms
+   ✓ a first server connection with no stored config uses the same generation defaults  929ms
+   ✓ Extended and explicit Reset persist their generation budgets across reload  3398ms
+   ✓ preserves explicit stored 10000 ms generation overrides on ordinary save and reload  2623ms
+   ✓ preserves explicit stored 237000 ms generation overrides on ordinary save and reload  2623ms
+   ✓ invalid zero generation values fall back to generation presets instead of the generic timeout  1242ms
+   ✓ clicking Balanced from a preserved Custom configuration applies the selected preset  2438ms
+   ✓ the actual request layer accepts a generation longer than 10 seconds using ordinary Settings save output  1177ms
+   ✓ the same actual request layer still honors a deliberate 10-second RAG limit  1202ms
+
+ Test Files  2 passed (2)
+      Tests  18 passed (18)
+   Start at  14:22:40
+   Duration  19.83s (transform 547ms, setup 165ms, import 1.40s, tests 21.25s, environment 412ms)
