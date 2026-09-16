@@ -1,0 +1,5 @@
+[
+  "apps/packages/ui/src/components/Option/Playground/Playground.tsx",
+  "apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx",
+  "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx"
+]

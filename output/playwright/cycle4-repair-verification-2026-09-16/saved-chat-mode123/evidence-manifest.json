@@ -1,0 +1,71 @@
+{
+  "unit": "saved-chat-mode123",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-uat123-mode-frontend-paths.json",
+      "bytes": 285,
+      "sha256": "0b7c7f8338022e2c91c872b52769d7efe596ce666f1f29833428c3e3a2e214b5"
+    },
+    {
+      "file": "cycle4-uat123-mode-green.log",
+      "bytes": 1382,
+      "sha256": "70cea46ddec8cd337020ffcf23f119831992d8d81dd4f2a80bca09eb2f502a41"
+    },
+    {
+      "file": "cycle4-uat123-mode-implementation.md",
+      "bytes": 4269,
+      "sha256": "21dab085706bb920c3ecce6903b3553560e42dc056789f73d0dacb5a2eba99eb"
+    },
+    {
+      "file": "cycle4-uat123-mode-lint-baseline.json",
+      "bytes": 176185,
+      "sha256": "83aeecde3925eba60507a3f72d1ebc17054394be055a8c64d63356e6a28bf35e"
+    },
+    {
+      "file": "cycle4-uat123-mode-lint-comparison.json",
+      "bytes": 124,
+      "sha256": "fe42ed6b40db0d92e66dcbc57e47b6eb0edcaba938d646771539eaf0b97ad83f"
+    },
+    {
+      "file": "cycle4-uat123-mode-lint-current.json",
+      "bytes": 176752,
+      "sha256": "f665f0533937ef6bb5342a73e4e995deffc44a4a70f5f55270eb34e7a3c51d59"
+    },
+    {
+      "file": "cycle4-uat123-mode-owned-manifest.json",
+      "bytes": 931,
+      "sha256": "6f2fabb5f93a57ddfaac6500ee60f60c188f23953a9cd6d84711234decdeaa19"
+    },
+    {
+      "file": "cycle4-uat123-mode-paths.json",
+      "bytes": 285,
+      "sha256": "0b7c7f8338022e2c91c872b52769d7efe596ce666f1f29833428c3e3a2e214b5"
+    },
+    {
+      "file": "cycle4-uat123-mode-red.log",
+      "bytes": 22148,
+      "sha256": "674790d76e7ee28b642e2ae4d64b5bee23d4b490c64d1681e0593fa824e13332"
+    },
+    {
+      "file": "cycle4-uat123-mode-static-check.mjs",
+      "bytes": 1936,
+      "sha256": "33c1195dc4270919caf2dea3e5ab16dcde27411ee0d04eec63661f866681aec5"
+    },
+    {
+      "file": "cycle4-uat123-note-red.log",
+      "bytes": 11242,
+      "sha256": "9990a04dcb15b9d38514f7905f610cce5ffe61dbba922a7e128ab094b2432243"
+    },
+    {
+      "file": "cycle4-uat123-root-focused.log",
+      "bytes": 1883,
+      "sha256": "39030f2fafb07d6fd2cf377e329a09fc4a9d56d3821bdaa58a04a1f673c2675d"
+    },
+    {
+      "file": "cycle4-uat123-root-review.md",
+      "bytes": 1130,
+      "sha256": "c1bf0dfc6945cb2f993cdf8f40fa2c32935e6946fd31e2d474929b07ae10bf6c"
+    }
+  ]
+}

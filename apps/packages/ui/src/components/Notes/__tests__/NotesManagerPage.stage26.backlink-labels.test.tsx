@@ -7,6 +7,7 @@ import NotesManagerPage from "../NotesManagerPage"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { Playground } from "@/components/Option/Playground/Playground"
+import { selectedAssistantStorage } from "@/utils/selected-assistant-storage"
 
 const {
   mockBgRequest,
@@ -61,6 +62,9 @@ vi.mock("react-i18next", () => ({
     }
   })
 }))
+
+vi.mock("@plasmohq/storage", () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+vi.mock("@plasmohq/storage/hook", () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage-hook"))
 
 vi.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
@@ -142,7 +146,7 @@ vi.mock("@/hooks/useMessageOption", () => ({ useMessageOption: () => ({
   selectedCharacter: chatAuthority.selection?.kind === "character" ? { id: chatAuthority.selection.id, name: chatAuthority.selection.name } : null,
   setSelectedAssistant: chatAuthority.setSelection, setSelectedCharacter: vi.fn(), onSubmit: vi.fn(), regenerateLastMessage: vi.fn()
 }) }))
-vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({ PlaygroundForm: () => <div data-testid="loaded-chat-composer" /> }))
+vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({ PlaygroundForm: ({ characterWorkflowActive, characterChatSendBlocker }: { characterWorkflowActive?: boolean; characterChatSendBlocker?: unknown }) => <div data-testid="loaded-chat-composer" data-character-workflow={String(characterWorkflowActive)} data-character-blocked={String(Boolean(characterChatSendBlocker))} /> }))
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({ PlaygroundChat: () => <div data-testid="loaded-chat-body">{useStoreMessageOption(state => state.messages).map(row => <p key={row.id}>{row.message}</p>)}</div> }))
 vi.mock("@/components/Option/Playground/CharacterChatSessionsPanel", () => ({ CharacterChatSessionsPanel: () => null }))
 vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({ ArtifactsPanel: () => null }))
@@ -421,6 +425,34 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     await waitFor(() => expect(screen.getByTestId("loaded-chat-composer")).toBeInTheDocument())
     expect(useStoreMessageOption.getState()).toMatchObject({ serverChatId: "cedar", serverChatCharacterId: 4 })
     expect(usePlaygroundSessionStore.getState()).toMatchObject({ serverChatId: "cedar", trackedCharacterId: "4" })
+  })
+
+
+  it("opens an ordinary Note source in ordinary workflow after a persisted Character session", async () => {
+    localStorage.clear()
+    await selectedAssistantStorage.set("playgroundChatWorkflowMode", "character")
+    configureCommonRequests("ordinary")
+    mockGetChat.mockResolvedValue({ id: "ordinary", title: "Ordinary chat", source: "webui-chat", version: 1 })
+    mockListChatMessages.mockResolvedValue([{ id: "saved-user", role: "user", content: "When?", version: 1 }, { id: "saved-answer", role: "assistant", content: "An ordinary saved answer", version: 1 }])
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const Route = () => {
+      const [chat, setChat] = React.useState(false)
+      mockNavigate.mockImplementation(() => setChat(true))
+      return chat ? <Playground /> : <NotesManagerPage />
+    }
+    const view = render(<QueryClientProvider client={queryClient}><Route /></QueryClientProvider>)
+    try {
+      fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
+      fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+      fireEvent.click(await screen.findByText(/open linked conversation/i))
+      expect(await screen.findByText("An ordinary saved answer")).toBeInTheDocument()
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+      await waitFor(() => expect(screen.getByTestId("loaded-chat-composer")).toHaveAttribute("data-character-workflow", "false"))
+      expect(screen.getByTestId("loaded-chat-composer")).toHaveAttribute("data-character-blocked", "false")
+      expect(screen.queryByText("Choose a character to start character chat")).not.toBeInTheDocument()
+      expect(useStoreMessageOption.getState()).toMatchObject({ serverChatId: "ordinary", serverChatMetaLoaded: true, serverChatCharacterId: null })
+      expect(await selectedAssistantStorage.get("playgroundChatWorkflowMode")).toBe("character")
+    } finally { view.unmount(); localStorage.clear() }
   })
 
   it.each(["stream", "new-draft", "image-draft", "note-edit", "account"])("does not replace current work when %s changes during a linked read", async change => {

@@ -1,0 +1,5 @@
+# Root independent UAT123 review
+
+Reviewed oneproduction andtwo test changes against frozen author scope. No remaining actionable finding. Existing owned saved metadata now derives ordinary/persona versus trackedCharacter mode; stored new-chat preference is unchanged. Pending scope/metadata, a new/different explicitCharacter entry and genuineunsaved draft retain prior mode. No route parser/backend/async setter added. Existing clear-assistant path resets saved ID/meta and therefore still supports explicit new selection. The canonical loader already checks scope/epoch before its metadata writes; this patch consumes that authority.
+
+Root independently ran full coordinator49 +Note25 =74pass, matching author final. Notes test invokes actual menu/shared selection/mounted Playground with lightweight composer rendering; it checks real calculated mode/gating, not stubbed results. History controls use actual canonical loader and selected-assistant storage. Scope/delayed/unsaved guards remain in these suites. Source whitespace/scopedlint/manifest checked separately. Combined compiler and native verification remain pending.

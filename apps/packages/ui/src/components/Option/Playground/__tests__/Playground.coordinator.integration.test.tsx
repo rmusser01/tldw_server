@@ -52,9 +52,9 @@ const useRealServerConversation = () => {
 }
 
 const AdditionalServerLoader = () => { useRealServerConversation(); return null }
-const SavedChatSelection = () => {
+const SavedChatSelection = ({ ordinary = false }: { ordinary?: boolean }) => {
   const select = useSelectServerChat()
-  return <button onClick={() => select({ id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat" } as Parameters<typeof select>[0])}>Open saved Robot</button>
+  return <button onClick={() => select((ordinary ? { id: "ordinary", title: "Ordinary saved chat", source: "webui-chat" } : { id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat" }) as Parameters<typeof select>[0])}>Open saved {ordinary ? "ordinary chat" : "Robot"}</button>
 }
 
 const messageOptionState = vi.hoisted(() => ({
@@ -126,7 +126,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
-  PlaygroundForm: () => <div data-testid="playground-form">{realLoader.additionalLoader ? Array.from({ length: realLoader.webStorage ? 5 : 1 }, (_, index) => <AdditionalServerLoader key={index} />) : null}</div>
+  PlaygroundForm: ({ characterWorkflowActive, characterChatSendBlocker }: { characterWorkflowActive?: boolean; characterChatSendBlocker?: unknown }) => <div data-testid="playground-form" data-character-workflow={String(characterWorkflowActive)} data-character-blocked={String(Boolean(characterChatSendBlocker))}>{realLoader.additionalLoader ? Array.from({ length: realLoader.webStorage ? 5 : 1 }, (_, index) => <AdditionalServerLoader key={index} />) : null}</div>
 }))
 
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
@@ -361,6 +361,7 @@ describe("Playground coordinator integration", () => {
     messageOptionState.value.historyId = null
     messageOptionState.value.serverChatId = null
     messageOptionState.value.selectedCharacter = null
+    messageOptionState.value.setMessages.mockClear()
     messageOptionState.value.setHistoryId.mockClear()
     messageOptionState.value.setServerChatId.mockClear()
     messageOptionState.value.setServerChatCharacterId.mockClear()
@@ -785,6 +786,50 @@ describe("Playground coordinator integration", () => {
     expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled()
     expect(window.location.search).toContain("settingsHistoryId=missing-local")
     view.unmount()
+  })
+
+
+  it.each(["history", "cold"])("uses canonical ordinary workflow after %s load despite a persisted Character preference", async entry => {
+    realLoader.enabled = realLoader.webStorage = true
+    useMessageOptionMock.mockImplementation(useRealServerConversation)
+    localStorage.clear()
+    await selectedAssistantStorage.set("playgroundChatWorkflowMode", "character")
+    await selectedAssistantStorage.set("selectedAssistant", { kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } })
+    useStoreMessageOption.setState({ serverChatId: entry === "cold" ? "ordinary" : null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isProcessing: false })
+    tldwClientState.getChat.mockResolvedValue({ id: "ordinary", title: "Ordinary saved chat", source: "webui-chat", scope_type: "global" })
+    tldwClientState.listChatMessages.mockResolvedValue([{ id: "answer", role: "assistant", content: "Ordinary answer", version: 1 }])
+    const view = render(<><Playground /><SavedChatSelection ordinary /></>)
+    try {
+      if (entry === "history") fireEvent.click(screen.getByRole("button", { name: "Open saved ordinary chat" }))
+      await waitFor(() => expect(useStoreMessageOption.getState().messages.map(row => row.message)).toContain("Ordinary answer"))
+      await waitFor(() => expect(screen.getByTestId("playground-form")).toHaveAttribute("data-character-workflow", "false"))
+      expect(screen.getByTestId("playground-form")).toHaveAttribute("data-character-blocked", "false")
+      expect(screen.queryByText("Choose a character to start character chat")).not.toBeInTheDocument()
+      expect(await selectedAssistantStorage.get("playgroundChatWorkflowMode")).toBe("character")
+    } finally { view.unmount(); localStorage.clear() }
+  })
+
+  it.each(["pending", "scope-pending", "fresh", "unsaved", "character", "persona"])("preserves the intended workflow for %s chat state", async state => {
+    realLoader.webStorage = true
+    localStorage.clear()
+    await selectedAssistantStorage.set("playgroundChatWorkflowMode", "character")
+    const fresh = state === "fresh" || state === "unsaved"
+    if (state === "fresh") window.history.pushState({}, "", "/chat?mode=character&characterId=4")
+    sessionPersistenceState.value.sessionScopeReady = state !== "scope-pending"
+    const base = messageOptionState.value
+    useMessageOptionMock.mockImplementation(() => ({ ...base,
+      serverChatId: fresh ? null : "owned-chat", serverChatMetaLoaded: state !== "pending",
+      serverChatAssistantKind: state === "character" ? "character" : state === "persona" ? "persona" : null,
+      serverChatCharacterId: state === "character" ? "4" : null,
+      messages: state === "unsaved" ? [{ id: "draft", isBot: false, message: "Keep my unsaved thought" }] : []
+    }))
+    const view = render(<Playground />)
+    try {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+      await waitFor(() => expect(screen.getByTestId("playground-form")).toHaveAttribute("data-character-workflow", state === "persona" ? "false" : "true"))
+      if (state === "unsaved") expect(base.setMessages).not.toHaveBeenCalled()
+      expect(await selectedAssistantStorage.get("playgroundChatWorkflowMode")).toBe("character")
+    } finally { view.unmount(); localStorage.clear() }
   })
 
   it.each(["profile", "messages"])("keeps a saved target over a previous character while %s is delayed", async delayed => {

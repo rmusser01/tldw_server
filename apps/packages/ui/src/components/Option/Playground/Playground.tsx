@@ -520,6 +520,7 @@ export const Playground = () => {
     serverChatId,
     serverChatMetaLoaded,
     serverChatCharacterId,
+    serverChatAssistantKind,
     serverChatTitle,
     serverChatLoadState,
     serverChatLoadError,
@@ -821,11 +822,19 @@ export const Playground = () => {
     }
     return null;
   }, [selectedAssistant, selectedAssistantMode, selectedCharacter]);
-  const characterWorkflowActive =
-    routeRequestsCharacterMode ||
-    characterModeIntentActive ||
-    normalizedChatWorkflowMode === "character" ||
-    hasTrackedCharacterSelection;
+  // An owned saved conversation determines its workflow; the preference is for
+  // new chats. Keep explicit new Character entries and unresolved loads intact.
+  const hasResolvedSavedChatWorkflow = Boolean(
+    sessionScopeReady && serverChatId && serverChatMetaLoaded &&
+    (!routeRequestsCharacterMode || routeCharacterIntentChatId === serverChatId)
+  );
+  const characterWorkflowActive = hasResolvedSavedChatWorkflow
+    ? serverChatAssistantKind === "character" ||
+      (serverChatAssistantKind !== "persona" && serverChatCharacterId != null)
+    : routeRequestsCharacterMode ||
+      characterModeIntentActive ||
+      normalizedChatWorkflowMode === "character" ||
+      hasTrackedCharacterSelection;
   const activeCharacterModeLabel = activeCharacterSelection?.name ?? null;
   const selectedTrackedCharacterId = React.useMemo(() => {
     return activeCharacterSelection?.id != null
