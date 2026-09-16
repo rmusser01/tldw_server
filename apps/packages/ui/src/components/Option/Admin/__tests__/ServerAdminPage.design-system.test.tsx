@@ -2,6 +2,7 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { App, message } from "antd"
 import ServerAdminPage from "../ServerAdminPage"
 
 const apiMock = vi.hoisted(() => ({
@@ -152,7 +153,8 @@ describe("ServerAdminPage design-system states", () => {
   it("creates an ordinary user from the admin modal and refreshes the list", async () => {
     apiMock.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
     apiMock.createAdminUser.mockResolvedValue({ id: 22, username: "alice", role: "user" })
-    render(<ServerAdminPage />)
+    const staticSuccess = vi.spyOn(message, "success")
+    render(<App><ServerAdminPage /></App>)
     fireEvent.click(await screen.findByRole("button", { name: "Create user" }))
     // Test setup supplies identical useId values; find the sole open dialog.
     const dialog = await screen.findByRole("dialog")
@@ -164,6 +166,8 @@ describe("ServerAdminPage design-system states", () => {
       username: "alice", email: "alice@example.com", password: "A-strong-password-21!", role: "user"
     }))
     await waitFor(() => expect(apiMock.listAdminUsers).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText("User created")).toBeVisible()
+    expect(staticSuccess).not.toHaveBeenCalled()
   })
 
   it("keeps create-user errors inside the modal without losing the form", async () => {

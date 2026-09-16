@@ -1,0 +1,7 @@
+# UAT102 and Prompt contextual feedback
+
+Backlog13260.43, plan4Task8. Replace static admin message import with existing useAntdMessage and Prompt sync notification with existing useAntdNotification. Include notification in existing callback dependencies. Scope only those callers.
+
+Permanent actual App-context RED2: admin creation calls static success; failed prompt sync produces no contextual notification. Admin test preserves exact form submission and list refresh; Prompt test preserves failed sync return/local-save feedback and owner seam. Green broader58cases/3suites (Admin design-system, media-budget, service auto-sync) plus corrected Prompt owner-callers10pass,68unique tests. Existing owner-caller mocks needed stable original spies because real notification compatibility utility wraps exported methods; test now keeps those references. Actual AntD notification animation remained in appear state in jsdom; after inspecting DOM and existing Settings fixtures, test wraps actual App in ConfigProvider motion:false for deterministic visible feedback. No production animation change and no suppressed test assertions. One working-directory typo prevented a test-file replacement before the corrected run; not a product failure.
+
+Evidence /private/tmp/uat102-permanent-red.txt, -permanent-green.txt (intermediate harness failures retained), -prompt-final.txt (10pass). Scoped ESLint before final harness-only refinements0errors/17unchangedwarnings; final comparison queued. TS-only Bandit N/A. Native feedback warning verification pending.

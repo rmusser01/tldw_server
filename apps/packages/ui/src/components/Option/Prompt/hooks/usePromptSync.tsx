@@ -1,7 +1,7 @@
 import { resolveRecipePersistenceOwnerView } from "@/services/recipe-persistence-uncertainty"
 import React, { useRef, useState } from "react"
 import { useMutation, type QueryClient } from "@tanstack/react-query"
-import { notification } from "antd"
+import { useAntdNotification } from "@/hooks/useAntdNotification"
 import {
   autoSyncPrompt,
   pushToStudio,
@@ -53,6 +53,7 @@ export interface UsePromptSyncDeps {
 }
 
 export function usePromptSync(deps: UsePromptSyncDeps) {
+  const notification = useAntdNotification()
   const { queryClient, isOnline, t } = deps
 
   const [projectSelectorOpen, setProjectSelectorOpen] = useState(false)
@@ -128,7 +129,7 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         }
       }
     },
-    [t]
+    [t, notification]
   )
 
   const { mutate: pushToStudioMutation, isPending: isPushing } = useMutation({
@@ -529,7 +530,7 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
         batchSyncRunningRef.current = false
       }
     },
-    [isOnline, queryClient, t]
+    [isOnline, queryClient, t, notification]
   )
 
   const handleBatchSyncAction = React.useCallback(() => {

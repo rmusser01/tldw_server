@@ -1728,7 +1728,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           />
         )
       case 4:
-        return <ProcessingStep onCancelAll={handleCancelAll} />
+        return <ProcessingStep onCancelAll={handleCancelAll} onMinimize={onClose} />
       case 5:
         return (
           <WizardResultsStep

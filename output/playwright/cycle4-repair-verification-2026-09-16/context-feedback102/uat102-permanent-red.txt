@@ -1,0 +1,96 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:91209) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Option/Admin/__tests__/ServerAdminPage.design-system.test.tsx (12 tests | 1 failed | 11 skipped) 3075ms
+     ↓ loads multi-user creation controls under Strict Mode
+     ↓ does not start dashboard requests when a config lookup resolves after unmount
+     × creates an ordinary user from the admin modal and refreshes the list 3074ms
+     ↓ keeps create-user errors inside the modal without losing the form
+     ↓ uses PermissionNotice with an actionable recovery path for forbidden admin APIs
+     ↓ uses a blocked callout with an actionable recovery path when admin APIs are missing
+     ↓ uses an Error state panel with a retry path for system stats failures
+     ↓ uses an Empty state panel when no media budget user can be selected
+     ↓ renders user-load errors as an error state with retry, without a false empty panel
+     ↓ renders role-load errors through the design-system Alert primitive
+     ↓ renders media budget diagnostic errors through the design-system Alert primitive
+     ↓ resets a user's password with a generated secret and reveals it once (#2918)
+(node:91231) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Option/Prompt/__tests__/prompt-sync.owner-callers.test.tsx (10 tests | 1 failed | 9 skipped) 1073ms
+   × uses application-context feedback when a locally saved prompt cannot sync 1072ms
+   ↓ keeps the project selector open and reports rejection instead of push success
+   ↓ captures current owner for user save and manual push without exposing authorization revision
+   ↓ does not require owner resolution for v1 user saves
+   ↓ freezes one owner for an entire outbox batch despite a connection change between items
+   ↓ freezes one opaque owner for parallel bulk pushes
+   ↓ reports a false pull result as an error instead of success
+   ↓ reports a false unlink result as an error instead of success
+   ↓ keeps failed keep-server recovery visible and refreshes its copied error row
+   ↓ reports a false Prompt Studio import as an error and refreshes on settlement
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Admin/__tests__/ServerAdminPage.design-system.test.tsx > ServerAdminPage design-system states > creates an ordinary user from the admin modal and refreshes the list
+AssertionError: expected "Mock" to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st Mock call:
+
+    Array [
+      "User created",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/components/Option/Admin/__tests__/ServerAdminPage.design-system.test.tsx:170:31
+    168|     await waitFor(() => expect(apiMock.listAdminUsers).toHaveBeenCalle…
+    169|     expect(await screen.findByText("User created")).toBeVisible()
+    170|     expect(staticSuccess).not.toHaveBeenCalled()
+       |                               ^
+    171|   })
+    172| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/Option/Prompt/__tests__/prompt-sync.owner-callers.test.tsx > uses application-context feedback when a locally saved prompt cannot sync
+TestingLibraryElementError: Unable to find an element with the text: managePrompts.sync.syncFailedWithLocalSave. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-root"[39m
+    [36m/>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-root"[39m
+    [36m/>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Option/Prompt/__tests__/prompt-sync.owner-callers.test.tsx:105:23
+    103|     })
+    104|   })
+    105|   expect(await screen.findByText("managePrompts.sync.syncFailedWithLoc…
+       |                       ^
+    106|   expect(notification.warning).not.toHaveBeenCalled()
+    107| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 20 skipped (22)
+   Start at  19:27:13
+   Duration  6.29s (transform 268ms, setup 163ms, import 1.22s, tests 4.15s, environment 568ms)
+

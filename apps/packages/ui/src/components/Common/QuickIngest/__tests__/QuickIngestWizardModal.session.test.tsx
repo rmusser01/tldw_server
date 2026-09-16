@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   runtimeListeners: [] as Array<(message: any) => void>,
   modalProps: [] as any[],
   afterCancelProcessing: null as null | (() => void),
+  useActualProcessingStep: false,
   connectionState: {
     phase: "connected",
     isConnected: true,
@@ -326,27 +327,35 @@ vi.mock("@/components/Common/QuickIngest/ProcessingStep", async () => {
   const actual = await vi.importActual<
     typeof import("@/components/Common/QuickIngest/IngestWizardContext")
   >("@/components/Common/QuickIngest/IngestWizardContext")
+  const { ProcessingStep: ActualProcessingStep } = await vi.importActual<
+    typeof import("@/components/Common/QuickIngest/ProcessingStep")
+  >("@/components/Common/QuickIngest/ProcessingStep")
   return {
-    ProcessingStep: ({ onCancelAll }: { onCancelAll?: () => void }) => {
-      const { state, cancelProcessing } = actual.useIngestWizard()
-      return (
-        <div data-testid="wizard-processing">
-          {state.processingState.status}:{state.processingState.perItemProgress.length}
-          <button
-            onClick={() => {
-              if (onCancelAll) {
-                onCancelAll()
-              } else {
-                cancelProcessing()
-              }
-              mocks.afterCancelProcessing?.()
-            }}
-          >
-            Cancel Processing
-          </button>
-        </div>
-      )
+    ProcessingStep: (props: React.ComponentProps<typeof ActualProcessingStep>) => {
+      if (mocks.useActualProcessingStep) return <ActualProcessingStep {...props} />
+      return <StubProcessingStep {...props} />
     },
+  }
+
+  function StubProcessingStep({ onCancelAll }: { onCancelAll?: () => void }) {
+    const { state, cancelProcessing } = actual.useIngestWizard()
+    return (
+      <div data-testid="wizard-processing">
+        {state.processingState.status}:{state.processingState.perItemProgress.length}
+        <button
+          onClick={() => {
+            if (onCancelAll) {
+              onCancelAll()
+            } else {
+              cancelProcessing()
+            }
+            mocks.afterCancelProcessing?.()
+          }}
+        >
+          Cancel Processing
+        </button>
+      </div>
+    )
   }
 })
 
@@ -453,6 +462,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   })
 
   beforeEach(async () => {
+    mocks.useActualProcessingStep = false
     mocks.runtimeListeners.splice(0, mocks.runtimeListeners.length)
     mocks.startQuickIngestSession.mockReset()
     mocks.submitQuickIngestBatch.mockReset()
@@ -490,6 +500,57 @@ describe("QuickIngestWizardModal session runtime", () => {
     vi.useRealTimers()
     vi.restoreAllMocks()
   })
+
+  it.each(["processing button", "close confirmation"])(
+    "minimizes the actual processing view through %s and resumes the same job",
+    async (via) => {
+      mocks.useActualProcessingStep = true
+      useQuickIngestSessionStore.getState().createDraftSession({
+        ...createEmptyQuickIngestSession(),
+        lifecycle: "processing",
+        currentStep: 4,
+        queueItems: [{
+          id: "minimize-item", kind: "url", url: "https://example.com/article",
+          detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true },
+        }],
+        processingState: {
+          status: "running", elapsed: 1, estimatedRemaining: 12,
+          perItemProgress: [{
+            id: "minimize-item", status: "processing", progressPercent: 40,
+            currentStage: "Processing", estimatedRemaining: 12,
+          }],
+        },
+        tracking: {
+          mode: "extension-runtime", sessionId: "minimize-runtime",
+          itemIds: ["minimize-item"], startedAt: Date.now(),
+        },
+      })
+      const original = useQuickIngestSessionStore.getState().session!
+      render(<SessionBackedQuickIngestModal />)
+      const minimizeButton = await screen.findByRole("button", { name: "Minimize to Background" })
+      if (via === "processing button") {
+        await userEvent.click(minimizeButton)
+      } else {
+        await userEvent.click(screen.getByRole("button", { name: "Close", exact: true }))
+        const { Modal } = await import("antd")
+        const options = vi.mocked(Modal.confirm).mock.calls.at(-1)?.[0]
+        await act(async () => { await options?.onOk?.() })
+      }
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+      expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+        id: original.id, visibility: "hidden", lifecycle: "processing",
+        tracking: original.tracking,
+        processingState: {
+          status: "running", perItemProgress: original.processingState.perItemProgress,
+        },
+      })
+      expect(mocks.cancelQuickIngestSession).not.toHaveBeenCalled()
+      expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+      await act(async () => { useQuickIngestSessionStore.getState().showSession() })
+      expect(await screen.findByRole("button", { name: "Minimize to Background" })).toBeInTheDocument()
+      expect(useQuickIngestSessionStore.getState().session?.id).toBe(original.id)
+    }
+  )
 
   it("leaves pending stages and percentages unchanged as elapsed time passes, then accepts a terminal result", async () => {
     vi.useFakeTimers()

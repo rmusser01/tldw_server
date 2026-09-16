@@ -242,9 +242,10 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
 
 type ProcessingStepProps = {
   onCancelAll?: () => void
+  onMinimize?: () => void
 }
 
-export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) => {
+export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, onMinimize }) => {
   const { t } = useTranslation(["option"])
   const { state, cancelProcessing, cancelItem, minimize } = useIngestWizard()
   const { processingState, queueItems } = state
@@ -384,7 +385,8 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) =
 
   const handleMinimize = useCallback(() => {
     minimize()
-  }, [minimize])
+    onMinimize?.()
+  }, [minimize, onMinimize])
 
   const handleCancelItem = useCallback(
     (id: string) => {

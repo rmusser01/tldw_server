@@ -13,8 +13,7 @@ import {
   Input,
   Popconfirm,
   Form,
-  Modal,
-  message
+  Modal
 } from "antd"
 import { useTranslation } from "react-i18next"
 import {
@@ -38,6 +37,7 @@ import {
   StatePanel
 } from "@/components/ui/state"
 import { Alert } from "@/components/ui/primitives"
+import { useAntdMessage } from "@/hooks/useAntdMessage"
 
 const { Title, Text } = Typography
 const SYSTEM_STATS_TIMEOUT_MS = 10_000
@@ -95,6 +95,7 @@ const formatRetryAfterForAdmin = (value: number | null | undefined): string => {
 }
 
 export const ServerAdminPage: React.FC = () => {
+  const message = useAntdMessage()
   const { t } = useTranslation(["option", "settings"])
   const [config, setConfig] = React.useState<TldwConfig | null>(null)
   const [stats, setStats] = React.useState<any | null>(null)

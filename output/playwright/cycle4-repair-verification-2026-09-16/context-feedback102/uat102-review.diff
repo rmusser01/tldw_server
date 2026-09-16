@@ -1,0 +1,228 @@
+diff --git a/apps/packages/ui/src/components/Option/Admin/ServerAdminPage.tsx b/apps/packages/ui/src/components/Option/Admin/ServerAdminPage.tsx
+index 2011ad9e48..a97e9ee307 100644
+--- a/apps/packages/ui/src/components/Option/Admin/ServerAdminPage.tsx
++++ b/apps/packages/ui/src/components/Option/Admin/ServerAdminPage.tsx
+@@ -13,8 +13,7 @@ import {
+   Input,
+   Popconfirm,
+   Form,
+-  Modal,
+-  message
++  Modal
+ } from "antd"
+ import { useTranslation } from "react-i18next"
+ import {
+@@ -38,6 +37,7 @@ import {
+   StatePanel
+ } from "@/components/ui/state"
+ import { Alert } from "@/components/ui/primitives"
++import { useAntdMessage } from "@/hooks/useAntdMessage"
+ 
+ const { Title, Text } = Typography
+ const SYSTEM_STATS_TIMEOUT_MS = 10_000
+@@ -95,6 +95,7 @@ const formatRetryAfterForAdmin = (value: number | null | undefined): string => {
+ }
+ 
+ export const ServerAdminPage: React.FC = () => {
++  const message = useAntdMessage()
+   const { t } = useTranslation(["option", "settings"])
+   const [config, setConfig] = React.useState<TldwConfig | null>(null)
+   const [stats, setStats] = React.useState<any | null>(null)
+diff --git a/apps/packages/ui/src/components/Option/Admin/__tests__/ServerAdminPage.design-system.test.tsx b/apps/packages/ui/src/components/Option/Admin/__tests__/ServerAdminPage.design-system.test.tsx
+index 3ec11b9fe8..77dfaf2732 100644
+--- a/apps/packages/ui/src/components/Option/Admin/__tests__/ServerAdminPage.design-system.test.tsx
++++ b/apps/packages/ui/src/components/Option/Admin/__tests__/ServerAdminPage.design-system.test.tsx
+@@ -2,6 +2,7 @@
+ import React from "react"
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+ import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
++import { App, message } from "antd"
+ import ServerAdminPage from "../ServerAdminPage"
+ 
+ const apiMock = vi.hoisted(() => ({
+@@ -152,7 +153,8 @@ describe("ServerAdminPage design-system states", () => {
+   it("creates an ordinary user from the admin modal and refreshes the list", async () => {
+     apiMock.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
+     apiMock.createAdminUser.mockResolvedValue({ id: 22, username: "alice", role: "user" })
+-    render(<ServerAdminPage />)
++    const staticSuccess = vi.spyOn(message, "success")
++    render(<App><ServerAdminPage /></App>)
+     fireEvent.click(await screen.findByRole("button", { name: "Create user" }))
+     // Test setup supplies identical useId values; find the sole open dialog.
+     const dialog = await screen.findByRole("dialog")
+@@ -164,6 +166,8 @@ describe("ServerAdminPage design-system states", () => {
+       username: "alice", email: "alice@example.com", password: "A-strong-password-21!", role: "user"
+     }))
+     await waitFor(() => expect(apiMock.listAdminUsers).toHaveBeenCalledTimes(2))
++    expect(await screen.findByText("User created")).toBeVisible()
++    expect(staticSuccess).not.toHaveBeenCalled()
+   })
+ 
+   it("keeps create-user errors inside the modal without losing the form", async () => {
+diff --git a/apps/packages/ui/src/components/Option/Prompt/__tests__/prompt-sync.owner-callers.test.tsx b/apps/packages/ui/src/components/Option/Prompt/__tests__/prompt-sync.owner-callers.test.tsx
+index f0f38e66a1..18fa6a6d05 100644
+--- a/apps/packages/ui/src/components/Option/Prompt/__tests__/prompt-sync.owner-callers.test.tsx
++++ b/apps/packages/ui/src/components/Option/Prompt/__tests__/prompt-sync.owner-callers.test.tsx
+@@ -1,6 +1,6 @@
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+-import { act, renderHook, waitFor } from "@testing-library/react"
+-import { notification } from "antd"
++import { act, renderHook, screen, waitFor } from "@testing-library/react"
++import { App, ConfigProvider } from "antd"
+ import React from "react"
+ import { beforeEach, expect, it, vi } from "vitest"
+ 
+@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
+   info: vi.fn(),
+   all: vi.fn()
+ }))
++const staticFeedback = vi.hoisted(() => ({
++  success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(),
++}))
+ vi.mock("@/services/recipe-persistence-uncertainty", () => ({
+   resolveRecipePersistenceOwnerView: mocks.owner
+ }))
+@@ -36,12 +39,10 @@ vi.mock("@/db/dexie/helpers", () => ({
+   restorePrompt: vi.fn(),
+   exportPrompts: vi.fn()
+ }))
+-vi.mock("antd", () => ({
++vi.mock("antd", async importOriginal => ({
++  ...await importOriginal<typeof import("antd")>(),
+   notification: {
+-    success: vi.fn(),
+-    error: vi.fn(),
+-    warning: vi.fn(),
+-    info: vi.fn()
++    ...staticFeedback,
+   }
+ }))
+ const ownerA = "recipe-owner:sha256:" + "a".repeat(64)
+@@ -89,6 +90,23 @@ function setup() {
+   const deps = { queryClient, isOnline: true, t: (key: string) => key }
+   return { queryClient, wrapper, deps }
+ }
++it("uses application-context feedback when a locally saved prompt cannot sync", async () => {
++  const { queryClient, deps } = setup()
++  mocks.auto.mockResolvedValue({ success: false, localId: "recipe", error: "Sync unavailable" })
++  const wrapper = ({ children }: { children: React.ReactNode }) => (
++    <ConfigProvider theme={{ token: { motion: false } }}>
++      <App><QueryClientProvider client={queryClient}>{children}</QueryClientProvider></App>
++    </ConfigProvider>
++  )
++  const { result } = renderHook(() => usePromptSync(deps), { wrapper })
++  await act(async () => {
++    expect(await result.current.syncPromptAfterLocalSave("recipe")).toMatchObject({
++      attempted: true, success: false, error: "Sync unavailable",
++    })
++  })
++  await waitFor(() => expect(screen.getByText("managePrompts.sync.syncFailedWithLocalSave")).toBeVisible())
++  expect(staticFeedback.warning).not.toHaveBeenCalled()
++})
+ it("keeps the project selector open and reports rejection instead of push success", async () => {
+   const { wrapper, deps } = setup()
+   const { result } = renderHook(() => usePromptSync(deps), { wrapper })
+@@ -106,13 +124,13 @@ it("keeps the project selector open and reports rejection instead of push succes
+     result.current.pushToStudioMutation({ localId: "recipe", projectId: 42 })
+   )
+   await waitFor(() =>
+-    expect(notification.error).toHaveBeenCalledWith(
++    expect(staticFeedback.error).toHaveBeenCalledWith(
+       expect.objectContaining({ description: "Unresolved recipe operation" })
+     )
+   )
+   expect(result.current.projectSelectorOpen).toBe(true)
+   expect(result.current.promptToSync).toBe("recipe")
+-  expect(notification.success).not.toHaveBeenCalled()
++  expect(staticFeedback.success).not.toHaveBeenCalled()
+ })
+ it("captures current owner for user save and manual push without exposing authorization revision", async () => {
+   const { wrapper, deps } = setup()
+@@ -226,13 +244,13 @@ it.each([
+     })
+ 
+     await waitFor(() =>
+-      expect(notification.error).toHaveBeenCalledWith(
++      expect(staticFeedback.error).toHaveBeenCalledWith(
+         expect.objectContaining({
+           description: "Recipe has an unresolved operation"
+         })
+       )
+     )
+-    expect(notification.success).not.toHaveBeenCalled()
++    expect(staticFeedback.success).not.toHaveBeenCalled()
+     expect(invalidate).toHaveBeenCalledWith({
+       queryKey: ["fetchAllPrompts"]
+     })
+@@ -255,14 +273,14 @@ it("keeps failed keep-server recovery visible and refreshes its copied error row
+   act(() => result.current.handleResolveConflict("keep_server"))
+ 
+   await waitFor(() =>
+-    expect(notification.error).toHaveBeenCalledWith(
++    expect(staticFeedback.error).toHaveBeenCalledWith(
+       expect.objectContaining({
+         description: "Recipe has an unresolved operation"
+       })
+     )
+   )
+   expect(result.current.conflictModalOpen).toBe(true)
+-  expect(notification.success).not.toHaveBeenCalled()
++  expect(staticFeedback.success).not.toHaveBeenCalled()
+   expect(invalidate).toHaveBeenCalledWith({
+     queryKey: ["fetchAllPrompts"]
+   })
+@@ -283,13 +301,13 @@ it("reports a false Prompt Studio import as an error and refreshes on settlement
+   act(() => result.current.importFromStudioMutation({ serverId: 101 }))
+ 
+   await waitFor(() =>
+-    expect(notification.error).toHaveBeenCalledWith(
++    expect(staticFeedback.error).toHaveBeenCalledWith(
+       expect.objectContaining({
+         description: "Recipe has an unresolved operation"
+       })
+     )
+   )
+-  expect(notification.success).not.toHaveBeenCalled()
++  expect(staticFeedback.success).not.toHaveBeenCalled()
+   expect(invalidate).toHaveBeenCalledWith({
+     queryKey: ["fetchAllPrompts"]
+   })
+diff --git a/apps/packages/ui/src/components/Option/Prompt/hooks/usePromptSync.tsx b/apps/packages/ui/src/components/Option/Prompt/hooks/usePromptSync.tsx
+index ecc1cdbbe4..312114001f 100644
+--- a/apps/packages/ui/src/components/Option/Prompt/hooks/usePromptSync.tsx
++++ b/apps/packages/ui/src/components/Option/Prompt/hooks/usePromptSync.tsx
+@@ -1,7 +1,7 @@
+ import { resolveRecipePersistenceOwnerView } from "@/services/recipe-persistence-uncertainty"
+ import React, { useRef, useState } from "react"
+ import { useMutation, type QueryClient } from "@tanstack/react-query"
+-import { notification } from "antd"
++import { useAntdNotification } from "@/hooks/useAntdNotification"
+ import {
+   autoSyncPrompt,
+   pushToStudio,
+@@ -53,6 +53,7 @@ export interface UsePromptSyncDeps {
+ }
+ 
+ export function usePromptSync(deps: UsePromptSyncDeps) {
++  const notification = useAntdNotification()
+   const { queryClient, isOnline, t } = deps
+ 
+   const [projectSelectorOpen, setProjectSelectorOpen] = useState(false)
+@@ -128,7 +129,7 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
+         }
+       }
+     },
+-    [t]
++    [t, notification]
+   )
+ 
+   const { mutate: pushToStudioMutation, isPending: isPushing } = useMutation({
+@@ -529,7 +530,7 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
+         batchSyncRunningRef.current = false
+       }
+     },
+-    [isOnline, queryClient, t]
++    [isOnline, queryClient, t, notification]
+   )
+ 
+   const handleBatchSyncAction = React.useCallback(() => {
