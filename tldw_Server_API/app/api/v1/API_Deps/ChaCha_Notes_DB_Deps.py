@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management import sqlite_policy
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
 from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
     ChaChaRuntimeManager,
     ChaChaRuntimeUnavailableError,
@@ -444,17 +445,21 @@ def _apply_sqlite_tuning(db_instance: CharactersRAGDB) -> None:
 def _health_check_instance(db_instance: CharactersRAGDB) -> bool:
     try:
         conn = db_instance.get_connection()
-        sqlite_policy.configure_sqlite_connection(
-            conn,
-            use_wal=False,
-            synchronous=None,
-            foreign_keys=True,
-            busy_timeout_ms=1000,
-            temp_store=None,
-        )
-        conn.execute("SELECT 1")
+        if db_instance.backend_type == BackendType.POSTGRESQL:
+            with db_instance.transaction() as transaction:
+                transaction.execute("SELECT 1")
+        else:
+            sqlite_policy.configure_sqlite_connection(
+                conn,
+                use_wal=False,
+                synchronous=None,
+                foreign_keys=True,
+                busy_timeout_ms=1000,
+                temp_store=None,
+            )
+            conn.execute("SELECT 1")
         return True
-    except (CharactersRAGDBError, sqlite3.Error, OSError, RuntimeError, ValueError) as e:
+    except (BackendDatabaseError, CharactersRAGDBError, sqlite3.Error, OSError, RuntimeError, ValueError) as e:
         logger.warning("ChaChaNotes health probe failed ({})", type(e).__name__)
         return False
 

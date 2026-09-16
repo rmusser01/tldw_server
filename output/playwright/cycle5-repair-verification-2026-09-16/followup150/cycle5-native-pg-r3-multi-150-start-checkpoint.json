@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-16T16:52:11.200Z",
+  "mode": "multi",
+  "head": "5dc4b3b0935fbaf54809b238b07c44c403409f8d",
+  "sourceFiles": [
+    {
+      "path": "tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py",
+      "sha256": "7b5e0d837ff506f7c877e4e915cf805b73e7d96c3f1ae848f86a3d696e404276"
+    },
+    {
+      "path": "tldw_Server_API/tests/Chat/test_chacha_notes_db_deps_postgres_health.py",
+      "sha256": "997a212a1237f04d9b485dea5a115f9dabe54f86f74fb2cb4ff87926726432fc"
+    }
+  ],
+  "logOffset": 758304,
+  "scope": "Restart preserved r3 profile to verify repeated authenticated reads after150 repair."
+}

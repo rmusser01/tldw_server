@@ -1,0 +1,4 @@
+[
+  "ERROR:  syntax error at or near \"PRAGMA\" at character 1",
+  "ERROR:  current transaction is aborted, commands ignored until end of transaction block"
+]

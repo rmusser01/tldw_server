@@ -1,0 +1,16 @@
+{
+  "checkedAt": "2026-09-16T16:52:16.177Z",
+  "allMatch": true,
+  "files": [
+    {
+      "path": "tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py",
+      "sha256": "7b5e0d837ff506f7c877e4e915cf805b73e7d96c3f1ae848f86a3d696e404276",
+      "actual": "7b5e0d837ff506f7c877e4e915cf805b73e7d96c3f1ae848f86a3d696e404276"
+    },
+    {
+      "path": "tldw_Server_API/tests/Chat/test_chacha_notes_db_deps_postgres_health.py",
+      "sha256": "997a212a1237f04d9b485dea5a115f9dabe54f86f74fb2cb4ff87926726432fc",
+      "actual": "997a212a1237f04d9b485dea5a115f9dabe54f86f74fb2cb4ff87926726432fc"
+    }
+  ]
+}
