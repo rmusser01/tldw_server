@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-15 23:49'
+updated_date: '2026-09-16 00:27'
 labels:
   - uat
   - testing
@@ -121,6 +121,8 @@ Native restoration evidence retained at output/playwright/cycle3-repair-verifica
 Retained final targeted UAT086/.27 and UAT096/.37 native account controls in output/playwright/cycle3-repair-verification-2026-09-15/qa-history-settings-native-final: Alice verified id2 own history/cited Cedar restore → normal logout200 with zero bounded console/Form errors → Bob UI login then independently verified id3 QA reload with empty history/no Alice content/no observed conversation responses → settled health6/8 → Bob logout200 without bounded Form error → Alice verified id2 own history returns. Login principals[] is explicitly not identity proof. Raw populated login form omitted. 17 files/73,887 bytes,16 hashes validated,11 originals byte-identical,14credentials/JWT/private-key scan0. Sources match primary committed QA/Settings modules; Header edit unrelated. Full fresh matrix still pending.
 
 Current targeted repair total is46findings (17P2/29P3), adding mobileHeader098, Media progress099 and mobile drawer100 after original frozen32 plus087-097. Final savedChat ownership repair committed98a97eea7a with197/11PASS. Native restoration and QAaccount/Settings logout evidence retained separately; Header98 CSS reviewed/nativegeometrypass and awaitscheckpoint, Media99 layout passes actualprogressPUT but reload overwriteszero and remainsunderrepair; drawer100 same-routeacceptedselection remainsunderrepair. Full new freshmatrix has not started.
+
+Cycle3 repair checkpoints complete through UAT101: source7c9409fad2 includes reviewed mobileMedia correction;33/37/39/40/41/42 targeted tasks now Done. Exact finalMedia85/16 and independent56/7 overlap; compiler90baseline unchanged. Final multiCedar Note backlink/reload and singleMedia ownedprogress save/reload/mobilecontrols pass, retained dedicated bundles. New cycle4 profiles single/multi20260916 created empty, initialized via normalAuthNZ; adminCLI provisioned. Existing dependencies reused, oldcycle3data retained and only stopped generatedNextcaches cleared. API/UI18300/18380 single and18301/18381 multi started. Productfreeze7c9409fad2, no new fullworkflow passes yet; run same12namedmatrix with realinference, separate running artifacts and globalissue tracker updates.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

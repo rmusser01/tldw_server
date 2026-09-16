@@ -1,0 +1,65 @@
+{
+  "frozenAt": "2026-09-15T23:08:52.251Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/Playground.tsx",
+      "sha256": "f329cd492b85fa371c53a03340be24ecf4fef4bf86855fe2b3c123a037880873",
+      "bytes": 155582
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx",
+      "sha256": "de2c2b914e0936a963b1d8a365e20bd07c2c439ce034da566a4df8e813f0f8c7",
+      "bytes": 246828
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/hooks/usePromptTemplates.ts",
+      "sha256": "17e30aadfaa414af1dea761ad56af18f779bbc5f690bba233eaaa05f498333d9",
+      "bytes": 16157
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/effective-assistant-state.ts",
+      "sha256": "788f1258fb9676a00289cf9edac5ab0090e0bd51ebffc638a65a89fa76b4c39c",
+      "bytes": 6207
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useServerChatLoader.ts",
+      "sha256": "ece2dbf6112363b3cc4cd3ed4f42d4b64505ce332b5e57a8e648b90580eac859",
+      "bytes": 42091
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/useSelectedAssistant.ts",
+      "sha256": "13ef588d5139f38147268ae4b8ea47f7f4fae14dad745ff94ad2ef309fb42a33",
+      "bytes": 8680
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/RolePlaySetupDrawer.tsx",
+      "sha256": "d647b11b1dc957fd5100eeb7040c74d833e30e08cb5870de544edb8e15a27b9f",
+      "bytes": 28880
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx",
+      "sha256": "6c31555565b97839f4fc8f9d883275e81804800a2c564c14ff042902f6cae60c",
+      "bytes": 30131
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx",
+      "sha256": "db7981bdc98ee6f17942c752eced6b50c63f00a0fea47aff749716cba34b3b60",
+      "bytes": 46753
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx",
+      "sha256": "cba40bf4ce063788091b367e739144c1535a7c27e86c54207d5ef093e2b33c93",
+      "bytes": 51788
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/__tests__/usePromptTemplates.role-play-apply.test.ts",
+      "sha256": "091d3fd7c1ff1abcbe16e12b39a78fb117af157e47ae2a320de2a6a12b5723ae",
+      "bytes": 3776
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/effective-assistant-state.test.ts",
+      "sha256": "0fbfacc9193c6a6c216559e41f8f11e2df5f7632d702079869460582a7c396cc",
+      "bytes": 9271
+    }
+  ]
+}

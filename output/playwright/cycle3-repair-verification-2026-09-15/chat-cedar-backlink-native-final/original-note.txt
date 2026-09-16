@@ -1,0 +1,13 @@
+### Ran Playwright code
+```js
+await page.getByTestId('notes-open-button-0d6a6904-c5b4-4d38-a8c6-18b1c36f46e2').click();
+```
+### Open tabs
+- 0: (current) [Notes | tldw](http://127.0.0.1:18281/notes)
+- 1: [Server Settings | tldw](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/notes
+- Page Title: Notes | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T00-17-31-941Z.yml)

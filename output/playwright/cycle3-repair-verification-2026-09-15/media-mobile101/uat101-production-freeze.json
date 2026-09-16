@@ -1,0 +1,20 @@
+{
+  "frozenAt": "2026-09-16T00:15:52.146Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
+      "sha256": "b9e58148dbac0f55a4da39ea5867da0e752492006ac25e4f3aaf7969a08da734",
+      "bytes": 71902
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/ContentViewer.tsx",
+      "sha256": "cd985f0f5f7f3fc02ed2fea2582d4448c5e00a8f3836e8111328ab446275361d",
+      "bytes": 86974
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/MediaSectionNavigator.tsx",
+      "sha256": "2b33a5b2a78d37c3bee71f3d0c57714ebed4f83bba377233ffbd3c0e9ba6907e",
+      "bytes": 9659
+    }
+  ]
+}

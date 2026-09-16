@@ -1,0 +1,190 @@
+{
+  "createdAt": "2026-09-16T00:21:34.691Z",
+  "originalArtifacts": [
+    {
+      "name": "robot-click.txt",
+      "source": "/private/tmp/uat093-final-cedar-backlink-robot-click.txt",
+      "sourceBytes": 708,
+      "sourceSha256": "45f06dcc8d6ebdc11f9159de91a22a51d30861494e8c0012aad65913c4e7a6b2",
+      "retainedBytes": 708,
+      "retainedSha256": "45f06dcc8d6ebdc11f9159de91a22a51d30861494e8c0012aad65913c4e7a6b2",
+      "modifiedAt": "2026-09-16T00:16:16.707Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline."
+    },
+    {
+      "name": "robot-confirmed.txt",
+      "source": "/private/tmp/uat093-final-cedar-backlink-robot-confirmed.txt",
+      "sourceBytes": 2424,
+      "sourceSha256": "878a5b4de763615b49d4d4cdd18b2bbc43086ec362e56e58be5664a8bade8cbe",
+      "retainedBytes": 2424,
+      "retainedSha256": "878a5b4de763615b49d4d4cdd18b2bbc43086ec362e56e58be5664a8bade8cbe",
+      "modifiedAt": "2026-09-16T00:16:43.200Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline."
+    },
+    {
+      "name": "notes-entry.txt",
+      "source": "/private/tmp/uat093-final-cedar-backlink-notes-entry.txt",
+      "sourceBytes": 662,
+      "sourceSha256": "e5dc7b26788877f32cfc4e5274d50c12448360183250b07149b3543f5cff98d6",
+      "retainedBytes": 662,
+      "retainedSha256": "e5dc7b26788877f32cfc4e5274d50c12448360183250b07149b3543f5cff98d6",
+      "modifiedAt": "2026-09-16T00:17:05.081Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline."
+    },
+    {
+      "name": "original-note.txt",
+      "source": "/private/tmp/uat093-final-cedar-backlink-original-note.txt",
+      "sourceBytes": 596,
+      "sourceSha256": "f30c950b028fc818706fc6899be4b536007ee29970c4ec938895ad4df7fb7938",
+      "retainedBytes": 596,
+      "retainedSha256": "f30c950b028fc818706fc6899be4b536007ee29970c4ec938895ad4df7fb7938",
+      "modifiedAt": "2026-09-16T00:17:31.956Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline."
+    },
+    {
+      "name": "note-ready.txt",
+      "source": "/private/tmp/uat093-final-cedar-backlink-note-ready.txt",
+      "sourceBytes": 18557,
+      "sourceSha256": "18fc8050f195df0485c4511cbf18d81d84afbed763f2467cd1d71788eda44512",
+      "retainedBytes": 18557,
+      "retainedSha256": "18fc8050f195df0485c4511cbf18d81d84afbed763f2467cd1d71788eda44512",
+      "modifiedAt": "2026-09-16T00:17:54.855Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline."
+    },
+    {
+      "name": "more-actions.txt",
+      "source": "/private/tmp/uat093-final-cedar-backlink-more-actions.txt",
+      "sourceBytes": 568,
+      "sourceSha256": "083461d2b7a1d803fc5258e6027e076a4bca50d6d7e4f0834f49c89302a17096",
+      "retainedBytes": 568,
+      "retainedSha256": "083461d2b7a1d803fc5258e6027e076a4bca50d6d7e4f0834f49c89302a17096",
+      "modifiedAt": "2026-09-16T00:18:12.755Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline."
+    },
+    {
+      "name": "menu.txt",
+      "source": "/private/tmp/uat093-final-cedar-backlink-menu.txt",
+      "sourceBytes": 19714,
+      "sourceSha256": "21216a3265405a1ba2886aaa5a1803e6b1a87479825374cb2010a207d21feb87",
+      "retainedBytes": 19714,
+      "retainedSha256": "21216a3265405a1ba2886aaa5a1803e6b1a87479825374cb2010a207d21feb87",
+      "modifiedAt": "2026-09-16T00:18:15.995Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline."
+    },
+    {
+      "name": "open-click.txt",
+      "source": "/private/tmp/uat093-final-cedar-backlink-open-click.txt",
+      "sourceBytes": 649,
+      "sourceSha256": "85d19acfd4d5d61c8770d53c6918985d48c2331b4c22365443ba0698e56a708c",
+      "retainedBytes": 649,
+      "retainedSha256": "85d19acfd4d5d61c8770d53c6918985d48c2331b4c22365443ba0698e56a708c",
+      "modifiedAt": "2026-09-16T00:18:39.891Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline."
+    },
+    {
+      "name": "settled.txt",
+      "source": "/private/tmp/uat093-final-cedar-backlink-settled.txt",
+      "sourceBytes": 3020,
+      "sourceSha256": "6bcf86077be855407ee9367fe258e80971a21a151a995e25eee941542f0c1651",
+      "retainedBytes": 3020,
+      "retainedSha256": "6bcf86077be855407ee9367fe258e80971a21a151a995e25eee941542f0c1651",
+      "modifiedAt": "2026-09-16T00:18:44.566Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline."
+    },
+    {
+      "name": "settled.png",
+      "source": "/private/tmp/uat093-final-cedar-backlink-settled.png",
+      "sourceBytes": 120808,
+      "sourceSha256": "5d30d2bcb4a1f6bad0ed528bfb980993fb13263ea486afc540d2dfe4d27d5c65",
+      "retainedBytes": 120808,
+      "retainedSha256": "5d30d2bcb4a1f6bad0ed528bfb980993fb13263ea486afc540d2dfe4d27d5c65",
+      "modifiedAt": "2026-09-16T00:18:44.048Z",
+      "transform": "Exact bytes preserved.",
+      "dimensions": {
+        "width": 1280,
+        "height": 720
+      }
+    },
+    {
+      "name": "reloaded.txt",
+      "source": "/private/tmp/uat093-final-cedar-backlink-reloaded.txt",
+      "sourceBytes": 3723,
+      "sourceSha256": "a7232a750831ecacb7ea27effb627bfcb2c6a95cf7567a32b1b10308dda1657e",
+      "retainedBytes": 3723,
+      "retainedSha256": "a7232a750831ecacb7ea27effb627bfcb2c6a95cf7567a32b1b10308dda1657e",
+      "modifiedAt": "2026-09-16T00:19:14.179Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline."
+    },
+    {
+      "name": "reloaded.png",
+      "source": "/private/tmp/uat093-final-cedar-backlink-reloaded.png",
+      "sourceBytes": 122291,
+      "sourceSha256": "bc254b0b968809ba00b7febe542a9eda0a4f17fe3584efa90b3309da5158b2f2",
+      "retainedBytes": 122291,
+      "retainedSha256": "bc254b0b968809ba00b7febe542a9eda0a4f17fe3584efa90b3309da5158b2f2",
+      "modifiedAt": "2026-09-16T00:19:13.625Z",
+      "transform": "Exact bytes preserved.",
+      "dimensions": {
+        "width": 1280,
+        "height": 720
+      }
+    },
+    {
+      "name": "reloaded-snapshot.txt",
+      "source": "/private/tmp/uat093-final-cedar-backlink-reloaded-snapshot.txt",
+      "sourceBytes": 11767,
+      "sourceSha256": "e4682b4ca235c150c1b5e98b920b01cb0b6b0a6b597e80c8482c405807eb72dd",
+      "retainedBytes": 11767,
+      "retainedSha256": "e4682b4ca235c150c1b5e98b920b01cb0b6b0a6b597e80c8482c405807eb72dd",
+      "modifiedAt": "2026-09-16T00:19:18.767Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline."
+    },
+    {
+      "name": "original-note-response.json",
+      "source": "/private/tmp/uat093-final-cedar-backlink-note-response.txt",
+      "sourceBytes": 490,
+      "sourceSha256": "b8c2e04c5a3be6c4f0b9f11cff7d985ba1098c8b1e3e1b2682ffdebef2902c87",
+      "retainedBytes": 490,
+      "retainedSha256": "b8c2e04c5a3be6c4f0b9f11cff7d985ba1098c8b1e3e1b2682ffdebef2902c87",
+      "modifiedAt": "2026-09-16T00:18:00.461Z",
+      "transform": "Exact bytes preserved."
+    },
+    {
+      "name": "ownership-final-manifest.json",
+      "source": "/private/tmp/uat093-ownership-final-manifest.json",
+      "sourceBytes": 2618,
+      "sourceSha256": "414ab94aab867c4ba5f46cff3f554d6103ee44404c8c0308bdd50cb1051446df",
+      "retainedBytes": 2618,
+      "retainedSha256": "414ab94aab867c4ba5f46cff3f554d6103ee44404c8c0308bdd50cb1051446df",
+      "modifiedAt": "2026-09-15T23:08:52.253Z",
+      "transform": "Exact bytes preserved."
+    },
+    {
+      "name": "original-note-requests-excerpt.txt",
+      "source": "/private/tmp/uat093-final-cedar-backlink-note-requests.txt",
+      "sourceBytes": 73889,
+      "sourceSha256": "521144c2b54828b685c5674d69f9f18a1c00d2c5c3b12805caa4f1b6cb208b69",
+      "retainedBytes": 436,
+      "retainedSha256": "509633ad24a8af35d158d8d5a4b71b3c2f18e1a0d74cecf44939e5e5cdfdcc58",
+      "transform": "Only request lines containing the authorized original Note UUID retained; trailing whitespace/final newline normalized. No headers or other request records retained."
+    }
+  ],
+  "embeddedResultCount": 3,
+  "excluded": [
+    {
+      "source": "/private/tmp/uat093-final-cedar-backlink-robot-settled.txt",
+      "reason": "Empty redirected stdout after strict locator diagnostic failure; error was tool stderr, not an acceptance result."
+    }
+  ],
+  "builder": {
+    "path": "/private/tmp/uat093-build-cedar-backlink-evidence.mjs",
+    "sha256": "26c628d07b70aaee60a1e266f0548db6f6ef4bb05ac99c01bcdf0473bb72000b"
+  },
+  "derivedFiles": [
+    "README.md",
+    "INDEX.json",
+    "RESULTS.json",
+    "source-verification.json",
+    "SCAN.json"
+  ]
+}
