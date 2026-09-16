@@ -1,0 +1,12 @@
+{
+  "at": "2026-09-16T01:03:55.082Z",
+  "reason": "UAT107 stale setup model inventory workaround after original400 captured",
+  "oldPid": 86970,
+  "port": 18300,
+  "product": "7c9409fad2",
+  "configSha256": "cb03903a859ce63caad9447d15480ad24879a86c8a9754573df83d2dfda00c3c",
+  "configEdited": false,
+  "newPid": 23507,
+  "readyAt": "2026-09-16T01:04:45.642Z",
+  "docsStatus": 200
+}

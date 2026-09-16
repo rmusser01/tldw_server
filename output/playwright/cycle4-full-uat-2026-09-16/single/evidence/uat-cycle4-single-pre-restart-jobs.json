@@ -1,0 +1,9 @@
+{
+  "checkedAt": "2026-09-16T01:03:29.493Z",
+  "method": "GET",
+  "path": "/api/v1/jobs?limit=10",
+  "status": 404,
+  "body": {
+    "detail": "Not Found"
+  }
+}

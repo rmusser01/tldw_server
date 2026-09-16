@@ -1,0 +1,88 @@
+{
+  "checkedAt": "2026-09-16T01:21:52.025Z",
+  "method": "GET",
+  "path": "/api/v1/chats/94a50532-cc5c-4f6e-baca-761e25ce295b/messages?limit=100",
+  "status": 200,
+  "body": {
+    "messages": [
+      {
+        "id": "5c2c5db5-1162-4956-bf4f-6dac004ceaf5",
+        "conversation_id": "94a50532-cc5c-4f6e-baca-761e25ce295b",
+        "parent_message_id": null,
+        "sender": "system",
+        "content": "You are a helpful AI assistant.",
+        "timestamp": "2026-09-16T01:19:05.715000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": null
+      },
+      {
+        "id": "60de2171-dd25-4d5a-a65a-38bd1e36264b",
+        "conversation_id": "94a50532-cc5c-4f6e-baca-761e25ce295b",
+        "parent_message_id": null,
+        "sender": "user",
+        "content": "Remember this public cycle4 phrase: ASTER-42. Reply with only ASTER-42.",
+        "timestamp": "2026-09-16T01:19:06.285000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": null
+      },
+      {
+        "id": "df3b7307-2fa5-4f0f-b1f6-61f50b8ea8da",
+        "conversation_id": "94a50532-cc5c-4f6e-baca-761e25ce295b",
+        "parent_message_id": null,
+        "sender": "assistant",
+        "content": "ASTER-42",
+        "timestamp": "2026-09-16T01:19:08.842000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": null
+      },
+      {
+        "id": "0a41337a-5a62-4be0-a2ef-85c78f793611",
+        "conversation_id": "94a50532-cc5c-4f6e-baca-761e25ce295b",
+        "parent_message_id": null,
+        "sender": "user",
+        "content": "What phrase did I ask you to remember? Reply with only the phrase.",
+        "timestamp": "2026-09-16T01:20:39.560000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": null
+      },
+      {
+        "id": "bd952dc6-5a49-4f3b-9a01-2d640f8b4f43",
+        "conversation_id": "94a50532-cc5c-4f6e-baca-761e25ce295b",
+        "parent_message_id": null,
+        "sender": "assistant",
+        "content": "ASTER-42",
+        "timestamp": "2026-09-16T01:20:40.807000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": null
+      }
+    ],
+    "total": 5,
+    "limit": 100,
+    "offset": 0,
+    "pagination": {
+      "mode": "offset",
+      "limit": 100,
+      "offset": 0,
+      "total": 5,
+      "has_more": false,
+      "next_offset": null
+    },
+    "has_more": false,
+    "next_offset": null
+  }
+}

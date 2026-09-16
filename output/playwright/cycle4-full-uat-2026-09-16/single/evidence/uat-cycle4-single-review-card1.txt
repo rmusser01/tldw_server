@@ -1,0 +1,334 @@
+- generic [ref=e11]:
+  - generic [ref=e12]:
+    - generic [ref=e14]:
+      - link "Skip to main content" [ref=e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=e16]:
+        - button "Expand sidebar" [ref=e17] [cursor=pointer]
+        - button "New Chat" [ref=e21] [cursor=pointer]
+        - generic [ref=e24]:
+          - button "Quick Ingest" [ref=e25] [cursor=pointer]
+          - button "Chat" [ref=e29] [cursor=pointer]
+          - button "Prompts" [ref=e32] [cursor=pointer]
+          - button "Characters" [ref=e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=e41] [cursor=pointer]
+          - button "World Books" [ref=e45] [cursor=pointer]
+          - button "Notes" [ref=e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=e52] [cursor=pointer]
+          - button "Media" [ref=e60] [cursor=pointer]
+          - button "Document Workspace" [ref=e63] [cursor=pointer]
+          - button "Research Workspace" [ref=e69] [cursor=pointer]
+          - button "Kanban" [ref=e75] [cursor=pointer]
+          - button "Watchlists" [ref=e77] [cursor=pointer]
+        - generic [ref=e82]:
+          - button "Open Notes Dock" [ref=e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=e88] [cursor=pointer]
+          - button "Settings" [ref=e91] [cursor=pointer]
+      - main [ref=e95]:
+        - generic [ref=e96]:
+          - generic [ref=e99]:
+            - generic [ref=e100]:
+              - button "Expand sidebar" [ref=e101] [cursor=pointer]
+              - generic [ref=e103]:
+                - img "tldw Assistant" [ref=e104]
+                - generic [ref=e105]: tldw Assistant
+                - button "Companion Home" [ref=e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=e110] [cursor=pointer]
+            - generic [ref=e113]:
+              - button "Search - Open command palette" [ref=e114] [cursor=pointer]:
+                - generic [ref=e118]: Search
+                - generic [ref=e119]: ⌘K
+              - button "Open settings" [ref=e120] [cursor=pointer]
+              - generic [ref=e132]:
+                - button "Notifications, 0 unread" [ref=e133] [cursor=pointer]
+                - status [ref=e137]: Notifications are active
+              - button "Switch to light theme" [ref=e138] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=e145] [cursor=pointer]:
+                - generic [ref=e146]: "?"
+          - generic [ref=e579]:
+            - generic [ref=e581]:
+              - generic [ref=e583]:
+                - generic [ref=e584]: Study workspace
+                - heading "Flashcards" [level=1] [ref=e585]
+              - navigation "Flashcards modes" [ref=e586]:
+                - generic [ref=e587]: Study
+                - generic [ref=e588]: Manage
+                - generic [ref=e589]: Import / Export
+                - generic [ref=e590]: Templates
+                - generic [ref=e591]: Scheduler
+            - generic [ref=e610]:
+              - tablist [ref=e611]:
+                - generic [ref=e613]:
+                  - tab "Study" [ref=e615] [cursor=pointer]
+                  - tab "Manage" [selected] [ref=e617] [cursor=pointer]
+                  - tab "Import / Export" [ref=e619] [cursor=pointer]
+                  - tab "Templates" [ref=e621] [cursor=pointer]
+                  - tab "Scheduler" [ref=e623] [cursor=pointer]
+                - generic [ref=e625]:
+                  - button "Test with Quiz" [disabled] [ref=e627]
+                  - button "Keyboard Shortcuts" [ref=e628] [cursor=pointer]
+              - generic [ref=e634]:
+                - tabpanel "Manage" [ref=e1186]:
+                  - generic [ref=e1187]:
+                    - generic [ref=e1189]:
+                      - radiogroup "segmented control" [ref=e1190]:
+                        - generic [ref=e1191]:
+                          - generic [ref=e1192] [cursor=pointer]:
+                            - radio "Cards" [checked]
+                            - generic "Cards" [ref=e1193]
+                          - generic [ref=e1194] [cursor=pointer]:
+                            - radio "Trash"
+                            - generic [ref=e1195]: Trash
+                      - generic [ref=e1197]:
+                        - generic [ref=e1198]: "?"
+                        - generic [ref=e1202]: J/K Navigate
+                        - generic [ref=e1203]: Enter Edit
+                        - generic [ref=e1204]: Space Select
+                        - generic [ref=e1205]: Delete Remove
+                        - button "Compact hints" [ref=e1206] [cursor=pointer]
+                    - generic [ref=e1208]:
+                      - generic [ref=e1209]:
+                        - generic [ref=e1210]:
+                          - searchbox "Search" [ref=e1212]
+                          - button [ref=e1214] [cursor=pointer]:
+                            - img "search" [ref=e1216]
+                        - generic [ref=e1219] [cursor=pointer]:
+                          - generic [ref=e1220]:
+                            - generic: Deck
+                            - combobox [ref=e1221]
+                          - img "down" [ref=e1223]
+                        - button "Move scope" [ref=e1226] [cursor=pointer]
+                        - generic [ref=e1228] [cursor=pointer]:
+                          - checkbox "Show workspace decks" [ref=e1230]
+                          - generic [ref=e1232]: Show workspace decks
+                        - generic [ref=e1233]:
+                          - generic [ref=e1234]:
+                            - generic: Filter workspace
+                            - combobox [disabled] [ref=e1235]
+                          - img "down" [ref=e1237]
+                        - button "More" [ref=e1241] [cursor=pointer]
+                      - generic [ref=e1246]:
+                        - radiogroup "segmented control" [ref=e1247]:
+                          - generic [ref=e1248]:
+                            - generic [ref=e1249] [cursor=pointer]:
+                              - radio "All" [checked]
+                              - generic "All" [ref=e1250]
+                            - generic [ref=e1251] [cursor=pointer]:
+                              - radio "Due"
+                              - generic "Due" [ref=e1252]
+                            - generic [ref=e1253] [cursor=pointer]:
+                              - radio "New"
+                              - generic "New" [ref=e1254]
+                            - generic [ref=e1255] [cursor=pointer]:
+                              - radio "Learning"
+                              - generic "Learning" [ref=e1256]
+                        - generic [ref=e1257]:
+                          - generic [ref=e1259] [cursor=pointer]:
+                            - generic [ref=e1260]:
+                              - 'generic "Sort: Due date" [ref=e1261]'
+                              - combobox [ref=e1262]
+                            - img "down" [ref=e1264]
+                          - generic "Presentation mode" [ref=e1267]:
+                            - button [ref=e1268] [cursor=pointer]
+                            - button [ref=e1271] [cursor=pointer]
+                            - button "Doc" [ref=e1276] [cursor=pointer]
+                    - generic [ref=e1278]:
+                      - checkbox "Select all on page" [ref=e1282] [cursor=pointer]
+                      - generic [ref=e1284]: 6 Cards
+                    - list "Flashcards" [ref=e1289]:
+                      - listitem [ref=e1290] [cursor=pointer]:
+                        - generic [ref=e1292]:
+                          - paragraph [ref=e1299]: When does Project Aster open?
+                          - generic [ref=e1301]:
+                            - generic [ref=e1302]:
+                              - generic [ref=e1303]: Cycle4 Aster facts
+                              - generic [ref=e1304]: 5 minutes ago
+                              - 'link "Note #4377bd3b-6d92-4c1c-a7d2-430ea3efedc0" [ref=e1305]':
+                                - /url: /notes?source_ref_id=4377bd3b-6d92-4c1c-a7d2-430ea3efedc0
+                            - generic [ref=e1306]:
+                              - generic [ref=e1307]: Memory 2.50
+                              - generic [ref=e1308]: Next gap 0d
+                              - generic [ref=e1309]: Recall runs 0
+                              - generic [ref=e1310]: Relearns 0
+                        - generic [ref=e1311]:
+                          - 'checkbox "Select card: When does Project Aster open?" [ref=e1315]'
+                          - generic [ref=e1317]:
+                            - button "Edit" [ref=e1318]
+                            - button "More actions" [ref=e1322]
+                      - listitem [ref=e1328] [cursor=pointer]:
+                        - generic [ref=e1330]:
+                          - paragraph [ref=e1337]: Who coordinates the garden?
+                          - generic [ref=e1339]:
+                            - generic [ref=e1340]:
+                              - generic [ref=e1341]: Cycle4 Aster facts
+                              - generic [ref=e1342]: 5 minutes ago
+                              - 'link "Note #4377bd3b-6d92-4c1c-a7d2-430ea3efedc0" [ref=e1343]':
+                                - /url: /notes?source_ref_id=4377bd3b-6d92-4c1c-a7d2-430ea3efedc0
+                            - generic [ref=e1344]:
+                              - generic [ref=e1345]: Memory 2.50
+                              - generic [ref=e1346]: Next gap 0d
+                              - generic [ref=e1347]: Recall runs 0
+                              - generic [ref=e1348]: Relearns 0
+                        - generic [ref=e1349]:
+                          - 'checkbox "Select card: Who coordinates the garden?" [ref=e1353]'
+                          - generic [ref=e1355]:
+                            - button "Edit" [ref=e1356]
+                            - button "More actions" [ref=e1360]
+                      - listitem [ref=e1366] [cursor=pointer]:
+                        - generic [ref=e1368]:
+                          - paragraph [ref=e1375]: How many raised beds are in the garden?
+                          - generic [ref=e1377]:
+                            - generic [ref=e1378]:
+                              - generic [ref=e1379]: Cycle4 Aster facts
+                              - generic [ref=e1380]: 5 minutes ago
+                              - 'link "Note #4377bd3b-6d92-4c1c-a7d2-430ea3efedc0" [ref=e1381]':
+                                - /url: /notes?source_ref_id=4377bd3b-6d92-4c1c-a7d2-430ea3efedc0
+                            - generic [ref=e1382]:
+                              - generic [ref=e1383]: Memory 2.50
+                              - generic [ref=e1384]: Next gap 0d
+                              - generic [ref=e1385]: Recall runs 0
+                              - generic [ref=e1386]: Relearns 0
+                        - generic [ref=e1387]:
+                          - 'checkbox "Select card: How many raised beds are in the garden?" [ref=e1391]'
+                          - generic [ref=e1393]:
+                            - button "Edit" [ref=e1394]
+                            - button "More actions" [ref=e1398]
+                      - listitem [ref=e1404] [cursor=pointer]:
+                        - generic [ref=e1406]:
+                          - paragraph [ref=e1413]: When do volunteers meet?
+                          - generic [ref=e1415]:
+                            - generic [ref=e1416]:
+                              - generic [ref=e1417]: Cycle4 Aster facts
+                              - generic [ref=e1418]: 5 minutes ago
+                              - 'link "Note #4377bd3b-6d92-4c1c-a7d2-430ea3efedc0" [ref=e1419]':
+                                - /url: /notes?source_ref_id=4377bd3b-6d92-4c1c-a7d2-430ea3efedc0
+                            - generic [ref=e1420]:
+                              - generic [ref=e1421]: Memory 2.50
+                              - generic [ref=e1422]: Next gap 0d
+                              - generic [ref=e1423]: Recall runs 0
+                              - generic [ref=e1424]: Relearns 0
+                        - generic [ref=e1425]:
+                          - 'checkbox "Select card: When do volunteers meet?" [ref=e1429]'
+                          - generic [ref=e1431]:
+                            - button "Edit" [ref=e1432]
+                            - button "More actions" [ref=e1436]
+                      - listitem [ref=e1442] [cursor=pointer]:
+                        - generic [ref=e1444]:
+                          - paragraph [ref=e1451]: Where is the tool shed located?
+                          - generic [ref=e1453]:
+                            - generic [ref=e1454]:
+                              - generic [ref=e1455]: Cycle4 Aster facts
+                              - generic [ref=e1456]: 5 minutes ago
+                              - 'link "Note #4377bd3b-6d92-4c1c-a7d2-430ea3efedc0" [ref=e1457]':
+                                - /url: /notes?source_ref_id=4377bd3b-6d92-4c1c-a7d2-430ea3efedc0
+                            - generic [ref=e1458]:
+                              - generic [ref=e1459]: Memory 2.50
+                              - generic [ref=e1460]: Next gap 0d
+                              - generic [ref=e1461]: Recall runs 0
+                              - generic [ref=e1462]: Relearns 0
+                        - generic [ref=e1463]:
+                          - 'checkbox "Select card: Where is the tool shed located?" [ref=e1467]'
+                          - generic [ref=e1469]:
+                            - button "Edit" [ref=e1470]
+                            - button "More actions" [ref=e1474]
+                      - listitem [ref=e1639] [cursor=pointer]:
+                        - generic [ref=e1641]:
+                          - paragraph [ref=e1647]: What color is the Cycle4 Aster practice flag?
+                          - generic [ref=e1650]:
+                            - generic [ref=e1651]: Memory 2.50
+                            - generic [ref=e1652]: Next gap 0d
+                            - generic [ref=e1653]: Recall runs 0
+                            - generic [ref=e1654]: Relearns 0
+                        - generic [ref=e1655]:
+                          - 'checkbox "Select card: What color is the Cycle4 Aster practice flag?" [ref=e1659]'
+                          - generic [ref=e1661]:
+                            - button "Edit" [ref=e1662]
+                            - button "More actions" [ref=e1666]
+                    - list [ref=e1481]:
+                      - listitem "Previous Page" [ref=e1482]:
+                        - button [disabled] [ref=e1483]:
+                          - img "left" [ref=e1484]
+                      - listitem "1" [ref=e1487] [cursor=pointer]
+                      - listitem "Next Page" [ref=e1489]:
+                        - button [disabled] [ref=e1490]:
+                          - img "right" [ref=e1491]
+                      - listitem [ref=e1494]:
+                        - generic [ref=e1495]:
+                          - generic [ref=e1496]:
+                            - generic "20 / page" [ref=e1497]
+                            - combobox "Page Size" [ref=e1498]
+                          - img "down" [ref=e1500]
+                  - button [ref=e1503] [cursor=pointer]
+                - text: ": : : : : : : : : : : : : : :"
+    - dialog "Create Flashcard" [ref=e1528]:
+      - generic [ref=e1530]:
+        - button "Close" [ref=e1531] [cursor=pointer]:
+          - img "close" [ref=e1532]
+        - generic [ref=e1535]: Create Flashcard
+      - generic [ref=e1537]:
+        - generic [ref=e1538]:
+          - heading "Organization" [level=3] [ref=e1539]
+          - generic [ref=e1541]:
+            - generic "Deck" [ref=e1543]
+            - generic [ref=e1547] [cursor=pointer]:
+              - generic [ref=e1548]:
+                - generic: Select deck
+                - combobox "Deck" [ref=e1549]
+              - img "down" [ref=e1551]
+          - button "or create a new deck" [ref=e1554] [cursor=pointer]
+          - generic [ref=e1555]:
+            - button "Apply template" [ref=e1556] [cursor=pointer]
+            - button "Save as template" [ref=e1558] [cursor=pointer]
+          - generic [ref=e1561]:
+            - generic "Card template" [ref=e1563]
+            - generic [ref=e1567] [cursor=pointer]:
+              - generic [ref=e1568]:
+                - generic "Basic (Question - Answer)" [ref=e1569]
+                - combobox "Card template" [ref=e1570]
+              - img "down" [ref=e1572]
+          - generic [ref=e1575]: Choose Basic for direct question and answer cards (facts, definitions, short prompts).
+        - generic [ref=e1576]:
+          - heading "Content" [level=3] [ref=e1577]
+          - button "collapsed Tips for effective flashcards" [ref=e1580] [cursor=pointer]:
+            - img "collapsed" [ref=e1582]
+            - generic [ref=e1585]: Tips for effective flashcards
+          - generic [ref=e1673]:
+            - generic [ref=e1675]:
+              - text: "*"
+              - generic [ref=e1676]:
+                - generic [ref=e1677]: Front
+                - button "Upload image for Front" [ref=e1678]
+                - button "Insert image" [ref=e1679] [cursor=pointer]
+            - textbox "* Front Upload image for Front Insert image" [ref=e1684]:
+              - /placeholder: Question or prompt...
+              - text: How many chairs are in the Cycle4 Aster practice tent?
+          - generic [ref=e1599]: "Front: 54 / 8192 bytes"
+          - generic [ref=e1686]:
+            - generic [ref=e1688]:
+              - text: "*"
+              - generic [ref=e1689]:
+                - generic [ref=e1690]: Back
+                - button "Upload image for Back" [ref=e1691]
+                - button "Insert image" [ref=e1692] [cursor=pointer]
+            - textbox "* Back Upload image for Back Insert image" [active] [ref=e1697]:
+              - /placeholder: Answer...
+              - text: Three. This is a synthetic undecked practice card.
+          - generic [ref=e1613]: "Back: 50 / 8192 bytes"
+          - generic [ref=e1614]:
+            - button "Show preview" [ref=e1615] [cursor=pointer]
+            - generic [ref=e1616]: "Supports Markdown and LaTeX ($x^2$, $$\\sum_{i=1}^n$$)"
+        - button "collapsed Advanced options (tags, extra, notes)" [ref=e1619] [cursor=pointer]:
+          - img "collapsed" [ref=e1621]
+          - generic [ref=e1624]: Advanced options (tags, extra, notes)
+      - generic [ref=e1629]:
+        - button "Cancel" [ref=e1631] [cursor=pointer]
+        - button "loading Create & Add Another" [ref=e1698] [cursor=pointer]:
+          - generic:
+            - img "loading"
+          - generic [ref=e1635]: Create & Add Another
+        - button "loading Create" [ref=e1699] [cursor=pointer]:
+          - generic:
+            - img "loading"
+          - generic [ref=e1638]: Create
+  - button "Open Next.js Dev Tools" [ref=e393] [cursor=pointer]
+  - alert [ref=e10]: Flashcards | tldw

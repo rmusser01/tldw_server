@@ -1,0 +1,290 @@
+- generic [ref=e11]:
+  - generic [ref=e14]:
+    - link "Skip to main content" [ref=e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e16]:
+      - button "Expand sidebar" [ref=e17] [cursor=pointer]
+      - button "New Chat" [ref=e21] [cursor=pointer]
+      - generic [ref=e24]:
+        - button "Quick Ingest" [ref=e25] [cursor=pointer]
+        - button "Chat" [ref=e29] [cursor=pointer]
+        - button "Prompts" [ref=e32] [cursor=pointer]
+        - button "Characters" [ref=e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e41] [cursor=pointer]
+        - button "World Books" [ref=e45] [cursor=pointer]
+        - button "Notes" [ref=e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=e52] [cursor=pointer]
+        - button "Media" [ref=e60] [cursor=pointer]
+        - button "Document Workspace" [ref=e63] [cursor=pointer]
+        - button "Research Workspace" [ref=e69] [cursor=pointer]
+        - button "Kanban" [ref=e75] [cursor=pointer]
+        - button "Watchlists" [ref=e77] [cursor=pointer]
+      - generic [ref=e82]:
+        - button "Open Notes Dock" [ref=e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e88] [cursor=pointer]
+        - button "Settings" [ref=e91] [cursor=pointer]
+    - main [ref=e95]:
+      - generic [ref=e96]:
+        - generic [ref=e99]:
+          - generic [ref=e100]:
+            - button "Expand sidebar" [ref=e101] [cursor=pointer]
+            - generic [ref=e103]:
+              - img "tldw Assistant" [ref=e104]
+              - generic [ref=e105]: tldw Assistant
+              - button "Companion Home" [ref=e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=e110] [cursor=pointer]
+          - generic [ref=e113]:
+            - button "Search - Open command palette" [ref=e114] [cursor=pointer]:
+              - generic [ref=e118]: Search
+              - generic [ref=e119]: ⌘K
+            - button "Open settings" [ref=e120] [cursor=pointer]
+            - generic [ref=e132]:
+              - button "Notifications, 0 unread" [ref=e133] [cursor=pointer]
+              - status [ref=e137]: Notifications are active
+            - button "Switch to light theme" [ref=e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e145] [cursor=pointer]:
+              - generic [ref=e146]: "?"
+        - generic [ref=e579]:
+          - generic [ref=e581]:
+            - generic [ref=e583]:
+              - generic [ref=e584]: Study workspace
+              - heading "Flashcards" [level=1] [ref=e585]
+            - navigation "Flashcards modes" [ref=e586]:
+              - generic [ref=e587]: Study
+              - generic [ref=e588]: Manage
+              - generic [ref=e589]: Import / Export
+              - generic [ref=e590]: Templates
+              - generic [ref=e591]: Scheduler
+          - generic [ref=e610]:
+            - tablist [ref=e611]:
+              - generic [ref=e613]:
+                - tab "Study" [ref=e615] [cursor=pointer]
+                - tab "Manage" [ref=e617] [cursor=pointer]
+                - tab "Import / Export" [selected] [ref=e619] [cursor=pointer]
+                - tab "Templates" [ref=e621] [cursor=pointer]
+                - tab "Scheduler" [ref=e623] [cursor=pointer]
+              - generic [ref=e625]:
+                - button "Test with Quiz" [disabled] [ref=e627]
+                - button "Keyboard Shortcuts" [ref=e628] [cursor=pointer]
+            - tabpanel "Import / Export" [ref=e635]:
+              - generic [ref=e636]:
+                - generic [ref=e637]:
+                  - generic [ref=e638]: Task
+                  - radiogroup "Create, import, or export task" [ref=e642]:
+                    - generic [ref=e643]:
+                      - generic [ref=e644] [cursor=pointer]:
+                        - radio "Create cards" [checked]
+                        - generic "Create cards" [ref=e645]
+                      - generic [ref=e646] [cursor=pointer]:
+                        - radio "Import file"
+                        - generic "Import file" [ref=e647]
+                      - generic [ref=e648] [cursor=pointer]:
+                        - radio "Export backup"
+                        - generic "Export backup" [ref=e649]
+                - region [ref=e650]:
+                  - generic [ref=e651]:
+                    - heading "Create and generate" [level=5] [ref=e652]
+                    - text: Start new study material from study packs, source text, or images.
+                  - generic [ref=e653]:
+                    - generic [ref=e654]:
+                      - generic [ref=e655]: Study packs
+                      - generic [ref=e659]:
+                        - generic [ref=e660]:
+                          - strong [ref=e662]: Turn media or notes into a review queue.
+                          - text: Create a study pack from supported sources, then review the generated deck in Flashcards.
+                        - button "Create study pack" [ref=e663] [cursor=pointer]
+                    - generic [ref=e665]:
+                      - generic [ref=e666]: Generate Flashcards
+                      - generic [ref=e670]:
+                        - generic [ref=e671]: Generate cards from pasted text, review/edit them, then save to a deck.
+                        - status [ref=e672]:
+                          - generic [ref=e676]:
+                            - paragraph [ref=e677]: Source context attached
+                            - generic [ref=e678]: Cards saved from this draft will be linked to note Cycle4 Aster study facts.
+                        - textbox "Paste transcript, notes, or study material..." [ref=e679]: Project Aster opens on 18 December 2026. Mira Chen coordinates the garden. The garden has seven raised beds. Volunteers meet every Saturday at 09:30. The tool shed is beside the east gate.
+                        - generic [ref=e680]: "Tip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph."
+                        - generic [ref=e681]:
+                          - generic [ref=e682]:
+                            - switch "Advanced mix" [ref=e683] [cursor=pointer]
+                            - generic [ref=e686]: Advanced mix
+                          - generic [ref=e688]:
+                            - generic "Number of cards" [ref=e690]: "Number of cards :"
+                            - spinbutton [ref=e694]: "5"
+                          - generic [ref=e696]:
+                            - generic "Card type" [ref=e698]: "Card type :"
+                            - generic [ref=e702] [cursor=pointer]:
+                              - generic [ref=e703]:
+                                - generic "Basic" [ref=e704]
+                                - combobox [ref=e705]
+                              - img "down" [ref=e707]
+                          - generic [ref=e711]:
+                            - generic "Difficulty" [ref=e713]: "Difficulty :"
+                            - generic [ref=e717] [cursor=pointer]:
+                              - generic [ref=e718]:
+                                - generic "Mixed" [ref=e719]
+                                - combobox [ref=e720]
+                              - img "down" [ref=e722]
+                          - generic [ref=e726]:
+                            - generic "Deck" [ref=e728]: "Deck :"
+                            - generic [ref=e732] [cursor=pointer]:
+                              - generic [ref=e733]:
+                                - generic "Create new deck" [ref=e734]
+                                - combobox [ref=e735]
+                              - img "down" [ref=e737]
+                          - generic [ref=e740]:
+                            - generic [ref=e741]:
+                              - strong [ref=e743]: New deck name
+                              - textbox "New deck name" [ref=e744]: Cycle4 Aster facts
+                            - generic [ref=e745]:
+                              - strong [ref=e747]: Review prompt side
+                              - generic [ref=e748] [cursor=pointer]:
+                                - generic [ref=e749]:
+                                  - generic "Front first" [ref=e750]
+                                  - combobox "Review prompt side" [ref=e751]
+                                - img "down" [ref=e753]
+                            - generic [ref=e756]:
+                              - generic [ref=e757]:
+                                - strong [ref=e759]: Scheduler type
+                                - generic [ref=e760] [cursor=pointer]:
+                                  - generic [ref=e761]:
+                                    - generic "SM-2+" [ref=e762]
+                                    - combobox "Scheduler type SM-2+ down" [ref=e763]
+                                  - img "down" [ref=e765]
+                              - generic [ref=e768]:
+                                - strong [ref=e770]: Presets
+                                - generic [ref=e771]:
+                                  - button "Default" [ref=e772] [cursor=pointer]
+                                  - button "Fast acquisition" [ref=e774] [cursor=pointer]
+                                  - button "Conservative review" [ref=e776] [cursor=pointer]
+                                  - button "Reset to defaults" [ref=e778] [cursor=pointer]
+                              - generic [ref=e780]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                              - button "Customize scheduler" [ref=e782] [cursor=pointer]
+                          - generic [ref=e785]:
+                            - generic "Provider (optional)" [ref=e787]: "Provider (optional) :"
+                            - textbox [ref=e791]: custom_openai
+                          - generic [ref=e793]:
+                            - generic "Model (optional)" [ref=e795]: "Model (optional) :"
+                            - textbox [ref=e799]: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                        - generic [ref=e801]:
+                          - generic "Focus topics (comma-separated)" [ref=e803]: "Focus topics (comma-separated) :"
+                          - textbox "exam 1, chapter 3, formulas" [ref=e807]
+                        - button "Generate cards" [active] [ref=e926] [cursor=pointer]
+                        - generic [ref=e927]:
+                          - strong [ref=e929]: Generated cards (editable before save)
+                          - generic [ref=e930]:
+                            - generic [ref=e932]:
+                              - generic [ref=e933]: Card 1
+                              - button "Remove" [ref=e935] [cursor=pointer]
+                            - generic [ref=e938]:
+                              - generic [ref=e939]: Basic
+                              - textbox [ref=e941]: When does Project Aster open?
+                              - textbox [ref=e943]: Project Aster opens on 18 December 2026.
+                              - textbox "tag-1, tag-2" [ref=e945]: Project Aster
+                          - generic [ref=e946]:
+                            - generic [ref=e948]:
+                              - generic [ref=e949]: Card 2
+                              - button "Remove" [ref=e951] [cursor=pointer]
+                            - generic [ref=e954]:
+                              - generic [ref=e955]: Basic
+                              - textbox [ref=e957]: Who coordinates the garden?
+                              - textbox [ref=e959]: Mira Chen coordinates the garden.
+                              - textbox "tag-1, tag-2" [ref=e961]: Garden Coordination
+                          - generic [ref=e962]:
+                            - generic [ref=e964]:
+                              - generic [ref=e965]: Card 3
+                              - button "Remove" [ref=e967] [cursor=pointer]
+                            - generic [ref=e970]:
+                              - generic [ref=e971]: Basic
+                              - textbox [ref=e973]: How many raised beds are in the garden?
+                              - textbox [ref=e975]: The garden has seven raised beds.
+                              - textbox "tag-1, tag-2" [ref=e977]: Garden Features
+                          - generic [ref=e978]:
+                            - generic [ref=e980]:
+                              - generic [ref=e981]: Card 4
+                              - button "Remove" [ref=e983] [cursor=pointer]
+                            - generic [ref=e986]:
+                              - generic [ref=e987]: Basic
+                              - textbox [ref=e989]: When do volunteers meet?
+                              - textbox [ref=e991]: Volunteers meet every Saturday at 09:30.
+                              - textbox "tag-1, tag-2" [ref=e993]: Volunteer Schedule
+                          - generic [ref=e994]:
+                            - generic [ref=e996]:
+                              - generic [ref=e997]: Card 5
+                              - button "Remove" [ref=e999] [cursor=pointer]
+                            - generic [ref=e1002]:
+                              - generic [ref=e1003]: Basic
+                              - textbox [ref=e1005]: Where is the tool shed located?
+                              - textbox [ref=e1007]: The tool shed is beside the east gate.
+                              - textbox "tag-1, tag-2" [ref=e1009]: Garden Layout
+                          - button "Save generated cards" [ref=e1010] [cursor=pointer]
+                    - generic [ref=e811]:
+                      - generic [ref=e812]: Image Occlusion
+                      - generic [ref=e816]:
+                        - generic [ref=e817]: Upload one image, draw labeled rectangular occlusions, generate drafts, then save them in bulk.
+                        - generic [ref=e818]:
+                          - generic [ref=e820]:
+                            - generic "Deck" [ref=e822]: "Deck :"
+                            - generic [ref=e826] [cursor=pointer]:
+                              - generic [ref=e827]:
+                                - generic "Create new deck" [ref=e828]
+                                - combobox [ref=e829]
+                              - img "down" [ref=e831]
+                              - img "close-circle" [ref=e835]
+                          - generic [ref=e838]:
+                            - generic [ref=e839]:
+                              - strong [ref=e841]: New deck name
+                              - textbox "New deck name" [ref=e842]: Image Occlusion
+                            - generic [ref=e843]:
+                              - strong [ref=e845]: Review prompt side
+                              - generic [ref=e846] [cursor=pointer]:
+                                - generic [ref=e847]:
+                                  - generic "Front first" [ref=e848]
+                                  - combobox "Review prompt side" [ref=e849]
+                                - img "down" [ref=e851]
+                            - generic [ref=e854]:
+                              - generic [ref=e855]:
+                                - strong [ref=e857]: Scheduler type
+                                - generic [ref=e858] [cursor=pointer]:
+                                  - generic [ref=e859]:
+                                    - generic "SM-2+" [ref=e860]
+                                    - combobox "Scheduler type SM-2+ down" [ref=e861]
+                                  - img "down" [ref=e863]
+                              - generic [ref=e866]:
+                                - strong [ref=e868]: Presets
+                                - generic [ref=e869]:
+                                  - button "Default" [ref=e870] [cursor=pointer]
+                                  - button "Fast acquisition" [ref=e872] [cursor=pointer]
+                                  - button "Conservative review" [ref=e874] [cursor=pointer]
+                                  - button "Reset to defaults" [ref=e876] [cursor=pointer]
+                              - generic [ref=e878]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                              - button "Customize scheduler" [ref=e880] [cursor=pointer]
+                          - generic [ref=e883]:
+                            - generic "Tags" [ref=e885]: "Tags :"
+                            - textbox "tag-1, tag-2" [ref=e889]
+                        - generic [ref=e890]:
+                          - generic [ref=e891]: Upload one image, drag rectangular occlusions, label each region, then generate drafts.
+                          - generic [ref=e892]:
+                            - generic [ref=e893]: Source image
+                            - button "Upload image occlusion source" [ref=e894]
+                          - status [ref=e895]:
+                            - paragraph [ref=e900]: Choose an image to begin authoring occlusions.
+                        - button "Generate occlusion drafts" [ref=e901] [cursor=pointer]
+                - region [ref=e903]:
+                  - generic [ref=e904]:
+                    - heading "Import and export" [level=5] [ref=e905]
+                    - text: Move cards in and out without changing the flashcards route.
+                  - generic [ref=e906]:
+                    - generic [ref=e907]: Import/export summary
+                    - generic [ref=e911]:
+                      - generic [ref=e912]:
+                        - strong [ref=e914]: Supported formats
+                        - text: "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
+                      - generic [ref=e915]:
+                        - strong [ref=e917]: Current import limits
+                        - text: 10,000 lines / 32,768 bytes per line / 8,192 bytes per field
+                      - generic [ref=e918]:
+                        - strong [ref=e920]: Last action
+                        - text: Generate Flashcards · Generated 5 cards. · 6:00:43 PM
+                  - text: ": : : : : :"
+  - button "Open Next.js Dev Tools" [ref=e393] [cursor=pointer]
+  - alert [ref=e10]: Flashcards | tldw

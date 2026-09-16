@@ -1,0 +1,183 @@
+- generic [active] [ref=e11]:
+  - generic [ref=e12]:
+    - generic [ref=e14]:
+      - link "Skip to main content" [ref=e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=e16]:
+        - button "Expand sidebar" [ref=e17] [cursor=pointer]
+        - button "New Chat" [ref=e21] [cursor=pointer]
+        - generic [ref=e24]:
+          - button "Quick Ingest" [ref=e25] [cursor=pointer]
+          - button "Chat" [ref=e29] [cursor=pointer]
+          - button "Prompts" [ref=e32] [cursor=pointer]
+          - button "Characters" [ref=e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=e41] [cursor=pointer]
+          - button "World Books" [ref=e45] [cursor=pointer]
+          - button "Notes" [ref=e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=e52] [cursor=pointer]
+          - button "Media" [ref=e60] [cursor=pointer]
+          - button "Document Workspace" [ref=e63] [cursor=pointer]
+          - button "Research Workspace" [ref=e69] [cursor=pointer]
+          - button "Kanban" [ref=e75] [cursor=pointer]
+          - button "Watchlists" [ref=e77] [cursor=pointer]
+        - generic [ref=e82]:
+          - button "Open Notes Dock" [ref=e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=e88] [cursor=pointer]
+          - button "Settings" [ref=e91] [cursor=pointer]
+      - main [ref=e95]:
+        - generic [ref=e96]:
+          - generic [ref=e99]:
+            - generic [ref=e100]:
+              - button "Expand sidebar" [ref=e101] [cursor=pointer]
+              - generic [ref=e103]:
+                - img "tldw Assistant" [ref=e104]
+                - generic [ref=e105]: tldw Assistant
+                - button "Companion Home" [ref=e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=e110] [cursor=pointer]
+            - generic [ref=e113]:
+              - button "Search - Open command palette" [ref=e114] [cursor=pointer]:
+                - generic [ref=e118]: Search
+                - generic [ref=e119]: ⌘K
+              - button "Open settings" [ref=e120] [cursor=pointer]
+              - generic [ref=e132]:
+                - button "Notifications, 0 unread" [ref=e133] [cursor=pointer]
+                - status [ref=e137]: Notifications are active
+              - button "Switch to light theme" [ref=e138] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=e145] [cursor=pointer]:
+                - generic [ref=e146]: "?"
+          - generic [ref=e579]:
+            - generic [ref=e581]:
+              - generic [ref=e583]:
+                - generic [ref=e584]: Study workspace
+                - heading "Flashcards" [level=1] [ref=e585]
+              - navigation "Flashcards modes" [ref=e586]:
+                - generic [ref=e587]: Study
+                - generic [ref=e588]: Manage
+                - generic [ref=e589]: Import / Export
+                - generic [ref=e590]: Templates
+                - generic [ref=e591]: Scheduler
+            - generic [ref=e610]:
+              - tablist [ref=e611]:
+                - generic [ref=e613]:
+                  - tab "Study" [selected] [ref=e615] [cursor=pointer]
+                  - tab "Manage" [ref=e617] [cursor=pointer]
+                  - tab "Import / Export" [ref=e619] [cursor=pointer]
+                  - tab "Templates" [ref=e621] [cursor=pointer]
+                  - tab "Scheduler" [ref=e623] [cursor=pointer]
+                - generic [ref=e625]:
+                  - button "Test with Quiz" [disabled] [ref=e627]
+                  - button "Keyboard Shortcuts" [ref=e628] [cursor=pointer]
+              - generic [ref=e634]:
+                - tabpanel "Study" [ref=e1028]:
+                  - generic [ref=e1029]:
+                    - generic [ref=e1030]:
+                      - generic [ref=e1031] [cursor=pointer]:
+                        - generic [ref=e1032]:
+                          - generic: Select deck
+                          - combobox [ref=e1033]
+                        - img "down" [ref=e1035]
+                      - radiogroup "segmented control" [ref=e1038]:
+                        - generic [ref=e1039]:
+                          - generic [ref=e1040] [cursor=pointer]:
+                            - radio "Due only" [checked]
+                            - generic "Due only" [ref=e1041]
+                          - generic [ref=e1042] [cursor=pointer]:
+                            - radio "Cram"
+                            - generic "Cram" [ref=e1043]
+                      - radiogroup "segmented control" [ref=e1044]:
+                        - generic [ref=e1045]:
+                          - generic [ref=e1046] [cursor=pointer]:
+                            - radio "Front first" [checked]
+                            - generic "Front first" [ref=e1047]
+                          - generic [ref=e1048] [cursor=pointer]:
+                            - radio "Back first"
+                            - generic "Back first" [ref=e1049]
+                    - region [ref=e1700]:
+                      - generic [ref=e1701]:
+                        - generic [ref=e1707]:
+                          - strong [ref=e1709]: Source reviews
+                          - generic [ref=e1710]: No source reviews due
+                        - button "Schedule" [ref=e1711] [cursor=pointer]
+                    - generic [ref=e1121]:
+                      - generic [ref=e1122]:
+                        - generic [ref=e1123]:
+                          - generic [ref=e1124]: Reviewed today
+                          - strong [ref=e1126]: "1"
+                        - generic [ref=e1127]:
+                          - generic [ref=e1128]: Retention rate
+                          - strong [ref=e1130]: 100.0%
+                        - generic [ref=e1131]:
+                          - generic [ref=e1132]: Lapse rate
+                          - strong [ref=e1134]: 0.0%
+                        - generic [ref=e1135]:
+                          - generic [ref=e1136]: Avg answer time
+                          - strong [ref=e1138]: 33.0s
+                        - generic [ref=e1139]:
+                          - generic [ref=e1140]: Study streak
+                          - strong [ref=e1142]: 1 days
+                      - generic [ref=e1143]:
+                        - strong [ref=e1145]: Deck progress
+                        - generic [ref=e1146]:
+                          - generic [ref=e1147]:
+                            - strong [ref=e1149]: Cycle4 Aster facts
+                            - generic [ref=e1150]:
+                              - generic [ref=e1151]: "Total: 5"
+                              - generic [ref=e1152]: "New: 4"
+                              - generic [ref=e1153]: "Learning: 0"
+                              - generic [ref=e1154]: "Due: 0"
+                              - generic [ref=e1155]: "Mature: 0"
+                          - progressbar [ref=e1156]
+                    - status [ref=e1159]:
+                      - generic [ref=e1160]: "6 cards remaining, 1 reviewed, Available now: 6, new: 6, learning: 0, due: 0"
+                      - generic [ref=e1161]:
+                        - generic [aria-hidden] [ref=e1162]: Study queue
+                        - generic [aria-hidden] [ref=e1163]: "6"
+                        - generic [aria-hidden] [ref=e1164]: cards remaining
+                      - generic [aria-hidden] [ref=e1166]: 1 reviewed
+                      - generic [aria-hidden] [ref=e1168]: "Available now: 6"
+                      - generic [aria-hidden] [ref=e1170]: "new: 6"
+                      - generic [aria-hidden] [ref=e1172]: "learning: 0"
+                      - generic [aria-hidden] [ref=e1174]: "due: 0"
+                      - generic [aria-hidden] [ref=e1176]: ~2 min left
+                    - generic [ref=e1718]:
+                      - generic [ref=e1720]:
+                        - generic [ref=e1721]: Standard
+                        - generic [ref=e1722]: New
+                        - generic [ref=e1724]: SM-2+
+                        - generic [ref=e1799]: Garden Coordination
+                        - 'link "Note #4377bd3b-6d92-4c1c-a7d2-430ea3efedc0" [ref=e1727] [cursor=pointer]':
+                          - /url: /notes?source_ref_id=4377bd3b-6d92-4c1c-a7d2-430ea3efedc0
+                        - button "Edit card (E)" [ref=e1728] [cursor=pointer]:
+                          - generic [ref=e1729]: Edit
+                      - generic [ref=e1730]:
+                        - heading "Front" [level=5] [ref=e1731]
+                        - paragraph [ref=e1800]: Who coordinates the garden?
+                      - button "Need help?" [ref=e1737] [cursor=pointer]
+                      - button "End Session" [ref=e1802] [cursor=pointer]
+                      - generic [ref=e1743]:
+                        - generic [ref=e1804]:
+                          - button "Show answer (Space)" [ref=e1805] [cursor=pointer]:
+                            - generic [ref=e1806]: Show Answer
+                          - generic [ref=e1807]:
+                            - generic [ref=e1808]: Space Flip
+                            - generic [ref=e1809]: E Edit
+                            - button "Compact hints" [ref=e1810] [cursor=pointer]
+                        - button "Re-rate last card, 8 seconds remaining" [ref=e1813] [cursor=pointer]:
+                          - generic [ref=e1818]:
+                            - text: Re-rate last card
+                            - timer [ref=e1819]: 8s
+                    - generic [ref=e1178]:
+                      - generic [ref=e1179]: Recent study sessions
+                      - heading "No completed study sessions yet." [level=2] [ref=e1185]
+                - text: ": : : : : : : : : : : : : : :"
+    - generic:
+      - generic: "* *"
+      - generic:
+        - generic [ref=e1821]:
+          - img "check-circle" [ref=e1822]
+          - generic [ref=e1825]: First card reviewed! Review daily for best results.
+        - generic [ref=e1827]:
+          - img "check-circle" [ref=e1828]
+          - generic [ref=e1831]: "Saved. Next review in 4 days (next review gap: 4 days)."
+  - button "Open Next.js Dev Tools" [ref=e393] [cursor=pointer]
+  - alert [ref=e10]: Flashcards | tldw

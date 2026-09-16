@@ -1,0 +1,295 @@
+- generic [ref=e11]:
+  - generic [ref=e12]:
+    - generic [ref=e14]:
+      - link "Skip to main content" [ref=e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=e16]:
+        - button "Expand sidebar" [ref=e17] [cursor=pointer]
+        - button "New Chat" [ref=e21] [cursor=pointer]
+        - generic [ref=e24]:
+          - button "Quick Ingest" [ref=e25] [cursor=pointer]
+          - button "Chat" [ref=e29] [cursor=pointer]
+          - button "Prompts" [ref=e32] [cursor=pointer]
+          - button "Characters" [ref=e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=e41] [cursor=pointer]
+          - button "World Books" [ref=e45] [cursor=pointer]
+          - button "Notes" [ref=e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=e52] [cursor=pointer]
+          - button "Media" [ref=e60] [cursor=pointer]
+          - button "Document Workspace" [ref=e63] [cursor=pointer]
+          - button "Research Workspace" [ref=e69] [cursor=pointer]
+          - button "Kanban" [ref=e75] [cursor=pointer]
+          - button "Watchlists" [ref=e77] [cursor=pointer]
+        - generic [ref=e82]:
+          - button "Open Notes Dock" [ref=e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=e88] [cursor=pointer]
+          - button "Settings" [ref=e91] [cursor=pointer]
+      - main [ref=e95]:
+        - generic [ref=e96]:
+          - generic [ref=e99]:
+            - generic [ref=e100]:
+              - button "Expand sidebar" [ref=e101] [cursor=pointer]
+              - generic [ref=e103]:
+                - img "tldw Assistant" [ref=e104]
+                - generic [ref=e105]: tldw Assistant
+                - button "Companion Home" [ref=e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=e110] [cursor=pointer]
+            - generic [ref=e113]:
+              - button "Search - Open command palette" [ref=e114] [cursor=pointer]:
+                - generic [ref=e118]: Search
+                - generic [ref=e119]: ⌘K
+              - button "Open settings" [ref=e120] [cursor=pointer]
+              - generic [ref=e132]:
+                - button "Notifications, 0 unread" [ref=e133] [cursor=pointer]
+                - status [ref=e137]: Notifications are active
+              - button "Switch to light theme" [ref=e138] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=e145] [cursor=pointer]:
+                - generic [ref=e146]: "?"
+          - generic [ref=e147]:
+            - region [ref=e148]:
+              - generic [ref=e149]:
+                - generic [ref=e155]:
+                  - heading "Add your first source" [level=2] [ref=e156]
+                  - paragraph [ref=e157]: First chat is working. Add a source next so chat can use your own material.
+                - generic [ref=e158]:
+                  - button "Add source" [ref=e159] [cursor=pointer]
+                  - button "Dismiss" [ref=e160] [cursor=pointer]
+              - generic [ref=e164]:
+                - generic [ref=e165] [cursor=pointer]:
+                  - radio "Web URL" [checked] [ref=e166]
+                  - generic [ref=e170]: Web URL
+                - generic [ref=e171] [cursor=pointer]:
+                  - radio "File" [ref=e172]
+                  - generic [ref=e176]: File
+                - generic [ref=e177] [cursor=pointer]:
+                  - radio "Paste" [ref=e178]
+                  - generic [ref=e184]: Paste
+            - generic [ref=e185]:
+              - generic [ref=e186]:
+                - generic [ref=e187]:
+                  - generic [ref=e188]:
+                    - generic [ref=e189]:
+                      - paragraph [ref=e190]: Companion Home
+                      - heading "Companion" [level=1] [ref=e191]
+                      - paragraph [ref=e192]: Review what is waiting in your inbox, what needs attention next, and which work threads are worth resuming right now.
+                    - generic [ref=e193]:
+                      - button "Customize Home" [ref=e194] [cursor=pointer]
+                      - button "Refresh" [ref=e195] [cursor=pointer]
+                  - generic [ref=e196]:
+                    - paragraph [ref=e197]: Setup
+                    - generic [ref=e198]:
+                      - generic [ref=e199]:
+                        - heading "Companion setup required" [level=2] [ref=e200]
+                        - paragraph [ref=e201]: Personalization is unavailable on this connection. Your server operator may need to enable the backend feature using the configuration guide.
+                      - link "Personalization configuration guide" [ref=e202] [cursor=pointer]:
+                        - /url: https://github.com/rmusser01/tldw_server/blob/main/Docs/Product/Personalization_Design.md#current-status-v02x-dev
+                  - generic [ref=e203]:
+                    - generic [ref=e204]:
+                      - paragraph [ref=e205]: Inbox
+                      - paragraph [ref=e206]: "0"
+                      - paragraph [ref=e207]: Unread or newly surfaced items
+                    - generic [ref=e208]:
+                      - paragraph [ref=e209]: Goals
+                      - paragraph [ref=e210]: "0"
+                      - paragraph [ref=e211]: Live priorities in focus
+                    - generic [ref=e212]:
+                      - paragraph [ref=e213]: Reading
+                      - paragraph [ref=e214]: "0"
+                      - paragraph [ref=e215]: Queued items ready to revisit
+                    - generic [ref=e216]:
+                      - paragraph [ref=e217]: Resume
+                      - paragraph [ref=e218]: "0"
+                      - paragraph [ref=e219]: Threads worth picking back up
+                - generic [ref=e220]:
+                  - generic [ref=e221]:
+                    - generic [ref=e222]:
+                      - generic [ref=e223]:
+                        - heading "Automation Inbox" [level=2] [ref=e224]
+                        - paragraph [ref=e225]: Nothing new from automations.
+                      - generic [ref=e226]: "0"
+                    - generic [ref=e227]:
+                      - generic [ref=e228]: No automation results yet
+                      - paragraph [ref=e229]: Results and failures from scheduled tasks appear here after a run. Future scheduled questions and agent outputs appear here only when routed by task visibility policy.
+                  - generic [ref=e230]:
+                    - generic [ref=e231]:
+                      - generic [ref=e232]:
+                        - heading "Inbox Preview" [level=2] [ref=e233]
+                        - paragraph [ref=e234]: Setup required
+                      - generic [ref=e235]: "0"
+                    - generic [ref=e236]:
+                      - generic [ref=e237]: Setup required
+                      - paragraph [ref=e238]: Connect your tldw server and enable personalization to unlock this feature. Companion inbox items unlock once personalization is available for this workspace.
+                  - generic [ref=e239]:
+                    - generic [ref=e240]:
+                      - generic [ref=e241]:
+                        - heading "Needs Attention" [level=2] [ref=e242]
+                        - paragraph [ref=e243]: Setup required
+                      - generic [ref=e244]: "0"
+                    - generic [ref=e245]:
+                      - generic [ref=e246]: Setup required
+                      - paragraph [ref=e247]: Connect your tldw server and enable personalization to unlock needs-attention signals from goals and reading.
+                - generic [ref=e248]:
+                  - generic [ref=e249]:
+                    - generic [ref=e250]:
+                      - generic [ref=e251]:
+                        - heading "Resume Work" [level=2] [ref=e252]
+                        - paragraph [ref=e253]: Setup required
+                      - generic [ref=e254]: "0"
+                    - generic [ref=e255]:
+                      - generic [ref=e256]: Setup required
+                      - paragraph [ref=e257]: Connect your tldw server and enable personalization to unlock resume suggestions across goals, reading, and notes.
+                  - generic [ref=e258]:
+                    - generic [ref=e259]:
+                      - generic [ref=e260]:
+                        - heading "Goals / Focus" [level=2] [ref=e261]
+                        - paragraph [ref=e262]: Setup required
+                      - generic [ref=e263]: "0"
+                    - generic [ref=e264]:
+                      - generic [ref=e265]: Setup required
+                      - paragraph [ref=e266]: Connect your tldw server and enable personalization to unlock this feature. Enable Companion to turn goals and focus prompts into a live dashboard block.
+                  - generic [ref=e267]:
+                    - generic [ref=e268]:
+                      - generic [ref=e269]:
+                        - heading "Recent Activity" [level=2] [ref=e270]
+                        - paragraph [ref=e271]: Setup required
+                      - generic [ref=e272]: "0"
+                    - generic [ref=e273]:
+                      - generic [ref=e274]: Setup required
+                      - paragraph [ref=e275]: Connect your tldw server and enable personalization to unlock this feature. Enable Companion to review recent activity and capture trails here.
+                  - generic [ref=e276]:
+                    - generic [ref=e277]:
+                      - generic [ref=e278]:
+                        - heading "Reading Queue" [level=2] [ref=e279]
+                        - paragraph [ref=e280]: Setup required
+                      - generic [ref=e281]: "0"
+                    - generic [ref=e282]:
+                      - generic [ref=e283]: Setup required
+                      - paragraph [ref=e284]: Connect your tldw server and enable personalization to unlock your reading queue.
+              - generic [ref=e285]:
+                - generic [ref=e286]:
+                  - heading "Quick actions" [level=2] [ref=e287]
+                  - paragraph [ref=e288]: Jump to the main features.
+                - generic [ref=e289]:
+                  - link "Open Chat Continue active work in the main chat workspace." [ref=e290] [cursor=pointer]:
+                    - /url: /chat
+                    - generic [ref=e291]: Open Chat
+                    - paragraph [ref=e292]: Continue active work in the main chat workspace.
+                  - link "Open Knowledge Review sources, notes, and captured knowledge from the main workspace." [ref=e293] [cursor=pointer]:
+                    - /url: /knowledge
+                    - generic [ref=e294]: Open Knowledge
+                    - paragraph [ref=e295]: Review sources, notes, and captured knowledge from the main workspace.
+                  - link "Open Analysis Review and compare media from the main workspace." [ref=e296] [cursor=pointer]:
+                    - /url: /media-multi
+                    - generic [ref=e297]: Open Analysis
+                    - paragraph [ref=e298]: Review and compare media from the main workspace.
+        - generic [ref=e299]:
+          - dialog "Quick Ingest (1)":
+            - generic [ref=e300]:
+              - button "Close" [ref=e301] [cursor=pointer]:
+                - generic "Close" [ref=e302]:
+                  - img "close" [ref=e303]
+              - generic [ref=e306]: Quick Ingest (1)
+              - generic [ref=e308]:
+                - navigation "Ingest wizard progress" [ref=e309]:
+                  - list [ref=e310]:
+                    - listitem [ref=e311]:
+                      - 'button "Step 1: Add (completed)" [ref=e365] [cursor=pointer]':
+                        - generic [ref=e316]: Add
+                        - generic [ref=e368]: 1 items
+                    - listitem [ref=e318]:
+                      - 'button "Step 2: Configure (current)" [disabled] [ref=e369]':
+                        - generic [ref=e323]: Configure
+                    - listitem [ref=e325]:
+                      - 'button "Step 3: Review" [disabled] [ref=e326]':
+                        - generic [ref=e330]: Review
+                    - listitem [ref=e332]:
+                      - 'button "Step 4: Processing" [disabled] [ref=e333]':
+                        - generic [ref=e337]: Processing
+                    - listitem [ref=e339]:
+                      - 'button "Step 5: Results" [disabled] [ref=e340]':
+                        - generic [ref=e344]: Results
+                - generic [ref=e370]:
+                  - generic [ref=e371]:
+                    - generic [ref=e372]:
+                      - button "Quick preset" [ref=e373] [cursor=pointer]:
+                        - generic [aria-hidden] [ref=e374]: ⚡
+                        - generic [ref=e375]: Quick
+                        - generic [ref=e376]: Process fast, skip analysis
+                      - button "Standard preset (Recommended)" [ref=e377] [cursor=pointer]:
+                        - generic [aria-hidden] [ref=e378]: ★
+                        - generic [ref=e379]: Standard
+                        - generic [ref=e380]: (Recommended)
+                        - generic [ref=e382]: Analyze + chunk for RAG search
+                      - button "Deep preset" [ref=e383] [cursor=pointer]:
+                        - generic [aria-hidden] [ref=e384]: 🔬
+                        - generic [ref=e385]: Deep
+                        - generic [ref=e386]: All options, review before save
+                    - generic [ref=e387]: Presets are starting points. Adjust any settings below or in Advanced options to fit this run. Using custom settings (no preset match).
+                  - generic [ref=e390]:
+                    - generic [ref=e391]:
+                      - heading "Ingestion options" [level=5] [ref=e392]
+                      - text: Defaults apply only to items added after you change them.
+                    - generic [ref=e393]:
+                      - generic [ref=e394]:
+                        - generic [ref=e395]:
+                          - generic [ref=e396]: Analysis
+                          - switch "Ingestion options – analysis" [checked] [ref=e397] [cursor=pointer]
+                        - paragraph [ref=e400]: Generate AI summary and key findings
+                      - generic [ref=e401]:
+                        - generic [ref=e402]:
+                          - generic [ref=e403]: Chunking
+                          - switch "Ingestion options – chunking" [checked] [ref=e404] [cursor=pointer]
+                        - paragraph [ref=e407]: Split into searchable sections for Knowledge QA
+                      - generic [ref=e408]:
+                        - generic [ref=e409]:
+                          - generic [ref=e410]: Overwrite existing
+                          - switch "Ingestion options – overwrite existing" [ref=e411] [cursor=pointer]
+                        - paragraph [ref=e414]: Replace content if previously ingested
+                    - generic [ref=e415]:
+                      - generic [ref=e416]: Analysis provider
+                      - generic [ref=e417]:
+                        - combobox "Analysis provider" [expanded] [active] [ref=e419]:
+                          - text: custom_openai
+                          - listbox:
+                            - option "custom-openai-api-99"
+                            - option "custom_openai" [selected]
+                        - img "close-circle" [ref=e461] [cursor=pointer]
+                      - paragraph [ref=e420]: Configured providers are suggestions. This choice is only for this ingest.
+                    - generic [ref=e422]:
+                      - generic [ref=e423]:
+                        - strong [ref=e425]: Chunking mode
+                        - radiogroup "Chunking mode" [ref=e426]:
+                          - generic [ref=e427]:
+                            - generic [ref=e428] [cursor=pointer]:
+                              - radio "Auto" [checked]
+                              - generic "Auto" [ref=e429]
+                            - generic [ref=e430] [cursor=pointer]:
+                              - radio "Manual"
+                              - generic "Manual" [ref=e431]
+                      - generic [ref=e432]:
+                        - generic [ref=e433]:
+                          - generic [ref=e434]: Auto chunking goal
+                          - generic [ref=e435] [cursor=pointer]:
+                            - generic [ref=e436]:
+                              - generic "Balanced" [ref=e437]
+                              - combobox "Auto chunking goal" [ref=e438]
+                            - img "down" [ref=e440]
+                        - generic [ref=e443]:
+                          - generic [ref=e444]: Use AI to improve chunk boundaries
+                          - switch "Use AI to improve chunk boundaries" [ref=e445] [cursor=pointer]
+                    - button "Advanced options" [ref=e448] [cursor=pointer]
+                  - generic [ref=e451]:
+                    - button "Back" [ref=e452] [cursor=pointer]
+                    - button "Next" [ref=e456] [cursor=pointer]
+    - generic [ref=e469]:
+      - generic "custom-openai-api-92" [ref=e470] [cursor=pointer]
+      - generic "custom-openai-api-93" [ref=e472] [cursor=pointer]
+      - generic "custom-openai-api-94" [ref=e474] [cursor=pointer]
+      - generic "custom-openai-api-95" [ref=e476] [cursor=pointer]
+      - generic "custom-openai-api-96" [ref=e478] [cursor=pointer]
+      - generic "custom-openai-api-97" [ref=e480] [cursor=pointer]
+      - generic "custom-openai-api-98" [ref=e482] [cursor=pointer]
+      - generic "custom-openai-api-99" [ref=e484] [cursor=pointer]
+      - generic "custom_openai" [ref=e486] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=e6] [cursor=pointer]
+  - alert [ref=e10]

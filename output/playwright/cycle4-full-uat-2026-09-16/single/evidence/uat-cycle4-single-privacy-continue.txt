@@ -1,0 +1,10 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Continue' }).click();
+```
+### Page
+- Page URL: http://127.0.0.1:18380/
+- Page Title: Home | tldw
+- Console: 0 errors, 1 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T00-29-56-186Z.yml)

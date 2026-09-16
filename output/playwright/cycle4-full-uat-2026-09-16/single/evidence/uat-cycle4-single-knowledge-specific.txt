@@ -1,0 +1,181 @@
+- generic [ref=e11]:
+  - generic [ref=e14]:
+    - link "Skip to main content" [ref=e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e16]:
+      - button "Expand sidebar" [ref=e17] [cursor=pointer]
+      - button "New Chat" [ref=e21] [cursor=pointer]
+      - generic [ref=e24]:
+        - button "Quick Ingest" [ref=e25] [cursor=pointer]
+        - button "Chat" [ref=e29] [cursor=pointer]
+        - button "Prompts" [ref=e32] [cursor=pointer]
+        - button "Characters" [ref=e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e41] [cursor=pointer]
+        - button "World Books" [ref=e45] [cursor=pointer]
+        - button "Notes" [ref=e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=e52] [cursor=pointer]
+        - button "Media" [ref=e60] [cursor=pointer]
+        - button "Document Workspace" [ref=e63] [cursor=pointer]
+        - button "Research Workspace" [ref=e69] [cursor=pointer]
+        - button "Kanban" [ref=e75] [cursor=pointer]
+        - button "Watchlists" [ref=e77] [cursor=pointer]
+      - generic [ref=e82]:
+        - button "Open Notes Dock" [ref=e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e88] [cursor=pointer]
+        - button "Settings" [ref=e91] [cursor=pointer]
+    - main [ref=e95]:
+      - generic [ref=e96]:
+        - generic [ref=e99]:
+          - generic [ref=e100]:
+            - button "Expand sidebar" [ref=e101] [cursor=pointer]
+            - generic [ref=e103]:
+              - img "tldw Assistant" [ref=e104]
+              - generic [ref=e105]: tldw Assistant
+              - button "Companion Home" [ref=e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=e110] [cursor=pointer]
+          - generic [ref=e113]:
+            - button "Search - Open command palette" [ref=e114] [cursor=pointer]:
+              - generic [ref=e118]: Search
+              - generic [ref=e119]: ⌘K
+            - button "Open settings" [ref=e120] [cursor=pointer]
+            - generic [ref=e132]:
+              - button "Notifications, 0 unread" [ref=e133] [cursor=pointer]
+              - status [ref=e137]: Notifications are active
+            - button "Switch to light theme" [ref=e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e145] [cursor=pointer]:
+              - generic [ref=e146]: "?"
+        - generic [ref=e559]:
+          - link "Skip to search" [ref=e560] [cursor=pointer]:
+            - /url: "#knowledge-search-input"
+          - main [ref=e561]:
+            - generic [ref=e564]:
+              - generic [ref=e565]:
+                - 'button "Open source scope and saved profiles. Sources: 4 selected" [ref=e566] [cursor=pointer]': "Sources: 4 selected"
+                - button "Balanced" [ref=e573] [cursor=pointer]
+                - button "Web fallback is currently disabled. Click to toggle." [ref=e576] [cursor=pointer]: Web
+                - button "Choose answer model" [ref=e581] [cursor=pointer]:
+                  - generic [ref=e585]: "AI: Server default"
+                - button "Refresh source health" [ref=e588] [cursor=pointer]: "Sources ready: 7 of 8"
+                - button "Open Knowledge QA settings" [ref=e589] [cursor=pointer]
+              - generic [ref=e593]:
+                - generic [ref=e594]:
+                  - heading "Ask Your Library" [level=1] [ref=e597]
+                  - paragraph [ref=e598]: Search selected personal-library sources and get cited answers
+                  - paragraph [ref=e599]: Knowledge QA searches documents, media, notes, and other selected sources, then grounds answer claims in citations you can inspect.
+                  - paragraph [ref=e600]: This page answers questions over searchable sources. Add or manage sources in their owner pages, then use /knowledge for QA.
+                - generic [ref=e601]:
+                  - button "How it works" [expanded] [ref=e602] [cursor=pointer]
+                  - list [ref=e604]:
+                    - listitem [ref=e605]:
+                      - generic [ref=e606]: "1"
+                      - generic [ref=e607]: Select sources
+                    - listitem [ref=e609]:
+                      - generic [ref=e610]: "2"
+                      - generic [ref=e611]: Ask a question
+                    - listitem [ref=e614]:
+                      - generic [ref=e615]: "3"
+                      - generic [ref=e616]: Review cited answer
+                - generic [ref=e620]:
+                  - button "Explain the methodology used in this study" [ref=e621] [cursor=pointer]
+                  - button "Summarize the key findings in my latest sources" [ref=e622] [cursor=pointer]
+                  - button "What claims have direct citations?" [ref=e623] [cursor=pointer]
+                  - button "Compare conclusions across my documents" [ref=e624] [cursor=pointer]
+                - generic [ref=e625]:
+                  - paragraph [ref=e626]: No previous QA sessions yet.
+                  - button "Continue recent session" [disabled] [ref=e627]
+                  - button "Select sources" [ref=e631] [cursor=pointer]
+                - paragraph [ref=e633]:
+                  - text: Need a full workspace?
+                  - link "Try Research Workspace →" [ref=e634] [cursor=pointer]:
+                    - /url: /research-workspace
+              - generic [ref=e635]:
+                - paragraph [ref=e636]: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
+                - generic [ref=e637]:
+                  - textbox "Search your knowledge base" [ref=e638]:
+                    - /placeholder: Explain the methodology used in this study
+                  - button "Ask" [disabled] [ref=e640]
+                - generic [ref=e641]: Press / to focus, Cmd+K for new search
+          - button [aria-hidden] [ref=e651] [cursor=pointer]
+          - dialog [ref=e652]:
+            - generic [ref=e653]:
+              - heading "Source scope and profiles" [level=2] [ref=e655]
+              - button "Close source scope" [ref=e656] [cursor=pointer]
+            - generic [ref=e661]:
+              - generic [ref=e662]:
+                - generic [ref=e663]:
+                  - generic [ref=e664]:
+                    - heading "Source Scope" [level=3] [ref=e669]
+                    - generic [ref=e670]: "Sources ready: 7 of 8"
+                  - generic [ref=e673]:
+                    - 'button "Sources: 4 selected" [ref=e675] [cursor=pointer]'
+                    - generic [ref=e682]:
+                      - 'button "Specific: All items" [expanded] [ref=e683] [cursor=pointer]'
+                      - dialog "Specific source selector" [ref=e735]:
+                        - generic [ref=e736]:
+                          - generic [ref=e737]:
+                            - paragraph [ref=e738]: Specific source scope
+                            - paragraph [ref=e739]: Choose exact docs or notes. Leave this empty to search all items inside selected categories.
+                          - button "Use all" [ref=e740] [cursor=pointer]
+                        - generic [ref=e741]:
+                          - button "Documents & Media (1)" [ref=e742] [cursor=pointer]
+                          - button "Notes (1)" [ref=e743] [cursor=pointer]
+                          - button "Reload" [ref=e744] [cursor=pointer]
+                        - textbox [active] [ref=e749]:
+                          - /placeholder: Filter docs by title
+                        - generic [ref=e750]:
+                          - generic [ref=e751]:
+                            - text: Source status
+                            - combobox "Source status" [ref=e752]:
+                              - option "All statuses" [selected]
+                              - option "Ready"
+                              - option "Indexing"
+                              - option "Error"
+                              - option "Unavailable"
+                          - generic [ref=e753]:
+                            - text: Recent imports
+                            - combobox "Recent imports" [ref=e754]:
+                              - option "All dates" [selected]
+                              - option "Recent imports"
+                          - generic [ref=e755]:
+                            - text: Workspace scope
+                            - combobox "Workspace scope" [ref=e756]:
+                              - option "No workspace scope" [selected]
+                        - generic [ref=e757]:
+                          - button "Select visible" [ref=e758] [cursor=pointer]
+                          - button "Clear visible" [ref=e759] [cursor=pointer]
+                          - button "Select recent imports" [ref=e760] [cursor=pointer]
+                        - list [ref=e762]:
+                          - listitem [ref=e763]:
+                            - generic [ref=e764] [cursor=pointer]:
+                              - 'checkbox "cycle4-aster ID: 1 • document • completed" [ref=e765]'
+                              - generic [ref=e766]:
+                                - generic [ref=e767]: cycle4-aster
+                                - generic [ref=e768]: "ID: 1 • document • completed"
+                    - button "Explain source categories" [ref=e688] [cursor=pointer]
+                  - paragraph [ref=e692]: "Scope: 4 selected • Specific filters: All items — 4 of 8 categories selected"
+                - generic [ref=e693]:
+                  - heading "Search Profile" [level=3] [ref=e698]
+                  - group "Preset selection" [ref=e701]:
+                    - button "Fast Fastest" [ref=e702] [cursor=pointer]:
+                      - generic [ref=e703]: Fast
+                      - generic [ref=e704]: Fastest
+                    - button "Balanced Moderate" [pressed] [ref=e705] [cursor=pointer]:
+                      - generic [ref=e706]: Balanced
+                      - generic [ref=e707]: Moderate
+                    - button "Deep Slower" [ref=e708] [cursor=pointer]:
+                      - generic [ref=e709]: Deep
+                      - generic [ref=e710]: Slower
+                  - paragraph [ref=e711]: "Balanced retrieval depth for quality and speed. Response time: Moderate. Sources checked: Moderate. Best for: Default day-to-day research."
+              - generic [ref=e712]:
+                - button "Web fallback is currently disabled. Click to toggle." [ref=e713] [cursor=pointer]: Web
+                - button "Choose answer model" [ref=e718] [cursor=pointer]:
+                  - generic [ref=e722]: "AI: Server default"
+                - paragraph [ref=e725]: Queries stay on your tldw server unless web fallback is enabled. When enabled, fallback uses your configured server default provider.
+                - button "Profiles" [ref=e726] [cursor=pointer]
+                - button "Settings" [ref=e731] [cursor=pointer]
+          - generic [ref=e643]:
+            - button "Switch to detailed view" [ref=e644] [cursor=pointer]
+            - link "Help & Documentation" [ref=e648] [cursor=pointer]:
+              - /url: https://github.com/rmusser01/tldw_server2#readme
+  - button "Open Next.js Dev Tools" [ref=e6] [cursor=pointer]
+  - alert [ref=e10]: Knowledge | tldw

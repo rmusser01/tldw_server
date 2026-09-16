@@ -1,0 +1,6 @@
+### Result
+{"checkedAt":"2026-09-16T00:37:31.323Z","text":"SOLO ONBOARDING\n\nFirst-time setup\n\nConfigure the minimum needed to reach a successful first chat.\n\nSkip for now\nSetup readiness\n\nChat must be ready. RAG and speech can be configured later.\n\nRetry\n\nChat\n\nFirst-chat lane\n\nready with warnings\nChat details\n\nEmbeddings/RAG\n\nOptional lane\n\nready with warnings\nEmbeddings/RAG details\n\nSpeech\n\nOptional lane\n\nready with warnings\nSpeech details\nMCP tools\n\nChoose tool packs for chat and research workflows.\n\nPacks\nResearchSearch and inspect saved knowledge, media, prompts, and MCP catalogs.\nLearningReview quizzes, flashcards, and media without changing study data.\nWritingSearch prompts and notes without creating or editing content.\nMedia LibrarySearch and inspect media records.\nPersonal KnowledgeSearch saved notes, prompts, and knowledge records.\nAdd-ons\nBack\nSkipping MCP tools...\nSave packs\nRun sample tool\nContinue"}
+### Ran Playwright code
+```js
+await (async page => {const skip=page.getByRole("button",{name:"Skip MCP tools",exact:true});await skip.click();await skip.waitFor({state:"hidden",timeout:15000});return {checkedAt:new Date().toISOString(),text:await page.locator("main").first().innerText()};})(page);
+```

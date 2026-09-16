@@ -1,0 +1,25 @@
+### Page
+- Page URL: http://127.0.0.1:18380/
+- Page Title: Home | tldw
+- Console: 0 errors, 2 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=e11]:
+  - generic [ref=e14]:
+    - link "Skip to main content" [ref=e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - main [ref=e16]:
+      - region [ref=e448]:
+        - generic [ref=e454]:
+          - heading "Restore media access" [level=2] [ref=e455]
+          - paragraph [ref=e456]: First chat is complete, but the WebUI needs a working server key before it can add sources.
+          - paragraph [ref=e457]: If automatic WebUI access is disabled or unavailable, enter the SINGLE_USER_API_KEY configured for this server. Find it in the server's environment configuration or ask its operator.
+        - generic [ref=e458]:
+          - generic [ref=e459]: Single-user API key
+          - generic [ref=e460]:
+            - textbox "Single-user API key" [ref=e461]
+            - button "Save API key" [ref=e462] [cursor=pointer]
+            - button "Retry" [ref=e463] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=e88] [cursor=pointer]
+  - alert [ref=e10]
+```
