@@ -64,11 +64,17 @@ type HistoryNodeV1 = {
   parent_id: string | null
   role: string
   settled: boolean
+  legacy_projection_id?: string
 }
 
 // Throws HistorySelectionError with a stable code on missing/cyclic ancestry.
 function resolveParentPath(
   nodes: readonly HistoryNodeV1[], cursor: HistoryCursorV1
+): readonly HistoryNodeV1[]
+
+function resolveLegacyProjection(
+  nodes: readonly HistoryNodeV1[], orderedPathIds: readonly string[],
+  cursor: HistoryCursorV1, projectionId?: string
 ): readonly HistoryNodeV1[]
 
 function resolveHistorySelection(
@@ -109,13 +115,21 @@ function createBranchMessage(deps: BranchDependencies):
 ```python
 # MessageStore methods; expose through CharactersRAGDB delegation.
 def get_conversation_history_snapshot(
-    self, conversation_id: str, *, owner_client_id: str, conn=None
+    self, conversation_id: str, *, owner_client_id: str,
+    owner_key: str | None = None, projection_id: str | None = None,
+    conn=None, lock_for_update: bool = False,
 ) -> HistorySelectionSnapshotV1: ...
 
+def get_conversation_history_selected_content(
+    self, conversation_id: str, message_ids: Sequence[str], *,
+    snapshot: HistorySelectionSnapshotV1, owner_client_id: str,
+    owner_key: str | None = None, conn=None,
+) -> tuple[dict[str, Any], ...]: ...
+
 def confirm_legacy_history_projection(
-    self, confirmation: LegacyHistoryProjectionConfirmV1,
-    *, owner_client_id: str, conn=None
-) -> LegacyHistoryProjectionV1: ...
+    self, confirmation: Mapping[str, Any], *, owner_client_id: str,
+    owner_key: str | None = None, conn=None,
+) -> dict[str, Any]: ...
 
 def append_message_with_history_selection(
     self, payload: dict[str, object], selection: HistorySelectionV1,
@@ -129,6 +143,8 @@ def persist_assistant_with_history_admission(
 ```
 
 These are signature declarations, not placeholder implementations. Reuse the actual backend connection type when adding annotations. Transaction ownership follows existing caller-connection conventions; a supplied connection is not committed independently.
+
+Task 2.1's native confirmation returns a detached JSON-shaped `LegacyHistoryProjectionV1` mapping that the API validates against its strict envelope. Its selected-content reader retains parsed `tool_calls` and `extra_metadata` alongside ID/revision/text/ordered images; Task 2.2 must extend the shared typed capture explicitly before composing from it. The optional DB-internal owner-key fallback is not a cross-server browser namespace; authenticated adapters supply their verified owner key. Protected legacy descendants require the explicitly selected projection ID; Python's matching resolver uses the keyword-only `projection_id` argument.
 
 ## Stage 1: selected-path contract and identity
 
@@ -201,11 +217,14 @@ Execution evidence: contract commits `28c7d1904e`, `2fed0871c4`, `77dde3d2b4`; 1
 - Modify `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py` for migration, table backend policies and store delegation.
 - Modify `tldw_Server_API/tests/ChaChaNotesDB/test_chacha_message_store.py`.
 - Create `tldw_Server_API/tests/DB_Management/test_history_selection_migration.py` and `tldw_Server_API/tests/DB_Management/test_history_selection_transactions.py`.
+- Extend the shared history-selection node types, schema, pure resolvers and their two-language tests with protected `legacy_projection_id` provenance for explicit descendants.
 
 **Interfaces:** Consumes Stage 1 core values. Produces complete `get_conversation_history_snapshot` and replay-safe `confirm_legacy_history_projection` with caller transaction support.
 
-- [ ] Add migration tests for an unchanged legacy transcript, both schema backends, owner isolation and multiple immutable projections. Use the neighboring behavior-snapshot migration fixture patterns, but do not inherit that file's autouse pin to schema 65.
-- [ ] Add a complete reader test to the existing `db` fixture in `test_chacha_message_store.py`:
+Implementation refinement: the native migration also adds nullable protected `messages.history_admission_json`, defaulting absent on legacy rows. Ordinary/imported metadata cannot establish owner-issued acceptance. Snapshots may receive an explicit requested projection and adapter-verified owner namespace; `owner_client_id` stays required. The shared legacy resolver follows matching protected descendants to an immutable base prefix or null without selecting a global latest branch. Actual admission writes remain Task 2.2.
+
+- [x] Add migration tests for an unchanged legacy transcript, both schema backends, owner isolation and multiple immutable projections. Use the neighboring behavior-snapshot migration fixture patterns, but do not inherit that file's autouse pin to schema 65.
+- [x] Add a complete reader test to the existing `db` fixture in `test_chacha_message_store.py`:
 
 ```python
 def test_history_snapshot_preserves_equal_text_distinct_ids(db):
@@ -223,12 +242,14 @@ def test_history_snapshot_preserves_equal_text_distinct_ids(db):
     assert {row["id"] for row in snapshot.nodes} == {first, second}
 ```
 
-- [ ] Run the three focused files and verify a behavior/missing-table failure. Implement the next available migration on both backends. The reviewed pin is schema 67; choose the next free version at execution, update every SQLite/PostgreSQL migration path and fresh bootstrap, and test upgrade idempotence. Do not renumber a migration already integrated by UAT.
-- [ ] Implement complete statement/transaction-consistent reads with distinct conversation/history/settings fences and deterministic manifest order. Include metadata/asset revisions; avoid tree limits, display page caps, truncated source projection helpers and binary-heavy review payloads.
-- [ ] Implement immutable `conversation_history_projections` owner/conversation keys and CAS. Check authorized same-ID replay before fresh-source validation; reject same ID with different content. Persist complete source digest/membership plus selected order. No settings overwrite or parent rewrite occurs.
-- [ ] Add real competing-connection tests for edit during snapshot/admission, confirmation after source change, two views confirming different paths, confirmation response loss followed by append/retry, and deleted conversation access. Verify lock ordering against existing message/metadata edit methods.
-- [ ] Add a 20,001-row owner manifest fixture and equal-timestamp ties. Check no row disappears even when the display loader would be capped. Measure only enough to detect accidental per-row metadata/asset queries; do not introduce a benchmark framework.
-- [ ] Run focused SQLite tests and actual PostgreSQL integration using the existing provisioned fixture/`TEST_DATABASE_URL` path. Report unavailable PostgreSQL as unverified, not passing. Run touched-scope Bandit, review and commit.
+- [x] Run the three focused files and verify a behavior/missing-table failure. Implement the next available migration on both backends. The reviewed pin is schema 67; choose the next free version at execution, update every SQLite/PostgreSQL migration path and fresh bootstrap, and test upgrade idempotence. Do not renumber a migration already integrated by UAT.
+- [x] Implement complete statement/transaction-consistent reads with distinct conversation/history/settings fences and deterministic manifest order. Include metadata/asset revisions; avoid tree limits, display page caps, truncated source projection helpers and binary-heavy review payloads.
+- [x] Implement immutable `conversation_history_projections` owner/conversation keys and CAS. Check authorized same-ID replay before fresh-source validation; reject same ID with different content. Persist complete source digest/membership plus selected order. No settings overwrite or parent rewrite occurs.
+- [x] Add real competing-connection tests for edit during snapshot/confirmation, confirmation after source change, two views confirming different paths, confirmation response loss followed by append/retry, and deleted conversation access. Verify lock ordering against existing message/metadata edit methods. Admission-specific races are Task 2.2.
+- [x] Add a 20,001-row owner manifest fixture and equal-timestamp ties. Check no row disappears even when the display loader would be capped. Measure only enough to detect accidental per-row metadata/asset queries; do not introduce a benchmark framework.
+- [x] Run focused SQLite tests and actual PostgreSQL integration using the existing provisioned fixture/`TEST_DATABASE_URL` path. Report unavailable PostgreSQL as unverified, not passing. Run touched-scope Bandit, review and commit.
+
+Execution evidence: `8a293d1ef3` implements schema 68, coherent snapshots and immutable legacy CAS; `c11a8bd9e9` fixes review order and repeated large payload materialization. Initial qualification passed 79 Python and 19 TypeScript tests; the final changed native scope passed 32 real SQLite/PostgreSQL tests, with all 20,001 rows and accepted projection reopen retained. Independent review and scoped re-review resolved all identified native P1/P2 findings. Ruff, compileall, focused TS and touched-scope Bandit passed. The measured same-scope run dropped from 149.80s with observed 26.6 GiB RSS to 43.16s with about 629 MiB peak RSS; these are qualification observations, not a benchmark guarantee. API/admission/settlement and external asset capability checks remain Task 2.2.
 
 ### Task 2.2: native selection routes and accepted message persistence
 
@@ -260,7 +281,7 @@ def test_history_snapshot_preserves_equal_text_distinct_ids(db):
 - Modify `apps/packages/ui/src/db/dexie/schema.ts`, `types.ts`, `chat.ts`, `helpers.ts` and `server-chat-mirror.ts` only at selection/admission interfaces.
 - Create `apps/packages/ui/src/db/dexie/__tests__/history-selection.test.ts`.
 - Create `apps/packages/ui/src/services/chat-history-selection.ts` and `src/services/__tests__/chat-history-selection.test.ts`.
-- Modify `apps/packages/ui/src/services/tldw/TldwApiClient.ts` for strict selection/admission requests.
+- Modify `apps/packages/ui/src/services/tldw/TldwApiClient.ts` and `src/services/tldw/domains/chat-rag.ts` for strict selection/admission requests. The domain mixin supplies the live `addChatMessage` method; changing only the base-class duplicate does not update runtime behavior.
 
 **Interfaces:** Consumes Stage 1 types and Task 2.2 routes. Produces `captureHistorySnapshot`, `finalizeHistorySelection`, `confirmLegacyHistoryProjection`, owner-scoped bookmark load/save, and immutable local accepted user metadata for later settlement.
 
