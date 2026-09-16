@@ -1,0 +1,36 @@
+[
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 80,
+      "row": 23
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Chat/integration/test_persona_backed_chat_conversations.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from __future__ import annotations\n\nimport asyncio\nimport json\nfrom unittest.mock import patch\n\nimport pytest\nfrom fastapi import HTTPException\nfrom fastapi.testclient import TestClient\n\nfrom tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (\n    DEFAULT_CHARACTER_NAME,\n    get_chacha_db_for_user,\n)\nfrom tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user\nfrom tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint_module\nfrom tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user\nfrom tldw_Server_API.app.core.Chat.prompt_template_manager import DEFAULT_RAW_PASSTHROUGH_TEMPLATE\nfrom tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB\nfrom tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths\nfrom tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB\nfrom tldw_Server_API.app.main import app\nfrom tldw_Server_API.tests.Persona.persona_chat_quality_cases import case_by_id\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 26
+          },
+          "location": {
+            "column": 1,
+            "row": 1
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 1
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 1,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  }
+]

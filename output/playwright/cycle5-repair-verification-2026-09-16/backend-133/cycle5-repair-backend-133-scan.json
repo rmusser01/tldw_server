@@ -1,0 +1,30 @@
+{
+  "/private/tmp/cycle5-repair-backend-133-endpoint-red-corrected.log": {
+    "jwt": 0,
+    "provider_key": 0
+  },
+  "/private/tmp/cycle5-repair-backend-133-final-focused.log": {
+    "jwt": 0,
+    "provider_key": 0
+  },
+  "/private/tmp/cycle5-repair-backend-133-red-corrected.log": {
+    "jwt": 0,
+    "provider_key": 0
+  },
+  "/private/tmp/cycle5-repair-backend-133-bandit.log": {
+    "jwt": 0,
+    "provider_key": 0
+  },
+  "/private/tmp/cycle5-repair-backend-133-endpoint-red.log": {
+    "jwt": 0,
+    "provider_key": 0
+  },
+  "/private/tmp/cycle5-repair-backend-133-green.log": {
+    "jwt": 0,
+    "provider_key": 0
+  },
+  "/private/tmp/cycle5-repair-backend-133-red.log": {
+    "jwt": 0,
+    "provider_key": 0
+  }
+}

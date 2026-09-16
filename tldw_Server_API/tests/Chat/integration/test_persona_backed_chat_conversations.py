@@ -298,6 +298,47 @@ def test_actual_provider_failure_then_retry_preserves_canonical_user(
     assert "tldw_retry_failed_turn" not in json.dumps(provider_call.call_args.kwargs["messages_payload"])
 
 
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("order", ["asc", "desc"])
+def test_failed_retry_dispatches_latest_question_after_multiple_saved_turns(
+    persona_chat_client, persona_chat_db, stream, order
+):
+    client, headers, provider_call = persona_chat_client
+    conversation_id = persona_chat_db.add_conversation({"title": "Retry ordering", "client_id": "1"})
+    body = {**_chat_completion_body(conversation_id), "history_message_order": order}
+    for question in ("Who coordinates Cedar?", "Greet the visitor."):
+        body["messages"] = [{"role": "user", "content": question}]
+        assert client.post("/api/v1/chat/completions", json=body, headers=headers).status_code == 200
+    current = "Reply exactly: CEDAR RETRY READY."
+    body["messages"] = [{"role": "user", "content": current}]
+    body["metadata"] = {"tldw_client_message_id": "latest-user"}
+    success_response = provider_call.return_value
+    provider_call.side_effect = HTTPException(502, "Provider unavailable")
+    assert client.post("/api/v1/chat/completions", json=body, headers=headers).status_code == 502
+    rows = persona_chat_db.get_messages_for_conversation(conversation_id, order_by_timestamp="ASC")
+    failed_user_id = rows[-1]["id"]
+    body["messages"] = [{"role": row["sender"], "content": row["content"]} for row in rows]
+    body["metadata"]["tldw_retry_failed_turn"] = True
+    body["stream"] = stream
+    provider_call.side_effect = None
+    provider_call.return_value = (iter([
+        'data: {"choices":[{"delta":{"content":"CEDAR RETRY READY."},"finish_reason":null}]}\n\n',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+        'data: [DONE]\n\n',
+    ]) if stream else success_response)
+    recovered = client.post("/api/v1/chat/completions", json=body, headers=headers)
+    assert recovered.status_code == 200, recovered.text
+    dispatched = provider_call.call_args.kwargs["messages_payload"]
+    def text_of(message):
+        content = message["content"]
+        return content if isinstance(content, str) else "".join(part.get("text", "") for part in content)
+    assert text_of(dispatched[-1]) == current
+    assert sum(text_of(message) == current for message in dispatched) == 1
+    saved = persona_chat_db.get_messages_for_conversation(conversation_id)
+    assert [row["id"] for row in saved if row["sender"] == "user" and row["content"] == current] == [failed_user_id]
+    assert len(saved) == 7  # Saved system prompt plus three user/assistant pairs.
+
+
 @pytest.mark.asyncio
 async def test_client_correlation_failure_rolls_back_the_owned_user(persona_chat_db, monkeypatch):
     conversation_id = persona_chat_db.add_conversation({"title": "Atomic correlation", "client_id": "1"})

@@ -4481,6 +4481,12 @@ async def build_context_and_messages(
         if not reused_retry or retry_user_message_id not in historical_ids:
             current_turn.append(msg_for_llm)
 
+    if retry_user_message_id is not None and retry_user_message_id in historical_ids:
+        # Overlap and identity checks above have accepted this exact saved turn.
+        # Keep its validated content, but make it current even with DESC history.
+        retry_index = historical_ids.index(retry_user_message_id)
+        current_turn.append(historical_msgs.pop(retry_index))
+
     if continuation_spec and assistant_prefill:
         prefill_payload: dict[str, Any] = {
             "role": "assistant",
