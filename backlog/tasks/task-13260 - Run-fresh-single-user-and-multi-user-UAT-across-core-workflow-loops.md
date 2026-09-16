@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 02:59'
+updated_date: '2026-09-16 03:31'
 labels:
   - uat
   - testing
@@ -131,6 +131,12 @@ Cycle4 frozen execution closed on product7c9409fad2. Both mode FINAL_REPORT matr
 Cycle4 repair design Docs/Design/2026-09-16-uat-cycle-4-repairs.md and IMPLEMENTATION_PLAN_uat_cycle_4.md written. Independent initial domains:44/51Chat acknowledgement;47/55consolidated model handoff;46safe summarization;root45minimize. Shared chat_service and AnalysisModal follow-ups serialize after owners release. No full new UAT until reviewed fixes and targeted checks pass.
 
 Cycle4 reviewed repair checkpoints committed: feedback/minimize6d2f3abc55, model-selection0dcca3c032, analysis8128c93c1b, accessibilitydb141cbd90, hidden-tab transporte4552e4764, Chat acknowledgements+inventory14f33af27c. Tracker and plan now distinguish reviewed code from pending targeted native/full UAT. Remaining Chat/QA/title/form units active. Review raw Markdown confirmed existing060 omission under task17; permanent reading-pane regression begins.
+
+Further reviewed repairs committed: QA/Media failure containment + completed generation intent3c159b219b and Review Markdown scope correction74f5a0ee1e. All167 retained repair evidence files hash-verified. Verified owned cycle4 API/Next processes stopped gracefully and confirmed absent; frozen data/evidence preserved. New empty targeted-single profile prepared18400/18480 for no-restart setup verification, no DB init/server/browser yet. Combined backend13-file verification now runs on stable Python code; remaining Chat/title/form implementation continues separately.
+
+Cycle4 repair checkpoint: titles058/cold Character form067 committed eb8782e5fd after independent33 title and3 focused form tests; author broader135 tests/8files. Combined backend353pass/1existing skip,5production Python files Bandit0. Task5 Chat108/113/117 remains under final review, then combined frontend/compiler checks and targeted browser acceptance. Targeted single API18400 initialized and started PID16030; frontend/browser not yet started. All four verified frozen-cycle4 API/UI processes stopped gracefully; evidence/data retained. Branch codex/fresh-install-uat-fixes contains latest fetched dev59049e094e (zero dev-only commits). Historical initial baseline was missing32 dev commits and is documented without claiming original latest-dev ancestry.
+
+Final Task5 independent review clear: Retry11 focused and remaining173 focused tests,24 frozen file hashes match. Combined post-freeze frontend1155 UI tests/75suites plus144 Web tests/9suites all pass (1299/84 total); whole TypeScript retains exactly90 baseline diagnostics by path/code/full message/multiplicity, none added or removed. Combined backend353pass/1existing skip and production Bandit0. Retained code/review and combined evidence in output/playwright/cycle4-repair-verification-2026-09-16. All new code repair units ready for targeted native verification, which precedes full fresh re-UAT; no sign-off yet.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

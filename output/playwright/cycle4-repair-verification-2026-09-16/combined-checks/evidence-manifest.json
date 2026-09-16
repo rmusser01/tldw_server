@@ -1,0 +1,71 @@
+{
+  "unit": "combined-checks",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-combined-backend.txt",
+      "bytes": 9596,
+      "sha256": "32c1876c0b41783d26b6c1607607e596fb4e9051949ed95becc811d4f06534cb"
+    },
+    {
+      "file": "cycle4-combined-bandit.json",
+      "bytes": 2204,
+      "sha256": "bd129f4d8604c73e6d44e82c909ff10b45f249b9ddb648bf0d3b3747da964831"
+    },
+    {
+      "file": "cycle4-combined-bandit.log",
+      "bytes": 234,
+      "sha256": "ade912a11abfeb97400a653fa78678ea8dcfd42d9dad5d1c586f96512b7351f1"
+    },
+    {
+      "file": "cycle4-combined-frontend-base.json",
+      "bytes": 5958,
+      "sha256": "7ec9af0b285cebdd0434a0afcc3b5c58f6f6924f42566d03573aeb71b04f06d8"
+    },
+    {
+      "file": "cycle4-combined-frontend-candidate.json",
+      "bytes": 6752,
+      "sha256": "a351ee38b2b046125c2e9fd2164fc02955f3bdf1434949bbecd633adfe1bbd82"
+    },
+    {
+      "file": "cycle4-combined-frontend-command.json",
+      "bytes": 6752,
+      "sha256": "a351ee38b2b046125c2e9fd2164fc02955f3bdf1434949bbecd633adfe1bbd82"
+    },
+    {
+      "file": "cycle4-combined-typecheck-comparison.json",
+      "bytes": 336,
+      "sha256": "a6eb202288e5710a68dcec59360b08fc71c8f4658f1fa71dce7a36ba7fba0ed5"
+    },
+    {
+      "file": "cycle4-combined-typecheck.log",
+      "bytes": 24922,
+      "sha256": "e5b7d174f6dbb6166279ca6583ca8a047ea545c536ff8b33d515d9b51383b345"
+    },
+    {
+      "file": "cycle4-combined-ui.log",
+      "bytes": 65831,
+      "sha256": "6c7eca9fe019b0df6554495c4d7cb8cd8fb935e4d448adca0b14c1d4a1006bb1"
+    },
+    {
+      "file": "cycle4-combined-validation-summary.json",
+      "bytes": 967,
+      "sha256": "f23b6dc89ef1813368befb6f4ddcde968228001c7cc12c2e363c83e50d6733dc"
+    },
+    {
+      "file": "cycle4-combined-web-command.json",
+      "bytes": 675,
+      "sha256": "6482d18c1f4a3e5fbdde0221a668775c3d75caab35162dac977a5b4bfe5bc352"
+    },
+    {
+      "file": "cycle4-combined-web.log",
+      "bytes": 912,
+      "sha256": "da60d58085a59f90444bef6d29181b893787de8ae12bc3c347d7fb1225e71425"
+    },
+    {
+      "file": "cycle4-repair-evidence-integrity.json",
+      "bytes": 80,
+      "sha256": "5a63f146d833873e13c590bc573b8d966fc74a5a488322ed44ff96de26468232"
+    }
+  ]
+}

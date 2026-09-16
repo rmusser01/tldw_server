@@ -76,7 +76,7 @@ Reviewed code checkpoints: Task1/4 `14f33af27c`; Task2 `0dcca3c032`; Task3 `8128
 **Tests:** Actual request projection, stream cancellation, QA completed-request states, visibility transitions and native controls.
 **Status:** In Progress
 
-Task7 reviewed code committed `e4552e4764` (111 independent tests); native six-tab acceptance pending. Task5 andTask6 implementation now active after their predecessor owners released shared files.
+Task7 reviewed code committed `e4552e4764` (111 independent tests); native six-tab acceptance pending. Task6 reviewed code committed `3c159b219b` (248 independent covering tests; author359 broader cases). Task5 committed `f83a8ba456` after independent11Retry/173remaining controls and combined1299frontend tests/84suites. Whole TypeScript matches90existing diagnostics with none added. All code checkpoints are reviewed; targeted native acceptance follows before the full fresh run.
 
 ### Task5: Chat retry, character route and missing final answer — TASK13260.49/53/57, UAT108/113/117
 **Files:** `utils/generate-history.ts`, `hooks/chat/useChatActions.ts`, `components/Option/Playground/PlaygroundForm.tsx`, `components/Option/Playground/Playground.tsx`, session persistence and existing tests.
@@ -107,7 +107,7 @@ Task7 reviewed code committed `e4552e4764` (111 independent tests); native six-t
 **Tests:** Actual modal, AntD feedback/form lifecycle, title owner and accessibility behavior.
 **Status:** In Progress
 
-Task8 code reviewed/committed: feedback102 andMinimize104 `6d2f3abc55`, accessibility112 `db141cbd90`; native controls pending. Task9 titles/form implementation active. Review Markdown triage confirms the existing060 omission under TASK13260.17; use the existing safe renderer in the analysis reading pane, preserving raw copy/edit/export data.
+Task8 code reviewed/committed: feedback102 andMinimize104 `6d2f3abc55`, accessibility112 `db141cbd90`; native controls pending. Task9 titles/form committed `eb8782e5fd` after independent33title/3focused form controls and author135cases/8files. Review Markdown060 correction committed `74f5a0ee1e` after independent33-test review: existing safe renderer reused in the analysis reading pane, preserving raw copy/edit/export data. Combined backend353pass/1existing skip and production Bandit0; combined frontend/compiler checks follow Task5 freeze.
 
 ### Task8: Minimize and feedback/accessibility — TASK13260.45/43/52, UAT104/102/112
 **Files:** shared `components/Common/QuickIngest/ProcessingStep.tsx`, `QuickIngestWizardModal.tsx`; actual admin creation and Prompt sync feedback owners; `components/Flashcards/tabs/ManageTab.tsx` and affected action/loading components; existing tests.

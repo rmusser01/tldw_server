@@ -1,0 +1,38 @@
+{
+  "at": "2026-09-16T03:30:32.502Z",
+  "scope": "Combined cycle4 repair validation before targeted native checks",
+  "backend": {
+    "passed": 353,
+    "skipped": 1,
+    "skip": "Existing complex asynchronous coordination test",
+    "log": "cycle4-combined-backend.txt"
+  },
+  "bandit": {
+    "findings": 0,
+    "errors": 0,
+    "productionPaths": 5
+  },
+  "web": {
+    "passed": 144,
+    "suites": 9,
+    "log": "cycle4-combined-web.log"
+  },
+  "typecheck": {
+    "baseline": "/private/tmp/uat032-merged-typecheck.log",
+    "current": "/private/tmp/cycle4-combined-typecheck.log",
+    "normalization": "Diagnostic path, TS code, complete indented message and multiplicity; location shifts and npm wrapper lines excluded",
+    "baselineCount": 90,
+    "currentCount": 90,
+    "added": [],
+    "removed": []
+  },
+  "ui": {
+    "passed": 1155,
+    "suites": 75,
+    "log": "cycle4-combined-ui.log"
+  },
+  "frontendTotal": {
+    "passed": 1299,
+    "suites": 84
+  }
+}

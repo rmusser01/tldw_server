@@ -1,0 +1,18 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+ ✓ __tests__/pages/notifications.test.tsx (31 tests) 768ms
+ ✓ __tests__/pages/chat-title.integration.test.tsx (15 tests) 861ms
+ ✓ __tests__/components/notification-lifecycle-provider.test.tsx (42 tests) 242ms
+ ✓ __tests__/components/notification-rotation.integration.test.tsx (32 tests) 214ms
+ ✓ __tests__/pages/core-route-titles.test.tsx (12 tests) 81ms
+ ✓ __tests__/pages/chat-title-late-persistence.test.tsx (2 tests) 24ms
+ ✓ __tests__/components/notification-toast-bridge.test.tsx (6 tests) 14ms
+ ✓ ../packages/ui/src/utils/__tests__/update-page-title.test.ts (3 tests) 7ms
+ ✓ __tests__/pages/chat-title.ssr.test.tsx (1 test) 3ms
+
+ Test Files  9 passed (9)
+      Tests  144 passed (144)
+   Start at  20:27:17
+   Duration  6.00s (transform 893ms, setup 559ms, import 1.16s, tests 2.21s, environment 1.59s)
+
