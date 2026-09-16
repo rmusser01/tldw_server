@@ -15,7 +15,8 @@ import { useDemoMode } from '@/context/demo-mode'
 import { useServerCapabilities } from '@/hooks/useServerCapabilities'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { useAntdMessage } from '@/hooks/useAntdMessage'
-import { useStoreMessageOption } from "@/store/option"
+import { useStoreMessageOption, type Message as ChatMessage } from "@/store/option"
+import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { useTutorialStore } from "@/store/tutorials"
 import { UNAVAILABLE_STATE_LABEL, getDesignSystemState } from "@/design-system"
 import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat"
@@ -115,6 +116,15 @@ const shouldAutoResolveConversationLabel = (conversationId: string): boolean =>
 
 const CONVERSATION_LABEL_MAX_RETRIES = 3
 const CONVERSATION_LABEL_RETRY_DELAY_MS = 1500
+
+// Display-only failure bubbles are not unsaved conversation work.
+const hasUnsavedChatWork = (row: ChatMessage): boolean => {
+  if (row.serverMessageId || row.messageType === "character:greeting" || row.messageType === "greeting") return false
+  const hasImages = row.images?.some(image => Boolean(image?.trim()))
+  if (hasImages) return true
+  return Boolean(row.message?.trim() &&
+    !(row.isBot && (!row.role || row.role === "assistant") && decodeChatErrorPayload(row.message)))
+}
 
 const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNoteId = null }) => {
   const transferFlashcards = useFlashcardsGenerateTransfer()
@@ -1928,8 +1938,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
       return
     }
     const chatState = useStoreMessageOption.getState()
-    if (chatState.streaming || chatState.isProcessing || chatState.messages.some(row =>
-      !row.serverMessageId && row.message?.trim() && row.messageType !== "character:greeting" && row.messageType !== "greeting")) {
+    if (chatState.streaming || chatState.isProcessing || chatState.messages.some(hasUnsavedChatWork)) {
       message.warning(t("option:notesSearch.finishChatBeforeOpening", { defaultValue: "Finish or save the current chat before opening the linked conversation." }))
       return
     }
@@ -1941,7 +1950,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     const stopWatchingChat = useStoreMessageOption.subscribe((current, previous) => {
       if (current.serverChatId !== previous.serverChatId || current.historyId !== previous.historyId ||
         current.streaming || current.isProcessing ||
-        (current.messages !== previous.messages && current.messages.some(row => !row.serverMessageId && row.message?.trim() && row.messageType !== "character:greeting" && row.messageType !== "greeting"))) controller.abort()
+        (current.messages !== previous.messages && current.messages.some(hasUnsavedChatWork))) controller.abort()
     })
     let snapshot: ServicePromptSnapshot | undefined
     let stopWatchingAuthority: (() => void) | undefined

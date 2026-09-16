@@ -3,7 +3,7 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import NotesManagerPage from "../NotesManagerPage"
+import NotesManagerPage from "@/components/Notes/NotesManagerPage"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { Playground } from "@/components/Option/Playground/Playground"
@@ -423,7 +423,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     expect(usePlaygroundSessionStore.getState()).toMatchObject({ serverChatId: "cedar", trackedCharacterId: "4" })
   })
 
-  it.each(["stream", "new-draft", "image-draft", "note-edit", "account"])("does not replace current work when %s changes during a linked read", async change => {
+  it.each(["stream", "new-draft", "note-edit", "account"])("does not replace current work when %s changes during a linked read", async change => {
     configureCommonRequests("cedar")
     const chat = { id: "cedar", title: "Cedar chat", character_id: 4, source: "webui-character-chat" }
     let release!: (rows: unknown[]) => void
@@ -437,7 +437,6 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     act(() => {
       if (change === "stream") useStoreMessageOption.setState({ streaming: true })
       if (change === "new-draft") useStoreMessageOption.setState({ messages: [{ id: "draft", role: "user", isBot: false, name: "You", message: "Keep this thought" }] })
-      if (change === "image-draft") useStoreMessageOption.setState({ messages: [{ id: "draft", role: "assistant", isBot: true, name: "Assistant", message: "", images: ["data:image/png;base64,YQ=="] }] })
       if (change === "account") chatAuthority.controller.abort()
     })
     if (change === "note-edit") fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), { target: { value: "New note edits" } })
@@ -447,47 +446,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     expect(chatAuthority.selection.id).toBe("5")
   })
 
-  it.each(["display-error", "user-error-text", "assistant-draft", "malformed-error", "user-image-only", "assistant-image-only", "error-image"])("opens past only a retained assistant display error (%s)", async kind => {
-    configureCommonRequests("normal-saved")
-    mockGetChat.mockResolvedValue({ id: "normal-saved", title: "Recovered chat", source: "webui-chat" })
-    mockListChatMessages.mockResolvedValue([{ id: "server-user", role: "user", content: "Question" }, { id: "server-answer", role: "assistant", content: "Answer" }])
-    const error = '__tldw_error__:{"summary":"Provider failed","hint":"Try again","detail":"Stream completion failed"}'
-    useStoreMessageOption.setState({ historyId: "local-normal", serverChatId: "normal-saved", messages: [
-      { id: "local-user", serverMessageId: "server-user", isBot: false, name: "You", message: "Question" },
-      { id: "local-error", isBot: !kind.startsWith("user-"), role: kind.startsWith("user-") ? "user" : "assistant", name: "Assistant", images: kind.includes("image") ? ["data:image/png;base64,YQ=="] : undefined, message: kind.endsWith("image-only") ? "" : kind === "assistant-draft" ? "Unfinished reply" : kind === "malformed-error" ? "__tldw_error__:{broken" : error },
-      { id: "local-answer", serverMessageId: "server-answer", isBot: true, name: "Assistant", message: "Answer" }
-    ], streaming: false, isProcessing: false })
-    renderPage()
-    fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
-    fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
-    fireEvent.click(await screen.findByText(/open linked conversation/i))
-    if (kind === "display-error") {
-      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
-      expect(useStoreMessageOption.getState().messages).toMatchObject([{ serverMessageId: "server-user" }, { serverMessageId: "server-answer" }])
-    } else {
-      expect(mockNavigate).not.toHaveBeenCalled()
-      expect(mockListChatMessages).not.toHaveBeenCalled()
-      expect(mockMessageWarning).toHaveBeenCalled()
-    }
-  })
-
-  it("does not cancel an owned linked read when only an assistant display error is restored", async () => {
-    configureCommonRequests("normal-saved")
-    mockGetChat.mockResolvedValue({ id: "normal-saved", title: "Recovered chat", source: "webui-chat" })
-    let release!: (rows: unknown[]) => void
-    mockListChatMessages.mockReturnValue(new Promise(resolve => { release = resolve }))
-    renderPage()
-    fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
-    fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
-    fireEvent.click(await screen.findByText(/open linked conversation/i))
-    await waitFor(() => expect(mockListChatMessages).toHaveBeenCalled())
-    act(() => useStoreMessageOption.setState({ messages: [{ id: "restored-error", role: "assistant", isBot: true, name: "Assistant", message: '__tldw_error__:{"summary":"Provider failed","hint":"Try again"}' }] }))
-    await act(async () => { release([{ id: "saved-answer", role: "assistant", content: "Recovered answer" }]); await Promise.resolve(); await Promise.resolve() })
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
-    expect(useStoreMessageOption.getState().messages).toMatchObject([{ serverMessageId: "saved-answer", message: "Recovered answer" }])
-  })
-
-  it.each([false, true])("opens a normally acknowledged saved Chat while retaining the unsent-draft guard (draft=%s)", async (withDraft) => {
+  it.each([false, true])("private retained display error permits backlink without bypassing user draft guard (draft=%s)", async (withDraft) => {
     configureCommonRequests("normal-saved")
     mockGetChat.mockResolvedValue({ id: "normal-saved", title: "Normal saved chat", character_id: null, assistant_kind: null, assistant_id: null, source: "webui-chat", version: 1 })
     mockListChatMessages.mockResolvedValue([
@@ -498,6 +457,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     useStoreMessageOption.setState({ historyId: "local-normal", serverChatId: "normal-saved", serverChatCharacterId: null, serverChatMetaLoaded: true, messages: [
       { id: "local-user", serverMessageId: "server-user", isBot: false, name: "You", message: "Question" },
       { id: "local-answer", serverMessageId: "server-answer", isBot: true, name: "Assistant", message: "Answer" },
+      { id: "old-display-error", isBot: true, role: "assistant", name: "Assistant", message: '__tldw_error__:{"summary":"Provider failed","hint":"Try again","detail":"Stream completion failed"}' },
       ...(withDraft ? [{ id: "unsent", isBot: false, name: "You", message: "Question" }] : [])
     ], history: [], streaming: false, isProcessing: false })
     renderPage()

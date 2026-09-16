@@ -1,0 +1,14 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:45903) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx (20 tests) 4998ms
+     ✓ shows conversation title labels with UUID debug tooltip in list and header  519ms
+     ✓ retries transient conversation label lookups and hydrates once they recover  1580ms
+
+ Test Files  1 passed (1)
+      Tests  20 passed (20)
+   Start at  22:51:37
+   Duration  7.32s (transform 1.18s, setup 72ms, import 1.96s, tests 5.00s, environment 208ms)
+

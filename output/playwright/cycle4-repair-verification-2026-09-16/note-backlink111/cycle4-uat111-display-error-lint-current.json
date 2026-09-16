@@ -1,0 +1,2074 @@
+[
+  {
+    "filePath": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Notes/NotesManagerPage.tsx",
+    "messages": [
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 189,
+        "column": 52,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 189,
+        "endColumn": 55,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                8628,
+                8631
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                8628,
+                8631
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 190,
+        "column": 56,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 190,
+        "endColumn": 59,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                8707,
+                8710
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                8707,
+                8710
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "react-hooks/exhaustive-deps",
+        "severity": 1,
+        "message": "React Hook React.useCallback has a missing dependency: 'ed'. Either include it or remove the dependency array.",
+        "line": 275,
+        "column": 6,
+        "nodeType": "ArrayExpression",
+        "endLine": 275,
+        "endColumn": 22,
+        "suggestions": [
+          {
+            "desc": "Update the dependencies array to be: [ed]",
+            "fix": {
+              "range": [
+                11508,
+                11524
+              ],
+              "text": "[ed]"
+            }
+          }
+        ]
+      },
+      {
+        "ruleId": "react-hooks/exhaustive-deps",
+        "severity": 1,
+        "message": "React Hook React.useCallback has a missing dependency: 'ed'. Either include it or remove the dependency array.",
+        "line": 326,
+        "column": 6,
+        "nodeType": "ArrayExpression",
+        "endLine": 326,
+        "endColumn": 22,
+        "suggestions": [
+          {
+            "desc": "Update the dependencies array to be: [ed]",
+            "fix": {
+              "range": [
+                13518,
+                13534
+              ],
+              "text": "[ed]"
+            }
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-unused-vars",
+        "severity": 1,
+        "message": "'orderedVisibleNoteIds' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+        "line": 381,
+        "column": 9,
+        "nodeType": "Identifier",
+        "messageId": "unusedVar",
+        "endLine": 381,
+        "endColumn": 30
+      },
+      {
+        "ruleId": "react-hooks/exhaustive-deps",
+        "severity": 1,
+        "message": "React Hook React.useEffect has a missing dependency: 'ed'. Either include it or remove the dependency array.",
+        "line": 415,
+        "column": 6,
+        "nodeType": "ArrayExpression",
+        "endLine": 415,
+        "endColumn": 56,
+        "suggestions": [
+          {
+            "desc": "Update the dependencies array to be: [currentNoteStudioSummary?.note_id, ed, ed.selectedId]",
+            "fix": {
+              "range": [
+                16917,
+                16967
+              ],
+              "text": "[currentNoteStudioSummary?.note_id, ed, ed.selectedId]"
+            }
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 473,
+        "column": 39,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 473,
+        "endColumn": 42,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                19138,
+                19141
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                19138,
+                19141
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 474,
+        "column": 137,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 474,
+        "endColumn": 140,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                19281,
+                19284
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                19281,
+                19284
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 475,
+        "column": 28,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 475,
+        "endColumn": 31,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                19313,
+                19316
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                19313,
+                19316
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "react-hooks/exhaustive-deps",
+        "severity": 1,
+        "message": "React Hook React.useCallback has missing dependencies: 'ed' and 'list'. Either include them or remove the dependency array.",
+        "line": 934,
+        "column": 6,
+        "nodeType": "ArrayExpression",
+        "endLine": 946,
+        "endColumn": 4,
+        "suggestions": [
+          {
+            "desc": "Update the dependencies array to be: [ed, isMobileViewport, list, message, startDraftSession]",
+            "fix": {
+              "range": [
+                35851,
+                36086
+              ],
+              "text": "[ed, isMobileViewport, list, message, startDraftSession]"
+            }
+          }
+        ]
+      },
+      {
+        "ruleId": "react-hooks/exhaustive-deps",
+        "severity": 1,
+        "message": "React Hook React.useCallback has missing dependencies: 'ed' and 'list'. Either include them or remove the dependency array.",
+        "line": 957,
+        "column": 6,
+        "nodeType": "ArrayExpression",
+        "endLine": 964,
+        "endColumn": 4,
+        "suggestions": [
+          {
+            "desc": "Update the dependencies array to be: [ed, isMobileViewport, list, startDraftSession]",
+            "fix": {
+              "range": [
+                36434,
+                36563
+              ],
+              "text": "[ed, isMobileViewport, list, startDraftSession]"
+            }
+          }
+        ]
+      },
+      {
+        "ruleId": "react-hooks/exhaustive-deps",
+        "severity": 1,
+        "message": "React Hook React.useCallback has missing dependencies: 'ed', 'kw', and 'list'. Either include them or remove the dependency array.",
+        "line": 1035,
+        "column": 6,
+        "nodeType": "ArrayExpression",
+        "endLine": 1052,
+        "endColumn": 4,
+        "suggestions": [
+          {
+            "desc": "Update the dependencies array to be: [ed, editorDisabled, isMobileViewport, kw, list, message, startDraftSession]",
+            "fix": {
+              "range": [
+                38725,
+                39048
+              ],
+              "text": "[ed, editorDisabled, isMobileViewport, kw, list, message, startDraftSession]"
+            }
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1067,
+        "column": 23,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1067,
+        "endColumn": 26,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                39542,
+                39545
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                39542,
+                39545
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1068,
+        "column": 70,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1068,
+        "endColumn": 73,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                39618,
+                39621
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                39618,
+                39621
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1069,
+        "column": 27,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1069,
+        "endColumn": 30,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                39649,
+                39652
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                39649,
+                39652
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1080,
+        "column": 21,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1080,
+        "endColumn": 24,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                39981,
+                39984
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                39981,
+                39984
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1104,
+        "column": 25,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1104,
+        "endColumn": 28,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                40772,
+                40775
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                40772,
+                40775
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1105,
+        "column": 72,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1105,
+        "endColumn": 75,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                40850,
+                40853
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                40850,
+                40853
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1106,
+        "column": 31,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1106,
+        "endColumn": 34,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                40885,
+                40888
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                40885,
+                40888
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1110,
+        "column": 23,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1110,
+        "endColumn": 26,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                41027,
+                41030
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                41027,
+                41030
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1131,
+        "column": 37,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1131,
+        "endColumn": 40,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                41710,
+                41713
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                41710,
+                41713
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1132,
+        "column": 91,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1132,
+        "endColumn": 94,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                41807,
+                41810
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                41807,
+                41810
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1133,
+        "column": 28,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1133,
+        "endColumn": 31,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                41839,
+                41842
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                41839,
+                41842
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1136,
+        "column": 41,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1136,
+        "endColumn": 44,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                41986,
+                41989
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                41986,
+                41989
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1141,
+        "column": 59,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1141,
+        "endColumn": 62,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                42243,
+                42246
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                42243,
+                42246
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1158,
+        "column": 32,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1158,
+        "endColumn": 35,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                42826,
+                42829
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                42826,
+                42829
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1159,
+        "column": 24,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1159,
+        "endColumn": 27,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                42880,
+                42883
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                42880,
+                42883
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1167,
+        "column": 27,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1167,
+        "endColumn": 30,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                43180,
+                43183
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                43180,
+                43183
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1170,
+        "column": 20,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1170,
+        "endColumn": 23,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                43354,
+                43357
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                43354,
+                43357
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1171,
+        "column": 31,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1171,
+        "endColumn": 34,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                43389,
+                43392
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                43389,
+                43392
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1183,
+        "column": 30,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1183,
+        "endColumn": 33,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                43731,
+                43734
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                43731,
+                43734
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1184,
+        "column": 22,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1184,
+        "endColumn": 25,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                43780,
+                43783
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                43780,
+                43783
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1212,
+        "column": 37,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1212,
+        "endColumn": 40,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                44630,
+                44633
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                44630,
+                44633
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1213,
+        "column": 121,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1213,
+        "endColumn": 124,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                44757,
+                44760
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                44757,
+                44760
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1214,
+        "column": 26,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1214,
+        "endColumn": 29,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                44787,
+                44790
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                44787,
+                44790
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1263,
+        "column": 42,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1263,
+        "endColumn": 45,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                46815,
+                46818
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                46815,
+                46818
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1263,
+        "column": 84,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1263,
+        "endColumn": 87,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                46857,
+                46860
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                46857,
+                46860
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1263,
+        "column": 106,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1263,
+        "endColumn": 109,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                46879,
+                46882
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                46879,
+                46882
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1265,
+        "column": 21,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1265,
+        "endColumn": 24,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                46956,
+                46959
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                46956,
+                46959
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1274,
+        "column": 23,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1274,
+        "endColumn": 26,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                47214,
+                47217
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                47214,
+                47217
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1277,
+        "column": 16,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1277,
+        "endColumn": 19,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                47348,
+                47351
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                47348,
+                47351
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1278,
+        "column": 29,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1278,
+        "endColumn": 32,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                47381,
+                47384
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                47381,
+                47384
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1285,
+        "column": 17,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1285,
+        "endColumn": 20,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                47675,
+                47678
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                47675,
+                47678
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1307,
+        "column": 40,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1307,
+        "endColumn": 43,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                48482,
+                48485
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                48482,
+                48485
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1310,
+        "column": 16,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1310,
+        "endColumn": 19,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                48644,
+                48647
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                48644,
+                48647
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1311,
+        "column": 27,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1311,
+        "endColumn": 30,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                48675,
+                48678
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                48675,
+                48678
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1319,
+        "column": 21,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1319,
+        "endColumn": 24,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                48923,
+                48926
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                48923,
+                48926
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1353,
+        "column": 25,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1353,
+        "endColumn": 28,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                50049,
+                50052
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                50049,
+                50052
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1356,
+        "column": 18,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1356,
+        "endColumn": 21,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                50209,
+                50212
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                50209,
+                50212
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1357,
+        "column": 31,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1357,
+        "endColumn": 34,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                50244,
+                50247
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                50244,
+                50247
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "react-hooks/exhaustive-deps",
+        "severity": 1,
+        "message": "React Hook React.useCallback has a missing dependency: 'resetEditorToEmptyState'. Either include it or remove the dependency array.",
+        "line": 1377,
+        "column": 6,
+        "nodeType": "ArrayExpression",
+        "endLine": 1377,
+        "endColumn": 40,
+        "suggestions": [
+          {
+            "desc": "Update the dependencies array to be: [confirmDanger, ed, list, message, resetEditorToEmptyState]",
+            "fix": {
+              "range": [
+                50939,
+                50973
+              ],
+              "text": "[confirmDanger, ed, list, message, resetEditorToEmptyState]"
+            }
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1415,
+        "column": 25,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1415,
+        "endColumn": 28,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                52341,
+                52344
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                52341,
+                52344
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1418,
+        "column": 18,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1418,
+        "endColumn": 21,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                52501,
+                52504
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                52501,
+                52504
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1419,
+        "column": 30,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1419,
+        "endColumn": 33,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                52535,
+                52538
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                52535,
+                52538
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1621,
+        "column": 44,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1621,
+        "endColumn": 47,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                60528,
+                60531
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                60528,
+                60531
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1622,
+        "column": 82,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1622,
+        "endColumn": 85,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                60616,
+                60619
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                60616,
+                60619
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1623,
+        "column": 33,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1623,
+        "endColumn": 36,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                60653,
+                60656
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                60653,
+                60656
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1854,
+        "column": 21,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1854,
+        "endColumn": 24,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                69800,
+                69803
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                69800,
+                69803
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1891,
+        "column": 21,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1891,
+        "endColumn": 24,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                70990,
+                70993
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                70990,
+                70993
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "react-hooks/exhaustive-deps",
+        "severity": 1,
+        "message": "React Hook React.useCallback has a missing dependency: 'list'. Either include it or remove the dependency array.",
+        "line": 2028,
+        "column": 6,
+        "nodeType": "ArrayExpression",
+        "endLine": 2028,
+        "endColumn": 42,
+        "suggestions": [
+          {
+            "desc": "Update the dependencies array to be: [list]",
+            "fix": {
+              "range": [
+                78227,
+                78263
+              ],
+              "text": "[list]"
+            }
+          }
+        ]
+      },
+      {
+        "ruleId": "react-hooks/exhaustive-deps",
+        "severity": 1,
+        "message": "React Hook React.useMemo has a missing dependency: 'filteredCount'. Either include it or remove the dependency array.",
+        "line": 2068,
+        "column": 6,
+        "nodeType": "ArrayExpression",
+        "endLine": 2068,
+        "endColumn": 33,
+        "suggestions": [
+          {
+            "desc": "Update the dependencies array to be: [filteredCount, kw.keywordTokens, list.hasActiveFilters, list.listMode, list.listViewMode, list.query, list.queryInput, list.selectedNotebook, list.total, t]",
+            "fix": {
+              "range": [
+                80918,
+                80945
+              ],
+              "text": "[filteredCount, kw.keywordTokens, list.hasActiveFilters, list.listMode, list.listViewMode, list.query, list.queryInput, list.selectedNotebook, list.total, t]"
+            }
+          }
+        ]
+      },
+      {
+        "ruleId": "react-hooks/exhaustive-deps",
+        "severity": 1,
+        "message": "React Hook React.useMemo has a missing dependency: 'list'. Either include it or remove the dependency array.",
+        "line": 2141,
+        "column": 5,
+        "nodeType": "ArrayExpression",
+        "endLine": 2141,
+        "endColumn": 75,
+        "suggestions": [
+          {
+            "desc": "Update the dependencies array to be: [filteredSearchTips, list, t]",
+            "fix": {
+              "range": [
+                84774,
+                84844
+              ],
+              "text": "[filteredSearchTips, list, t]"
+            }
+          }
+        ]
+      },
+      {
+        "ruleId": "react-hooks/exhaustive-deps",
+        "severity": 1,
+        "message": "React Hook React.useEffect has a missing dependency: 'ed'. Either include it or remove the dependency array.",
+        "line": 2273,
+        "column": 6,
+        "nodeType": "ArrayExpression",
+        "endLine": 2273,
+        "endColumn": 80,
+        "suggestions": [
+          {
+            "desc": "Update the dependencies array to be: [duplicateSelectedNote, ed, ed.setEditorMode, focusSearchInput, handleNewNote]",
+            "fix": {
+              "range": [
+                89980,
+                90054
+              ],
+              "text": "[duplicateSelectedNote, ed, ed.setEditorMode, focusSearchInput, handleNewNote]"
+            }
+          }
+        ]
+      },
+      {
+        "ruleId": "react-hooks/exhaustive-deps",
+        "severity": 1,
+        "message": "The ref value 'keywordSearchTimeoutRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'keywordSearchTimeoutRef.current' to a variable inside the effect, and use that variable in the cleanup function.",
+        "line": 2333,
+        "column": 89,
+        "nodeType": "Identifier",
+        "endLine": 2333,
+        "endColumn": 96
+      }
+    ],
+    "suppressedMessages": [],
+    "errorCount": 0,
+    "fatalErrorCount": 0,
+    "warningCount": 64,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "source": "import React from 'react'\nimport { Input, Typography, Button } from 'antd'\nimport type { InputRef } from 'antd'\nimport {\n  ChevronLeft,\n  ChevronRight,\n} from 'lucide-react'\nimport { bgRequest } from '@/services/background-proxy'\nimport { useQuery, useQueryClient } from '@tanstack/react-query'\nimport { useServerOnline } from '@/hooks/useServerOnline'\nimport { useConfirmDanger, type ConfirmDangerOptions } from '@/components/Common/confirm-danger'\nimport { useTranslation } from 'react-i18next'\nimport { useNavigate } from 'react-router-dom'\nimport { useDemoMode } from '@/context/demo-mode'\nimport { useServerCapabilities } from '@/hooks/useServerCapabilities'\nimport { tldwClient } from '@/services/tldw/TldwApiClient'\nimport { useAntdMessage } from '@/hooks/useAntdMessage'\nimport { useStoreMessageOption, type Message as ChatMessage } from \"@/store/option\"\nimport { decodeChatErrorPayload } from \"@/utils/chat-error-message\"\nimport { useTutorialStore } from \"@/store/tutorials\"\nimport { UNAVAILABLE_STATE_LABEL, getDesignSystemState } from \"@/design-system\"\nimport { useSelectServerChat } from \"@/hooks/chat/useSelectServerChat\"\nimport { useSelectedAssistant } from \"@/hooks/useSelectedAssistant\"\nimport { usePlaygroundSessionStore } from \"@/store/playground-session\"\nimport { loadServicePromptSnapshot, type ServicePromptSnapshot } from \"@/services/service-prompts\"\nimport { watchServerChatLoadAuthority } from \"@/services/server-chat-load-authority\"\nimport { fetchAllServerChatMessages, mapServerChatMessagesToPlaygroundMessages, resolveServerChatAssistantIdentity } from \"@/hooks/chat/useServerChatLoader\"\nimport NotesEditorPane from \"@/components/Notes/NotesEditorPane\"\nimport NotesGraphWorkspace from \"@/components/Notes/NotesGraphWorkspace\"\nimport NotesStudioCreateModal from \"@/components/Notes/NotesStudioCreateModal\"\nimport NotesSidebar from \"@/components/Notes/NotesSidebar\"\nimport { useCanonicalConnectionConfig } from \"@/hooks/useCanonicalConnectionConfig\"\nimport { useNotesGraphAuthorityScope } from \"@/components/Notes/hooks/useNotesGraphAuthorityScope\"\nimport {\n  useNotesKeywords,\n  useNotesListManagement,\n  useNotesEditorState,\n  useNotesExport,\n  useNotesImport,\n  useNotesWikilinks,\n} from \"@/components/Notes/hooks\"\nimport type { NoteListItem } from \"@/components/Notes/notes-manager-types\"\nimport { clearSetting, getSetting } from \"@/services/settings/registry\"\nimport { useFlashcardsGenerateTransfer } from \"@/hooks/useFlashcardsGenerateTransfer\"\nimport { buildStudyPackRoute } from \"@/services/tldw/study-pack-handoff\"\nimport { buildSourcesNewPath } from \"@/routes/route-paths\"\nimport { deriveNoteStudio, getNoteStudioState, regenerateNoteStudio } from \"@/services/notes-studio\"\nimport { useMobile } from \"@/hooks/useMediaQuery\"\nimport {\n  LAST_NOTE_ID_SETTING,\n} from \"@/services/settings/ui-settings\"\n\nimport type {\n  NotesAssistAction,\n  MarkdownToolbarAction,\n  NotesInputMode,\n  NotesTocEntry,\n  KeywordPickerSortMode,\n} from './notes-manager-types'\nimport type {\n  NoteStudioState,\n  NotesStudioHandwritingMode,\n  NotesStudioPaperSize,\n  NotesStudioTemplateType,\n} from './notes-studio-types'\nimport { getDefaultStudioPaperSizeFromLocale } from './export-utils'\nimport {\n  normalizeConversationId,\n  toConversationLabel,\n  toAttachmentMarkdown,\n  formatSourceNodeLabel,\n  normalizeGraphNoteId,\n  getNotesGraphEdgeLabel,\n  parseSourceNodeId,\n  MIN_SIDEBAR_HEIGHT,\n  NOTES_LIST_REGION_ID,\n  NOTES_EDITOR_REGION_ID,\n  NOTES_SHORTCUTS_SUMMARY_ID,\n  shouldIgnoreGlobalShortcut,\n  calculateSidebarHeight,\n  NOTE_TEMPLATES,\n  toSortableTimestamp,\n  toNoteVersion,\n  markdownToWysiwygHtml,\n  wysiwygHtmlToMarkdown,\n  LARGE_NOTES_PAGINATION_THRESHOLD,\n  TRASH_LOOKUP_PAGE_SIZE,\n  TRASH_LOOKUP_MAX_PAGES,\n  sortNotesByPinnedIds,\n  promptModal,\n  NOTES_TUTORIAL_SHOWN_STORAGE_KEY,\n  notesUiStorage,\n  hasNotesGraphActiveNotes,\n  resolveNotesGraphFocusNoteId,\n} from './notes-manager-utils'\n\nconst LazyNotesManagerOverlays = React.lazy(() => import(\"./NotesManagerOverlays\"))\n\nconst isMissingConversationLookupError = (error: unknown): boolean => {\n  if (!error) return false\n  const status =\n    typeof error === 'object' && 'status' in error ? Number((error as { status?: unknown }).status) : Number.NaN\n  if (status === 404) return true\n  const code =\n    typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : ''\n  if (code.toUpperCase() === 'NOT_FOUND') return true\n  const message = error instanceof Error ? error.message : String(error)\n  return /\\b(not found|404)\\b/i.test(message)\n}\n\nconst UUID_LIKE_CONVERSATION_ID =\n  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i\n\nconst shouldAutoResolveConversationLabel = (conversationId: string): boolean =>\n  !UUID_LIKE_CONVERSATION_ID.test(conversationId)\n\nconst CONVERSATION_LABEL_MAX_RETRIES = 3\nconst CONVERSATION_LABEL_RETRY_DELAY_MS = 1500\n\n// Display-only failure bubbles are not unsaved conversation work.\nconst hasUnsavedChatWork = (row: ChatMessage): boolean => {\n  if (row.serverMessageId || row.messageType === \"character:greeting\" || row.messageType === \"greeting\") return false\n  const hasImages = row.images?.some(image => Boolean(image?.trim()))\n  if (hasImages) return true\n  return Boolean(row.message?.trim() &&\n    !(row.isBot && (!row.role || row.role === \"assistant\") && decodeChatErrorPayload(row.message)))\n}\n\nconst NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNoteId = null }) => {\n  const transferFlashcards = useFlashcardsGenerateTransfer()\n  const { t } = useTranslation(['option', 'common'])\n  const isOnline = useServerOnline()\n  const isMobileViewport = useMobile()\n  const { demoEnabled } = useDemoMode()\n  const queryClient = useQueryClient()\n  const navigate = useNavigate()\n  const { capabilities, loading: capsLoading } = useServerCapabilities()\n  const {\n    config: canonicalConnectionConfig,\n    loading: canonicalConnectionLoading,\n    authorityLoading: canonicalAuthorityLoading,\n  } = useCanonicalConnectionConfig()\n  const notesGraphAuthorityScope = useNotesGraphAuthorityScope({\n    config: canonicalConnectionConfig,\n    loading: canonicalAuthorityLoading ?? canonicalConnectionLoading,\n  })\n  const message = useAntdMessage()\n  const rawConfirmDanger = useConfirmDanger()\n  const confirmDanger = React.useCallback((options: ConfirmDangerOptions) => {\n    useTutorialStore.getState().endTutorial()\n    return rawConfirmDanger(options)\n  }, [rawConfirmDanger])\n  const selectServerChat = useSelectServerChat()\n  const [, setSelectedAssistant] = useSelectedAssistant()\n\n  const capabilityDisabled = !capsLoading && capabilities && !capabilities.hasNotes\n  const editorDisabled = Boolean(capabilityDisabled)\n\n  const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false)\n  const [shortcutHelpOpen, setShortcutHelpOpen] = React.useState(false)\n  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)\n  const desktopSidebarCollapsedRef = React.useRef(false)\n  const [sidebarHeight, setSidebarHeight] = React.useState(calculateSidebarHeight())\n  const [conversationLabelById, setConversationLabelById] = React.useState<Record<string, string>>({})\n  const conversationLabelByIdRef = React.useRef<Record<string, string>>({})\n  conversationLabelByIdRef.current = conversationLabelById\n  const pendingConversationLabelRequestsRef = React.useRef<Set<string>>(new Set())\n  const missingConversationLabelIdsRef = React.useRef<Set<string>>(new Set())\n  const conversationLabelRetryAttemptsRef = React.useRef<Record<string, number>>({})\n  const conversationLabelRetryTimeoutRef = React.useRef<number | null>(null)\n  const [conversationLabelRetryTick, setConversationLabelRetryTick] = React.useState(0)\n  const searchInputRef = React.useRef<InputRef | null>(null)\n\n  // ---- Notebook keyword tokens (needed before list hook) ----\n  // We compute this after list hook provides selectedNotebook\n\n  // ---- List hook ----\n  // We need keywordTokens from keyword hook, but keyword hook needs listMode from list hook.\n  // Solution: manage keywordTokens at this level.\n\n  // Temporary: we need to break the circular dep by keeping keywordTokens here\n  const [keywordTokensLocal, setKeywordTokensLocal] = React.useState<string[]>([])\n\n  // Placeholder for notebookKeywordTokens (computed after list hook)\n  const notebookKeywordTokensRef = React.useRef<string[]>([])\n\n  // Refs for editor state setters needed by keyword hook (editor hook initialized later)\n  const setIsDirtyRef = React.useRef<React.Dispatch<React.SetStateAction<boolean>>>(() => {})\n  const setSaveIndicatorRef = React.useRef<(state: any) => void>(() => {})\n  const setMonitoringNoticeRef = React.useRef<(notice: any) => void>(() => {})\n  const markGeneratedEditRef = React.useRef<(action: NotesAssistAction) => void>(() => {})\n\n  const list = useNotesListManagement({\n    authorityScope: notesGraphAuthorityScope,\n    isOnline,\n    message,\n    confirmDanger,\n    queryClient,\n    t,\n    keywordTokens: keywordTokensLocal,\n    setKeywordTokens: setKeywordTokensLocal,\n    notebookKeywordTokens: notebookKeywordTokensRef.current,\n  })\n\n  // Compute notebook keyword tokens from list hook's selectedNotebook\n  const notebookKeywordTokens = React.useMemo(\n    () =>\n      list.selectedNotebook == null\n        ? []\n        : list.selectedNotebook.keywords\n            .map((keyword) => String(keyword || '').trim().toLowerCase())\n            .filter((keyword) => keyword.length > 0),\n    [list.selectedNotebook]\n  )\n  notebookKeywordTokensRef.current = notebookKeywordTokens\n\n  // ---- Keyword hook ----\n  const kw = useNotesKeywords({\n    isOnline,\n    listMode: list.listMode,\n    message,\n    confirmDanger,\n    restoreFocusAfterOverlayClose: (target) => {\n      if (!target) return\n      window.requestAnimationFrame(() => {\n        if (target.isConnected) target.focus()\n      })\n    },\n    notebookKeywordTokens,\n    queryClient,\n    t,\n    setPage: list.setPage,\n    setIsDirty: (val) => setIsDirtyRef.current(val),\n    setSaveIndicator: (val) => setSaveIndicatorRef.current(val),\n    setMonitoringNotice: (val) => setMonitoringNoticeRef.current(val),\n    markGeneratedEdit: (val) => markGeneratedEditRef.current(val),\n  })\n\n  // Sync keywordTokens between kw hook and local state\n  React.useEffect(() => {\n    setKeywordTokensLocal(kw.keywordTokens)\n  }, [kw.keywordTokens])\n\n  // ---- Editor hook (use actual deps now that list and kw are available) ----\n  const ed = useNotesEditorState({\n    connectionConfig: canonicalConnectionConfig,\n    authorityScope: notesGraphAuthorityScope,\n    isOnline,\n    isMobileViewport,\n    message,\n    confirmDanger,\n    queryClient,\n    t,\n    listMode: list.listMode,\n    setListMode: list.setListMode,\n    data: list.data,\n    refetch: list.refetch,\n    setPage: list.setPage,\n    setQuery: list.setQuery,\n    setQueryInput: list.setQueryInput,\n    setKeywordTokens: kw.setKeywordTokens,\n    setSelectedNotebookId: list.setSelectedNotebookId,\n    setMobileSidebarOpen,\n    editorKeywords: kw.editorKeywords,\n    setEditorKeywords: kw.setEditorKeywords,\n    keywordSuggestionReturnFocusRef: kw.keywordSuggestionReturnFocusRef,\n    setKeywordSuggestionOptions: kw.setKeywordSuggestionOptions,\n    setKeywordSuggestionSelection: kw.setKeywordSuggestionSelection,\n    editorDisabled,\n  })\n  const [hasActiveDraft, setHasActiveDraft] = React.useState(false)\n  const resetEditorToEmptyState = React.useCallback(() => {\n    setHasActiveDraft(false)\n    ed.resetEditor()\n  }, [ed.resetEditor])\n  const selectedAuthorityEvidenceRef = React.useRef<{\n    noteId: string\n    authorityScope: string\n  } | null>(null)\n  const renderedSelectedIdRef = React.useRef<string | null>(null)\n  const renderedSelectedId =\n    ed.selectedId == null ? null : String(ed.selectedId)\n  if (renderedSelectedIdRef.current !== renderedSelectedId) {\n    renderedSelectedIdRef.current = renderedSelectedId\n    selectedAuthorityEvidenceRef.current =\n      renderedSelectedId && notesGraphAuthorityScope\n        ? {\n            noteId: renderedSelectedId,\n            authorityScope: notesGraphAuthorityScope\n          }\n        : null\n  }\n  const authoritySelectedId =\n    notesGraphAuthorityScope &&\n    selectedAuthorityEvidenceRef.current?.authorityScope ===\n      notesGraphAuthorityScope &&\n    selectedAuthorityEvidenceRef.current.noteId === renderedSelectedId\n      ? ed.selectedId\n      : null\n  const lastVerifiedAuthorityScopeRef = React.useRef<string | null>(null)\n  React.useEffect(() => {\n    if (!notesGraphAuthorityScope) return\n    const previousAuthority = lastVerifiedAuthorityScopeRef.current\n    lastVerifiedAuthorityScopeRef.current = notesGraphAuthorityScope\n    if (!previousAuthority || previousAuthority === notesGraphAuthorityScope) {\n      return\n    }\n    selectedAuthorityEvidenceRef.current = null\n    resetEditorToEmptyState()\n  }, [notesGraphAuthorityScope, resetEditorToEmptyState])\n  React.useEffect(() => {\n    const resetOnLogout = (event: Event) => {\n      if ((event as CustomEvent).detail?.kind !== 'logout') return\n      selectedAuthorityEvidenceRef.current = null\n      lastVerifiedAuthorityScopeRef.current = null\n      resetEditorToEmptyState()\n    }\n    window.addEventListener('tldw:auth-principal-changed', resetOnLogout)\n    return () => {\n      window.removeEventListener('tldw:auth-principal-changed', resetOnLogout)\n    }\n  }, [resetEditorToEmptyState])\n  const startDraftSession = React.useCallback(() => {\n    setHasActiveDraft(true)\n    ed.resetEditor()\n  }, [ed.resetEditor])\n  const focusSearchInput = React.useCallback(() => {\n    searchInputRef.current?.focus()\n  }, [])\n\n  React.useEffect(() => {\n    if (ed.selectedId != null) {\n      setHasActiveDraft(false)\n    }\n  }, [ed.selectedId])\n\n  const [notesStudioCreateOpen, setNotesStudioCreateOpen] = React.useState(false)\n  const [notesStudioCreateLoading, setNotesStudioCreateLoading] = React.useState(false)\n  const [notesStudioMarkdownOnlyNoticeOpen, setNotesStudioMarkdownOnlyNoticeOpen] = React.useState(false)\n  const [notesStudioExcerptText, setNotesStudioExcerptText] = React.useState('')\n  const [notesStudioTemplateType, setNotesStudioTemplateType] =\n    React.useState<NotesStudioTemplateType>('lined')\n  const [notesStudioHandwritingMode, setNotesStudioHandwritingMode] =\n    React.useState<NotesStudioHandwritingMode>('accented')\n  const [selectedStudioState, setSelectedStudioState] = React.useState<NoteStudioState | null>(null)\n  const [notesStudioRegenerating, setNotesStudioRegenerating] = React.useState(false)\n  const defaultStudioPaperSize = React.useMemo(\n    () => getDefaultStudioPaperSizeFromLocale(typeof navigator !== 'undefined' ? navigator.language : ''),\n    []\n  )\n  const [selectedStudioPaperSize, setSelectedStudioPaperSize] =\n    React.useState<NotesStudioPaperSize>(defaultStudioPaperSize)\n\n  // Wire the keyword hook's cross-cutting refs now that editor is available\n  setIsDirtyRef.current = ed.setIsDirty\n  setSaveIndicatorRef.current = ed.setSaveIndicator\n  setMonitoringNoticeRef.current = ed.setMonitoringNotice\n  markGeneratedEditRef.current = ed.markGeneratedEdit\n\n  // ---- Visible notes (applies pin sorting from editor on top of list data) ----\n  const visibleNotes = React.useMemo(() => {\n    if (!Array.isArray(list.data)) return []\n    if (list.listMode !== 'active') return list.data\n    if (list.listViewMode === 'moodboard') return list.data\n    return sortNotesByPinnedIds(list.data, ed.pinnedNoteIdSet)\n  }, [list.data, list.listMode, list.listViewMode, ed.pinnedNoteIdSet])\n\n  const filteredCount = visibleNotes.length\n  const graphInitialFocusNoteId = React.useMemo(\n    () =>\n      resolveNotesGraphFocusNoteId(\n        authoritySelectedId,\n        ed.recentNotes,\n        visibleNotes\n      ),\n    [authoritySelectedId, ed.recentNotes, visibleNotes]\n  )\n  const hasActiveNotes =\n    list.listMode === 'active' &&\n    hasNotesGraphActiveNotes(authoritySelectedId, list.total, visibleNotes)\n  const orderedVisibleNoteIds = React.useMemo(\n    () => visibleNotes.map((note) => String(note.id)),\n    [visibleNotes]\n  )\n\n  const selectedStudioSummaryNoteId = ed.selectedStudioSummary?.note_id ?? null\n  const currentNoteStudioSummary =\n    ed.selectedId != null &&\n    selectedStudioSummaryNoteId != null &&\n    String(selectedStudioSummaryNoteId) === String(ed.selectedId)\n      ? ed.selectedStudioSummary\n      : null\n\n  React.useEffect(() => {\n    if (ed.selectedId == null || !currentNoteStudioSummary?.note_id) {\n      setSelectedStudioState(null)\n      return\n    }\n\n    let cancelled = false\n    void getNoteStudioState(String(ed.selectedId))\n      .then((studioState) => {\n        if (cancelled) return\n        setSelectedStudioState(studioState)\n        ed.setEditorMode('preview')\n      })\n      .catch(() => {\n        if (cancelled) return\n        setSelectedStudioState(null)\n      })\n\n    return () => {\n      cancelled = true\n    }\n  }, [currentNoteStudioSummary?.note_id, ed.selectedId])\n\n  const effectiveStudioState = React.useMemo(() => {\n    if (!selectedStudioState || ed.selectedId == null) return null\n    if (String(selectedStudioState.note.id) !== String(ed.selectedId)) {\n      return null\n    }\n    if (String(ed.content || '') === String(selectedStudioState.note.content || '')) {\n      return selectedStudioState\n    }\n    return {\n      ...selectedStudioState,\n      is_stale: true,\n      stale_reason: selectedStudioState.stale_reason || 'companion_content_hash_mismatch'\n    }\n  }, [ed.content, ed.selectedId, selectedStudioState])\n\n  React.useEffect(() => {\n    setNotesStudioMarkdownOnlyNoticeOpen(false)\n    setSelectedStudioPaperSize(defaultStudioPaperSize)\n  }, [defaultStudioPaperSize, ed.selectedId])\n\n  // ---- Note graph neighbors ----\n  const noteNeighborsOwner = JSON.stringify([notesGraphAuthorityScope, authoritySelectedId])\n  const noteNeighborsOwnerRef = React.useRef(noteNeighborsOwner)\n  noteNeighborsOwnerRef.current = noteNeighborsOwner\n  const [neighborsIntent, setNeighborsIntent] = React.useState({ owner: noteNeighborsOwner, requested: false, denied: false })\n  if (neighborsIntent.owner !== noteNeighborsOwner) {\n    setNeighborsIntent({ owner: noteNeighborsOwner, requested: false, denied: false })\n  }\n  const noteNeighborsRequested = neighborsIntent.owner === noteNeighborsOwner && neighborsIntent.requested\n  const {\n    data: requestedNoteNeighborsData,\n    error: noteNeighborsFailure,\n    isLoading: noteNeighborsLoading,\n    isError: noteNeighborsError,\n    isSuccess: noteNeighborsSuccess,\n    refetch: refetchNoteNeighbors\n  } = useQuery({\n    queryKey: [\n      'note-graph-neighbors',\n      notesGraphAuthorityScope,\n      authoritySelectedId,\n      ed.graphMutationTick\n    ],\n    enabled:\n      isOnline &&\n      noteNeighborsRequested &&\n      !neighborsIntent.denied &&\n      notesGraphAuthorityScope != null &&\n      authoritySelectedId != null,\n    retry: false,\n    refetchOnWindowFocus: false,\n    refetchOnReconnect: false,\n    refetchOnMount: false,\n    queryFn: async () => {\n      const noteId = encodeURIComponent(String(authoritySelectedId))\n      try {\n        const graph = await bgRequest<any>({\n          path: `/api/v1/notes/${noteId}/neighbors?edge_types=manual,wikilink,backlink,source_membership&max_nodes=80&max_edges=200` as any,\n          method: 'GET' as any\n        })\n        return noteNeighborsOwnerRef.current === noteNeighborsOwner ? graph : null\n      } catch (error) {\n        if (Number((error as { status?: number } | null)?.status) === 403) {\n          setNeighborsIntent((current) => current.owner === noteNeighborsOwner\n            ? { ...current, denied: true }\n            : current)\n        }\n        throw error\n      }\n    }\n  })\n  const noteNeighborsData = noteNeighborsRequested && noteNeighborsSuccess ? requestedNoteNeighborsData : null\n  const noteNeighborsUnavailable = Number((noteNeighborsFailure as { status?: number } | null)?.status) === 403\n  const noteNeighborsState = noteNeighborsError ? 'error'\n    : noteNeighborsLoading ? 'loading'\n    : noteNeighborsSuccess && noteNeighborsData != null ? 'success'\n    : 'not_loaded'\n\n  const unavailableStateLabel =\n    getDesignSystemState('unavailable')?.label ?? UNAVAILABLE_STATE_LABEL\n\n  const noteRelations = React.useMemo(() => {\n    const selectedNormalized = normalizeGraphNoteId(ed.selectedId)\n    const nodes = Array.isArray(noteNeighborsData?.nodes) ? noteNeighborsData.nodes : []\n    const edges = Array.isArray(noteNeighborsData?.edges) ? noteNeighborsData.edges : []\n\n    const noteNodeMap = new Map<\n      string,\n      { id: string; title: string; available: boolean; unavailableReason: string | null }\n    >()\n    const sourceNodeMap = new Map<string, { id: string; label: string }>()\n    for (const node of nodes) {\n      const nodeType = String(node?.type || '')\n      if (!nodeType || nodeType === 'note') {\n        const normalizedId = normalizeGraphNoteId(node?.id)\n        if (!normalizedId) continue\n        const deleted = Boolean(node?.deleted)\n        noteNodeMap.set(normalizedId, {\n          id: normalizedId,\n          title: String(node?.label || node?.title || `Note ${normalizedId}`),\n          available: !deleted,\n          unavailableReason: deleted\n            ? t('option:notesSearch.linkedNoteDeleted', { defaultValue: unavailableStateLabel })\n            : null\n        })\n        continue\n      }\n      if (nodeType === 'source') {\n        const sourceId = String(node?.id || '').trim()\n        if (!sourceId) continue\n        sourceNodeMap.set(sourceId, {\n          id: sourceId,\n          label: formatSourceNodeLabel(sourceId, String(node?.label || sourceId))\n        })\n      }\n    }\n\n    const sourceIds = new Set<string>()\n    const relatedById = new Map<\n      string,\n      { id: string; title: string; relationLabel: string; available: boolean; unavailableReason: string | null }\n    >()\n    const backlinksById = new Map<\n      string,\n      { id: string; title: string; relationLabel: string; available: boolean; unavailableReason: string | null }\n    >()\n    const manualLinkByEdgeId = new Map<\n      string,\n      {\n        edgeId: string\n        noteId: string\n        title: string\n        directed: boolean\n        outgoing: boolean\n        relationLabel: string\n        available: boolean\n        unavailableReason: string | null\n      }\n    >()\n\n    const buildNoteRelation = (id: string, relationLabel: string) => {\n      const node = noteNodeMap.get(id)\n      return {\n        id,\n        title: node?.title || t('option:notesSearch.unavailableLinkedNoteTitle', {\n          defaultValue: 'Unavailable note'\n        }),\n        relationLabel,\n        available: node?.available ?? false,\n        unavailableReason: node?.unavailableReason || (\n          node\n            ? null\n            : t('option:notesSearch.linkedNoteUnavailable', {\n                defaultValue: unavailableStateLabel\n              })\n        )\n      }\n    }\n\n    const upsertRelation = (\n      map: Map<string, ReturnType<typeof buildNoteRelation>>,\n      id: string,\n      relationLabel: string\n    ) => {\n      if (!id || id === selectedNormalized) return\n      const existing = map.get(id)\n      if (existing) return\n      map.set(id, buildNoteRelation(id, relationLabel))\n    }\n\n    for (const edge of edges) {\n      const source = normalizeGraphNoteId(edge?.source)\n      const target = normalizeGraphNoteId(edge?.target)\n      if (!source || !target || source === target) continue\n\n      const type = String(edge?.type || '').toLowerCase()\n      const directed = Boolean(edge?.directed)\n      if (type === 'source_membership') {\n        if (source === selectedNormalized && sourceNodeMap.has(target)) {\n          sourceIds.add(target)\n        }\n        if (target === selectedNormalized && sourceNodeMap.has(source)) {\n          sourceIds.add(source)\n        }\n        continue\n      }\n      if (type === 'tag_membership') {\n        continue\n      }\n\n      const touchesSelected = source === selectedNormalized || target === selectedNormalized\n      if (!touchesSelected) continue\n      const counterpartId = source === selectedNormalized ? target : source\n      const relationLabel =\n        type === 'wikilink' && target === selectedNormalized\n          ? t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })\n          : type === 'backlink'\n            ? t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })\n            : type === 'manual' && directed && target === selectedNormalized\n              ? t('option:notesSearch.connectionLabelManualBacklink', { defaultValue: 'Manual backlink' })\n              : getNotesGraphEdgeLabel(type)\n\n      upsertRelation(relatedById, counterpartId, relationLabel)\n\n      if (type === 'wikilink' && target === selectedNormalized) {\n        upsertRelation(\n          backlinksById,\n          source,\n          t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })\n        )\n      }\n      if (type === 'backlink' && source === selectedNormalized) {\n        upsertRelation(\n          backlinksById,\n          target,\n          t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })\n        )\n      }\n      if (type === 'manual' && directed && target === selectedNormalized) {\n        upsertRelation(\n          backlinksById,\n          source,\n          t('option:notesSearch.connectionLabelManualBacklink', { defaultValue: 'Manual backlink' })\n        )\n      }\n      if (type === 'manual') {\n        if (!counterpartId) continue\n        const edgeId = String(edge?.id || '')\n        if (!edgeId) continue\n        const relation = buildNoteRelation(counterpartId, getNotesGraphEdgeLabel(type))\n        manualLinkByEdgeId.set(edgeId, {\n          edgeId,\n          noteId: counterpartId,\n          title: relation.title,\n          directed,\n          outgoing: source === selectedNormalized,\n          relationLabel: relation.relationLabel,\n          available: relation.available,\n          unavailableReason: relation.unavailableReason\n        })\n      }\n    }\n\n    for (const normalizedId of noteNodeMap.keys()) {\n      if (normalizedId !== selectedNormalized) {\n        upsertRelation(\n          relatedById,\n          normalizedId,\n          t('option:notesSearch.connectionLabelGraphNeighbor', { defaultValue: 'Graph neighbor' })\n        )\n      }\n    }\n\n    const toItems = (\n      items: Map<string, ReturnType<typeof buildNoteRelation>>\n    ) =>\n      Array.from(items.values())\n        .sort((a, b) => a.title.localeCompare(b.title))\n\n    const sourceItems = Array.from(sourceIds)\n      .map((id) => {\n        const sourceNode = sourceNodeMap.get(id)\n        if (!sourceNode) return null\n        return {\n          id: sourceNode.id,\n          label: sourceNode.label\n        }\n      })\n      .filter(\n        (item): item is { id: string; label: string } => item != null\n      )\n      .sort((a, b) => a.label.localeCompare(b.label))\n\n    return {\n      related: toItems(relatedById),\n      backlinks: toItems(backlinksById),\n      manualLinks: Array.from(manualLinkByEdgeId.values()).sort((a, b) =>\n        a.title.localeCompare(b.title)\n      ),\n      sources: sourceItems\n    }\n  }, [noteNeighborsData, ed.selectedId, t, unavailableStateLabel])\n\n  const manualLinkOptions = React.useMemo(() => {\n    const selectedNormalized = normalizeGraphNoteId(ed.selectedId)\n    const seen = new Set<string>()\n    const options: Array<{ value: string; label: string }> = []\n    const append = (id: string, noteTitle: string) => {\n      const normalized = normalizeGraphNoteId(id)\n      if (!normalized || normalized === selectedNormalized) return\n      if (seen.has(normalized)) return\n      seen.add(normalized)\n      options.push({\n        value: normalized,\n        label: noteTitle || `Note ${normalized}`\n      })\n    }\n    if (Array.isArray(list.data)) {\n      for (const item of list.data) {\n        append(String(item.id), String(item.title || `Note ${item.id}`))\n      }\n    }\n    for (const item of noteRelations.related) {\n      if (item.unavailableReason != null) continue\n      append(item.id, item.title)\n    }\n    for (const item of noteRelations.backlinks) {\n      if (item.unavailableReason != null) continue\n      append(item.id, item.title)\n    }\n    return options.sort((a, b) => a.label.localeCompare(b.label))\n  }, [list.data, noteRelations.backlinks, noteRelations.related, ed.selectedId])\n\n  // ---- Wikilinks hook ----\n  const wl = useNotesWikilinks({\n    selectedId: ed.selectedId,\n    title: ed.title,\n    content: ed.content,\n    editorCursorIndex: ed.editorCursorIndex,\n    setEditorCursorIndex: ed.setEditorCursorIndex,\n    editorDisabled,\n    editorMode: ed.editorMode,\n    contentTextareaRef: ed.contentTextareaRef,\n    resizeEditorTextarea: ed.resizeEditorTextarea,\n    setContentDirty: ed.setContentDirty,\n    data: list.data,\n    noteRelations,\n  })\n\n  // ---- Export hook ----\n  const exp = useNotesExport({\n    message,\n    confirmDanger,\n    t,\n    listMode: list.listMode,\n    query: list.query,\n    effectiveKeywordTokens: list.effectiveKeywordTokens,\n    total: list.total,\n    filteredCount: filteredCount,\n    hasActiveFilters: list.hasActiveFilters,\n    selectedBulkNotes: list.selectedBulkNotes,\n    fetchFilteredNotesRaw: list.fetchFilteredNotesRaw,\n    selectedId: ed.selectedId,\n    title: ed.title,\n    content: ed.content,\n    editorKeywords: kw.editorKeywords,\n    selectedStudioState: effectiveStudioState,\n    studioPaperSize: selectedStudioPaperSize,\n  })\n\n  // ---- Import hook ----\n  const imp = useNotesImport({\n    isOnline,\n    message,\n    t,\n    listMode: list.listMode,\n    refetch: list.refetch,\n  })\n  const hasDeferredOverlayOpen =\n    kw.keywordSuggestionOptions.length > 0 ||\n    kw.keywordPickerOpen ||\n    kw.keywordManagerOpen ||\n    kw.keywordRenameDraft != null ||\n    kw.keywordMergeDraft != null ||\n    imp.importModalOpen ||\n    shortcutHelpOpen\n\n  // ---- Remaining logic that stays in the component ----\n\n  // Conversation label resolution\n  const backlinkConversationLabel = React.useMemo(() => {\n    const id = normalizeConversationId(ed.backlinkConversationId)\n    if (!id) return null\n    return conversationLabelById[id] || null\n  }, [ed.backlinkConversationId, conversationLabelById])\n\n  const conversationIdsToResolve = React.useMemo(() => {\n    const ids = new Set<string>()\n    const selectedConversationId = normalizeConversationId(ed.backlinkConversationId)\n    for (const note of visibleNotes) {\n      const normalized = normalizeConversationId(note?.conversation_id)\n      if (!normalized) continue\n      if (shouldAutoResolveConversationLabel(normalized)) {\n        ids.add(normalized)\n        continue\n      }\n      if (selectedConversationId && normalized === selectedConversationId) {\n        ids.add(normalized)\n      }\n    }\n    if (selectedConversationId) ids.add(selectedConversationId)\n    return Array.from(ids)\n  }, [ed.backlinkConversationId, visibleNotes])\n\n  const resolveConversationLabels = React.useCallback(\n    async (conversationIds: string[]) => {\n      const pending = conversationIds.filter((conversationId) => {\n        if (!conversationId) return false\n        if (conversationLabelByIdRef.current[conversationId]) return false\n        if (pendingConversationLabelRequestsRef.current.has(conversationId)) return false\n        if (missingConversationLabelIdsRef.current.has(conversationId)) return false\n        return true\n      })\n      if (pending.length === 0) return\n      pending.forEach((conversationId) =>\n        pendingConversationLabelRequestsRef.current.add(conversationId)\n      )\n      try {\n        await tldwClient.initialize().catch(() => null)\n        const settled = await Promise.allSettled(\n          pending.map(async (conversationId) => {\n            const chat = await tldwClient.getChat(conversationId)\n            const label = toConversationLabel(chat)\n            return { conversationId, label }\n          })\n        )\n        setConversationLabelById((current) => {\n          let next: Record<string, string> | null = null\n          for (const result of settled) {\n            if (result.status !== 'fulfilled') continue\n            const { conversationId, label } = result.value\n            if (!label) continue\n            missingConversationLabelIdsRef.current.delete(conversationId)\n            if (current[conversationId]) continue\n            if (next == null) next = { ...current }\n            next[conversationId] = label\n          }\n          return next ?? current\n        })\n        const retryableFailures: string[] = []\n        settled.forEach((result, index) => {\n          const conversationId = pending[index]\n          if (!conversationId) return\n          if (result.status === 'fulfilled') {\n            delete conversationLabelRetryAttemptsRef.current[conversationId]\n            return\n          }\n          if (isMissingConversationLookupError(result.reason)) {\n            missingConversationLabelIdsRef.current.add(conversationId)\n            delete conversationLabelRetryAttemptsRef.current[conversationId]\n            return\n          }\n          const nextAttempt =\n            (conversationLabelRetryAttemptsRef.current[conversationId] ?? 0) + 1\n          conversationLabelRetryAttemptsRef.current[conversationId] = nextAttempt\n          if (nextAttempt <= CONVERSATION_LABEL_MAX_RETRIES) {\n            retryableFailures.push(conversationId)\n          }\n        })\n        if (retryableFailures.length > 0) {\n          if (conversationLabelRetryTimeoutRef.current != null) {\n            window.clearTimeout(conversationLabelRetryTimeoutRef.current)\n          }\n          conversationLabelRetryTimeoutRef.current = window.setTimeout(() => {\n            conversationLabelRetryTimeoutRef.current = null\n            setConversationLabelRetryTick((current) => current + 1)\n          }, CONVERSATION_LABEL_RETRY_DELAY_MS)\n        }\n      } finally {\n        pending.forEach((conversationId) =>\n          pendingConversationLabelRequestsRef.current.delete(conversationId)\n        )\n      }\n    },\n    []\n  )\n\n  React.useEffect(\n    () => () => {\n      if (conversationLabelRetryTimeoutRef.current != null) {\n        window.clearTimeout(conversationLabelRetryTimeoutRef.current)\n      }\n    },\n    []\n  )\n\n  React.useEffect(() => {\n    const activeConversationIds = new Set(conversationIdsToResolve)\n    for (const conversationId of Object.keys(conversationLabelRetryAttemptsRef.current)) {\n      if (!activeConversationIds.has(conversationId)) {\n        delete conversationLabelRetryAttemptsRef.current[conversationId]\n      }\n    }\n    if (\n      activeConversationIds.size === 0 &&\n      conversationLabelRetryTimeoutRef.current != null\n    ) {\n      window.clearTimeout(conversationLabelRetryTimeoutRef.current)\n      conversationLabelRetryTimeoutRef.current = null\n    }\n  }, [conversationIdsToResolve])\n\n  React.useEffect(() => {\n    if (!isOnline) return\n    if (conversationIdsToResolve.length === 0) return\n    void resolveConversationLabels(conversationIdsToResolve)\n  }, [conversationIdsToResolve, conversationLabelRetryTick, isOnline, resolveConversationLabels])\n\n  // ---- Handlers remaining in component ----\n\n  const handleNewNote = React.useCallback(async (templateId?: string) => {\n    const ok = await ed.confirmDiscardIfDirty()\n    if (!ok) return\n    if (list.listMode !== 'active') list.setListMode('active')\n    if (isMobileViewport) setMobileSidebarOpen(false)\n    startDraftSession()\n    const template = NOTE_TEMPLATES.find((entry) => entry.id === templateId)\n    if (template) {\n      ed.setTitle(template.title)\n      ed.setContent(template.content)\n      ed.setIsDirty(true)\n      ed.setSaveIndicator('dirty')\n      message.success(`Applied template: ${template.label}`)\n    }\n    setTimeout(() => {\n      ed.titleInputRef.current?.focus()\n    }, 0)\n  }, [\n    ed.confirmDiscardIfDirty,\n    ed.setContent,\n    ed.setIsDirty,\n    ed.setSaveIndicator,\n    ed.setTitle,\n    ed.titleInputRef,\n    isMobileViewport,\n    list.listMode,\n    list.setListMode,\n    message,\n    startDraftSession\n  ])\n\n  const saveAndStartNew = React.useCallback(async () => {\n    const saved = await ed.saveNote()\n    if (!saved) return\n    if (list.listMode !== 'active') list.setListMode('active')\n    if (isMobileViewport) setMobileSidebarOpen(false)\n    startDraftSession()\n    window.setTimeout(() => {\n      ed.titleInputRef.current?.focus()\n    }, 0)\n  }, [\n    ed.saveNote,\n    ed.titleInputRef,\n    isMobileViewport,\n    list.listMode,\n    list.setListMode,\n    startDraftSession\n  ])\n\n  const handleCreateStudyPackFromNote = React.useCallback(() => {\n    const selectedNoteId = ed.selectedId\n    if (selectedNoteId == null) {\n      message.warning(\n        t('option:notesSearch.createStudyPackMissingSelection', {\n          defaultValue: 'Select a note before creating a study pack.'\n        })\n      )\n      return\n    }\n\n    if (ed.isDirty) {\n      message.warning(\n        t('option:notesSearch.createStudyPackDirty', {\n          defaultValue: 'Save this note before creating a study pack.'\n        })\n      )\n      return\n    }\n\n    const noteTitle = ed.title.trim()\n    if (!noteTitle) {\n      message.warning(\n        t('option:notesSearch.createStudyPackEmpty', {\n          defaultValue: 'Save and title this note before creating a study pack.'\n        })\n      )\n      return\n    }\n\n    navigate(\n      buildStudyPackRoute({\n        title: noteTitle,\n        sourceItems: [\n          {\n            sourceType: 'note',\n            sourceId: String(selectedNoteId),\n            sourceTitle: noteTitle\n          }\n        ]\n      })\n    )\n  }, [ed.isDirty, ed.selectedId, ed.title, message, navigate, t])\n\n  const duplicateSelectedNote = React.useCallback(async () => {\n    if (editorDisabled) return\n    const hasDraft = ed.title.trim().length > 0 || ed.content.trim().length > 0\n    if (!hasDraft) {\n      message.warning('Add a title or content before duplicating.')\n      return\n    }\n\n    if (list.listMode !== 'active') list.setListMode('active')\n    if (isMobileViewport) setMobileSidebarOpen(false)\n    const baseTitle = ed.title.trim() || (ed.selectedId != null ? `Note ${ed.selectedId}` : 'Untitled note')\n    const duplicateTitle = /\\(copy\\)$/i.test(baseTitle) ? baseTitle : `${baseTitle} (Copy)`\n    const duplicateContent = ed.content\n    const duplicateKeywords = [...kw.editorKeywords]\n\n    startDraftSession()\n    ed.setTitle(duplicateTitle)\n    ed.setContent(duplicateContent)\n    kw.setEditorKeywords(duplicateKeywords)\n    ed.setIsDirty(true)\n    ed.setSaveIndicator('dirty')\n    message.success('Created duplicate draft. Save to keep it.')\n    setTimeout(() => {\n      ed.titleInputRef.current?.focus()\n    }, 0)\n  }, [\n    ed.content,\n    ed.selectedId,\n    ed.setContent,\n    ed.setIsDirty,\n    ed.setSaveIndicator,\n    ed.setTitle,\n    ed.title,\n    ed.titleInputRef,\n    editorDisabled,\n    isMobileViewport,\n    kw.editorKeywords,\n    kw.setEditorKeywords,\n    list.listMode,\n    list.setListMode,\n    message,\n    startDraftSession\n  ])\n\n  // Manual links\n  const createManualLink = React.useCallback(async () => {\n    if (ed.manualLinkSaving) return\n    if (ed.selectedId == null || !ed.manualLinkTargetId) return\n    const fromId = normalizeGraphNoteId(ed.selectedId)\n    const toId = normalizeGraphNoteId(ed.manualLinkTargetId)\n    if (!fromId || !toId) return\n    if (fromId === toId) {\n      message.warning('Cannot link a note to itself')\n      return\n    }\n    ed.setManualLinkSaving(true)\n    try {\n      await bgRequest<any>({\n        path: `/api/v1/notes/${encodeURIComponent(fromId)}/links` as any,\n        method: 'POST' as any,\n        headers: { 'Content-Type': 'application/json' },\n        body: {\n          to_note_id: toId,\n          directed: false,\n          weight: 1.0\n        }\n      })\n      message.success('Manual link created')\n      ed.setManualLinkTargetId(null)\n      ed.setGraphMutationTick((current) => current + 1)\n    } catch (error: any) {\n      const status = Number(error?.status ?? error?.response?.status)\n      if (status === 409) {\n        message.warning('Manual link already exists')\n      } else {\n        message.error(String(error?.message || 'Could not create manual link'))\n      }\n    } finally {\n      ed.setManualLinkSaving(false)\n    }\n  }, [ed, message])\n\n  const removeManualLink = React.useCallback(\n    async (edgeId: string) => {\n      if (!edgeId || ed.manualLinkDeletingEdgeId) return\n      const ok = await confirmDanger({\n        title: 'Remove link?',\n        content: 'This removes the manual relationship between these notes.',\n        okText: 'Remove',\n        cancelText: 'Cancel'\n      })\n      if (!ok) return\n      ed.setManualLinkDeletingEdgeId(edgeId)\n      try {\n        await bgRequest<any>({\n          path: `/api/v1/notes/links/${encodeURIComponent(edgeId)}` as any,\n          method: 'DELETE' as any\n        })\n        message.success('Manual link removed')\n        ed.setGraphMutationTick((current) => current + 1)\n      } catch (error: any) {\n        message.error(String(error?.message || 'Could not remove manual link'))\n      } finally {\n        ed.setManualLinkDeletingEdgeId(null)\n      }\n    },\n    [confirmDanger, ed, message]\n  )\n\n  // Delete note\n  const lookupDeletedNoteVersion = React.useCallback(async (noteId: string) => {\n    if (list.listMode === 'trash' && Array.isArray(list.data)) {\n      const existing = list.data.find((note) => String(note.id) === noteId)\n      if (existing?.version != null) {\n        return Number(existing.version)\n      }\n    }\n    try {\n      let offset = 0\n      let pagesChecked = 0\n      while (pagesChecked < TRASH_LOOKUP_MAX_PAGES) {\n        const res = await bgRequest<any>({\n          path: `/api/v1/notes/trash?limit=${TRASH_LOOKUP_PAGE_SIZE}&offset=${offset}` as any,\n          method: 'GET' as any\n        })\n        const items = Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []\n        const match = items.find((item: any) => String(item?.id) === noteId)\n        const version = toNoteVersion(match)\n        if (version != null) return version\n        if (items.length === 0) break\n        const paginationTotalRaw =\n          res && typeof res === 'object' ? Number((res as any)?.pagination?.total_items) : NaN\n        const hasPaginationTotal = Number.isFinite(paginationTotalRaw)\n        offset += items.length\n        pagesChecked += 1\n        if (hasPaginationTotal && offset >= paginationTotalRaw) break\n        if (items.length < TRASH_LOOKUP_PAGE_SIZE) break\n      }\n      return null\n    } catch {\n      return null\n    }\n  }, [list.data, list.listMode])\n\n  const showDeleteUndoToast = React.useCallback(\n    (noteId: string) => {\n      const toastKey = `notes-delete-${noteId}`\n      const handleUndo = async () => {\n        if (typeof (message as any).destroy === 'function') {\n          ;(message as any).destroy(toastKey)\n        }\n        try {\n          const resolvedVersion = await lookupDeletedNoteVersion(noteId)\n          if (resolvedVersion == null) {\n            message.warning('Undo unavailable. Open Trash to restore this note.')\n            return\n          }\n          await bgRequest<any>({\n            path: `/api/v1/notes/${encodeURIComponent(noteId)}/restore?expected_version=${encodeURIComponent(\n              String(resolvedVersion)\n            )}` as any,\n            method: 'POST' as any\n          })\n          message.success('Note restored')\n          list.setListMode('active')\n          list.setPage(1)\n          await list.refetch()\n          await ed.loadDetail(noteId)\n        } catch {\n          message.warning('Undo failed. Open Trash to restore this note manually.')\n        }\n      }\n\n      if (typeof (message as any).open === 'function') {\n        ;(message as any).open({\n          key: toastKey,\n          duration: 10,\n          content: (\n            <span className=\"inline-flex items-center gap-2\">\n              <span>Note deleted</span>\n              <Button\n                type=\"link\"\n                size=\"small\"\n                className=\"!px-0\"\n                onClick={() => { void handleUndo() }}\n                data-testid={`notes-delete-undo-${noteId.replace(/[^a-z0-9_-]/gi, '_')}`}\n              >\n                Undo\n              </Button>\n            </span>\n          )\n        })\n        return\n      }\n      message.success('Note deleted')\n    },\n    [ed, list, lookupDeletedNoteVersion, message]\n  )\n\n  const countInboundDeleteReferences = React.useCallback(async (noteId: string) => {\n    try {\n      const encodedId = encodeURIComponent(noteId)\n      const graph = await bgRequest<any>({\n        path: `/api/v1/notes/${encodedId}/neighbors?edge_types=manual,wikilink,backlink&max_nodes=120&max_edges=240` as any,\n        method: 'GET' as any\n      })\n      const edges = Array.isArray(graph?.edges) ? graph.edges : []\n      const inbound = new Set<string>()\n      for (const edge of edges) {\n        const source = normalizeGraphNoteId(edge?.source)\n        const target = normalizeGraphNoteId(edge?.target)\n        if (!source || !target || source === target) continue\n        const type = String(edge?.type || '').toLowerCase()\n        const directed = Boolean(edge?.directed)\n        if (type === 'wikilink' && target === noteId) { inbound.add(source); continue }\n        if (type === 'backlink' && source === noteId) { inbound.add(target); continue }\n        if (type === 'manual' && directed && target === noteId) { inbound.add(source) }\n      }\n      return inbound.size\n    } catch {\n      return 0\n    }\n  }, [])\n\n  const deleteNote = async (id?: string | number | null) => {\n    const target = id ?? ed.selectedId\n    if (target == null) { message.warning('No note selected'); return }\n    const targetId = String(target)\n    const inboundReferenceCount = await countInboundDeleteReferences(targetId)\n    const warningSuffix =\n      inboundReferenceCount > 0\n        ? `\\n\\nThis note is referenced by ${inboundReferenceCount} other note${\n            inboundReferenceCount === 1 ? '' : 's'\n          }. Deleting it will break those links.`\n        : ''\n    const ok = await confirmDanger({\n      title: 'Please confirm',\n      content: `Delete this note?${warningSuffix}`,\n      okText: 'Delete',\n      cancelText: 'Cancel'\n    })\n    if (!ok) return\n    try {\n      let expectedVersion: number | null = null\n      if (ed.selectedId != null && String(ed.selectedId) === targetId) {\n        expectedVersion = ed.selectedVersion\n      }\n      if (expectedVersion == null && Array.isArray(list.data)) {\n        const match = list.data.find((note) => String(note.id) === targetId)\n        if (typeof match?.version === 'number') expectedVersion = match.version\n      }\n      if (expectedVersion == null) {\n        try {\n          const detail = await bgRequest<any>({ path: `/api/v1/notes/${target}` as any, method: 'GET' as any })\n          expectedVersion = toNoteVersion(detail)\n        } catch (e: any) {\n          message.error(e?.message || 'Could not verify note version')\n          return\n        }\n      }\n      if (expectedVersion == null) {\n        message.error('Missing version; reload and try again')\n        return\n      }\n      await bgRequest<any>({\n        path: `/api/v1/notes/${target}?expected_version=${encodeURIComponent(\n          String(expectedVersion)\n        )}` as any,\n        method: 'DELETE' as any,\n        headers: { \"expected-version\": String(expectedVersion) }\n      })\n      ed.removeRecentNotes([targetId])\n      showDeleteUndoToast(targetId)\n      if (ed.selectedId != null && String(ed.selectedId) === targetId) resetEditorToEmptyState()\n      await list.refetch()\n    } catch (e: any) {\n      if (ed.isVersionConflictError(e)) {\n        ed.handleVersionConflict(target)\n      } else {\n        message.error(String(e?.message || '') || 'Operation failed')\n      }\n    }\n  }\n\n  const restoreNote = async (id: string | number, version?: number) => {\n    const target = String(id)\n    let expectedVersion: number | null =\n      typeof version === 'number' && Number.isFinite(version) ? version : null\n    if (expectedVersion == null && Array.isArray(list.data)) {\n      const match = list.data.find((note) => String(note.id) === target)\n      if (typeof match?.version === 'number') expectedVersion = match.version\n    }\n    if (expectedVersion == null) {\n      message.error('Missing version; reload trash and try again')\n      return\n    }\n    try {\n      const restored = await bgRequest<any>({\n        path: `/api/v1/notes/${encodeURIComponent(target)}/restore?expected_version=${encodeURIComponent(\n          String(expectedVersion)\n        )}` as any,\n        method: 'POST' as any\n      })\n      message.success('Note restored')\n      list.setListMode('active')\n      list.setPage(1)\n      await list.refetch()\n      const restoredId = String(restored?.id || target)\n      await ed.loadDetail(restoredId)\n    } catch (error: any) {\n      if (ed.isVersionConflictError(error)) {\n        message.error('Restore conflict. Refresh trash and retry.')\n      } else {\n        message.error(String(error?.message || 'Could not restore note'))\n      }\n    }\n  }\n\n  // Bulk operations\n  const deleteSelectedBulk = React.useCallback(async () => {\n    if (list.selectedBulkNotes.length === 0) {\n      message.info('No selected notes to delete')\n      return\n    }\n    const okToLeave = await ed.confirmDiscardIfDirty()\n    if (!okToLeave) return\n    const confirmed = await confirmDanger({\n      title: 'Delete selected notes?',\n      content: `Delete ${list.selectedBulkNotes.length} selected notes? This moves them to trash.`,\n      okText: 'Delete selected',\n      cancelText: 'Cancel'\n    })\n    if (!confirmed) return\n\n    let deleted = 0\n    let failed = 0\n    const deletedIds = new Set<string>()\n\n    for (const note of list.selectedBulkNotes) {\n      const noteId = String(note.id)\n      const expectedVersion = await ed.getExpectedVersionForNoteId(noteId)\n      if (expectedVersion == null) { failed += 1; continue }\n      try {\n        await bgRequest<any>({\n          path: `/api/v1/notes/${encodeURIComponent(noteId)}?expected_version=${encodeURIComponent(\n            String(expectedVersion)\n          )}` as any,\n          method: 'DELETE' as any,\n          headers: { 'expected-version': String(expectedVersion) }\n        })\n        deleted += 1\n        deletedIds.add(noteId)\n      } catch { failed += 1 }\n    }\n\n    if (deleted > 0) {\n      message.success(`Deleted ${deleted} selected note${deleted === 1 ? '' : 's'}`)\n      ed.removeRecentNotes(Array.from(deletedIds))\n      if (ed.selectedId != null && deletedIds.has(String(ed.selectedId))) {\n        resetEditorToEmptyState()\n      }\n      list.setBulkSelectedIds((current) => current.filter((id) => !deletedIds.has(id)))\n      await list.refetch()\n    }\n    if (failed > 0) {\n      message.warning(`${failed} selected note${failed === 1 ? '' : 's'} failed to delete`)\n    }\n  }, [confirmDanger, ed, list, message])\n\n  const assignKeywordsToSelectedBulk = React.useCallback(async () => {\n    if (list.selectedBulkNotes.length === 0) {\n      message.info('No selected notes to update')\n      return\n    }\n    const okToLeave = await ed.confirmDiscardIfDirty()\n    if (!okToLeave) return\n    const suggested = kw.keywordTokens.join(', ')\n    const rawInput = await promptModal({\n      title: 'Assign tags to selected notes',\n      label: 'Enter tag names separated by commas.',\n      defaultValue: suggested,\n      placeholder: 'tag1, tag2, tag3',\n      okText: 'Assign',\n    })\n    if (rawInput == null) return\n    const keywords = rawInput.split(',').map((entry) => entry.trim()).filter(Boolean)\n    if (keywords.length === 0) {\n      message.warning('Enter at least one tag to assign')\n      return\n    }\n    const confirmed = await confirmDanger({\n      title: 'Apply tags to selected notes?',\n      content: `Apply ${keywords.join(', ')} to ${list.selectedBulkNotes.length} selected notes?`,\n      okText: 'Apply tags',\n      cancelText: 'Cancel'\n    })\n    if (!confirmed) return\n\n    let updated = 0\n    let failed = 0\n    for (const note of list.selectedBulkNotes) {\n      const noteId = String(note.id)\n      const expectedVersion = await ed.getExpectedVersionForNoteId(noteId)\n      if (expectedVersion == null) { failed += 1; continue }\n      try {\n        await bgRequest<any>({\n          path: `/api/v1/notes/${encodeURIComponent(noteId)}?expected_version=${encodeURIComponent(\n            String(expectedVersion)\n          )}` as any,\n          method: 'PATCH' as any,\n          headers: {\n            'Content-Type': 'application/json',\n            'expected-version': String(expectedVersion)\n          },\n          body: { keywords }\n        })\n        updated += 1\n      } catch { failed += 1 }\n    }\n\n    if (updated > 0) {\n      message.success(`Updated tags on ${updated} selected note${updated === 1 ? '' : 's'}`)\n      await list.refetch()\n      if (ed.selectedId != null && list.selectedBulkNotes.some((note) => String(note.id) === String(ed.selectedId))) {\n        await ed.loadDetail(ed.selectedId)\n      }\n    }\n    if (failed > 0) {\n      message.warning(`${failed} selected note${failed === 1 ? '' : 's'} failed tag update`)\n    }\n  }, [confirmDanger, ed, kw.keywordTokens, list, message])\n\n  // Editor input handlers\n  const handleEditorChange = React.useCallback(\n    (event: React.ChangeEvent<HTMLTextAreaElement>) => {\n      const nextContent = event.target.value\n      ed.setContentDirty(nextContent)\n      ed.setEditorCursorIndex(event.target.selectionStart ?? nextContent.length)\n    },\n    [ed]\n  )\n\n  const handleEditorSelectionUpdate = React.useCallback(\n    (event: React.SyntheticEvent<HTMLTextAreaElement>) => {\n      const target = event.currentTarget\n      ed.setEditorCursorIndex(target.selectionStart ?? target.value.length)\n    },\n    [ed]\n  )\n\n  const applyMarkdownToolbarAction = React.useCallback(\n    (action: MarkdownToolbarAction) => {\n      if (editorDisabled) return\n      if (ed.editorInputMode === 'wysiwyg') {\n        const richEditor = ed.richEditorRef.current\n        if (!richEditor) return\n        const execute = (command: string, value?: string, options?: { focus?: boolean }) => {\n          if (typeof document === 'undefined') return\n          if (typeof document.execCommand !== 'function') return\n          if (options?.focus !== false) {\n            richEditor.focus()\n          }\n          document.execCommand(command, false, value)\n        }\n        if (action === 'bold') execute('bold')\n        else if (action === 'italic') execute('italic')\n        else if (action === 'heading') execute('formatBlock', '<h2>')\n        else if (action === 'list') execute('insertUnorderedList')\n        else if (action === 'link') {\n          ;(async () => {\n            const savedSelection =\n              typeof window !== 'undefined'\n                ? (() => {\n                    const selection = window.getSelection()\n                    if (!selection || selection.rangeCount === 0) return null\n                    const currentRange = selection.getRangeAt(0)\n                    return richEditor.contains(currentRange.commonAncestorContainer)\n                      ? currentRange.cloneRange()\n                      : null\n                  })()\n                : null\n            const href = await promptModal({\n              title: 'Insert link',\n              defaultValue: 'https://',\n              placeholder: 'https://example.com',\n              okText: 'Insert',\n            })\n            const normalizedHref = String(href || '').trim()\n            if (!normalizedHref) return\n            richEditor.focus()\n            if (savedSelection) {\n              const selection = window.getSelection()\n              selection?.removeAllRanges()\n              selection?.addRange(savedSelection)\n            }\n            execute('createLink', normalizedHref, { focus: false })\n            const nextHtml = richEditor.innerHTML\n            ed.setWysiwygHtml(nextHtml)\n            ed.setWysiwygSessionDirty(true)\n            const nextMarkdown = wysiwygHtmlToMarkdown(nextHtml)\n            ed.setContentDirty(nextMarkdown)\n            ed.setEditorCursorIndex(nextMarkdown.length)\n          })()\n          return\n        } else if (action === 'code') execute('insertText', '`code`')\n\n        const nextHtml = richEditor.innerHTML\n        ed.setWysiwygHtml(nextHtml)\n        ed.setWysiwygSessionDirty(true)\n        const nextMarkdown = wysiwygHtmlToMarkdown(nextHtml)\n        ed.setContentDirty(nextMarkdown)\n        ed.setEditorCursorIndex(nextMarkdown.length)\n        return\n      }\n      const textarea = ed.contentTextareaRef.current\n      if (!textarea) return\n      textarea.focus()\n      const start = textarea.selectionStart ?? 0\n      const end = textarea.selectionEnd ?? start\n      const selected = ed.content.slice(start, end)\n      let replacement = selected\n      let nextSelectionStart = start\n      let nextSelectionEnd = end\n      if (action === 'bold') {\n        const inner = selected || 'bold text'\n        replacement = `**${inner}**`\n        nextSelectionStart = start + 2\n        nextSelectionEnd = nextSelectionStart + inner.length\n      } else if (action === 'italic') {\n        const inner = selected || 'italic text'\n        replacement = `*${inner}*`\n        nextSelectionStart = start + 1\n        nextSelectionEnd = nextSelectionStart + inner.length\n      } else if (action === 'code') {\n        const inner = selected || 'code'\n        replacement = `\\`${inner}\\``\n        nextSelectionStart = start + 1\n        nextSelectionEnd = nextSelectionStart + inner.length\n      } else if (action === 'heading') {\n        if (selected) {\n          replacement = selected.split('\\n').map((line) => (line.startsWith('#') ? line : `# ${line}`)).join('\\n')\n          nextSelectionStart = start\n          nextSelectionEnd = start + replacement.length\n        } else {\n          replacement = '# Heading'\n          nextSelectionStart = start + 2\n          nextSelectionEnd = start + replacement.length\n        }\n      } else if (action === 'list') {\n        if (selected) {\n          replacement = selected.split('\\n').map((line) => {\n            const trimmed = line.trim()\n            if (!trimmed) return line\n            if (trimmed.startsWith('- ')) return line\n            return line.replace(trimmed, `- ${trimmed}`)\n          }).join('\\n')\n          nextSelectionStart = start\n          nextSelectionEnd = start + replacement.length\n        } else {\n          replacement = '- List item'\n          nextSelectionStart = start + 2\n          nextSelectionEnd = start + replacement.length\n        }\n      } else if (action === 'link') {\n        const text = selected || 'link text'\n        const url = 'https://'\n        replacement = `[${text}](${url})`\n        const urlStart = start + replacement.indexOf(url)\n        nextSelectionStart = urlStart\n        nextSelectionEnd = urlStart + url.length\n      }\n      const nextContent = `${ed.content.slice(0, start)}${replacement}${ed.content.slice(end)}`\n      ed.setContentDirty(nextContent)\n      window.requestAnimationFrame(() => {\n        const activeTextarea = ed.contentTextareaRef.current\n        if (!activeTextarea) return\n        activeTextarea.focus()\n        activeTextarea.setSelectionRange(nextSelectionStart, nextSelectionEnd)\n        ed.setEditorCursorIndex(nextSelectionEnd)\n        ed.resizeEditorTextarea()\n      })\n    },\n    [ed, editorDisabled]\n  )\n\n  const openAttachmentPicker = React.useCallback(() => {\n    if (editorDisabled) return\n    if (ed.selectedId == null) {\n      message.warning(t('option:notesSearch.attachmentSaveFirstWarning', {\n        defaultValue: 'Save this note once before adding attachments.'\n      }))\n      return\n    }\n    ed.attachmentInputRef.current?.click()\n  }, [ed, editorDisabled, message, t])\n\n  const handleAttachmentInputChange = React.useCallback(\n    (event: React.ChangeEvent<HTMLInputElement>) => {\n      const files = event.target.files\n      if (!files || files.length === 0) return\n      const inputElement = event.target\n      if (ed.selectedId == null) { inputElement.value = ''; return }\n      const noteId = String(ed.selectedId)\n      const selectedFiles = Array.from(files)\n      void (async () => {\n        const uploadedMarkdown: string[] = []\n        let failedUploads = 0\n        for (const file of selectedFiles) {\n          const formData = new FormData()\n          formData.append('file', file)\n          try {\n            const result = await bgRequest<any>({\n              path: `/api/v1/notes/${encodeURIComponent(noteId)}/attachments` as any,\n              method: 'POST' as any,\n              body: formData\n            })\n            const attachmentUrl = String(result?.url || '').trim()\n            if (!attachmentUrl) { failedUploads += 1; continue }\n            const attachmentName = String(result?.file_name || file.name || '').trim() || file.name\n            const attachmentContentType = typeof result?.content_type === 'string' ? result.content_type : file.type\n            uploadedMarkdown.push(toAttachmentMarkdown(attachmentName, attachmentUrl, attachmentContentType))\n          } catch { failedUploads += 1 }\n        }\n        if (uploadedMarkdown.length === 0) {\n          message.error(t('option:notesSearch.attachmentUploadFailed', { defaultValue: 'Attachment upload failed. Please try again.' }))\n          return\n        }\n        const markdown = uploadedMarkdown.join('\\n')\n        if (ed.editorInputMode === 'wysiwyg') {\n          const nextContent = ed.content.trim().length > 0 ? `${ed.content}\\n${markdown}` : markdown\n          ed.setContentDirty(nextContent)\n          ed.setWysiwygHtml(markdownToWysiwygHtml(nextContent))\n          ed.setWysiwygSessionDirty(true)\n        } else {\n          const activeTextarea = ed.contentTextareaRef.current\n          if (!activeTextarea) return\n          activeTextarea.focus()\n          const start = activeTextarea.selectionStart ?? ed.content.length\n          const end = activeTextarea.selectionEnd ?? start\n          const nextContent = `${ed.content.slice(0, start)}${markdown}${ed.content.slice(end)}`\n          ed.setContentDirty(nextContent)\n          const cursor = start + markdown.length\n          window.requestAnimationFrame(() => {\n            const refreshedTextarea = ed.contentTextareaRef.current\n            if (!refreshedTextarea) return\n            refreshedTextarea.focus()\n            refreshedTextarea.setSelectionRange(cursor, cursor)\n            ed.setEditorCursorIndex(cursor)\n            ed.resizeEditorTextarea()\n          })\n        }\n        if (failedUploads > 0) {\n          message.warning(t('option:notesSearch.attachmentUploadPartial', {\n            defaultValue: 'Uploaded {{uploaded}} attachment(s); {{failed}} failed.',\n            uploaded: uploadedMarkdown.length, failed: failedUploads\n          }))\n        } else {\n          message.success(t('option:notesSearch.attachmentUploadSuccess', {\n            defaultValue: 'Uploaded {{count}} attachment(s).', count: uploadedMarkdown.length\n          }))\n        }\n      })().finally(() => { inputElement.value = '' })\n    },\n    [ed, message, t]\n  )\n\n  // WYSIWYG handlers\n  const enterWysiwygMode = React.useCallback(() => {\n    ed.markdownBeforeWysiwygRef.current = ed.content\n    ed.setWysiwygHtml(markdownToWysiwygHtml(ed.content))\n    ed.setWysiwygSessionDirty(false)\n    ed.setEditorInputMode('wysiwyg')\n    ed.setEditorCursorIndex(null)\n  }, [ed])\n\n  const exitWysiwygMode = React.useCallback(() => {\n    const originalMarkdown = ed.markdownBeforeWysiwygRef.current\n    if (!ed.wysiwygSessionDirty && originalMarkdown != null && originalMarkdown !== ed.content) {\n      ed.setContent(originalMarkdown)\n    }\n    ed.markdownBeforeWysiwygRef.current = null\n    ed.setEditorInputMode('markdown')\n    ed.setWysiwygSessionDirty(false)\n  }, [ed])\n\n  const handleEditorInputModeChange = React.useCallback(\n    (nextMode: NotesInputMode) => {\n      if (nextMode === ed.editorInputMode) return\n      if (nextMode === 'wysiwyg') { enterWysiwygMode(); return }\n      setNotesStudioMarkdownOnlyNoticeOpen(false)\n      exitWysiwygMode()\n      window.requestAnimationFrame(() => {\n        const textarea = ed.contentTextareaRef.current\n        if (!textarea) return\n        textarea.focus()\n        const cursor = Math.min(ed.content.length, textarea.selectionStart ?? ed.content.length)\n        textarea.setSelectionRange(cursor, cursor)\n        ed.setEditorCursorIndex(cursor)\n      })\n    },\n    [ed, enterWysiwygMode, exitWysiwygMode]\n  )\n\n  const handleWysiwygInput = React.useCallback(\n    (event: React.FormEvent<HTMLDivElement>) => {\n      const nextHtml = event.currentTarget.innerHTML\n      ed.setWysiwygHtml(nextHtml)\n      ed.setWysiwygSessionDirty(true)\n      const nextMarkdown = wysiwygHtmlToMarkdown(nextHtml)\n      ed.setContentDirty(nextMarkdown)\n      ed.setEditorCursorIndex(nextMarkdown.length)\n    },\n    [ed]\n  )\n\n  const handleWysiwygPaste = React.useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {\n    if (editorDisabled) return\n    const plain = event.clipboardData.getData('text/plain')\n    if (!plain) return\n    event.preventDefault()\n    if (typeof document !== 'undefined' && typeof document.execCommand === 'function') {\n      document.execCommand('insertText', false, plain)\n    }\n  }, [editorDisabled])\n\n  // TOC jump\n  const handleTocJump = React.useCallback(\n    (entry: NotesTocEntry) => {\n      if (ed.editorInputMode === 'wysiwyg') {\n        const richEditor = ed.richEditorRef.current\n        if (!richEditor) return\n        const headingMatch = Array.from(\n          richEditor.querySelectorAll<HTMLElement>('[data-md-slug]')\n        ).find((element) => element.getAttribute('data-md-slug') === entry.id)\n        if (headingMatch) {\n          headingMatch.scrollIntoView({ block: 'center', behavior: 'smooth' })\n          const range = document.createRange()\n          range.selectNodeContents(headingMatch)\n          range.collapse(true)\n          const selection = window.getSelection()\n          selection?.removeAllRanges()\n          selection?.addRange(range)\n        }\n        richEditor.focus()\n        return\n      }\n      const focusAtOffset = () => {\n        const textarea = ed.contentTextareaRef.current\n        if (!textarea) return\n        const cursor = Math.max(0, Math.min(entry.offset, ed.content.length))\n        textarea.focus()\n        textarea.setSelectionRange(cursor, cursor)\n        ed.setEditorCursorIndex(cursor)\n      }\n      if (ed.editorMode === 'preview') {\n        ed.setEditorMode('split')\n        window.requestAnimationFrame(() => { window.requestAnimationFrame(focusAtOffset) })\n        return\n      }\n      window.requestAnimationFrame(focusAtOffset)\n    },\n    [ed]\n  )\n\n  // Preview link click\n  const handlePreviewLinkClick = React.useCallback(\n    (event: React.MouseEvent<HTMLDivElement>) => {\n      const target = event.target as HTMLElement | null\n      if (!target) return\n      const anchor = target.closest('a')\n      if (!(anchor instanceof HTMLAnchorElement)) return\n      const href = String(anchor.getAttribute('href') || '')\n      if (!href.startsWith('note://')) return\n      event.preventDefault()\n      const noteId = decodeURIComponent(href.slice('note://'.length))\n      if (!noteId) return\n      void ed.handleSelectNote(noteId)\n    },\n    [ed]\n  )\n\n  const closeNotesStudioCreateModal = React.useCallback(() => {\n    setNotesStudioCreateOpen(false)\n    setNotesStudioExcerptText('')\n    setNotesStudioTemplateType('lined')\n    setNotesStudioHandwritingMode('accented')\n  }, [])\n\n  const handleOpenNotesStudio = React.useCallback(() => {\n    if (editorDisabled || ed.selectedId == null) return\n    if (ed.isDirty) {\n      message.warning(t('option:notesSearch.notesStudioSaveFirstWarning', {\n        defaultValue: 'Save this note before opening Notes Studio.'\n      }))\n      return\n    }\n    if (ed.editorInputMode !== 'markdown') {\n      setNotesStudioMarkdownOnlyNoticeOpen(true)\n      return\n    }\n    const textarea = ed.contentTextareaRef.current\n    if (!textarea) {\n      message.warning(t('option:notesSearch.notesStudioSelectionRequired', {\n        defaultValue: 'Select Markdown text before opening Notes Studio.'\n      }))\n      return\n    }\n    const start = textarea.selectionStart ?? 0\n    const end = textarea.selectionEnd ?? start\n    const excerptText = ed.content.slice(start, end)\n    if (excerptText.trim().length === 0) {\n      message.warning(t('option:notesSearch.notesStudioSelectionRequired', {\n        defaultValue: 'Select Markdown text before opening Notes Studio.'\n      }))\n      return\n    }\n    setNotesStudioMarkdownOnlyNoticeOpen(false)\n    setNotesStudioExcerptText(excerptText)\n    setNotesStudioTemplateType('lined')\n    setNotesStudioHandwritingMode('accented')\n    setNotesStudioCreateOpen(true)\n  }, [ed, editorDisabled, message, t])\n\n  const switchNotesStudioToMarkdown = React.useCallback(() => {\n    setNotesStudioMarkdownOnlyNoticeOpen(false)\n    handleEditorInputModeChange('markdown')\n  }, [handleEditorInputModeChange])\n\n  const handleCreateNotesStudio = React.useCallback(async () => {\n    if (ed.selectedId == null || !notesStudioExcerptText.trim()) return\n    setNotesStudioCreateLoading(true)\n    try {\n      const studioState = await deriveNoteStudio({\n        source_note_id: String(ed.selectedId),\n        excerpt_text: notesStudioExcerptText,\n        template_type: notesStudioTemplateType,\n        handwriting_mode: notesStudioHandwritingMode,\n      })\n      closeNotesStudioCreateModal()\n      await list.refetch()\n      const opened = await ed.handleSelectNote(studioState.note.id)\n      if (!opened) return\n      setSelectedStudioState(studioState)\n      ed.setEditorMode('preview')\n    } catch (error: any) {\n      message.error(\n        error?.message || t('option:notesSearch.notesStudioCreateError', {\n          defaultValue: 'Failed to create Notes Studio note.'\n        })\n      )\n    } finally {\n      setNotesStudioCreateLoading(false)\n    }\n  }, [\n    closeNotesStudioCreateModal,\n    ed,\n    list,\n    message,\n    notesStudioExcerptText,\n    notesStudioHandwritingMode,\n    notesStudioTemplateType,\n    t,\n  ])\n\n  const handleRegenerateStudioView = React.useCallback(async () => {\n    if (ed.selectedId == null) return\n    setNotesStudioRegenerating(true)\n    try {\n      const selectedNoteId = String(ed.selectedId)\n      const refreshed = await regenerateNoteStudio(String(ed.selectedId), {\n        current_markdown: String(ed.content || ''),\n      })\n      const detailReloaded = await ed.loadDetail(selectedNoteId)\n      if (!detailReloaded) {\n        ed.setTitle(String(refreshed.note.title || ''))\n        ed.setContent(String(refreshed.note.content || ''))\n        ed.setWysiwygHtml(markdownToWysiwygHtml(String(refreshed.note.content || '')))\n        ed.setIsDirty(false)\n      }\n      setSelectedStudioState(refreshed)\n      ed.setEditorMode('preview')\n    } catch (error: any) {\n      message.error(\n        error?.message || t('option:notesSearch.notesStudioRegenerateError', {\n          defaultValue: 'Failed to regenerate Notes Studio view.'\n        })\n      )\n    } finally {\n      setNotesStudioRegenerating(false)\n    }\n  }, [ed, message, t])\n\n  // Flashcards\n  const handleGenerateFlashcardsFromNote = React.useCallback(async () => {\n    const sourceText = ed.content\n    if (!sourceText.trim()) {\n      message.warning(t(\"option:notesSearch.generateFlashcardsEmpty\", {\n        defaultValue: \"Add note content before generating flashcards.\"\n      }))\n      return\n    }\n    try {\n      await transferFlashcards(() => ({\n        text: sourceText,\n        sourceType: \"note\",\n        sourceId: ed.selectedId != null ? String(ed.selectedId) : undefined,\n        sourceTitle: ed.title || undefined,\n        conversationId: ed.backlinkConversationId || undefined,\n        messageId: ed.backlinkMessageId || undefined\n      }), { navigate })\n    } catch (error) {\n      if (!(error instanceof Error && error.name === \"AbortError\")) {\n        message.error(error instanceof Error ? error.message : \"The transfer could not be opened. Your note is unchanged.\")\n      }\n    }\n  }, [ed, message, navigate, t, transferFlashcards])\n\n  // The source note and current authority own the entire handoff, including confirmation.\n  const linkedChatSourceKey = JSON.stringify([notesGraphAuthorityScope, ed.selectedId, ed.backlinkConversationId, ed.title, ed.content])\n  const linkedChatSourceRef = React.useRef(linkedChatSourceKey)\n  linkedChatSourceRef.current = linkedChatSourceKey\n  const linkedChatRequestRef = React.useRef<AbortController | null>(null)\n  React.useEffect(() => () => { linkedChatRequestRef.current?.abort() }, [linkedChatSourceKey])\n\n  const openLinkedConversation = async () => {\n    const conversationId = ed.backlinkConversationId\n    if (!conversationId) {\n      message.warning(t(\"option:notesSearch.noLinkedConversation\", { defaultValue: \"No linked conversation to open.\" }))\n      return\n    }\n    const chatState = useStoreMessageOption.getState()\n    if (chatState.streaming || chatState.isProcessing || chatState.messages.some(hasUnsavedChatWork)) {\n      message.warning(t(\"option:notesSearch.finishChatBeforeOpening\", { defaultValue: \"Finish or save the current chat before opening the linked conversation.\" }))\n      return\n    }\n    linkedChatRequestRef.current?.abort()\n    const controller = new AbortController()\n    linkedChatRequestRef.current = controller\n    const sourceKey = linkedChatSourceKey\n    const isCurrent = () => !controller.signal.aborted && linkedChatRequestRef.current === controller && linkedChatSourceRef.current === sourceKey\n    const stopWatchingChat = useStoreMessageOption.subscribe((current, previous) => {\n      if (current.serverChatId !== previous.serverChatId || current.historyId !== previous.historyId ||\n        current.streaming || current.isProcessing ||\n        (current.messages !== previous.messages && current.messages.some(hasUnsavedChatWork))) controller.abort()\n    })\n    let snapshot: ServicePromptSnapshot | undefined\n    let stopWatchingAuthority: (() => void) | undefined\n    try {\n      ed.setOpeningLinkedChat(true)\n      snapshot = await loadServicePromptSnapshot([], { signal: controller.signal })\n      snapshot.scopeInvalidatedSignal.addEventListener(\"abort\", () => controller.abort(), { once: true })\n      if (!isCurrent() || snapshot.scopeSignal.aborted) return\n      stopWatchingAuthority = watchServerChatLoadAuthority(snapshot, controller)\n      const okToLeave = await ed.confirmDiscardIfDirty()\n      if (!okToLeave || !isCurrent()) return\n      const options = { signal: snapshot.scopeSignal, requestScope: snapshot.requestScope }\n      const chat = await tldwClient.getChat(conversationId, options)\n      if (!isCurrent()) return\n      const rows = await fetchAllServerChatMessages(params => tldwClient.listChatMessages(conversationId, { limit: params.limit, offset: params.offset, include_deleted: \"false\" }, options), { signal: snapshot.scopeSignal })\n      if (!isCurrent()) return\n      const identity = resolveServerChatAssistantIdentity(chat as unknown as Record<string, unknown>)\n      const assistantId = identity.assistantId || (identity.characterId == null ? null : String(identity.characterId))\n      const selection = identity.assistantKind && assistantId ? {\n        kind: identity.assistantKind, id: assistantId, name: identity.assistantKind === \"persona\" ? \"Persona\" : \"Assistant\",\n        metadata: { selectionMode: \"tracked\" }\n      } : null\n      const mappedMessages = mapServerChatMessagesToPlaygroundMessages({ serverMessages: rows, assistantName: selection?.name || \"Assistant\", characterId: identity.characterId })\n      usePlaygroundSessionStore.getState().cancelPendingRestore()\n      await setSelectedAssistant(selection, { isCurrent })\n      if (!isCurrent()) return\n      stopWatchingChat()\n      usePlaygroundSessionStore.getState().saveSession({\n        historyId: null, serverChatId: String(chat.id), scopeKey: snapshot.scopeKey,\n        trackedAssistantSelection: selection, trackedAssistantKind: selection?.kind ?? null,\n        trackedAssistantId: selection?.id ?? null,\n        trackedCharacterId: identity.characterId == null ? null : String(identity.characterId),\n        trackedAssistantDisplayName: selection?.name ?? null, trackedAssistantAvatarUrl: null,\n        serverChatPersonaMemoryMode: identity.personaMemoryMode, queuedMessages: []\n      })\n      useStoreMessageOption.getState().setTemporaryChat(false)\n      selectServerChat(chat)\n      useStoreMessageOption.getState().setHistory(mappedMessages.map(row => ({ role: row.role, content: row.message })))\n      useStoreMessageOption.getState().setMessages(mappedMessages)\n      const resolvedLabel = toConversationLabel(chat)\n      if (resolvedLabel) setConversationLabelById(current => ({ ...current, [conversationId]: resolvedLabel }))\n    } catch (error) {\n      if (isCurrent()) message.error(error instanceof Error ? error.message : t(\"option:notesSearch.openConversationError\", { defaultValue: \"Failed to open linked conversation.\" }))\n    } finally {\n      stopWatchingChat()\n      stopWatchingAuthority?.()\n      snapshot?.release()\n      if (linkedChatRequestRef.current === controller) {\n        linkedChatRequestRef.current = null\n        ed.setOpeningLinkedChat(false)\n      }\n    }\n  }\n\n  const openLinkedSource = React.useCallback(\n    (sourceId: string, sourceLabel: string) => {\n      const parsed = parseSourceNodeId(sourceId)\n      const externalRef = parsed?.externalRef || null\n      if (externalRef && /^https?:\\/\\//i.test(externalRef)) {\n        if (typeof window !== 'undefined') window.open(externalRef, '_blank', 'noopener,noreferrer')\n        return\n      }\n      if (externalRef) { navigate(`/media?id=${encodeURIComponent(externalRef)}`); return }\n      navigate('/media')\n      message.info(t('option:notesSearch.sourceNavigationFallback', {\n        defaultValue: 'Opened media library for source \"{{label}}\".', label: sourceLabel\n      }))\n    },\n    [message, navigate, t]\n  )\n\n  const openGraphWorkspace = React.useCallback(() => {\n    list.setListViewMode('graph')\n    list.setPage(1)\n  }, [list.setListViewMode, list.setPage])\n\n  // Keyword picker handlers\n  const handleKeywordPickerCancel = React.useCallback(() => {\n    kw.setKeywordPickerOpen(false)\n    ed.restoreFocusAfterOverlayClose(kw.keywordPickerReturnFocusRef.current)\n  }, [ed, kw])\n\n  const handleKeywordPickerApply = React.useCallback(() => {\n    kw.setKeywordTokens(kw.keywordPickerSelection)\n    kw.rememberRecentKeywords(kw.keywordPickerSelection)\n    list.setPage(1)\n    kw.setKeywordPickerOpen(false)\n    ed.restoreFocusAfterOverlayClose(kw.keywordPickerReturnFocusRef.current)\n  }, [ed, kw, list])\n\n  const handleKeywordPickerQueryChange = React.useCallback((value: string) => { kw.setKeywordPickerQuery(value) }, [kw])\n  const handleKeywordPickerSelectionChange = React.useCallback((vals: string[]) => { kw.setKeywordPickerSelection(vals) }, [kw])\n  const handleKeywordPickerSortModeChange = React.useCallback((mode: KeywordPickerSortMode) => { kw.setKeywordPickerSortMode(mode) }, [kw])\n  const handleToggleRecentKeyword = React.useCallback((keyword: string) => {\n    kw.setKeywordPickerSelection((current) => current.includes(keyword) ? current.filter((entry) => entry !== keyword) : [...current, keyword])\n  }, [kw])\n  const handleKeywordPickerSelectAll = React.useCallback(() => { kw.setKeywordPickerSelection(kw.availableKeywords) }, [kw])\n  const handleKeywordPickerClear = React.useCallback(() => { kw.setKeywordPickerSelection([]) }, [kw])\n\n  // Active filter summary\n  const activeFilterSummary = React.useMemo(() => {\n    if (!list.hasActiveFilters || list.listMode !== 'active') return null\n    const effectiveQuery = list.query.trim() || list.queryInput.trim()\n    const details: string[] = []\n    if (list.listViewMode === 'inbox') {\n      details.push(\n        `${t('option:notesSearch.summaryViewLabel', { defaultValue: 'View' })}: ${t('option:notesSearch.viewModeInbox', { defaultValue: 'Inbox' })}`\n      )\n    }\n    if (effectiveQuery) details.push(`${t('option:notesSearch.summaryQueryLabel', { defaultValue: 'Query' })}: \"${effectiveQuery}\"`)\n    if (list.selectedNotebook != null) details.push(`${t('option:notesSearch.summaryNotebookLabel', { defaultValue: 'Saved filter' })}: ${list.selectedNotebook.name}`)\n    if (kw.keywordTokens.length > 0) details.push(`${t('option:notesSearch.summaryKeywordsLabel', { defaultValue: 'Tags' })}: ${kw.keywordTokens.join(', ')}`)\n    const countText = `${t('option:notesSearch.summaryShowing', { defaultValue: 'Showing' })} ${filteredCount} ${t('option:notesSearch.summaryOf', { defaultValue: 'of' })} ${list.total} ${t('option:notesSearch.summaryNotes', { defaultValue: 'notes' })}`\n    return { countText, detailsText: details.join(' + ') }\n  }, [kw.keywordTokens, list, t])\n\n  const showLargeListPaginationHint =\n    list.listMode === 'active' && list.listViewMode !== 'moodboard' && list.total >= LARGE_NOTES_PAGINATION_THRESHOLD\n  const showEditorEmptyState =\n    ed.selectedId == null &&\n    !hasActiveDraft &&\n    !ed.isDirty &&\n    ed.title.trim().length === 0 &&\n    ed.content.trim().length === 0 &&\n    kw.editorKeywords.length === 0\n\n  // Timeline sections\n  const timelineSections = React.useMemo(() => {\n    if (list.listMode !== 'active') return [] as Array<{ key: string; label: string; notes: NoteListItem[] }>\n    const bucketMap = new Map<string, NoteListItem[]>()\n    for (const note of visibleNotes) {\n      const rawTimestamp = toSortableTimestamp(note.updated_at)\n      if (rawTimestamp <= 0) {\n        const fallback = bucketMap.get('unknown') || []\n        fallback.push(note)\n        bucketMap.set('unknown', fallback)\n        continue\n      }\n      const parsed = new Date(rawTimestamp)\n      const key = `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, '0')}`\n      const bucket = bucketMap.get(key) || []\n      bucket.push(note)\n      bucketMap.set(key, bucket)\n    }\n    const orderedKeys = Array.from(bucketMap.keys()).sort((a, b) => {\n      if (a === 'unknown') return 1\n      if (b === 'unknown') return -1\n      return b.localeCompare(a)\n    })\n    return orderedKeys.map((key) => {\n      const notesForKey = bucketMap.get(key) || []\n      notesForKey.sort((a, b) => toSortableTimestamp(b.updated_at) - toSortableTimestamp(a.updated_at))\n      if (key === 'unknown') return { key, label: t('option:notesSearch.timelineUnknownDate', { defaultValue: 'Unknown date' }), notes: notesForKey }\n      const monthLabel = `${key}-01T00:00:00.000Z`\n      const parsed = new Date(monthLabel)\n      const label = Number.isNaN(parsed.getTime()) ? key : parsed.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })\n      return { key, label, notes: notesForKey }\n    })\n  }, [list.listMode, visibleNotes, t])\n\n  // Search tips\n  const searchableTips = React.useMemo(() => [\n    { id: 'phrase', text: t('option:notesSearch.searchTipPhrase', { defaultValue: 'Use quotes for phrases, e.g. \"project roadmap\".' }) },\n    { id: 'prefix', text: t('option:notesSearch.searchTipPrefix', { defaultValue: 'Use prefix terms (like analy*) for broader matches.' }) },\n    { id: 'and', text: t('option:notesSearch.searchTipAnd', { defaultValue: 'Text query + selected tags are combined with AND.' }) },\n    { id: 'in-note', text: t('option:notesSearch.searchTipInNote', { defaultValue: 'To find text inside the open note, use browser Ctrl/Cmd+F.' }) }\n  ], [t])\n\n  const filteredSearchTips = React.useMemo(() => {\n    const queryLower = list.searchTipsQuery.trim().toLowerCase()\n    if (!queryLower) return searchableTips\n    return searchableTips.filter((tip) => tip.text.toLowerCase().includes(queryLower))\n  }, [list.searchTipsQuery, searchableTips])\n\n  const searchTipsContent = React.useMemo(\n    () => (\n      <div className=\"max-w-[300px] space-y-2 text-xs text-text\">\n        <Input size=\"small\" allowClear placeholder={t('option:notesSearch.searchTipsFilterPlaceholder', { defaultValue: 'Filter tips...' })} value={list.searchTipsQuery} onChange={(event) => list.setSearchTipsQuery(event.target.value)} data-testid=\"notes-search-tips-filter\" />\n        <div className=\"space-y-1\">\n          {filteredSearchTips.length === 0 ? (\n            <Typography.Text type=\"secondary\" className=\"block text-[11px] text-text-muted\" data-testid=\"notes-search-tips-empty\">\n              {t('option:notesSearch.searchTipsEmpty', { defaultValue: 'No matching tips.' })}\n            </Typography.Text>\n          ) : filteredSearchTips.map((tip) => (<div key={tip.id} data-testid={`notes-search-tip-${tip.id}`}>{tip.text}</div>))}\n        </div>\n      </div>\n    ),\n    [filteredSearchTips, list.searchTipsQuery, list.setSearchTipsQuery, t]\n  )\n\n  // Deep-link support\n  const [pendingNoteId, setPendingNoteId] = React.useState<string | null>(null)\n  const [sourceRetry, setSourceRetry] = React.useState(0)\n  const [sourceResult, setSourceResult] = React.useState<{ id: string; scope: string | null; status: 'opened' | 'cancelled' | 'unavailable' } | null>(null)\n  const openSourceNoteRef = React.useRef(ed.openSourceNote)\n  openSourceNoteRef.current = ed.openSourceNote\n\n  React.useEffect(() => {\n    if (sourceNoteId == null || !isOnline || !notesGraphAuthorityScope) return\n    const controller = new AbortController()\n    const id = sourceNoteId.trim()\n    setSourceResult(null)\n    void (async () => {\n      const status = await openSourceNoteRef.current(id, controller.signal)\n      if (!controller.signal.aborted) setSourceResult({ id: sourceNoteId, scope: notesGraphAuthorityScope, status })\n    })()\n    return () => controller.abort()\n  }, [sourceNoteId, isOnline, notesGraphAuthorityScope, sourceRetry])\n\n  const sourceUnavailable = sourceResult?.id === sourceNoteId && sourceResult.scope === notesGraphAuthorityScope && sourceResult.status === 'unavailable' && ed.selectedId == null\n\n  React.useEffect(() => {\n    if (sourceNoteId != null) return\n    let cancelled = false\n    void (async () => {\n      const lastNoteId = await getSetting(LAST_NOTE_ID_SETTING)\n      if (!cancelled && lastNoteId) setPendingNoteId(lastNoteId)\n    })()\n    return () => { cancelled = true }\n  }, [sourceNoteId])\n\n  React.useEffect(() => {\n    if (sourceNoteId != null || !isOnline || list.listMode !== 'active' || !pendingNoteId || !Array.isArray(list.data) || ed.selectedId != null) return\n    let cancelled = false\n    ;(async () => {\n      const opened = await ed.handleSelectNote(pendingNoteId)\n      if (cancelled) return\n      if (!opened) return\n      setPendingNoteId(null)\n      void clearSetting(LAST_NOTE_ID_SETTING)\n    })()\n    return () => { cancelled = true }\n  }, [list.data, ed, isOnline, list.listMode, pendingNoteId, sourceNoteId])\n\n  // Sidebar layout\n  React.useEffect(() => {\n    if (typeof window === 'undefined') return\n    const handleResize = () => setSidebarHeight(calculateSidebarHeight())\n    window.addEventListener('resize', handleResize)\n    return () => window.removeEventListener('resize', handleResize)\n  }, [])\n\n  React.useEffect(() => {\n    if (!isMobileViewport) desktopSidebarCollapsedRef.current = sidebarCollapsed\n  }, [isMobileViewport, sidebarCollapsed])\n\n  React.useEffect(() => {\n    if (isMobileViewport) { setSidebarCollapsed(true); setMobileSidebarOpen(false); return }\n    setMobileSidebarOpen(false)\n    setSidebarCollapsed(desktopSidebarCollapsedRef.current)\n  }, [isMobileViewport])\n\n  // Global keyboard shortcuts\n  React.useEffect(() => {\n    const handler = (event: KeyboardEvent) => {\n      if (event.defaultPrevented) return\n\n      // ? — open shortcut help (only when not typing in an input)\n      if (event.key === '?' && !event.metaKey && !event.ctrlKey && !event.altKey) {\n        if (shouldIgnoreGlobalShortcut(event.target)) return\n        event.preventDefault()\n        setShortcutHelpOpen(true)\n        return\n      }\n\n      // Alt+N — create new note\n      if (event.altKey && (event.key === 'n' || event.key === 'N') && !event.ctrlKey && !event.metaKey && !event.shiftKey) {\n        if (shouldIgnoreGlobalShortcut(event.target)) return\n        event.preventDefault()\n        void handleNewNote()\n        return\n      }\n\n      // Alt+Shift+D - duplicate current note or draft\n      if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey && (event.key === 'd' || event.key === 'D')) {\n        if (shouldIgnoreGlobalShortcut(event.target)) return\n        event.preventDefault()\n        void duplicateSelectedNote()\n        return\n      }\n\n      // Ctrl/Cmd+K — focus search\n      if ((event.ctrlKey || event.metaKey) && event.key === 'k' && !event.shiftKey && !event.altKey) {\n        if (shouldIgnoreGlobalShortcut(event.target)) return\n        event.preventDefault()\n        focusSearchInput()\n        return\n      }\n\n      // / — focus search (only when not typing in an input)\n      if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {\n        if (shouldIgnoreGlobalShortcut(event.target)) return\n        event.preventDefault()\n        focusSearchInput()\n        return\n      }\n\n      // Ctrl/Cmd+Shift+E/S/P — switch editor mode\n      if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey) {\n        if (shouldIgnoreGlobalShortcut(event.target)) return\n        if (event.key === 'E' || event.key === 'e') {\n          event.preventDefault()\n          ed.setEditorMode('edit')\n          return\n        }\n        if (event.key === 'S' || event.key === 's') {\n          event.preventDefault()\n          ed.setEditorMode('split')\n          return\n        }\n        if (event.key === 'P' || event.key === 'p') {\n          event.preventDefault()\n          ed.setEditorMode('preview')\n          return\n        }\n      }\n    }\n    window.addEventListener('keydown', handler)\n    return () => window.removeEventListener('keydown', handler)\n  }, [duplicateSelectedNote, ed.setEditorMode, focusSearchInput, handleNewNote])\n\n  // Auto-trigger notes tutorial on first visit\n  React.useEffect(() => {\n    if (typeof window === 'undefined') return\n    let cancelled = false\n    let timer: number | null = null\n    let userInteracted = false\n\n    function removeInteractionListeners() {\n      window.removeEventListener('pointerdown', handleUserInteraction, true)\n      window.removeEventListener('keydown', handleUserInteraction, true)\n    }\n\n    function handleUserInteraction() {\n      if (cancelled || userInteracted) return\n      userInteracted = true\n      if (timer != null) {\n        window.clearTimeout(timer)\n        timer = null\n      }\n      removeInteractionListeners()\n      void notesUiStorage\n        .set(NOTES_TUTORIAL_SHOWN_STORAGE_KEY, '1')\n        .catch(() => undefined)\n    }\n\n    window.addEventListener('pointerdown', handleUserInteraction, { capture: true, once: true })\n    window.addEventListener('keydown', handleUserInteraction, { capture: true, once: true })\n\n    void (async () => {\n      const alreadyShown = await notesUiStorage\n        .get<string | null>(NOTES_TUTORIAL_SHOWN_STORAGE_KEY)\n        .catch(() => null)\n      if (cancelled || alreadyShown || userInteracted) return\n      timer = window.setTimeout(() => {\n        if (cancelled || userInteracted) return\n        removeInteractionListeners()\n        void notesUiStorage\n          .set(NOTES_TUTORIAL_SHOWN_STORAGE_KEY, '1')\n          .catch(() => undefined)\n        useTutorialStore.getState().startTutorial('notes-basics')\n      }, 1000)\n    })()\n\n    return () => {\n      cancelled = true\n      if (timer != null) window.clearTimeout(timer)\n      removeInteractionListeners()\n    }\n  }, [])\n\n  const clearSearchQueryTimeout = list.clearSearchQueryTimeout\n  const keywordSearchTimeoutRef = kw.keywordSearchTimeoutRef\n  const clearAutosaveTimeout = ed.clearAutosaveTimeout\n\n  // Use stable cleanup handles so debounce timers survive normal re-renders.\n  React.useEffect(() => {\n    return () => {\n      clearSearchQueryTimeout()\n      if (keywordSearchTimeoutRef.current != null) clearTimeout(keywordSearchTimeoutRef.current)\n      clearAutosaveTimeout()\n    }\n  }, [clearAutosaveTimeout, clearSearchQueryTimeout, keywordSearchTimeoutRef])\n\n  const handleSkipLinkActivate = React.useCallback(\n    (targetId: string) => (event: React.MouseEvent<HTMLAnchorElement>) => {\n      event.preventDefault()\n      const sidebarHidden = isMobileViewport ? !mobileSidebarOpen : sidebarCollapsed\n      if (targetId === NOTES_LIST_REGION_ID && sidebarHidden) {\n        if (isMobileViewport) setMobileSidebarOpen(true)\n        else setSidebarCollapsed(false)\n      }\n      window.requestAnimationFrame(() => {\n        const target = document.getElementById(targetId) as HTMLElement | null\n        if (!target) return\n        target.focus()\n        if (typeof window !== 'undefined') window.location.hash = targetId\n      })\n    },\n    [isMobileViewport, mobileSidebarOpen, sidebarCollapsed]\n  )\n\n  return (\n    <div className=\"relative flex h-full w-full bg-bg p-2 sm:p-4 mt-16\">\n      <a href={`#${NOTES_LIST_REGION_ID}`} onClick={handleSkipLinkActivate(NOTES_LIST_REGION_ID)} className=\"sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:border focus:border-border focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-text focus:shadow\">\n        {t('option:notesSearch.skipToNotesList', { defaultValue: 'Skip to notes list' })}\n      </a>\n      <a href={`#${NOTES_EDITOR_REGION_ID}`} onClick={handleSkipLinkActivate(NOTES_EDITOR_REGION_ID)} className=\"sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-12 focus:z-50 focus:rounded-md focus:border focus:border-border focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-text focus:shadow\">\n        {t('option:notesSearch.skipToEditor', { defaultValue: 'Skip to editor' })}\n      </a>\n      <p id={NOTES_SHORTCUTS_SUMMARY_ID} className=\"sr-only\">\n        {t('option:notesSearch.shortcutSummaryText', { defaultValue: 'Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs.' })}\n      </p>\n      {isMobileViewport && mobileSidebarOpen && (\n        <button type=\"button\" aria-label={t('option:notesSearch.closeMobileSidebar', { defaultValue: 'Close notes list' })} data-testid=\"notes-mobile-sidebar-backdrop\" className=\"absolute inset-0 z-30 bg-black/35\" onClick={() => setMobileSidebarOpen(false)} />\n      )}\n      <NotesSidebar\n        isMobileViewport={isMobileViewport}\n        mobileSidebarOpen={mobileSidebarOpen}\n        sidebarCollapsed={sidebarCollapsed}\n        sidebarHeight={sidebarHeight}\n        listMode={list.listMode}\n        listViewMode={list.listViewMode}\n        page={list.page}\n        pageSize={list.pageSize}\n        total={list.total}\n        sortOption={list.sortOption}\n        selectedId={ed.selectedId}\n        visibleNotes={visibleNotes}\n        filteredCount={filteredCount}\n        timelineSections={timelineSections}\n        recentNotes={ed.recentNotes}\n        pinnedNoteIds={ed.pinnedNoteIds}\n        pinnedNoteIdSet={ed.pinnedNoteIdSet}\n        queryInput={list.queryInput}\n        hasActiveFilters={list.hasActiveFilters}\n        activeFilterSummary={activeFilterSummary}\n        keywordTokens={kw.keywordTokens}\n        keywordOptions={kw.keywordOptions}\n        availableKeywords={kw.availableKeywords}\n        notebookOptions={list.notebookOptions}\n        selectedNotebookId={list.selectedNotebookId}\n        selectedNotebook={list.selectedNotebook}\n        moodboards={list.moodboards}\n        selectedMoodboardId={list.selectedMoodboardId}\n        selectedMoodboard={list.selectedMoodboard}\n        isMoodboardsFetching={list.isMoodboardsFetching}\n        moodboardTotalPages={list.moodboardTotalPages}\n        moodboardCanGoPrev={list.moodboardCanGoPrev}\n        moodboardCanGoNext={list.moodboardCanGoNext}\n        moodboardRangeStart={list.moodboardRangeStart}\n        moodboardRangeEnd={list.moodboardRangeEnd}\n        bulkSelectedIds={list.bulkSelectedIds}\n        searchTipsContent={searchTipsContent}\n        query={list.query}\n        isFetching={list.isFetching}\n        hasListError={list.isError}\n        listErrorMessage={list.listErrorMessage}\n        isStaleResults={list.isError && Array.isArray(list.data) && list.data.length > 0}\n        isOnline={isOnline}\n        demoEnabled={demoEnabled}\n        capsLoading={capsLoading}\n        capabilities={capabilities || null}\n        queuedOfflineDraftCount={ed.queuedOfflineDraftCount}\n        showLargeListPaginationHint={showLargeListPaginationHint}\n        conversationLabelById={conversationLabelById}\n        importSubmitting={imp.importSubmitting}\n        exportProgress={exp.exportProgress}\n        setMobileSidebarOpen={setMobileSidebarOpen}\n        setListViewMode={list.setListViewMode}\n        setPage={list.setPage}\n        setPageSize={list.setPageSize}\n        setSortOption={list.setSortOption}\n        setQueryInput={list.setQueryInput}\n        searchInputRef={searchInputRef}\n        setSelectedMoodboardId={list.setSelectedMoodboardId}\n        setSelectedNotebookId={list.setSelectedNotebookId}\n        setSearchTipsQuery={list.setSearchTipsQuery}\n        retryList={() => {\n          void list.refetch()\n        }}\n        handleNewNote={handleNewNote}\n        switchListMode={ed.switchListMode}\n        handleSelectNote={async (id) => {\n          await ed.handleSelectNote(id)\n        }}\n        handleClearFilters={list.handleClearFilters}\n        handleKeywordFilterSearch={kw.handleKeywordFilterSearch}\n        handleKeywordFilterChange={kw.handleKeywordFilterChange}\n        handleToggleBulkSelection={list.handleToggleBulkSelection}\n        clearSearchQueryTimeout={list.clearSearchQueryTimeout}\n        setQuery={list.setQuery}\n        openKeywordPicker={kw.openKeywordPicker}\n        createNotebookFromCurrentKeywords={list.createNotebookFromCurrentKeywords}\n        removeSelectedNotebook={list.removeSelectedNotebook}\n        createMoodboard={list.createMoodboard}\n        renameMoodboard={list.renameMoodboard}\n        deleteMoodboard={list.deleteMoodboard}\n        clearBulkSelection={list.clearBulkSelection}\n        exportSelectedBulk={exp.exportSelectedBulk}\n        assignKeywordsToSelectedBulk={assignKeywordsToSelectedBulk}\n        deleteSelectedBulk={deleteSelectedBulk}\n        toggleNotePinned={ed.toggleNotePinned}\n        restoreNote={restoreNote}\n        exportAll={exp.exportAll}\n        exportAllCSV={exp.exportAllCSV}\n        exportAllJSON={exp.exportAllJSON}\n        openImportPicker={imp.openImportPicker}\n        onSyncFolder={() => navigate(buildSourcesNewPath({ preset: \"notes-folder-sync\" }))}\n        resetEditor={resetEditorToEmptyState}\n        renderKeywordLabelWithFrequency={kw.renderKeywordLabelWithFrequency}\n        onOpenSettings={() => navigate('/settings/tldw')}\n        onOpenHealth={() => navigate('/settings/health')}\n      />\n      {!isMobileViewport && (\n        <button\n          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}\n          className=\"relative w-6 bg-surface border-y border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors motion-reduce:transition-none rounded-r-lg\"\n          style={{ minHeight: `${MIN_SIDEBAR_HEIGHT}px`, height: `${sidebarHeight}px` }}\n          aria-label={sidebarCollapsed ? t('option:notesSearch.expandSidebar', { defaultValue: 'Expand sidebar' }) : t('option:notesSearch.collapseSidebar', { defaultValue: 'Collapse sidebar' })}\n          data-testid=\"notes-desktop-sidebar-toggle\"\n        >\n          <div className=\"flex items-center justify-center w-full h-full\">\n            {sidebarCollapsed ? <ChevronRight className=\"w-4 h-4 text-text-subtle group-hover:text-text\" /> : <ChevronLeft className=\"w-4 h-4 text-text-subtle group-hover:text-text\" />}\n          </div>\n        </button>\n      )}\n      {sourceUnavailable ? (\n        <section className=\"flex min-w-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center\" aria-label=\"Linked note unavailable\">\n          <div role=\"alert\">This linked note is unavailable. It may have been deleted or may belong to another account.</div>\n          <p>Choose a note from the list, or retry opening this source.</p>\n          <Button onClick={() => setSourceRetry(value => value + 1)}>Retry source</Button>\n          <Button onClick={() => { setSourceResult(null); void handleNewNote() }}>Create note</Button>\n        </section>\n      ) : list.listMode === 'active' && list.listViewMode === 'graph' ? (\n        <NotesGraphWorkspace\n          authorityScope={notesGraphAuthorityScope}\n          isOnline={isOnline}\n          initialFocusNoteId={graphInitialFocusNoteId}\n          selectedNoteId={authoritySelectedId}\n          hasActiveNotes={hasActiveNotes}\n          isMobileViewport={isMobileViewport}\n          onOpenSidebar={() => setMobileSidebarOpen(true)}\n          onSelectNote={(noteId) => {\n            void ed.handleSelectNote(noteId)\n          }}\n          onCreateNote={() => {\n            void handleNewNote()\n          }}\n        />\n      ) : (\n      <NotesEditorPane\n        isMobileViewport={isMobileViewport}\n        setMobileSidebarOpen={setMobileSidebarOpen}\n        selectedId={ed.selectedId}\n        showEmptyState={showEditorEmptyState}\n        title={ed.title}\n        content={ed.content}\n        editorDisabled={editorDisabled}\n        isDirty={ed.isDirty}\n        isOnline={isOnline}\n        loadingDetail={ed.loadingDetail}\n        saving={ed.saving}\n        backlinkConversationId={ed.backlinkConversationId}\n        backlinkConversationLabel={backlinkConversationLabel}\n        backlinkMessageId={ed.backlinkMessageId}\n        noteRelations={noteRelations}\n        noteNeighborsLoading={noteNeighborsLoading}\n        noteNeighborsError={noteNeighborsError}\n        noteNeighborsUnavailable={noteNeighborsUnavailable}\n        noteNeighborsState={noteNeighborsState}\n        noteNeighborsRequestKey={noteNeighborsOwner}\n        onRequestNeighbors={() => setNeighborsIntent((current) => ({ ...current, requested: true }))}\n        onRetryNeighbors={noteNeighborsUnavailable ? undefined : () => {\n          void refetchNoteNeighbors()\n        }}\n        selectedNotePinned={ed.selectedNotePinned}\n        editorMode={ed.editorMode}\n        editorInputMode={ed.editorInputMode}\n        openingLinkedChat={ed.openingLinkedChat}\n        editorKeywords={kw.editorKeywords}\n        keywordOptions={kw.keywordOptions}\n        saveIndicator={ed.saveIndicator}\n        saveIndicatorText={ed.saveIndicatorText}\n        saveRecoveryNotice={ed.saveRecoveryNotice}\n        selectedLastSavedAt={ed.selectedLastSavedAt}\n        offlineStatusText={ed.offlineStatusText}\n        currentOfflineDraft={ed.currentOfflineDraft}\n        remoteVersionInfo={ed.remoteVersionInfo}\n        monitoringNotice={ed.monitoringNotice}\n        monitoringNoticeClasses={ed.monitoringNoticeClasses}\n        noteTasks={ed.noteTasks}\n        taskReconciliation={ed.taskReconciliation}\n        taskActivityEvents={ed.taskActivityEvents}\n        taskConflictNotice={ed.taskConflictNotice}\n        titleSuggestionLoading={ed.titleSuggestionLoading}\n        canSwitchTitleStrategy={ed.canSwitchTitleStrategy}\n        effectiveTitleSuggestStrategy={ed.effectiveTitleSuggestStrategy}\n        titleStrategyOptions={ed.titleStrategyOptions}\n        studioBadgeLabel={effectiveStudioState || currentNoteStudioSummary ? t('option:notesSearch.notesStudioAction', {\n          defaultValue: 'Notes Studio'\n        }) : null}\n        showStudioMarkdownOnlyNotice={notesStudioMarkdownOnlyNoticeOpen}\n        selectedStudioState={effectiveStudioState}\n        studioPaperSize={selectedStudioPaperSize}\n        onStudioPaperSizeChange={setSelectedStudioPaperSize}\n        onRegenerateStudioView={() => {\n          void handleRegenerateStudioView()\n        }}\n        studioRegenerating={notesStudioRegenerating}\n        setTitleSuggestStrategy={ed.setTitleSuggestStrategy}\n        manualLinkTargetId={ed.manualLinkTargetId}\n        setManualLinkTargetId={ed.setManualLinkTargetId}\n        manualLinkSaving={ed.manualLinkSaving}\n        manualLinkOptions={manualLinkOptions}\n        manualLinkDeletingEdgeId={ed.manualLinkDeletingEdgeId}\n        assistLoadingAction={ed.assistLoadingAction}\n        canUndoAssist={ed.canUndoAssist}\n        undoAssist={ed.undoAssist}\n        shouldShowToc={wl.shouldShowToc}\n        tocEntries={wl.tocEntries}\n        previewContent={wl.previewContent}\n        usesLargePreviewGuardrails={wl.usesLargePreviewGuardrails}\n        largePreviewReady={wl.largePreviewReady}\n        wysiwygHtml={ed.wysiwygHtml}\n        activeWikilinkQuery={wl.activeWikilinkQuery}\n        wikilinkSuggestions={wl.wikilinkSuggestions}\n        wikilinkSuggestionDisplayCounts={wl.wikilinkSuggestionDisplayCounts}\n        wikilinkSelectionIndex={wl.wikilinkSelectionIndex}\n        metricSummaryText={ed.metricSummaryText}\n        revisionSummaryText={ed.revisionSummaryText}\n        provenanceSummaryText={ed.provenanceSummaryText}\n        queuedOfflineDraftCount={ed.queuedOfflineDraftCount}\n        titleInputRef={ed.titleInputRef}\n        contentTextareaRef={ed.contentTextareaRef}\n        richEditorRef={ed.richEditorRef}\n        attachmentInputRef={ed.attachmentInputRef}\n        setTitle={ed.setTitle}\n        setIsDirty={ed.setIsDirty}\n        setSaveIndicator={ed.setSaveIndicator}\n        setMonitoringNotice={ed.setMonitoringNotice}\n        toggleTaskCheckboxLocal={ed.toggleTaskCheckboxLocal}\n        toggleTaskCheckboxStatus={ed.toggleTaskCheckboxStatus}\n        dismissTaskActivity={ed.dismissTaskActivity}\n        inspectTaskActivity={ed.inspectTaskActivity}\n        setEditorMode={ed.setEditorMode}\n        setEditorKeywords={kw.setEditorKeywords}\n        setEditorCursorIndex={ed.setEditorCursorIndex}\n        setShortcutHelpOpen={setShortcutHelpOpen}\n        markManualEdit={ed.markManualEdit}\n        suggestTitle={ed.suggestTitle}\n        openLinkedConversation={openLinkedConversation}\n        openLinkedSource={openLinkedSource}\n        handleNewNote={handleNewNote}\n        duplicateSelectedNote={duplicateSelectedNote}\n        toggleNotePinned={ed.toggleNotePinned}\n        copySelected={exp.copySelected}\n        handleGenerateFlashcardsFromNote={handleGenerateFlashcardsFromNote}\n        handleCreateStudyPackFromNote={handleCreateStudyPackFromNote}\n        handleOpenNotesStudio={handleOpenNotesStudio}\n        exportSelected={exp.exportSelected}\n        saveNote={ed.saveNote}\n        reloadSelectedNoteAfterConflict={ed.reloadSelectedNoteAfterConflict}\n        saveAndStartNew={saveAndStartNew}\n        deleteNote={async () => {\n          await deleteNote()\n        }}\n        handleSelectNote={async (id) => {\n          await ed.handleSelectNote(id)\n        }}\n        openGraphWorkspace={openGraphWorkspace}\n        createManualLink={createManualLink}\n        removeManualLink={removeManualLink}\n        debouncedLoadKeywordSuggestions={kw.debouncedLoadKeywordSuggestions}\n        renderKeywordLabelWithFrequency={kw.renderKeywordLabelWithFrequency}\n        handleEditorInputModeChange={handleEditorInputModeChange}\n        applyMarkdownToolbarAction={applyMarkdownToolbarAction}\n        openAttachmentPicker={openAttachmentPicker}\n        handleAttachmentInputChange={handleAttachmentInputChange}\n        runAssistAction={ed.runAssistAction}\n        switchStudioNoticeToMarkdown={switchNotesStudioToMarkdown}\n        dismissStudioMarkdownOnlyNotice={() => setNotesStudioMarkdownOnlyNoticeOpen(false)}\n        handleTocJump={handleTocJump}\n        handlePreviewLinkClick={handlePreviewLinkClick}\n        handleWysiwygInput={handleWysiwygInput}\n        handleWysiwygPaste={handleWysiwygPaste}\n        handleEditorChange={handleEditorChange}\n        handleEditorKeyDown={wl.handleEditorKeyDown}\n        handleEditorSelectionUpdate={handleEditorSelectionUpdate}\n        applyWikilinkSuggestion={wl.applyWikilinkSuggestion}\n      />\n      )}\n      <NotesStudioCreateModal\n        open={notesStudioCreateOpen}\n        excerptText={notesStudioExcerptText}\n        templateType={notesStudioTemplateType}\n        handwritingMode={notesStudioHandwritingMode}\n        loading={notesStudioCreateLoading}\n        onClose={closeNotesStudioCreateModal}\n        onTemplateChange={setNotesStudioTemplateType}\n        onHandwritingChange={setNotesStudioHandwritingMode}\n        onSubmit={() => {\n          void handleCreateNotesStudio()\n        }}\n      />\n      <input ref={imp.importInputRef} type=\"file\" multiple accept=\".json,.md,.markdown,.txt,application/json,text/markdown,text/plain\" className=\"hidden\" data-testid=\"notes-import-input\" onChange={(event) => { void imp.handleImportInputChange(event) }} />\n      {hasDeferredOverlayOpen && (\n        <React.Suspense fallback={null}>\n          <LazyNotesManagerOverlays\n            kw={kw}\n            imp={imp}\n            isOnline={isOnline}\n            shortcutHelpOpen={shortcutHelpOpen}\n            setShortcutHelpOpen={setShortcutHelpOpen}\n            handleKeywordPickerCancel={handleKeywordPickerCancel}\n            handleKeywordPickerApply={handleKeywordPickerApply}\n            handleKeywordPickerSortModeChange={handleKeywordPickerSortModeChange}\n            handleToggleRecentKeyword={handleToggleRecentKeyword}\n            handleKeywordPickerQueryChange={handleKeywordPickerQueryChange}\n            handleKeywordPickerSelectionChange={handleKeywordPickerSelectionChange}\n            handleKeywordPickerSelectAll={handleKeywordPickerSelectAll}\n            handleKeywordPickerClear={handleKeywordPickerClear}\n            t={t}\n          />\n        </React.Suspense>\n      )}\n    </div>\n  )\n}\n\nexport default NotesManagerPage\n",
+    "usedDeprecatedRules": []
+  },
+  {
+    "filePath": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx",
+    "messages": [],
+    "suppressedMessages": [],
+    "errorCount": 0,
+    "fatalErrorCount": 0,
+    "warningCount": 0,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "usedDeprecatedRules": []
+  }
+]

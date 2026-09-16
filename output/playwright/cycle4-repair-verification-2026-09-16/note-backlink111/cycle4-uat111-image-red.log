@@ -1,0 +1,75 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx (24 tests | 4 failed) 5931ms
+     ✓ shows conversation title labels with UUID debug tooltip in list and header  563ms
+     ✓ falls back to topic label when conversation title is empty 110ms
+     ✓ falls back to raw conversation ID when metadata lookup fails 85ms
+     ✓ retries transient conversation label lookups and hydrates once they recover  1586ms
+     ✓ does not re-request a missing conversation label after the backlink is selected 81ms
+     ✓ does not auto-fetch UUID conversation labels until the linked note is opened 138ms
+     ✓ opens linked conversations in the same tab by default 204ms
+     ✓ restores Cedar identity and canonical saved-message IDs before navigation, replacing the Robot restore target 193ms
+     ✓ keeps the linked Cedar reply through the real Playground mismatch and persisted-session initialization effects 207ms
+     ✓ does not replace current work when stream changes during a linked read 226ms
+     ✓ does not replace current work when new-draft changes during a linked read 220ms
+     × does not replace current work when image-draft changes during a linked read 248ms
+     ✓ does not replace current work when note-edit changes during a linked read 205ms
+     ✓ does not replace current work when account changes during a linked read 201ms
+     ✓ opens past only a retained assistant display error (display-error) 163ms
+     ✓ opens past only a retained assistant display error (user-error-text) 146ms
+     ✓ opens past only a retained assistant display error (assistant-draft) 152ms
+     ✓ opens past only a retained assistant display error (malformed-error) 155ms
+     × opens past only a retained assistant display error (user-image-only) 154ms
+     × opens past only a retained assistant display error (assistant-image-only) 161ms
+     × opens past only a retained assistant display error (error-image) 189ms
+     ✓ does not cancel an owned linked read when only an assistant display error is restored 212ms
+     ✓ opens a normally acknowledged saved Chat while retaining the unsent-draft guard (draft=false) 171ms
+     ✓ opens a normally acknowledged saved Chat while retaining the unsent-draft guard (draft=true) 157ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx > NotesManagerPage stage 26 conversation backlink labels > does not replace current work when image-draft changes during a linked read
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st vi.fn() call:
+
+    Array [
+      "/chat",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx:445:30
+    443|     if (change === "note-edit") fireEvent.change(screen.getByPlacehold…
+    444|     await act(async () => { release([{ id: "a", role: "assistant", con…
+    445|     expect(mockNavigate).not.toHaveBeenCalled()
+       |                              ^
+    446|     expect(useStoreMessageOption.getState().serverChatId).toBe("robot")
+    447|     expect(chatAuthority.selection.id).toBe("5")
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx > NotesManagerPage stage 26 conversation backlink labels > opens past only a retained assistant display error (user-image-only)
+ FAIL  src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx > NotesManagerPage stage 26 conversation backlink labels > opens past only a retained assistant display error (assistant-image-only)
+ FAIL  src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx > NotesManagerPage stage 26 conversation backlink labels > opens past only a retained assistant display error (error-image)
+AssertionError: expected "vi.fn()" to be called at least once
+ ❯ src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx:470:34
+    468|       expect(mockNavigate).not.toHaveBeenCalled()
+    469|       expect(mockListChatMessages).not.toHaveBeenCalled()
+    470|       expect(mockMessageWarning).toHaveBeenCalled()
+       |                                  ^
+    471|     }
+    472|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 20 passed (24)
+   Start at  22:55:38
+   Duration  9.11s (transform 1.43s, setup 79ms, import 2.83s, tests 5.93s, environment 206ms)
+
