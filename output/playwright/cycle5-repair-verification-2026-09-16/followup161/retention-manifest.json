@@ -1,0 +1,136 @@
+{
+  "at": "2026-09-16T21:19:29.711Z",
+  "credentialScan": {
+    "filesChecked": 102,
+    "exactMatches": 0
+  },
+  "files": [
+    {
+      "file": "IMPLEMENTATION.md",
+      "sourceSha256": "9dbc27687b9e5696375b47ee0a878b1f6d4934065f677ef7ee93697c4b984f91",
+      "retainedSha256": "9dbc27687b9e5696375b47ee0a878b1f6d4934065f677ef7ee93697c4b984f91",
+      "trailingWhitespaceNormalized": false
+    },
+    {
+      "file": "README.md",
+      "sourceSha256": "9b8f723d32399b682bdd07906d159332745636c189c2240455bb45a8f2c57fea",
+      "retainedSha256": "9b8f723d32399b682bdd07906d159332745636c189c2240455bb45a8f2c57fea",
+      "trailingWhitespaceNormalized": false
+    },
+    {
+      "file": "after-click.png",
+      "sourceSha256": "e0fc08bd36838dd1beef44b9002de86fcb6843465fdcf8294c078963af5deea5",
+      "retainedSha256": "e0fc08bd36838dd1beef44b9002de86fcb6843465fdcf8294c078963af5deea5",
+      "trailingWhitespaceNormalized": false
+    },
+    {
+      "file": "after-click.txt",
+      "sourceSha256": "9fb0d3a39687b8b77b9ed2fb93c1f236dbb54673a92eb740a1adcbc1133c4fef",
+      "retainedSha256": "ae13634f3a223a3c6023ceb6863a8955bdde0363df4884274da29ca73330666f",
+      "trailingWhitespaceNormalized": true
+    },
+    {
+      "file": "after-geometry.txt",
+      "sourceSha256": "2e3b82ac7ea10aa4f4dec1db4f39818404cf8f3576475c034bc4ee23f76cdb31",
+      "retainedSha256": "6d4c095ab6ec8bab73894a7de171c14f4ba2687f1bb945f3065544a030170ff8",
+      "trailingWhitespaceNormalized": true
+    },
+    {
+      "file": "bandit.json",
+      "sourceSha256": "13bf29d5c96ee558b448a541be5e72948529c2909ff1c20da813bd1e091e0f17",
+      "retainedSha256": "13bf29d5c96ee558b448a541be5e72948529c2909ff1c20da813bd1e091e0f17",
+      "trailingWhitespaceNormalized": false
+    },
+    {
+      "file": "before-manifest.json",
+      "sourceSha256": "a4e325c7114d366ffbee186d7f2ea72b9ff06fdc3d7ac04f31c4d3074876fb7d",
+      "retainedSha256": "a4e325c7114d366ffbee186d7f2ea72b9ff06fdc3d7ac04f31c4d3074876fb7d",
+      "trailingWhitespaceNormalized": false
+    },
+    {
+      "file": "chat-geometry.txt",
+      "sourceSha256": "425c04c5a4bd44a789245d6074a9f31affac1c868f7874c3271a02731a0803ad",
+      "retainedSha256": "61a8ff2fc745fa46de2b13341a07d88402648be4563504c3834862174cb23baa",
+      "trailingWhitespaceNormalized": true
+    },
+    {
+      "file": "config-tests.log",
+      "sourceSha256": "12eddc6359024b327404df152e829cfef14556a73a4c4cecfffe5dd62b03be56",
+      "retainedSha256": "4780413faa305b511eb52560fe8145bef59f47bd00c61091285075d8d43f2f97",
+      "trailingWhitespaceNormalized": true
+    },
+    {
+      "file": "eslint.log",
+      "sourceSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "retainedSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "trailingWhitespaceNormalized": true
+    },
+    {
+      "file": "independent-config-tests.log",
+      "sourceSha256": "fb082baeb03b6c7459cd03e616df41bcc9cb48f8ffd99464f84a642a4c2f84f1",
+      "retainedSha256": "348000c91cd02ca358ae0cd5decf20e66efad60292dd8345a3d3bf83ac6f2ca0",
+      "trailingWhitespaceNormalized": true
+    },
+    {
+      "file": "independent-review.md",
+      "sourceSha256": "2ec4fcd6a8d957593a4628f9532e194493552689e84a9bec645640d2b5b8fa5b",
+      "retainedSha256": "2ec4fcd6a8d957593a4628f9532e194493552689e84a9bec645640d2b5b8fa5b",
+      "trailingWhitespaceNormalized": false
+    },
+    {
+      "file": "next-devtools-source-excerpts.json",
+      "sourceSha256": "37a5fac087b01e033b2782626f289daf84ba084d8ff2d0d5ba1987f955655f90",
+      "retainedSha256": "37a5fac087b01e033b2782626f289daf84ba084d8ff2d0d5ba1987f955655f90",
+      "trailingWhitespaceNormalized": false
+    },
+    {
+      "file": "owned-manifest.json",
+      "sourceSha256": "52e940da214c5fd597fd862601db0f63b40f83666fa4a4a8aca2562446d95583",
+      "retainedSha256": "52e940da214c5fd597fd862601db0f63b40f83666fa4a4a8aca2562446d95583",
+      "trailingWhitespaceNormalized": false
+    },
+    {
+      "file": "owned.patch",
+      "sourceSha256": "5789716c85b031220ab72ba0099d87b6a5069b96866fa1be47941e97b5079637",
+      "retainedSha256": "5789716c85b031220ab72ba0099d87b6a5069b96866fa1be47941e97b5079637",
+      "trailingWhitespaceNormalized": false
+    },
+    {
+      "file": "parse.log",
+      "sourceSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "retainedSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "trailingWhitespaceNormalized": true
+    },
+    {
+      "file": "portal-diagnosis.txt",
+      "sourceSha256": "5a7ca3936ce2d7f53ba7f503ac0e2276487a0ea299a5547eaeb5b916004917fc",
+      "retainedSha256": "ebb94e7c428e8babd9df7ee317d47c4af36a0b9cbf7092aebac2fee675000275",
+      "trailingWhitespaceNormalized": true
+    },
+    {
+      "file": "schema.log",
+      "sourceSha256": "1c4f19c3a100fdc0ab41163450ecbb01826fe65c710b6663ffe86ca730f5bd06",
+      "retainedSha256": "1c4f19c3a100fdc0ab41163450ecbb01826fe65c710b6663ffe86ca730f5bd06",
+      "trailingWhitespaceNormalized": false
+    },
+    {
+      "file": "settings-keyboard.txt",
+      "sourceSha256": "05d1c257b9128e71501abc1d23d60926cd3cee7697564c1969f0d794eabcea2e",
+      "retainedSha256": "71dee9829856910d4da07be447529544ea54f2d320b5ff9f1443e9c48c7f30bb",
+      "trailingWhitespaceNormalized": true
+    },
+    {
+      "file": "settings-open.txt",
+      "sourceSha256": "b6d899865debf4444e72963c07d949dff668b52e76aaff5079e3f6e37ac3ba69",
+      "retainedSha256": "9ac3c53ae965cbb7163fc6e244278af4e0b75e60b4280a547c47387a01a114fd",
+      "trailingWhitespaceNormalized": true
+    },
+    {
+      "file": "settings-pointer-intercept.png",
+      "sourceSha256": "03fc845c5905c785396420bf9a33b0322a4ee4f43ae870f5c0b6460c1a3ca008",
+      "retainedSha256": "03fc845c5905c785396420bf9a33b0322a4ee4f43ae870f5c0b6460c1a3ca008",
+      "trailingWhitespaceNormalized": false
+    }
+  ],
+  "normalization": "Text trailing spaces and final blank lines removed; original hashes preserved and binary bytes unchanged."
+}

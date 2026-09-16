@@ -1,0 +1,15 @@
+### Result
+{"url":"http://127.0.0.1:18580/","viewport":null,"settings":{"x":7.5,"y":905,"width":32,"height":32},"indicator":{"x":1146,"y":899,"width":32,"height":32},"at":1789593012522}
+### Ran Playwright code
+```js
+await (async page => {const settings=page.getByRole("button",{name:"Settings",exact:true});const indicator=page.getByRole("button",{name:"Open Next.js Dev Tools",exact:true});return {url:page.url(),viewport:page.viewportSize(),settings:await settings.boundingBox(),indicator:await indicator.boundingBox(),at:Date.now()};})(page);
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: (current) [Home | tldw](http://127.0.0.1:18580/)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+### Page
+- Page URL: http://127.0.0.1:18580/
+- Page Title: Home | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T21-08-47-298Z.log#L3-L6

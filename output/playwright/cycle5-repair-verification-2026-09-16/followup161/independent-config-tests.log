@@ -1,0 +1,14 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:53632) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:53633) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ __tests__/next-config-quickstart-health.test.ts (5 tests) 26ms
+ ✓ __tests__/next-config-dev-watch-guard.test.ts (7 tests) 9ms
+
+ Test Files  2 passed (2)
+      Tests  12 passed (12)
+   Start at  14:13:02
+   Duration  443ms (transform 73ms, setup 163ms, import 50ms, tests 35ms, environment 436ms)

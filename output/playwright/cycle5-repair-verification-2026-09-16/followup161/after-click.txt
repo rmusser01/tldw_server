@@ -1,0 +1,15 @@
+### Result
+{"before":"http://127.0.0.1:18580/","after":"http://127.0.0.1:18580/settings","pointerClick":true,"at":1789593047438}
+### Ran Playwright code
+```js
+await (async page => {const before=page.url();await page.getByRole("button",{name:"Settings",exact:true}).click();await page.waitForURL("**/settings");return {before,after:page.url(),pointerClick:true,at:Date.now()};})(page);
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: (current) [Setup & Recovery | Settings | tldw](http://127.0.0.1:18580/settings)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+### Page
+- Page URL: http://127.0.0.1:18580/settings
+- Page Title: Setup & Recovery | Settings | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T21-08-47-298Z.log#L7-L10

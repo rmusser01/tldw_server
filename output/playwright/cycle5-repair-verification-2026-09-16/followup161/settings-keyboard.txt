@@ -1,0 +1,19 @@
+### Result
+{"url":"http://127.0.0.1:18580/"}
+### Ran Playwright code
+```js
+await (async page => {await page.getByRole("button",{name:"Settings",exact:true}).focus();await page.getByRole("button",{name:"Settings",exact:true}).press("Enter");return {url:page.url()};})(page);
+```
+### Open tabs
+- 0: [Home | tldw](http://127.0.0.1:18582/)
+- 1: [Home | tldw](http://127.0.0.1:18580/)
+- 2: [Home | tldw](http://127.0.0.1:18580/)
+- 3: [Home | tldw](http://127.0.0.1:18580/)
+- 4: (current) [Setup & Recovery | Settings | tldw](http://127.0.0.1:18580/settings)
+- 5: [Prompts | tldw](http://127.0.0.1:18580/prompts?edit=pa_8716-c067-557-e6c9)
+- 6: [Notes | tldw](http://127.0.0.1:18580/notes)
+### Page
+- Page URL: http://127.0.0.1:18580/settings
+- Page Title: Setup & Recovery | Settings | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T20-39-23-755Z.log#L11-L14

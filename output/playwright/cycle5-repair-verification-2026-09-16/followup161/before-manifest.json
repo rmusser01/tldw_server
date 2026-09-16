@@ -1,0 +1,26 @@
+{
+  "at": "2026-09-16T21:09:39.794Z",
+  "scope": "Development-only pointer collision; actualkeyboardnavigation succeeded.",
+  "files": [
+    {
+      "name": "settings-pointer-intercept.png",
+      "source": ".tmp/uat142-native-20260916/settings-pointer-intercept.png",
+      "sha256": "03fc845c5905c785396420bf9a33b0322a4ee4f43ae870f5c0b6460c1a3ca008"
+    },
+    {
+      "name": "settings-open.txt",
+      "source": ".tmp/uat142-native-20260916/settings-open.txt",
+      "sha256": "b6d899865debf4444e72963c07d949dff668b52e76aaff5079e3f6e37ac3ba69"
+    },
+    {
+      "name": "portal-diagnosis.txt",
+      "source": ".tmp/uat142-native-20260916/portal-diagnosis.txt",
+      "sha256": "5a7ca3936ce2d7f53ba7f503ac0e2276487a0ea299a5547eaeb5b916004917fc"
+    },
+    {
+      "name": "settings-keyboard.txt",
+      "source": ".tmp/uat142-native-20260916/settings-keyboard.txt",
+      "sha256": "05d1c257b9128e71501abc1d23d60926cd3cee7697564c1969f0d794eabcea2e"
+    }
+  ]
+}
