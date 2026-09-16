@@ -1,0 +1,18 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:10925) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | ../../../../../../../../private/tmp/cycle4-uat124-variant-persistence-probe.test.ts > UAT124 actual pipeline + save helper + Dexie + restore formatter > preserves three retries as variants when raw parent supplied=false
+{"explicitParent":false,"rows":[{"id":"assistant-0","role":"assistant","parent_message_id":"user-local"},{"id":"assistant-1","role":"assistant","parent_message_id":"user-local"},{"id":"assistant-2","role":"assistant","parent_message_id":"user-local"},{"id":"user-local","role":"user","parent_message_id":null}]}
+
+stdout | ../../../../../../../../private/tmp/cycle4-uat124-variant-persistence-probe.test.ts > UAT124 actual pipeline + save helper + Dexie + restore formatter > preserves three retries as variants when raw parent supplied=true
+{"explicitParent":true,"rows":[{"id":"assistant-0","role":"assistant","parent_message_id":"user-local"},{"id":"assistant-1","role":"assistant","parent_message_id":"user-local"},{"id":"assistant-2","role":"assistant","parent_message_id":"user-local"},{"id":"user-local","role":"user","parent_message_id":null}]}
+
+ ✓ ../../../../../../../../private/tmp/cycle4-uat124-variant-persistence-probe.test.ts (2 tests) 45ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  00:43:58
+   Duration  1.12s (transform 532ms, setup 76ms, import 676ms, tests 45ms, environment 227ms)
+

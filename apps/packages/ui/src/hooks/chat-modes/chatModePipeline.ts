@@ -1069,7 +1069,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         assistantServerMessageId: modelClient?.serverMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         userParentMessageId: userParentMessageId ?? null,
-        assistantParentMessageId: assistantParentMessageId ?? null,
+        assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
         documents,
         isContinue: mode.isContinue,
         prompt_content: promptContent,

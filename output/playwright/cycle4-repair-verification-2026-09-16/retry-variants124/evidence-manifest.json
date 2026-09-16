@@ -1,0 +1,101 @@
+{
+  "unit": "retry-variants124",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-uat124-eslint-baseline.json",
+      "bytes": 47467,
+      "sha256": "e9d01f4a313e27234eb4c7373aa9810db7a542e9df3b4972d45d1c5cce559403"
+    },
+    {
+      "file": "cycle4-uat124-eslint-comparison.json",
+      "bytes": 239,
+      "sha256": "57d7cb5f5744ae4da6a1ea2bbe68068adebc1b8bd2a2eceb9be90319e0f92f2b"
+    },
+    {
+      "file": "cycle4-uat124-eslint-final.json",
+      "bytes": 45093,
+      "sha256": "f17e5489ca7dbc469a379f4b771e2dc10722d72a0c1ccf8b907c967f94c0151b"
+    },
+    {
+      "file": "cycle4-uat124-eslint.log",
+      "bytes": 261,
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "file": "cycle4-uat124-focused-green.log",
+      "bytes": 20390,
+      "sha256": "16cfa30fb622eed608cfcb34a10d5e2029e6045f024b6eeb763f33a39ae89d9e"
+    },
+    {
+      "file": "cycle4-uat124-freeze-audit.json",
+      "bytes": 321,
+      "sha256": "5ea6cedcfa9b244b3ce7f4bf94597a3d446b75c0d5d27d181bd84bdde3c90276"
+    },
+    {
+      "file": "cycle4-uat124-implementation.md",
+      "bytes": 6831,
+      "sha256": "a39589b0b5bac26a5d5a831d86ad23ff4aa1c23920eeaa9fc604848a69700b4e"
+    },
+    {
+      "file": "cycle4-uat124-independent-green.log",
+      "bytes": 1610,
+      "sha256": "030d2b0c3f8d9b145f144f17c9511341ef91d0ce00663f87c6d6c6208eeaac98"
+    },
+    {
+      "file": "cycle4-uat124-independent-manifest.json",
+      "bytes": 802,
+      "sha256": "7cf730adadfdc72008a0b7224c18a03af09e2a0887959e280ed3e616d1873951"
+    },
+    {
+      "file": "cycle4-uat124-independent-review.md",
+      "bytes": 3162,
+      "sha256": "098b575465626c92d6dd1c19b7fb8e0369fd160c259684f78b60b1398867d821"
+    },
+    {
+      "file": "cycle4-uat124-lint-compare.mjs",
+      "bytes": 1877,
+      "sha256": "7ec42611481aa6aca2c4873b3fe5e92f0a5384b80960440e5e28cefe955d328a"
+    },
+    {
+      "file": "cycle4-uat124-owned-manifest.json",
+      "bytes": 746,
+      "sha256": "5372a754ea949762ab10cad8a875afa288e59d8368ee4df66eb4b48ba2ca4f0c"
+    },
+    {
+      "file": "cycle4-uat124-permanent-red.log",
+      "bytes": 2631,
+      "sha256": "2a2122d2c1a1179694b149f9ef646654f59dd03e7d7167addaefc82c345abb55"
+    },
+    {
+      "file": "cycle4-uat124-real-dexie-green.log",
+      "bytes": 1620,
+      "sha256": "4c5c8cee1bc22563518c553b88c2267b5a549bd259c2428b7b6e094b3f7e646e"
+    },
+    {
+      "file": "cycle4-uat124-real-dexie-independent-green.log",
+      "bytes": 1620,
+      "sha256": "6cefd1392d17e41a02b056538ec55352ae08a107303d6c42af03863fcc3fdc56"
+    },
+    {
+      "file": "cycle4-uat124-root-review.md",
+      "bytes": 946,
+      "sha256": "dbf8f1ff301cb9ae1d84095cd5cbce8451fb2d7f431d7867c7e9e9846cd6b6ee"
+    },
+    {
+      "file": "cycle4-uat124-variant-persistence-probe.config.mts",
+      "bytes": 339,
+      "sha256": "977888f741dc7a8d7e3447d1a2e99713ff4f2cc2f2a313285ed12255788d3435"
+    },
+    {
+      "file": "cycle4-uat124-variant-persistence-probe.log",
+      "bytes": 2791,
+      "sha256": "989c749657cd3fb0a949045bd0c5d24f8f34957cd2f4671cdf5f37b1793fed59"
+    },
+    {
+      "file": "cycle4-uat124-variant-persistence-probe.test.ts",
+      "bytes": 3761,
+      "sha256": "0e38c87bf84008eb7272352274f74842d559e389c26a9e06e25f99b4076d1980"
+    }
+  ]
+}

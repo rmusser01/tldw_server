@@ -1,0 +1,19 @@
+{
+  "task": "TASK-13260.64",
+  "baseRef": "53ef4bf4d53add604bfff76f532a6d6c5fb2e027",
+  "frozenAt": "2026-09-16T07:40:23.826Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "sha256": "34a7daf9fa94a7f2d82e04b15f1a5080ac839867f4d4affc03b6478425e93249"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.error-variants.persistence.test.ts",
+      "sha256": "31e1f0ca2ad22d0a309589ce4d3dc5d9d85762d667f74f967fc1a0f1e5ec8b92"
+    }
+  ],
+  "taskRecord": {
+    "path": "backlog/tasks/task-13260.64 - Preserve-failed-Chat-retry-variants-across-saved-history-reload.md",
+    "sha256": "4feddfd26f0c2c51851da8f03456c44fbbb3f9e785b8b52a44d3abd0e0f7dfe1"
+  }
+}

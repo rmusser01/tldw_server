@@ -1,0 +1,13 @@
+{
+  "checkedAt": "2026-09-16T07:41:38.917Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "match": true
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.error-variants.persistence.test.ts",
+      "match": true
+    }
+  ]
+}
