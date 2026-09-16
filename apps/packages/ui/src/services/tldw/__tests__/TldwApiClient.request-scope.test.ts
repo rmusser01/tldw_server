@@ -53,6 +53,23 @@ describe("TldwApiClient captured request scope", () => {
     mocks.bgStream.mockReset()
   })
 
+  it.each([true, false])("keeps captured character recovery scope optional without changing content (scoped: %s)", async scoped => {
+    const body = { assistant_content: "<think>Partial reasoning</think>", assistant_message_id: "acknowledged", mood_label: "calm" }
+    mocks.bgRequest.mockResolvedValue({ assistant_message_id: "acknowledged" })
+    const signal = new AbortController().signal
+    await new TldwApiClient().persistCharacterCompletion("owned", body, scoped ? { requestScope, signal } : undefined)
+    const request = mocks.bgRequest.mock.calls[0][0]
+    expect(request.body).toEqual(body)
+    expect(request.path).toBe("/api/v1/chats/owned/completions/persist?scope_type=global")
+    expect(request.method).toBe("POST")
+    if (scoped) {
+      expect(request).toMatchObject({ ...expectedScopeFields, abortSignal: signal })
+    } else {
+      expect(request.servicePromptConfig).toBeUndefined()
+      expect(request.headers).not.toHaveProperty("X-TLDW-Expected-User-ID")
+    }
+  })
+
   it.each([
     ["fetchWithAuth", ["/api/v1/chat/conversations/owned/messages-with-context"], "GET"],
     ["listCharacters", [{ limit: 5 }], "GET"],

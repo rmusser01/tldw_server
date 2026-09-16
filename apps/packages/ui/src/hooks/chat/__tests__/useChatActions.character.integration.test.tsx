@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 import React from "react"
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useChatActions } from "../useChatActions"
+import type { Message } from "@/store/option"
 
 const {
   saveLocalSuccessMock,
+  saveLocalErrorMock,
   addChatMessageMock,
   createChatMock,
   detectCharacterMoodMock,
@@ -15,6 +17,7 @@ const {
   normalChatModeMock,
   resolveVisualIdentityBindingMock
 } = vi.hoisted(() => ({
+  saveLocalErrorMock: vi.fn(async (_payload: unknown) => "history-character"),
   saveLocalSuccessMock: vi.fn(async (_payload: unknown) => "history-character"),
   addChatMessageMock: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
   createChatMock: vi.fn(),
@@ -41,6 +44,8 @@ const {
   }))
 }))
 
+const recoveryAuthority = vi.hoisted(() => ({ controller: new AbortController() }))
+
 const messageStoreState = vi.hoisted(() => ({
   value: {
     selectedModel: "deepseek-chat" as string | null,
@@ -54,7 +59,7 @@ const messageStoreState = vi.hoisted(() => ({
 vi.mock("@/services/service-prompts", () => ({
   loadServicePromptSnapshot: async (_ids: unknown, { signal }: { signal: AbortSignal }) => ({
     scopeKey: "scope:test-chat", requestScope: { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }, userId: null },
-    scopeSignal: signal, scopeInvalidatedSignal: signal, definitions: {}, capability: "unchecked", release: vi.fn()
+    scopeSignal: signal, scopeInvalidatedSignal: recoveryAuthority.controller.signal, definitions: {}, capability: "unchecked", release: vi.fn()
   })
 }))
 
@@ -84,9 +89,7 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
     () => saveLocalSuccessMock
   ),
   createSaveMessageOnError: vi.fn(
-    () =>
-      async (_payload?: unknown): Promise<string | null> =>
-        "history-character"
+    () => saveLocalErrorMock
   )
 }))
 
@@ -268,6 +271,7 @@ const createHookOptions = () => ({
 
 describe("useChatActions character integration", () => {
   beforeEach(() => {
+    recoveryAuthority.controller = new AbortController()
     vi.clearAllMocks()
     normalChatModeMock.mockResolvedValue(undefined)
     createChatMock.mockResolvedValue({
@@ -299,6 +303,43 @@ describe("useChatActions character integration", () => {
       serverChatSource: null
     }
     resolveVisualIdentityBindingMock.mockClear()
+  })
+
+  it("does not publish recovered IDs or save an old owner's partial after the lease invalidates", async () => {
+    streamCharacterChatCompletionMock.mockImplementationOnce(async function* () { yield "<think>Only reasoning</think>" })
+    addChatMessageMock.mockResolvedValueOnce({ id: "user-server-1", version: 1 })
+    let release!: (value: { id: string; version: number }) => void
+    const held = new Promise<{ id: string; version: number }>(resolve => { release = resolve })
+    addChatMessageMock.mockImplementationOnce(() => held)
+    const options = createHookOptions()
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    let pending!: ReturnType<typeof result.current.onSubmit>
+    await act(async () => { pending = result.current.onSubmit({ message: "Question", image: "" }); await new Promise(resolve => setTimeout(resolve, 0)) })
+    await waitFor(() => expect(addChatMessageMock).toHaveBeenCalledTimes(2))
+    recoveryAuthority.controller.abort()
+    options.setMessages.mockClear()
+    await act(async () => { release({ id: "old-assistant", version: 1 }); await pending })
+    expect(saveLocalErrorMock).not.toHaveBeenCalled()
+    expect(options.setMessages).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["closed", "<think>Only reasoning</think>"],
+    ["unclosed", "<think>Only reasoning"],
+    ["structured", { choices: [{ delta: { reasoning_content: "Only reasoning" } }] }]
+  ])("preserves %s reasoning as a recoverable tracked completion with acknowledged IDs", async (_label, chunk) => {
+    addChatMessageMock.mockResolvedValueOnce({ id: "user-server-1", version: 1 })
+    addChatMessageMock.mockResolvedValueOnce({ id: "assistant-server-1", version: 1 })
+    streamCharacterChatCompletionMock.mockImplementationOnce(async function* () { yield chunk })
+    let rows: Message[] = []
+    const options = { ...createHookOptions(), setMessages: vi.fn((next: Message[] | ((previous: Message[]) => Message[])) => { rows = typeof next === "function" ? next(rows) : next }) }
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    await act(async () => { await result.current.onSubmit({ message: "Question", image: "" }) })
+    expect(saveLocalSuccessMock).not.toHaveBeenCalled()
+    expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectContaining({
+      botMessage: expect.stringContaining("Only reasoning"), userServerMessageId: "user-server-1", assistantServerMessageId: "assistant-server-1"
+    }))
+    expect(rows.find(row => row.isBot)).toMatchObject({ generationInfo: { interrupted: true, interruptionReason: expect.stringContaining("final answer") } })
   })
 
   it.each(["fallback", "degraded"])("forwards the confirmed assistant ID from %s success to local persistence", async (outcome) => {
@@ -829,6 +870,7 @@ describe("useChatActions character integration", () => {
     expect(persistPayload).not.toHaveProperty("mood_confidence")
     expect(persistPayload).not.toHaveProperty("mood_topic")
     expect(detectCharacterMoodMock).not.toHaveBeenCalled()
+    expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectContaining({ assistantServerMessageId: "assistant-server-1" }))
 
     const assistantMessages = messageSnapshots
       .flatMap((snapshot) => snapshot.filter((message) => message?.isBot))
@@ -897,6 +939,7 @@ describe("useChatActions character integration", () => {
         ([, payload]: [unknown, any]) => payload?.role === "assistant"
       )
       expect(tldwAddCalls).toHaveLength(0)
+      expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectContaining({ assistantServerMessageId: "assistant-degraded-1" }))
       expect(messagesState).toEqual(
         expect.arrayContaining([
           expect.objectContaining({

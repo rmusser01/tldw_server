@@ -627,6 +627,48 @@ describe("saved normal Chat pipeline with autosave", () => {
     })
   })
 
+  it("real failed-turn regeneration sends the intended user once without its display error", async () => {
+    const projected: unknown[][] = []
+    mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => ({
+      saveToDb: true, conversationId,
+      stream: async function* (messages: unknown[]) {
+        projected.push(messages)
+        if (projected.length === 1) throw new Error("Provider failed")
+        yield "Recovered final answer"
+      }
+    }))
+    const { result } = renderWorkspace()
+    await act(async () => { await result.current.actions.onSubmit({ message: "Retry question", image: "" }) })
+    expect(result.current.state.messages.at(-1)?.message).toContain("__tldw_error__:")
+    await act(async () => { await result.current.actions.regenerateLastMessage() })
+    const request = JSON.stringify(projected[1])
+    expect(request).not.toContain("__tldw_error__:")
+    expect(request.match(/Retry question/g)).toHaveLength(1)
+    expect(result.current.state.messages.filter(row => !row.isBot)).toHaveLength(1)
+    expect(result.current.state.messages.at(-1)?.message).toBe("Recovered final answer")
+  })
+
+  it("persists a real acknowledged reasoning-only stream as one recoverable saved pair", async () => {
+    mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => new ChatTldw({ model: "test", saveToDb: true, conversationId }))
+    mocks.streamMessage.mockImplementation(async function* (_messages, options, onChunk) {
+      onChunk({ tldw_conversation_id: options.conversationId, tldw_user_message_id: "reasoning-user" })
+      yield "<think>Still working</think>"
+      onChunk({ tldw_message_id: "reasoning-assistant" })
+    })
+    const { result } = renderWorkspace()
+    await act(async () => { await result.current.actions.onSubmit({ message: "Question", image: "" }) })
+    expect(mocks.rows.map(row => [row.role, row.serverMessageId, row.content])).toEqual([
+      ["user", "reasoning-user", "Question"],
+      ["assistant", "reasoning-assistant", "<think>Still working</think>"]
+    ])
+    expect(result.current.state.messages.at(-1)).toMatchObject({
+      serverMessageId: "reasoning-assistant",
+      generationInfo: { interrupted: true, interruptionReason: expect.stringContaining("final answer") }
+    })
+    expect(result.current.state.history.map(row => row.content)).toEqual(["Question", "<think>Still working</think>"])
+    expect(mocks.addChatMessage).not.toHaveBeenCalled()
+  })
+
   it("acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft", async () => {
     mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => new ChatTldw({
       model: "test", saveToDb: true, conversationId

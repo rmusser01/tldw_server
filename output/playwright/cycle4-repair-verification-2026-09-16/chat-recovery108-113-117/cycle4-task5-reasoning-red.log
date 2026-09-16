@@ -1,0 +1,453 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx (13 tests | 2 failed) 278ms
+     × offers recovery for a settled restored reasoning-only row: <think>Only reasoning</think> 18ms
+     × offers recovery for a settled restored reasoning-only row: <think>Only reasoning 3ms
+     ✓ does not label active or usable output as missing final: {"message":"<think>Working","isStreaming":true} 2ms
+     ✓ does not label active or usable output as missing final: {"message":"<think>Working</think>Final answer"} 2ms
+     ✓ does not label active or usable output as missing final: {"message":"<think>Working</think>","role":"user","isBot":false} 2ms
+     ✓ does not label active or usable output as missing final: {"message":"<think>Working</think>","toolCalls":[{"id":"tool","name":"lookup","args":{}}]} 2ms
+     ✓ wires retry/switch/fallback/continue actions for explicit provider errors 107ms
+     ✓ renders interruption recovery status/actions for partial non-error responses 30ms
+     ✓ renders recovery for completed assistant turns with no visible text 34ms
+     ✓ renders a compact partial-save marker when stream transport drops after partial output 2ms
+     ✓ renders an image artifact event card with prompt and runtime metadata 4ms
+     ✓ does not render image artifact event metadata when generation payload is absent 1ms
+     ✓ renders image variant controls and compare preview for grouped image events 70ms
+stderr | src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from fallback success to local persistence
+Failed to persist assistant message via completions/persist: Error: Persist endpoint unavailable
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:323:9
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1026:60
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+
+stderr | src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from degraded success to local persistence
+Failed to persist assistant message via completions/persist: Error: Saved with validation warning
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:324:23
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1026:60
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21) {
+  status: 503,
+  detail: {
+    code: 'persist_validation_degraded',
+    saved: true,
+    assistant_message_id: 'fallback-assistant'
+  }
+}
+
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx (18 tests | 3 failed) 43ms
+     × preserves closed reasoning as a recoverable tracked completion with acknowledged IDs 15ms
+     × preserves unclosed reasoning as a recoverable tracked completion with acknowledged IDs 2ms
+     × preserves structured reasoning as a recoverable tracked completion with acknowledged IDs 1ms
+     ✓ forwards the confirmed assistant ID from fallback success to local persistence 3ms
+     ✓ forwards the confirmed assistant ID from degraded success to local persistence 2ms
+     ✓ keeps tracked character routing anchored to current chat metadata when global character state is stale 2ms
+     ✓ rebinds a greeting to the newly created conversation after a failed session 2ms
+     ✓ handles emote commands without sending chat 1ms
+     ✓ uses manual visual identity override when resolving assistant message metadata 2ms
+     ✓ does not let stale overlay assistant state override the active character chat 2ms
+     ✓ honors an explicit tracked character switch over the current chat metadata 1ms
+     ✓ reuses the latest store character chat when greeting persistence updates before the send closure 1ms
+     ✓ uses the latest store character id when the hook prop still points at another character 1ms
+     ✓ passes workspace scope through when creating a character-backed chat 1ms
+     ✓ strips explicit streaming emote directives and persists emote events 2ms
+     ✓ preserves explicit emote metadata when recovering a failed stream 4ms
+     ✓ does not duplicate recovery persistence when saved-degraded includes emote metadata 2ms
+     ✓ sends emote metadata when normal persist falls back to addChatMessage 1ms
+ ❯ src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts (8 tests | 3 failed) 8ms
+     × keeps closed reasoning and canonical acknowledgements in recoverable error persistence 4ms
+     × keeps unclosed reasoning and canonical acknowledgements in recoverable error persistence 1ms
+     × keeps structured reasoning and canonical acknowledgements in recoverable error persistence 0ms
+     ✓ exposes the saved assistant identity only when acknowledged ('server-assistant-1') 0ms
+     ✓ exposes the saved assistant identity only when acknowledged (undefined) 0ms
+     ✓ retains the acknowledged user when a saved stream fails after persistence 1ms
+     ✓ passes explicit conversation ids into pageAssistModel instead of relying on store fallback 0ms
+     ✓ treats empty model streams as failed recoverable assistant turns 0ms
+ ❯ src/hooks/chat-helper/__tests__/saveMessageOnError.test.ts (9 tests | 1 failed) 7ms
+     × persists an acknowledged user beside an interrupted assistant without changing local IDs 4ms
+     ✓ falls back to store setter when setHistory is not callable 1ms
+     ✓ uses a local fallback title when provider title generation fails during error recovery 0ms
+     ✓ persists user and assistant metadata extras when saving error records 0ms
+     ✓ writes nothing when an error save starts after a scope-only abort 0ms
+     ✓ defers scoped Compare metadata while preserving error messages 0ms
+     ✓ still persists a manual-stop partial when the scope lease signal is aborted 0ms
+     ✓ does not turn a scoped title 412 into an unscoped fallback history 0ms
+     ✓ cancels scoped title generation when the account scope changes 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts > runChatPipeline conversation id handoff > keeps closed reasoning and canonical acknowledgements in recoverable error persistence
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "assistantMessageId": "generated-assistant-id",
+        "assistantMessageType": undefined,
+        "assistantMetadataExtra": undefined,
+        "assistantParentMessageId": "local-user",
+        "assistantServerMessageId": "server-assistant",
+        "clusterId": undefined,
+        "conversationId": "server-chat-1",
+        "documents": undefined,
+        "fullText": "<think>Only reasoning</think>",
+        "generationInfo": undefined,
+        "historyId": "history-1",
+        "image": "",
+        "imageEventSyncPolicy": undefined,
+        "isContinue": undefined,
+        "isRegenerate": false,
+        "message": "Hello",
+        "modelId": "test",
+        "prompt_content": undefined,
+        "prompt_id": undefined,
+        "reasoning_time_taken": 0,
+        "requestScope": undefined,
+        "saveToDb": true,
+        "scopeInvalidatedSignal": undefined,
+        "scopeSignal": undefined,
+        "selectedModel": "test",
+        "setHistoryId": [Function Mock],
+        "source": Array [],
+        "userMessageId": "local-user",
+        "userMessageType": undefined,
+        "userMetadataExtra": undefined,
+        "userModelId": "test",
+        "userParentMessageId": null,
+        "userServerMessageId": "server-user",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts:85:44
+     83|       setAbortController: mocks.setAbortController, historyId: "histor…
+     84|     })
+     85|     expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+       |                                            ^
+     86|     expect(mocks.saveMessageOnError).toHaveBeenCalledWith(expect.objec…
+     87|       botMessage: expectedText, userServerMessageId: "server-user", as…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts > runChatPipeline conversation id handoff > keeps unclosed reasoning and canonical acknowledgements in recoverable error persistence
+ FAIL  src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts > runChatPipeline conversation id handoff > keeps structured reasoning and canonical acknowledgements in recoverable error persistence
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "assistantMessageId": "generated-assistant-id",
+        "assistantMessageType": undefined,
+        "assistantMetadataExtra": undefined,
+        "assistantParentMessageId": "local-user",
+        "assistantServerMessageId": "server-assistant",
+        "clusterId": undefined,
+        "conversationId": "server-chat-1",
+        "documents": undefined,
+        "fullText": "<think>Only reasoning",
+        "generationInfo": undefined,
+        "historyId": "history-1",
+        "image": "",
+        "imageEventSyncPolicy": undefined,
+        "isContinue": undefined,
+        "isRegenerate": false,
+        "message": "Hello",
+        "modelId": "test",
+        "prompt_content": undefined,
+        "prompt_id": undefined,
+        "reasoning_time_taken": 0,
+        "requestScope": undefined,
+        "saveToDb": true,
+        "scopeInvalidatedSignal": undefined,
+        "scopeSignal": undefined,
+        "selectedModel": "test",
+        "setHistoryId": [Function Mock],
+        "source": Array [],
+        "userMessageId": "local-user",
+        "userMessageType": undefined,
+        "userMetadataExtra": undefined,
+        "userModelId": "test",
+        "userParentMessageId": null,
+        "userServerMessageId": "server-user",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts:85:44
+     83|       setAbortController: mocks.setAbortController, historyId: "histor…
+     84|     })
+     85|     expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+       |                                            ^
+     86|     expect(mocks.saveMessageOnError).toHaveBeenCalledWith(expect.objec…
+     87|       botMessage: expectedText, userServerMessageId: "server-user", as…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  src/hooks/chat-helper/__tests__/saveMessageOnError.test.ts > saveMessageOnError > persists an acknowledged user beside an interrupted assistant without changing local IDs
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Received: 
+
+  1st vi.fn() call:
+
+  [
+-   ObjectContaining {
+-     "id": "local-assistant",
+-     "role": "assistant",
+-     "serverMessageId": "server-assistant",
++   {
++     "clusterId": undefined,
++     "content": "Question",
++     "documents": [],
++     "generationInfo": undefined,
++     "history_id": "history-1",
++     "id": "local-user",
++     "images": [
++       "",
++     ],
++     "message_type": undefined,
++     "metadataExtra": undefined,
++     "modelId": undefined,
++     "name": "test",
++     "parent_message_id": null,
++     "reasoning_time_taken": undefined,
++     "role": "user",
++     "serverMessageId": "server-user",
++     "time": 1,
+    },
+  ]
+
+  2nd vi.fn() call:
+
+  [
+-   ObjectContaining {
++   {
++     "clusterId": undefined,
++     "content": "ERR: provider failed",
++     "generationInfo": undefined,
++     "history_id": "history-1",
+      "id": "local-assistant",
++     "images": [],
++     "message_type": undefined,
++     "metadataExtra": undefined,
++     "modelId": undefined,
++     "name": "test",
++     "parent_message_id": null,
++     "reasoning_time_taken": undefined,
+      "role": "assistant",
+-     "serverMessageId": "server-assistant",
++     "source": [],
++     "time": 2,
+    },
+  ]
+
+
+Number of calls: 2
+
+ ❯ src/hooks/chat-helper/__tests__/saveMessageOnError.test.ts:95:31
+     93|       id: "local-user", serverMessageId: "server-user", role: "user", …
+     94|     }))
+     95|     expect(mocks.saveMessage).toHaveBeenCalledWith(expect.objectContai…
+       |                               ^
+     96|       id: "local-assistant", serverMessageId: "server-assistant", role…
+     97|     }))
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > preserves closed reasoning as a recoverable tracked completion with acknowledged IDs
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "assistantMessageId": "generated-id",
+        "assistantParentMessageId": "generated-id",
+        "assistantServerMessageId": "assistant-server-1",
+        "conversationId": "tracked-chat-1",
+        "fullText": "<think>Only reasoning</think>",
+        "historyId": "history-character",
+        "image": "",
+        "isRegenerate": false,
+        "message": "Question",
+        "message_source": "web-ui",
+        "modelId": "deepseek-chat",
+        "reasoning_time_taken": 0,
+        "saveToDb": true,
+        "selectedModel": "deepseek-chat",
+        "serverMessagesAlreadyPersisted": true,
+        "setHistoryId": [Function anonymous],
+        "source": Array [],
+        "userMessageId": "generated-id",
+        "userServerMessageId": "user-server-1",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:314:38
+    312|     const { result } = renderHook(() => useChatActions(options as unkn…
+    313|     await act(async () => { await result.current.onSubmit({ message: "…
+    314|     expect(saveLocalSuccessMock).not.toHaveBeenCalled()
+       |                                      ^
+    315|     expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectConta…
+    316|       botMessage: expect.stringContaining("Only reasoning"), userServe…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > preserves unclosed reasoning as a recoverable tracked completion with acknowledged IDs
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > preserves structured reasoning as a recoverable tracked completion with acknowledged IDs
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "assistantMessageId": "generated-id",
+        "assistantParentMessageId": "generated-id",
+        "assistantServerMessageId": "assistant-server-1",
+        "conversationId": "tracked-chat-1",
+        "fullText": "<think>Only reasoning",
+        "historyId": "history-character",
+        "image": "",
+        "isRegenerate": false,
+        "message": "Question",
+        "message_source": "web-ui",
+        "modelId": "deepseek-chat",
+        "reasoning_time_taken": 0,
+        "saveToDb": true,
+        "selectedModel": "deepseek-chat",
+        "serverMessagesAlreadyPersisted": true,
+        "setHistoryId": [Function anonymous],
+        "source": Array [],
+        "userMessageId": "generated-id",
+        "userServerMessageId": "user-server-1",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:314:38
+    312|     const { result } = renderHook(() => useChatActions(options as unkn…
+    313|     await act(async () => { await result.current.onSubmit({ message: "…
+    314|     expect(saveLocalSuccessMock).not.toHaveBeenCalled()
+       |                                      ^
+    315|     expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectConta…
+    316|       botMessage: expect.stringContaining("Only reasoning"), userServe…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx > PlaygroundMessage error recovery integration > offers recovery for a settled restored reasoning-only row: <think>Only reasoning</think>
+ FAIL  src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx > PlaygroundMessage error recovery integration > offers recovery for a settled restored reasoning-only row: <think>Only reasoning
+TestingLibraryElementError: Unable to find an element with the text: /No final answer/. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<article[39m
+      [33maria-label[39m=[32m"[object Object]"[39m
+      [33mclass[39m=[32m"group relative flex w-full max-w-5xl flex-col items-end justify-center text-text pb-3 md:px-5  "[39m
+      [33mdata-index[39m=[32m"0"[39m
+      [33mdata-role[39m=[32m"assistant"[39m
+      [33mdata-testid[39m=[32m"chat-message"[39m
+      [33mtabindex[39m=[32m"0"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-row m-auto w-full gap-4 md:gap-6 my-2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"w-8 flex flex-col relative "[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"relative h-7 w-7 p-1 rounded-sm text-white flex items-center justify-center  text-opacity-100"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"absolute h-8 w-8 rounded-full bg-gradient-to-r from-green-300 to-purple-400"[39m
+            [36m/>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 flex-1 flex-col gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-border/50 shadow-sm border-l-2 border-l-primary/20 gap-2 px-4 pt-3 pb-2.5"[39m
+            [33mstyle[39m=[32m"background-color: rgb(var(--color-surface) / var(--chat-message-opacity, 0.6));"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"flex flex-wrap items-center gap-2"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-caption font-semibold text-text"[39m
+                [36m>[39m
+                  [0mAssistant[0m
+                [36m</span>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex flex-grow flex-col"[39m
+            [36m>[39m
+              [36m<div>[39m
+                [0mOnly reasoning[0m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mdata-testid[39m=[32m"message-actions"[39m
+            [36m/>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</article>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ Object.getElementError ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx:292:19
+    290|     const retry = vi.fn()
+    291|     render(<PlaygroundMessage {...baseProps} message={message} onRegen…
+    292|     expect(screen.getByText(/No final answer/)).toBeInTheDocument()
+       |                   ^
+    293|     expect(screen.getByText("Only reasoning")).toBeInTheDocument()
+    294|     await userEvent.click(screen.getByRole("button", { name: /Retry/ }…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+
+ Test Files  4 failed (4)
+      Tests  9 failed | 39 passed (48)
+   Start at  20:07:56
+   Duration  2.07s (transform 1.26s, setup 302ms, import 2.04s, tests 336ms, environment 996ms)
+

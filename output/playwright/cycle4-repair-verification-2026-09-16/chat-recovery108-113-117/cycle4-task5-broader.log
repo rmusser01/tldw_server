@@ -1,0 +1,447 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 0 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 1 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to B
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to A
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cannot autosave a second conversation while the completed first pair is waiting for local persistence
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps temporary inference unsaved and promotes its existing pair only once
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > returns a recoverable creation failure and retries without a duplicate pair
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > rechecks the current conversation after promotion finishes during send initialization
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cancels a waiting follow-up without cancelling the owning promotion
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cleans up a failed promotion so retry saves the original pair before the next turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 0 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 1 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after ambiguous commit acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after new history on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after A to B to A on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old stream completes
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old local persistence completes
+Using normalChatMode
+
+ ✓ src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx (47 tests) 2635ms
+stderr | src/hooks/__tests__/useMessage.service-prompts.test.tsx > useMessage legacy Sidepanel Service Prompts > falls back to inline context when best-effort media ingest fails normally
+tldw ragSearch failed, falling back to inline context Error: ingest unavailable
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/__tests__/useMessage.service-prompts.test.tsx:875:42
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+    at runTest (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:12)
+
+stderr | src/hooks/__tests__/useMessage.service-prompts.test.tsx > useMessage legacy Sidepanel Service Prompts > persists a manual-stop Sidepanel partial under a scoped lease
+Error [AbortError]: Request cancelled
+    at chatWithWebsiteMode (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/useMessage.tsx:779:28)
+    at Object.onSubmit (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/useMessage.tsx:2947:11)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/__tests__/useMessage.service-prompts.test.tsx:1122:7
+
+stderr | src/hooks/__tests__/useMessage.service-prompts.test.tsx > useMessage legacy Sidepanel Service Prompts > discards a Sidepanel turn when its prompt scope changes during error persistence
+Error: provider failed
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/__tests__/useMessage.service-prompts.test.tsx:1166:15
+    at AsyncGenerator.next (<anonymous>)
+    at chatWithWebsiteMode (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/useMessage.tsx:739:24)
+    at Object.onSubmit (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/useMessage.tsx:2947:11)
+
+stderr | src/hooks/__tests__/useMessage.service-prompts.test.tsx > useMessage legacy Sidepanel Service Prompts > discards a stopped Sidepanel turn if its account changes during error persistence
+Error: provider failed
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/__tests__/useMessage.service-prompts.test.tsx:1223:15
+    at AsyncGenerator.next (<anonymous>)
+    at chatWithWebsiteMode (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/useMessage.tsx:739:24)
+    at Object.onSubmit (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/useMessage.tsx:2947:11)
+
+ ✓ src/hooks/__tests__/useMessage.service-prompts.test.tsx (20 tests) 288ms
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.abort-lifecycle.test.ts (12 tests) 112ms
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > uses and releases a freshly loaded snapshot lease for the whole pipeline
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > uses but does not release a caller-owned snapshot lease
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > loads the Main RAG answer and rewrite snapshot before entering the pipeline
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > loads only the answer snapshot for Tab Chat
+Using tabChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > loads the web-search snapshot only when Normal Chat enables web search
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > loads the web-search snapshot only when Normal Chat enables web search
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > reuses a caller-supplied immutable snapshot in every wrapper
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > reuses a caller-supplied immutable snapshot in every wrapper
+Using tabChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > reuses a caller-supplied immutable snapshot in every wrapper
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > rejects a caller snapshot missing the Main RAG answer before pipeline retrieval
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > rejects a caller snapshot missing the rewrite before selected-source preflight
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > validates a freshly loaded Main RAG snapshot before pipeline entry
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > rejects a caller snapshot missing the Tab answer before pipeline entry
+Using tabChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > rejects a web-enabled Normal snapshot missing its answer before image preflight
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > does not read or validate Service Prompts for Normal Chat without web search
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > renders Main RAG once, keeps the original answer question, and locks rewrite tools
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > renders Tab Chat once with the original question and never rewrites
+Using tabChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > keeps the packaged Tab image provider message byte-identical
+Using tabChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > does not convert selected-source account cancellation into a handled response
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > renders the web-search ISO timestamp and normalized results in one pass
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > checks web-search prompt availability outside the best-effort search catch
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > keeps ordinary web-provider failure as a best-effort fallback after prompt resolution
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > does not swallow a web-search scope rejection before the signal aborts
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > does not convert a selected-source prompt failure into a grounding fallback
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > preserves selected-source retrieval failure as a grounded handled response
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > keeps ordinary packaged RAG provider messages byte-identical
+Using ragMode
+
+ ✓ src/hooks/chat-modes/__tests__/service-prompts.test.ts (29 tests) 12ms
+ ✓ src/hooks/chat-modes/__tests__/ragMode.sanitization.test.ts (13 tests) 5ms
+Error: [vitest] No "isReasoningOnlyResponse" export is defined on the "@/libs/reasoning" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:484:5)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+Error: [vitest] No "isReasoningOnlyResponse" export is defined on the "@/libs/reasoning" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:484:5)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+stderr | src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx > PlaygroundMessage Mermaid rendering gates > enables Mermaid for a completed assistant markdown message by default
+The above error occurred in the <PlaygroundMessage> component:
+
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:263:54)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+Error: [vitest] No "isReasoningOnlyResponse" export is defined on the "@/libs/reasoning" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:484:5)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+Error: [vitest] No "isReasoningOnlyResponse" export is defined on the "@/libs/reasoning" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:484:5)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+stderr | src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx > PlaygroundMessage Mermaid rendering gates > uses the saved assistant message id as the Mermaid artifact context
+The above error occurred in the <PlaygroundMessage> component:
+
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:263:54)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+Error: [vitest] No "isReasoningOnlyResponse" export is defined on the "@/libs/reasoning" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:484:5)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+Error: [vitest] No "isReasoningOnlyResponse" export is defined on the "@/libs/reasoning" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:484:5)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+stderr | src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx > PlaygroundMessage Mermaid rendering gates > uses a safe local Mermaid artifact context when no message or conversation id is available
+The above error occurred in the <PlaygroundMessage> component:
+
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:263:54)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+Error: [vitest] No "isReasoningOnlyResponse" export is defined on the "@/libs/reasoning" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:484:5)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+Error: [vitest] No "isReasoningOnlyResponse" export is defined on the "@/libs/reasoning" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:484:5)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+stderr | src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx > PlaygroundMessage Mermaid rendering gates > namespaces Mermaid artifact contexts per assistant Markdown segment
+The above error occurred in the <PlaygroundMessage> component:
+
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:263:54)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+Error: [vitest] No "isReasoningOnlyResponse" export is defined on the "@/libs/reasoning" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:484:5)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+Error: [vitest] No "isReasoningOnlyResponse" export is defined on the "@/libs/reasoning" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:484:5)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+stderr | src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx > PlaygroundMessage Mermaid rendering gates > does not enable Mermaid when the chat setting is disabled
+The above error occurred in the <PlaygroundMessage> component:
+
+    at PlaygroundMessage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/Playground/Message.tsx:263:54)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+ ❯ src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx (12 tests | 5 failed) 56ms
+     × enables Mermaid for a completed assistant markdown message by default 13ms
+     × uses the saved assistant message id as the Mermaid artifact context 2ms
+     × uses a safe local Mermaid artifact context when no message or conversation id is available 1ms
+     × namespaces Mermaid artifact contexts per assistant Markdown segment 1ms
+     ✓ uses plain text instead of Markdown while assistant output is streaming 8ms
+     ✓ keeps Mermaid enabled for an older completed assistant message while another row streams 16ms
+     ✓ does not enable Mermaid on user messages 3ms
+     × does not enable Mermaid when the chat setting is disabled 2ms
+     ✓ forwards Mermaid enablement through completed assistant reasoning 2ms
+     ✓ keeps Mermaid disabled while reasoning is actively streaming 2ms
+     ✓ keeps Mermaid enabled for completed compact rows while a later row streams 4ms
+     ✓ does not compute a compact Mermaid artifact context when Mermaid actions are disabled 2ms
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.provider-recovery.test.ts (2 tests) 3ms
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.dynamic-ui.test.ts (3 tests) 4ms
+stdout | src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts > normalChatMode overlay prompt ordering > keeps base prompt first, overlay second, actor after overlay, and web search last
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts > normalChatMode overlay prompt ordering > keeps generic systemPromptAppendix appended to the active base prompt
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts > normalChatMode overlay prompt ordering > does not classify a no-web-search manual stop as scope invalidation
+Using normalChatMode
+
+ ✓ src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts (3 tests) 5ms
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts (8 tests) 5ms
+ ✓ src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts (3 tests) 4ms
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.error-recovery.guard.test.ts (2 tests) 2ms
+ ✓ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (39 tests) 7960ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn false)  515ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn true)  516ms
+     ✓ preserves canonical saved identity with actual WebUI storage and six loaders: sidebar  415ms
+     ✓ uses the real picker to deliberately select Robot with a saved target  749ms
+     ✓ uses the real picker to deliberately select New choice with a saved target  667ms
+     ✓ keeps the saved conversation and preference after cancelling the real legacy picker confirmation  628ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx > PlaygroundMessage Mermaid rendering gates > enables Mermaid for a completed assistant markdown message by default
+ FAIL  src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx > PlaygroundMessage Mermaid rendering gates > uses the saved assistant message id as the Mermaid artifact context
+ FAIL  src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx > PlaygroundMessage Mermaid rendering gates > uses a safe local Mermaid artifact context when no message or conversation id is available
+ FAIL  src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx > PlaygroundMessage Mermaid rendering gates > namespaces Mermaid artifact contexts per assistant Markdown segment
+ FAIL  src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx > PlaygroundMessage Mermaid rendering gates > does not enable Mermaid when the chat setting is disabled
+Error: [vitest] No "isReasoningOnlyResponse" export is defined on the "@/libs/reasoning" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+vi.mock(import("@/libs/reasoning"), async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    // your mocked methods
+  }
+})
+
+ ❯ PlaygroundMessage src/components/Common/Playground/Message.tsx:484:5
+    482|     !props.toolCalls?.length && !props.images?.length &&
+    483|     !isImageGenerationMessageType(props.message_type) &&
+    484|     isReasoningOnlyResponse(props.message || "")
+       |     ^
+    485|   const interruptedGeneration = missingFinalAnswer || Boolean(
+    486|     (props.generationInfo as Record<string, unknown> | undefined)?.int…
+ ❯ renderWithHooks ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18
+ ❯ mountIndeterminateComponent ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13
+ ❯ beginWork ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16
+ ❯ beginWork$1 ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27465:14
+ ❯ performUnitOfWork ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:26599:12
+ ❯ workLoopSync ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:26505:5
+ ❯ renderRootSync ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:26473:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+
+ Test Files  1 failed | 12 passed (13)
+      Tests  5 failed | 188 passed (193)
+   Start at  20:14:19
+   Duration  10.18s (transform 1.93s, setup 771ms, import 4.60s, tests 11.09s, environment 2.68s)
+

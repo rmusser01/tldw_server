@@ -1312,16 +1312,25 @@ export const chatRagMethods = {
     this: TldwApiClientCore,
     chat_id: string | number,
     payload: Record<string, any>,
-    options?: { scope?: ChatScope }
+    options?: {
+      scope?: ChatScope
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+    }
   ): Promise<any> {
     const cid = String(chat_id)
     const query = buildQuery(toChatScopeParams(options?.scope))
+    const scopeFields = requestScopeFields(options?.requestScope)
     try {
       const res = await bgRequest<any>({
         path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload
+        headers: { "Content-Type": "application/json", ...scopeFields.headers },
+        body: payload,
+        abortSignal: options?.signal,
+        ...(scopeFields.servicePromptConfig
+          ? { servicePromptConfig: scopeFields.servicePromptConfig }
+          : {})
       })
       this.invalidateChatMessagesCache(cid)
       return res

@@ -15,7 +15,9 @@ import { useTTS, type TtsClipMeta } from "@/hooks/useTTS"
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference"
 import { tagColors } from "@/utils/color"
 import { removeModelSuffix } from "@/db/dexie/models"
-import { parseReasoning } from "@/libs/reasoning"
+import {
+  parseReasoning, isReasoningOnlyResponse, MISSING_FINAL_ANSWER_MESSAGE
+} from "@/libs/reasoning"
 import {
   decodeChatErrorPayload,
   type ChatErrorPayload
@@ -84,6 +86,7 @@ import {
 import { resolveFallbackAudit } from "./routing-fallback-audit"
 import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
+  isImageGenerationMessageType,
   resolveImageGenerationMetadata,
   type ImageGenerationRequestSnapshot
 } from "@/utils/image-generation-chat"
@@ -476,15 +479,22 @@ export const PlaygroundMessage = (props: Props) => {
   )
   const showUsageMetadata =
     isProMode && props.isBot && messageUsage.totalTokens > 0
-  const interruptedGeneration = Boolean(
+  const missingFinalAnswer = props.isBot && props.role !== "system" &&
+    !props.isStreaming && !props.isProcessing &&
+    !props.toolCalls?.length && !props.images?.length &&
+    !isImageGenerationMessageType(props.message_type) &&
+    isReasoningOnlyResponse(props.message || "")
+  const interruptedGeneration = missingFinalAnswer || Boolean(
     (props.generationInfo as Record<string, unknown> | undefined)?.interrupted
   )
   const interruptionReason = React.useMemo(() => {
     const raw = (props.generationInfo as Record<string, unknown> | undefined)
       ?.interruptionReason
-    if (typeof raw !== "string" || raw.trim().length === 0) return null
+    if (typeof raw !== "string" || raw.trim().length === 0) {
+      return missingFinalAnswer ? MISSING_FINAL_ANSWER_MESSAGE : null
+    }
     return raw.trim()
-  }, [props.generationInfo])
+  }, [props.generationInfo, missingFinalAnswer])
   const streamTransportInterrupted = Boolean(
     (props.generationInfo as Record<string, unknown> | undefined)
       ?.streamTransportInterrupted

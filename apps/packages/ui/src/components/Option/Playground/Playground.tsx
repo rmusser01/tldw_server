@@ -206,6 +206,7 @@ const getCharacterChatRouteIntentFromLocation = (
 const updateCharacterChatRouteSearch = (
   search: string,
   characterId: string | null,
+  chatId: string | null = null,
 ): string => {
   const normalizedSearch = search.startsWith("?") ? search.slice(1) : search;
   const params = new URLSearchParams(normalizedSearch);
@@ -214,6 +215,7 @@ const updateCharacterChatRouteSearch = (
   params.delete("chat_id");
   params.delete("serverChatId");
   params.delete("server_chat_id");
+  if (chatId) params.set("chatId", chatId);
 
   if (characterId) {
     params.set("characterId", characterId);
@@ -229,6 +231,7 @@ const updateCharacterChatRouteSearch = (
 const updateCharacterChatRouteHash = (
   hash: string,
   characterId: string | null,
+  chatId: string | null = null,
 ): string => {
   const prefix = hash.startsWith("#") ? "#" : "";
   const value = prefix ? hash.slice(1) : hash;
@@ -238,6 +241,7 @@ const updateCharacterChatRouteHash = (
   return `${prefix}${hashPath}${updateCharacterChatRouteSearch(
     hashSearch,
     characterId,
+    chatId,
   )}`;
 };
 
@@ -514,6 +518,8 @@ export const Playground = () => {
     history,
     historyId,
     serverChatId,
+    serverChatMetaLoaded,
+    serverChatCharacterId,
     serverChatTitle,
     serverChatLoadState,
     serverChatLoadError,
@@ -1067,6 +1073,14 @@ export const Playground = () => {
     if (routeCharacterIntentInFlightRef.current) return;
 
     const nextCharacterId = selectedTrackedCharacterId;
+    // A creation URL is a command. Once its owned saved target is confirmed,
+    // replace it with that target so reloading cannot execute the command again.
+    const savedRouteChatId =
+      sessionScopeReady && serverChatMetaLoaded && serverChatId &&
+      persistedServerChatId === serverChatId &&
+      String(serverChatCharacterId ?? "") === nextCharacterId
+        ? String(serverChatId)
+        : null;
     const routeCharacterApplied =
       routeCharacterIntentId != null &&
       routeCharacterIntentAppliedRef.current === routeCharacterIntentId;
@@ -1079,7 +1093,8 @@ export const Playground = () => {
     if (
       nextCharacterId &&
       !routeCharacterIntentChatId &&
-      routeCharacterIntentId === nextCharacterId
+      routeCharacterIntentId === nextCharacterId &&
+      !savedRouteChatId
     ) {
       return;
     }
@@ -1104,6 +1119,7 @@ export const Playground = () => {
           search: updateCharacterChatRouteSearch(
             currentSearch,
             nextCharacterId,
+            savedRouteChatId,
           ),
           hash: currentHash,
         }
@@ -1111,7 +1127,9 @@ export const Playground = () => {
         ? {
             pathname,
             search: currentSearch,
-            hash: updateCharacterChatRouteHash(currentHash, nextCharacterId),
+            hash: updateCharacterChatRouteHash(
+              currentHash, nextCharacterId, savedRouteChatId,
+            ),
           }
         : null;
 
@@ -1131,6 +1149,11 @@ export const Playground = () => {
     routeCharacterIntentId,
     routeRequestsCharacterMode,
     selectedTrackedCharacterId,
+    sessionScopeReady,
+    persistedServerChatId,
+    serverChatId,
+    serverChatMetaLoaded,
+    serverChatCharacterId,
   ]);
 
   React.useEffect(() => {

@@ -1,0 +1,318 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/utils/__tests__/generate-history.image-generation.test.ts (3 tests | 1 failed) 7ms
+     ✓ excludes image generation no-op messages from prompt history 2ms
+     × omits only a recognized assistant display error 4ms
+     ✓ retains a user quotation, malformed marker and genuine partial prose 0ms
+TypeError: Cannot read properties of undefined (reading 'supported')
+    at PromptAssistComposerAction (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Chat/composer/PromptAssistComposerAction.tsx:378:27)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+    at HTMLUnknownElementImpl._dispatch (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9)
+    at HTMLUnknownElementImpl.dispatchEvent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17)
+TypeError: Cannot read properties of undefined (reading 'supported')
+    at PromptAssistComposerAction (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Chat/composer/PromptAssistComposerAction.tsx:378:27)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+    at HTMLUnknownElementImpl._dispatch (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9)
+    at HTMLUnknownElementImpl.dispatchEvent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17)
+stderr | src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx > PlaygroundForm pinned fallback > Retry chat regenerates the failed turn instead of appending its user again
+The above error occurred in the <PromptAssistComposerAction> component:
+
+    at PromptAssistComposerAction (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Chat/composer/PromptAssistComposerAction.tsx:181:3)
+    at div
+    at div
+    at div
+    at div
+    at form
+    at div
+    at div
+    at div
+    at div
+    at div
+    at div
+    at PlaygroundForm (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx:299:3)
+    at MemoryRouter (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx:308:20)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+TypeError: Cannot read properties of undefined (reading 'supported')
+    at PromptAssistComposerAction (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Chat/composer/PromptAssistComposerAction.tsx:378:27)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+    at HTMLUnknownElementImpl._dispatch (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9)
+    at HTMLUnknownElementImpl.dispatchEvent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17)
+TypeError: Cannot read properties of undefined (reading 'supported')
+    at PromptAssistComposerAction (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Chat/composer/PromptAssistComposerAction.tsx:378:27)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+    at HTMLUnknownElementImpl._dispatch (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9)
+    at HTMLUnknownElementImpl.dispatchEvent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17)
+stderr | src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx > PlaygroundForm pinned fallback > uses one shared disconnected recovery notice without duplicate composer copy
+The above error occurred in the <PromptAssistComposerAction> component:
+
+    at PromptAssistComposerAction (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Chat/composer/PromptAssistComposerAction.tsx:181:3)
+    at div
+    at div
+    at div
+    at div
+    at form
+    at div
+    at div
+    at div
+    at div
+    at div
+    at div
+    at PlaygroundForm (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx:299:3)
+    at MemoryRouter (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx:308:20)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+TypeError: Cannot read properties of undefined (reading 'supported')
+    at PromptAssistComposerAction (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Chat/composer/PromptAssistComposerAction.tsx:378:27)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+    at HTMLUnknownElementImpl._dispatch (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9)
+    at HTMLUnknownElementImpl.dispatchEvent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17)
+TypeError: Cannot read properties of undefined (reading 'supported')
+    at PromptAssistComposerAction (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Chat/composer/PromptAssistComposerAction.tsx:378:27)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+    at HTMLUnknownElementImpl._dispatch (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9)
+    at HTMLUnknownElementImpl.dispatchEvent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17)
+stderr | src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx > PlaygroundForm pinned fallback > renders a dedicated pinned-only fallback card and separate recent history block
+The above error occurred in the <PromptAssistComposerAction> component:
+
+    at PromptAssistComposerAction (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Chat/composer/PromptAssistComposerAction.tsx:181:3)
+    at div
+    at div
+    at div
+    at div
+    at form
+    at div
+    at div
+    at div
+    at div
+    at div
+    at div
+    at PlaygroundForm (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx:299:3)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+TypeError: Cannot read properties of undefined (reading 'supported')
+    at PromptAssistComposerAction (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Chat/composer/PromptAssistComposerAction.tsx:378:27)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+    at HTMLUnknownElementImpl._dispatch (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9)
+    at HTMLUnknownElementImpl.dispatchEvent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17)
+TypeError: Cannot read properties of undefined (reading 'supported')
+    at PromptAssistComposerAction (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Chat/composer/PromptAssistComposerAction.tsx:378:27)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+    at HTMLUnknownElementImpl._dispatch (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9)
+    at HTMLUnknownElementImpl.dispatchEvent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17)
+stderr | src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx > PlaygroundForm pinned fallback > restores and unpins from the pinned-only fallback card
+The above error occurred in the <PromptAssistComposerAction> component:
+
+    at PromptAssistComposerAction (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Chat/composer/PromptAssistComposerAction.tsx:181:3)
+    at div
+    at div
+    at div
+    at div
+    at form
+    at div
+    at div
+    at div
+    at div
+    at div
+    at div
+    at PlaygroundForm (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx:299:3)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+ ❯ src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx (4 tests | 4 failed) 102ms
+     × Retry chat regenerates the failed turn instead of appending its user again 60ms
+     × uses one shared disconnected recovery notice without duplicate composer copy 17ms
+     × renders a dedicated pinned-only fallback card and separate recent history block 14ms
+     × restores and unpins from the pinned-only fallback card 10ms
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 0 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 1 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to B
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to A
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cannot autosave a second conversation while the completed first pair is waiting for local persistence
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps temporary inference unsaved and promotes its existing pair only once
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > returns a recoverable creation failure and retries without a duplicate pair
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > rechecks the current conversation after promotion finishes during send initialization
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cancels a waiting follow-up without cancelling the owning promotion
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cleans up a failed promotion so retry saves the original pair before the next turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 0 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 1 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after ambiguous commit acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after new history on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after A to B to A on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old stream completes
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old local persistence completes
+Using normalChatMode
+
+ ✓ src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx (47 tests) 2750ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/utils/__tests__/generate-history.image-generation.test.ts > generateHistory display-error projection > omits only a recognized assistant display error
+AssertionError: expected [ 'human', 'ai' ] to deeply equal [ 'human' ]
+
+- Expected
++ Received
+
+  [
+    "human",
++   "ai",
+  ]
+
+ ❯ src/utils/__tests__/generate-history.image-generation.test.ts:46:48
+     44|   it("omits only a recognized assistant display error", () => {
+     45|     const history = generateHistory([{ role: "user", content: "Questio…
+     46|     expect(history.map(row => row._getType())).toEqual(["human"])
+       |                                                ^
+     47|   })
+     48|   it("retains a user quotation, malformed marker and genuine partial p…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx > PlaygroundForm pinned fallback > Retry chat regenerates the failed turn instead of appending its user again
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx > PlaygroundForm pinned fallback > uses one shared disconnected recovery notice without duplicate composer copy
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx > PlaygroundForm pinned fallback > renders a dedicated pinned-only fallback card and separate recent history block
+ FAIL  src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx > PlaygroundForm pinned fallback > restores and unpins from the pinned-only fallback card
+TypeError: Cannot read properties of undefined (reading 'supported')
+ ❯ PromptAssistComposerAction src/components/Chat/composer/PromptAssistComposerAction.tsx:378:27
+    376|     readActiveRoute: () => modelSelectionRef.current ?? { selected_mod…
+    377|     limits:
+    378|       promptCapabilities?.prompt_improvement_v1.supported === true
+       |                           ^
+    379|         ? promptCapabilities.prompt_improvement_v1.limits
+    380|         : null,
+ ❯ renderWithHooks ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18
+ ❯ mountIndeterminateComponent ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13
+ ❯ beginWork ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16
+ ❯ beginWork$1 ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27465:14
+ ❯ performUnitOfWork ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:26596:12
+ ❯ workLoopSync ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:26505:5
+ ❯ renderRootSync ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:26473:7
+ ❯ recoverFromConcurrentError ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:25889:20
+ ❯ performConcurrentWorkOnRoot ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:25789:22
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+
+ Test Files  2 failed | 1 passed (3)
+      Tests  5 failed | 49 passed (54)
+   Start at  20:01:15
+   Duration  5.35s (transform 2.02s, setup 352ms, import 3.40s, tests 2.86s, environment 945ms)
+

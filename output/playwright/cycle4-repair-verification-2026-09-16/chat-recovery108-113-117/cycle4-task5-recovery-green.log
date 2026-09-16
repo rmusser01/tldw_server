@@ -1,0 +1,48 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ✓ src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx (13 tests) 323ms
+stderr | src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from fallback success to local persistence
+Failed to persist assistant message via completions/persist: Error: Persist endpoint unavailable
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:325:9
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1026:60
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+
+stderr | src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from degraded success to local persistence
+Failed to persist assistant message via completions/persist: Error: Saved with validation warning
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:326:23
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1026:60
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21) {
+  status: 503,
+  detail: {
+    code: 'persist_validation_degraded',
+    saved: true,
+    assistant_message_id: 'fallback-assistant'
+  }
+}
+
+ ✓ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx (18 tests) 44ms
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts (8 tests) 6ms
+ ✓ src/hooks/chat-helper/__tests__/saveMessageOnError.test.ts (9 tests) 5ms
+ ✓ src/utils/__tests__/generate-history.image-generation.test.ts (3 tests) 3ms
+ ✓ src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx (4 tests) 220ms
+
+ Test Files  6 passed (6)
+      Tests  55 passed (55)
+   Start at  20:11:32
+   Duration  3.09s (transform 1.87s, setup 441ms, import 2.89s, tests 601ms, environment 1.44s)
+

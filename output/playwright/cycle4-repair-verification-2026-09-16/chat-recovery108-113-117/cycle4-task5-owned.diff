@@ -1,0 +1,1319 @@
+diff --git a/apps/packages/ui/src/components/Common/Playground/Message.tsx b/apps/packages/ui/src/components/Common/Playground/Message.tsx
+index a1360bda0f..330bc22ef6 100644
+--- a/apps/packages/ui/src/components/Common/Playground/Message.tsx
++++ b/apps/packages/ui/src/components/Common/Playground/Message.tsx
+@@ -15,7 +15,9 @@ import { useTTS, type TtsClipMeta } from "@/hooks/useTTS"
+ import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference"
+ import { tagColors } from "@/utils/color"
+ import { removeModelSuffix } from "@/db/dexie/models"
+-import { parseReasoning } from "@/libs/reasoning"
++import {
++  parseReasoning, isReasoningOnlyResponse, MISSING_FINAL_ANSWER_MESSAGE
++} from "@/libs/reasoning"
+ import {
+   decodeChatErrorPayload,
+   type ChatErrorPayload
+@@ -84,6 +86,7 @@ import {
+ import { resolveFallbackAudit } from "./routing-fallback-audit"
+ import {
+   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
++  isImageGenerationMessageType,
+   resolveImageGenerationMetadata,
+   type ImageGenerationRequestSnapshot
+ } from "@/utils/image-generation-chat"
+@@ -476,15 +479,22 @@ export const PlaygroundMessage = (props: Props) => {
+   )
+   const showUsageMetadata =
+     isProMode && props.isBot && messageUsage.totalTokens > 0
+-  const interruptedGeneration = Boolean(
++  const missingFinalAnswer = props.isBot && props.role !== "system" &&
++    !props.isStreaming && !props.isProcessing &&
++    !props.toolCalls?.length && !props.images?.length &&
++    !isImageGenerationMessageType(props.message_type) &&
++    isReasoningOnlyResponse(props.message || "")
++  const interruptedGeneration = missingFinalAnswer || Boolean(
+     (props.generationInfo as Record<string, unknown> | undefined)?.interrupted
+   )
+   const interruptionReason = React.useMemo(() => {
+     const raw = (props.generationInfo as Record<string, unknown> | undefined)
+       ?.interruptionReason
+-    if (typeof raw !== "string" || raw.trim().length === 0) return null
++    if (typeof raw !== "string" || raw.trim().length === 0) {
++      return missingFinalAnswer ? MISSING_FINAL_ANSWER_MESSAGE : null
++    }
+     return raw.trim()
+-  }, [props.generationInfo])
++  }, [props.generationInfo, missingFinalAnswer])
+   const streamTransportInterrupted = Boolean(
+     (props.generationInfo as Record<string, unknown> | undefined)
+       ?.streamTransportInterrupted
+diff --git a/apps/packages/ui/src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx b/apps/packages/ui/src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx
+index e47b316866..c3a40bdb6d 100644
+--- a/apps/packages/ui/src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx
++++ b/apps/packages/ui/src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx
+@@ -207,10 +207,6 @@ vi.mock("@/hooks/useDiscoSkills", () => ({
+   })
+ }))
+ 
+-vi.mock("@/libs/reasoning", () => ({
+-  parseReasoning: (content: string) => [{ type: "message", content }]
+-}))
+-
+ vi.mock("@/utils/chat-error-message", () => ({
+   decodeChatErrorPayload: decodeChatErrorPayloadMock
+ }))
+@@ -290,6 +286,25 @@ describe("PlaygroundMessage error recovery integration", () => {
+     decodeChatErrorPayloadMock.mockReturnValue(null)
+   })
+ 
++  it.each(["<think>Only reasoning</think>", "<think>Only reasoning"])("offers recovery for a settled restored reasoning-only row: %s", async message => {
++    const retry = vi.fn()
++    render(<PlaygroundMessage {...baseProps} message={message} onRegenerate={retry} />)
++    expect(screen.getByText(/No final answer/)).toBeInTheDocument()
++    expect(screen.getByText("Only reasoning")).toBeInTheDocument()
++    await userEvent.click(screen.getByRole("button", { name: /Retry/ }))
++    expect(retry).toHaveBeenCalledOnce()
++  })
++
++  it.each([
++    { message: "<think>Working", isStreaming: true },
++    { message: "<think>Working</think>Final answer" },
++    { message: "<think>Working</think>", role: "user" as const, isBot: false },
++    { message: "<think>Working</think>", toolCalls: [{ id: "tool", name: "lookup", args: {} }] }
++  ])("does not label active or usable output as missing final: %j", overrides => {
++    render(<PlaygroundMessage {...baseProps} {...overrides} />)
++    expect(screen.queryByText(/No final answer/)).not.toBeInTheDocument()
++  })
++
+   it("wires retry/switch/fallback/continue actions for explicit provider errors", async () => {
+     const user = userEvent.setup()
+     const onRegenerate = vi.fn()
+diff --git a/apps/packages/ui/src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx b/apps/packages/ui/src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx
+index 3f8370a286..5de9c08690 100644
+--- a/apps/packages/ui/src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx
++++ b/apps/packages/ui/src/components/Common/Playground/__tests__/Message.mermaid-rendering.test.tsx
+@@ -218,7 +218,8 @@ vi.mock("@/hooks/useDiscoSkills", () => ({
+   })
+ }))
+ 
+-vi.mock("@/libs/reasoning", () => ({
++vi.mock("@/libs/reasoning", async importOriginal => ({
++  ...await importOriginal<typeof import("@/libs/reasoning")>(),
+   parseReasoning: parseReasoningMock
+ }))
+ 
+diff --git a/apps/packages/ui/src/components/Option/Playground/Playground.tsx b/apps/packages/ui/src/components/Option/Playground/Playground.tsx
+index e2d1282205..5406409c02 100644
+--- a/apps/packages/ui/src/components/Option/Playground/Playground.tsx
++++ b/apps/packages/ui/src/components/Option/Playground/Playground.tsx
+@@ -206,6 +206,7 @@ const getCharacterChatRouteIntentFromLocation = (
+ const updateCharacterChatRouteSearch = (
+   search: string,
+   characterId: string | null,
++  chatId: string | null = null,
+ ): string => {
+   const normalizedSearch = search.startsWith("?") ? search.slice(1) : search;
+   const params = new URLSearchParams(normalizedSearch);
+@@ -214,6 +215,7 @@ const updateCharacterChatRouteSearch = (
+   params.delete("chat_id");
+   params.delete("serverChatId");
+   params.delete("server_chat_id");
++  if (chatId) params.set("chatId", chatId);
+ 
+   if (characterId) {
+     params.set("characterId", characterId);
+@@ -229,6 +231,7 @@ const updateCharacterChatRouteSearch = (
+ const updateCharacterChatRouteHash = (
+   hash: string,
+   characterId: string | null,
++  chatId: string | null = null,
+ ): string => {
+   const prefix = hash.startsWith("#") ? "#" : "";
+   const value = prefix ? hash.slice(1) : hash;
+@@ -238,6 +241,7 @@ const updateCharacterChatRouteHash = (
+   return `${prefix}${hashPath}${updateCharacterChatRouteSearch(
+     hashSearch,
+     characterId,
++    chatId,
+   )}`;
+ };
+ 
+@@ -514,6 +518,8 @@ export const Playground = () => {
+     history,
+     historyId,
+     serverChatId,
++    serverChatMetaLoaded,
++    serverChatCharacterId,
+     serverChatTitle,
+     serverChatLoadState,
+     serverChatLoadError,
+@@ -1067,6 +1073,14 @@ export const Playground = () => {
+     if (routeCharacterIntentInFlightRef.current) return;
+ 
+     const nextCharacterId = selectedTrackedCharacterId;
++    // A creation URL is a command. Once its owned saved target is confirmed,
++    // replace it with that target so reloading cannot execute the command again.
++    const savedRouteChatId =
++      sessionScopeReady && serverChatMetaLoaded && serverChatId &&
++      persistedServerChatId === serverChatId &&
++      String(serverChatCharacterId ?? "") === nextCharacterId
++        ? String(serverChatId)
++        : null;
+     const routeCharacterApplied =
+       routeCharacterIntentId != null &&
+       routeCharacterIntentAppliedRef.current === routeCharacterIntentId;
+@@ -1079,7 +1093,8 @@ export const Playground = () => {
+     if (
+       nextCharacterId &&
+       !routeCharacterIntentChatId &&
+-      routeCharacterIntentId === nextCharacterId
++      routeCharacterIntentId === nextCharacterId &&
++      !savedRouteChatId
+     ) {
+       return;
+     }
+@@ -1104,6 +1119,7 @@ export const Playground = () => {
+           search: updateCharacterChatRouteSearch(
+             currentSearch,
+             nextCharacterId,
++            savedRouteChatId,
+           ),
+           hash: currentHash,
+         }
+@@ -1111,7 +1127,9 @@ export const Playground = () => {
+         ? {
+             pathname,
+             search: currentSearch,
+-            hash: updateCharacterChatRouteHash(currentHash, nextCharacterId),
++            hash: updateCharacterChatRouteHash(
++              currentHash, nextCharacterId, savedRouteChatId,
++            ),
+           }
+         : null;
+ 
+@@ -1131,6 +1149,11 @@ export const Playground = () => {
+     routeCharacterIntentId,
+     routeRequestsCharacterMode,
+     selectedTrackedCharacterId,
++    sessionScopeReady,
++    persistedServerChatId,
++    serverChatId,
++    serverChatMetaLoaded,
++    serverChatCharacterId,
+   ]);
+ 
+   React.useEffect(() => {
+diff --git a/apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx b/apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx
+index 24d3e934ea..e63a8f3bf2 100644
+--- a/apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx
++++ b/apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx
+@@ -541,6 +541,7 @@ export const PlaygroundForm = ({
+   );
+   const {
+     onSubmit,
++    regenerateLastMessage,
+     messages,
+     setMessages,
+     selectedModel,
+@@ -3036,33 +3037,8 @@ export const PlaygroundForm = ({
+   });
+ 
+   const handleRetryChatError = React.useCallback(() => {
+-    let lastUserMessage: any = null
+-    for (let i = messages.length - 1; i >= 0; i--) {
+-      const entry = messages[i]
+-      const role = typeof entry?.role === "string" ? entry.role.toLowerCase() : ""
+-      if (role === "user" || entry?.isBot === false) {
+-        lastUserMessage = entry
+-        break
+-      }
+-    }
+-    const retryText =
+-      typeof lastUserMessage?.message === "string"
+-        ? lastUserMessage.message
+-        : typeof lastUserMessage?.content === "string"
+-          ? lastUserMessage.content
+-          : ""
+-    const trimmed = retryText.trim()
+-    if (!trimmed) {
+-      textAreaFocus()
+-      return
+-    }
+-
+-    void sendMessage({
+-      message: trimmed,
+-      image: "",
+-      docs: [],
+-    })
+-  }, [messages, sendMessage, textAreaFocus])
++    void regenerateLastMessage().catch(() => textAreaFocus())
++  }, [regenerateLastMessage, textAreaFocus])
+ 
+   const handleEditChatProvider = React.useCallback(() => {
+     setOpenModelSettings(true)
+diff --git a/apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx b/apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx
+index 8ca3657dc6..1f54fbc846 100644
+--- a/apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx
++++ b/apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx
+@@ -28,7 +28,7 @@ import type { PlaygroundSessionRestoreOutcome } from "@/hooks/usePlaygroundSessi
+ import { getFlashcardSourceMeta } from "@/components/Flashcards/utils/source-reference"
+ 
+ const useMessageOptionMock = vi.hoisted(() => vi.fn())
+-const realLoader = vi.hoisted(() => ({ enabled: false, webStorage: false, additionalLoader: false, storageBarrier: null as Promise<void> | null, storageWrites: 0, invalidated: new AbortController(), setSelection: null as null | ReturnType<typeof useSelectedAssistant>[1] }))
++const realLoader = vi.hoisted(() => ({ enabled: false, webStorage: false, session: false, route: false, additionalLoader: false, storageBarrier: null as Promise<void> | null, storageWrites: 0, invalidated: new AbortController(), setSelection: null as null | ReturnType<typeof useSelectedAssistant>[1] }))
+ const ensureTestHistory = async () => null
+ const loaderNotification = { error: vi.fn() }
+ const loaderTranslation = ((key: string) => key) as never
+@@ -48,7 +48,7 @@ const useRealServerConversation = () => {
+     tracked: { assistantKind: store.serverChatAssistantKind, assistantId: store.serverChatAssistantId, characterId: store.serverChatCharacterId },
+     draftSelection: assistant
+   })
+-  return { ...messageOptionState.value, ...store, selectedAssistant: effectiveAssistantStateToSelection(resolved) ?? assistant, setSelectedAssistant: setAssistant }
++  return { ...messageOptionState.value, ...store, selectedAssistant: effectiveAssistantStateToSelection(resolved) ?? assistant, setSelectedAssistant: setAssistant, ...(realLoader.session ? { setSelectedCharacter: async (character: { id: string | number; name: string }) => setAssistant({ kind: "character", id: String(character.id), name: character.name, metadata: { selectionMode: "tracked" } }) } : {}) }
+ }
+ 
+ const AdditionalServerLoader = () => { useRealServerConversation(); return null }
+@@ -103,6 +103,7 @@ const restoreDecisionState = vi.hoisted(() => ({
+ }))
+ 
+ const tldwClientState = vi.hoisted(() => ({
++  getConfig: vi.fn(async () => ({ serverUrl: "http://chat.test", authMode: "multi-user", accessToken: "test." + btoa(JSON.stringify({ sub: "A" })) + ".signature" })),
+   initialize: vi.fn(async () => undefined),
+   getProvidersStatus: vi.fn(async () => null),
+   getChatSettings: vi.fn(async () => ({ settings: {} })),
+@@ -140,13 +141,15 @@ vi.mock("@/hooks/useMessageOption", () => ({
+   useMessageOption: useMessageOptionMock
+ }))
+ 
+-vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
+-  usePlaygroundSessionPersistence: () => {
+-    // Match the real hook subscription: cancelling a restore must rerender its owner.
+-    usePlaygroundSessionStore()
+-    return sessionPersistenceState.value
+-  }
+-}))
++vi.mock("@/hooks/useConnectionState", () => ({ useConnectionState: () => ({ serverUrl: "http://chat.test", lastConfigUpdatedAt: 0 }) }))
++vi.mock("@/hooks/usePlaygroundSessionPersistence", async importOriginal => {
++  const actual = await importOriginal<typeof import("@/hooks/usePlaygroundSessionPersistence")>()
++  const useFixture = () => { usePlaygroundSessionStore(); return sessionPersistenceState.value }
++  return { usePlaygroundSessionPersistence: () => {
++    const useImplementation = realLoader.session ? actual.usePlaygroundSessionPersistence : useFixture
++    return useImplementation()
++  } }
++})
+ 
+ vi.mock("@/hooks/playground-session-restore", async () => {
+   const actual = await vi.importActual<
+@@ -315,20 +318,23 @@ vi.mock("@/hooks/useCharacterGreeting", () => ({
+   useCharacterGreeting: () => undefined
+ }))
+ 
++const subscribeRoute = (notify: () => void) => {
++  window.addEventListener("popstate", notify)
++  return () => window.removeEventListener("popstate", notify)
++}
++const readRoute = () => window.location.href
++const navigateRoute = (to: { pathname?: string; search?: string; hash?: string }) => {
++  window.history.replaceState({}, "", `${to.pathname || "/chat"}${to.search || ""}${to.hash || ""}`)
++  window.dispatchEvent(new PopStateEvent("popstate"))
++}
+ vi.mock("react-router-dom", async () => {
+-  const actual = await vi.importActual<typeof import("react-router-dom")>(
+-    "react-router-dom"
+-  )
+-  return {
+-    ...actual,
+-    useNavigate: () => vi.fn(),
+-    useLocation: () => ({
+-      pathname: window.location.pathname || "/chat",
+-      search: window.location.search || "",
+-      hash: window.location.hash || "",
+-      state: null,
+-      key: "test-location"
+-    })
++  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
++  return { ...actual,
++    useNavigate: () => realLoader.route ? navigateRoute : vi.fn(),
++    useLocation: () => {
++      React.useSyncExternalStore(subscribeRoute, readRoute)
++      return { pathname: window.location.pathname || "/chat", search: window.location.search || "", hash: window.location.hash || "", state: null, key: "test-location" }
++    }
+   }
+ })
+ 
+@@ -340,6 +346,8 @@ class RouteTestBoundary extends React.Component<{ children: React.ReactNode }, {
+ 
+ describe("Playground coordinator integration", () => {
+   beforeEach(() => {
++    realLoader.session = false
++    realLoader.route = false
+     realLoader.enabled = false
+     realLoader.webStorage = false
+     realLoader.additionalLoader = false
+@@ -405,6 +413,70 @@ describe("Playground coordinator integration", () => {
+     })
+   })
+ 
++  it.each(["/chat?mode=character&characterId=4&keep=1", "/options.html#/chat?mode=character&characterId=4&keep=1"])("promotes accepted entry to saved route and restores its transcript on remount: %s", async url => {
++    realLoader.enabled = realLoader.webStorage = realLoader.session = realLoader.route = true
++    restoreDecisionState.value = null
++    localStorage.clear()
++    usePlaygroundSessionStore.getState().clearSession()
++    useStoreMessageOption.setState({ historyId: null, serverChatId: null, history: [], messages: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isLoading: false, isProcessing: false, queuedMessages: [] })
++    useMessageOptionMock.mockImplementation(useRealServerConversation)
++    tldwClientState.getChat.mockResolvedValue({ id: "saved-cedar", title: "Cedar saved", scope_type: "global", character_id: 4, assistant_kind: "character", assistant_id: "4", source: "webui-character-chat" })
++    tldwClientState.listChatMessages.mockResolvedValue([{ id: "question", role: "user", content: "Question", version: 1 }, { id: "answer", role: "assistant", content: "Saved final answer", version: 1 }])
++    window.history.replaceState({}, "", url)
++    const view = render(<Playground />)
++    await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalledWith("4"))
++    await waitFor(() => expect(screen.queryByTestId("playground-chat")).toBeInTheDocument())
++    // The inference transport is outside this fixture; deliver its acknowledged owned target.
++    await act(async () => { useStoreMessageOption.setState({ serverChatId: "saved-cedar", serverChatCharacterId: 4, serverChatAssistantKind: "character", serverChatAssistantId: "4", serverChatMetaLoaded: true }) })
++    await waitFor(() => expect(window.location.href).toContain("chatId=saved-cedar"), { timeout: 2500 })
++    expect(window.location.href).toContain("keep=1")
++    expect(usePlaygroundSessionStore.getState().serverChatId).toBe("saved-cedar")
++    view.unmount()
++    useStoreMessageOption.setState({ historyId: null, serverChatId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null })
++    const reloaded = render(<Playground />)
++    await waitFor(() => expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual(["Question", "Saved final answer"]))
++    expect(useStoreMessageOption.getState().serverChatId).toBe("saved-cedar")
++    // The same route command is still deliberate when selected again, including
++    // the currently selected character. It must not resurrect the saved target.
++    for (const id of ["4", "5"]) {
++      const priorCalls = tldwClientState.getCharacter.mock.calls.length
++      act(() => navigateRoute({ pathname: "/chat", search: `?mode=character&characterId=${id}` }))
++      await waitFor(() => expect(tldwClientState.getCharacter.mock.calls.length).toBeGreaterThan(priorCalls))
++      await waitFor(() => expect(useStoreMessageOption.getState().serverChatId).toBeNull())
++      expect(useStoreMessageOption.getState().messages).toEqual([])
++      expect(window.location.href).not.toContain("chatId=")
++    }
++    reloaded.unmount()
++  })
++
++  it.each([false, true])("does not publish a superseded saved target after delayed scope hydration (return to A: %s)", async returnToA => {
++    realLoader.enabled = realLoader.webStorage = realLoader.session = realLoader.route = true
++    restoreDecisionState.value = null
++    localStorage.clear()
++    usePlaygroundSessionStore.getState().clearSession()
++    useStoreMessageOption.setState({ historyId: null, serverChatId: null, history: [], messages: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isLoading: false, isProcessing: false, queuedMessages: [] })
++    useMessageOptionMock.mockImplementation(useRealServerConversation)
++    let release!: (config: Awaited<ReturnType<typeof tldwClientState.getConfig>>) => void
++    const held = new Promise<Awaited<ReturnType<typeof tldwClientState.getConfig>>>(resolve => { release = resolve })
++    tldwClientState.getConfig.mockImplementationOnce(() => held)
++    window.history.replaceState({}, "", "/chat?mode=character&characterId=4")
++    const view = render(<Playground />)
++    await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalledWith("4"))
++    act(() => useStoreMessageOption.setState({ serverChatId: "old-A", serverChatCharacterId: 4, serverChatAssistantKind: "character", serverChatAssistantId: "4", serverChatMetaLoaded: true }))
++    expect(window.location.href).not.toContain("chatId=")
++    // Apply the real logout boundary's clear before its old configuration read resolves.
++    act(() => {
++      window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { reason: "logout" } }))
++      usePlaygroundSessionStore.getState().clearSession()
++      useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null })
++      if (returnToA) window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { reason: "login" } }))
++    })
++    await act(async () => { release({ serverUrl: "http://chat.test", authMode: "multi-user", accessToken: "test." + btoa(JSON.stringify({ sub: "A" })) + ".signature" }); await held })
++    expect(window.location.href).not.toContain("chatId=")
++    expect(useStoreMessageOption.getState().serverChatId).toBeNull()
++    view.unmount()
++  })
++
+   it("registers the webui chat route context on mount", () => {
+     render(<Playground />)
+ 
+diff --git a/apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx b/apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx
+index 1380fbcddb..1b5094c066 100644
+--- a/apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx
++++ b/apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.pinned-fallback.test.tsx
+@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event"
+ import { beforeEach, describe, expect, it, vi } from "vitest"
+ import { MemoryRouter } from "react-router-dom"
+ 
++import { encodeChatErrorPayload } from "@/utils/chat-error-message"
+ import { PlaygroundForm } from "../PlaygroundForm"
+ 
+ const onSubmitMock = vi.hoisted(() => vi.fn(async (_payload: unknown) => null))
+@@ -55,6 +56,7 @@ const playgroundFormConnectionState = vi.hoisted(() => ({
+ 
+ const createMessageOptionState = () => ({
+   onSubmit: onSubmitMock,
++  regenerateLastMessage: vi.fn(async () => undefined),
+   messages: [],
+   selectedModel: "deepseek-chat",
+   selectedModelIsLoading: false,
+@@ -144,6 +146,9 @@ vi.mock("react-i18next", () => ({
+   })
+ }))
+ 
++vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => null }))
++vi.mock("@/components/Chat/composer/PromptAssistComposerAction", () => ({ PromptAssistComposerAction: () => null }))
++
+ vi.mock("@tanstack/react-query", () => ({
+   useQuery: () => ({ data: [] }),
+   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+@@ -891,6 +896,19 @@ beforeEach(() => {
+ })
+ 
+ describe("PlaygroundForm pinned fallback", () => {
++  it("Retry chat regenerates the failed turn instead of appending its user again", async () => {
++    const user = userEvent.setup()
++    const state = playgroundFormMessageOptionState.value
++    state.messages = [
++      { id: "question", isBot: false, message: "Failed question" },
++      { id: "failure", isBot: true, message: encodeChatErrorPayload({ summary: "Provider failed", hint: "Retry", detail: "Upstream failed" }) }
++    ]
++    render(<MemoryRouter><PlaygroundForm droppedFiles={[]} /></MemoryRouter>)
++    await user.click(screen.getByRole("button", { name: "Retry chat" }))
++    expect(state.regenerateLastMessage).toHaveBeenCalledTimes(1)
++    expect(onSubmitMock).not.toHaveBeenCalled()
++  })
++
+   it("uses one shared disconnected recovery notice without duplicate composer copy", async () => {
+     const user = userEvent.setup()
+     playgroundFormConnectionState.phase = "disconnected"
+diff --git a/apps/packages/ui/src/hooks/chat-helper/__tests__/saveMessageOnError.test.ts b/apps/packages/ui/src/hooks/chat-helper/__tests__/saveMessageOnError.test.ts
+index 146ba477c2..4538a48933 100644
+--- a/apps/packages/ui/src/hooks/chat-helper/__tests__/saveMessageOnError.test.ts
++++ b/apps/packages/ui/src/hooks/chat-helper/__tests__/saveMessageOnError.test.ts
+@@ -87,13 +87,13 @@ describe("saveMessageOnError", () => {
+       e: new Error("provider failed"), history: [], setHistory: vi.fn(), image: "",
+       userMessage: "Question", botMessage: "Partial", historyId: "history-1",
+       selectedModel: "test", setHistoryId: vi.fn(), isRegenerating: false,
+-      userMessageId: "local-user", userServerMessageId: "server-user", assistantMessageId: "local-assistant"
++      userMessageId: "local-user", userServerMessageId: "server-user", assistantMessageId: "local-assistant", assistantServerMessageId: "server-assistant"
+     })
+     expect(mocks.saveMessage).toHaveBeenCalledWith(expect.objectContaining({
+       id: "local-user", serverMessageId: "server-user", role: "user", content: "Question"
+     }))
+     expect(mocks.saveMessage).toHaveBeenCalledWith(expect.objectContaining({
+-      id: "local-assistant", role: "assistant"
++      id: "local-assistant", serverMessageId: "server-assistant", role: "assistant"
+     }))
+   })
+ 
+diff --git a/apps/packages/ui/src/hooks/chat-helper/index.ts b/apps/packages/ui/src/hooks/chat-helper/index.ts
+index 86bd394e29..c94824f72d 100644
+--- a/apps/packages/ui/src/hooks/chat-helper/index.ts
++++ b/apps/packages/ui/src/hooks/chat-helper/index.ts
+@@ -90,6 +90,7 @@ export const saveMessageOnError = async ({
+   userMessageId,
+   userServerMessageId,
+   assistantMessageId,
++  assistantServerMessageId,
+   userParentMessageId,
+   assistantParentMessageId,
+   generationInfo,
+@@ -128,6 +129,7 @@ export const saveMessageOnError = async ({
+   userModelId?: string
+   userMessageId?: string
+   userServerMessageId?: string
++  assistantServerMessageId?: string
+   assistantMessageId?: string
+   userParentMessageId?: string | null
+   assistantParentMessageId?: string | null
+@@ -234,6 +236,7 @@ export const saveMessageOnError = async ({
+         } else {
+           await saveMessage({
+             id: assistantMessageId,
++            serverMessageId: assistantServerMessageId,
+             history_id: targetHistoryId,
+             name: selectedModel,
+             role: "assistant",
+@@ -297,6 +300,7 @@ export const saveMessageOnError = async ({
+       } else {
+         await saveMessage({
+           id: assistantMessageId,
++          serverMessageId: assistantServerMessageId,
+           history_id: historyId,
+           name: selectedModel,
+           role: "assistant",
+@@ -343,6 +347,7 @@ export const saveMessageOnError = async ({
+ 
+       await saveMessage({
+         id: assistantMessageId,
++        serverMessageId: assistantServerMessageId,
+         history_id: newHistoryId.id,
+         name: selectedModel,
+         role: "assistant",
+@@ -394,6 +399,7 @@ export const saveMessageOnError = async ({
+       // Save assistant error message
+       await saveMessage({
+         id: assistantMessageId,
++        serverMessageId: assistantServerMessageId,
+         history_id: historyId,
+         name: selectedModel,
+         role: "assistant",
+@@ -440,6 +446,7 @@ export const saveMessageOnError = async ({
+       }
+       await saveMessage({
+         id: assistantMessageId,
++        serverMessageId: assistantServerMessageId,
+         history_id: newHistoryId.id,
+         name: selectedModel,
+         role: "assistant",
+diff --git a/apps/packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts b/apps/packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts
+index 56350447a6..b20585b291 100644
+--- a/apps/packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts
++++ b/apps/packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts
+@@ -57,6 +57,38 @@ describe("runChatPipeline conversation id handoff", () => {
+     })
+   })
+ 
++  it.each([
++    ["closed", "<think>Only reasoning</think>", "<think>Only reasoning</think>"],
++    ["unclosed", "<think>Only reasoning", "<think>Only reasoning"],
++    ["structured", { choices: [{ delta: { reasoning_content: "Only reasoning" } }] }, "<think>Only reasoning"]
++  ])("keeps %s reasoning and canonical acknowledgements in recoverable error persistence", async (_label, chunk, expectedText) => {
++    mocks.pageAssistModel.mockResolvedValue({
++      conversationId: "server-chat-1", saveToDb: true,
++      userServerMessageId: "server-user", serverMessageId: "server-assistant",
++      stream: async function* () { yield chunk }
++    })
++    let rows: Message[] = [
++      { id: "local-user", isBot: false, name: "You", message: "Hello" },
++      { id: "generated-assistant-id", isBot: true, name: "Assistant", message: "" }
++    ]
++    mocks.setMessages.mockImplementation(next => { rows = typeof next === "function" ? next(rows) : next })
++    await runChatPipeline({
++      id: "normal", setupMessages: () => ({ targetMessageId: "generated-assistant-id" }),
++      preparePrompt: async () => ({ chatHistory: [], humanMessage: { role: "user", content: "Hello" }, sources: [] })
++    }, "Hello", "", false, rows, [], new AbortController().signal, {
++      selectedModel: "test", useOCR: false, userMessageId: "local-user",
++      setMessages: mocks.setMessages, saveMessageOnSuccess: mocks.saveMessageOnSuccess,
++      saveMessageOnError: mocks.saveMessageOnError, setHistory: mocks.setHistory,
++      setIsProcessing: mocks.setIsProcessing, setStreaming: mocks.setStreaming,
++      setAbortController: mocks.setAbortController, historyId: "history-1", setHistoryId: mocks.setHistoryId
++    })
++    expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
++    expect(mocks.saveMessageOnError).toHaveBeenCalledWith(expect.objectContaining({
++      botMessage: expectedText, userServerMessageId: "server-user", assistantServerMessageId: "server-assistant"
++    }))
++    expect(rows[1]).toMatchObject({ message: expectedText, generationInfo: { interrupted: true, interruptionReason: expect.stringContaining("final answer") } })
++  })
++
+   it.each([
+     { acknowledgement: "server-assistant-1", expected: "server-assistant-1" },
+     { acknowledgement: undefined, expected: undefined }
+diff --git a/apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts b/apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts
+index 7247f366e1..075ff7bea3 100644
+--- a/apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts
++++ b/apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts
+@@ -1,7 +1,10 @@
+ import { startTransition } from "react"
+ import { generateID } from "@/db/dexie/helpers"
+ import { getModelNicknameByID } from "@/db/dexie/nickname"
+-import { isReasoningEnded, isReasoningStarted } from "@/libs/reasoning"
++import {
++  isReasoningEnded, isReasoningStarted, isReasoningOnlyResponse,
++  MISSING_FINAL_ANSWER_MESSAGE
++} from "@/libs/reasoning"
+ import { pageAssistModel } from "@/models"
+ import type { ActorSettings } from "@/types/actor"
+ import type { ChatDocuments } from "@/models/ChatTypes"
+@@ -803,6 +806,13 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
+     ) {
+       throw new Error(EMPTY_RESPONSE_ERROR_MESSAGE)
+     }
++    if (
++      isReasoningOnlyResponse(fullText) &&
++      (!Array.isArray(toolCalls) || toolCalls.length === 0) &&
++      !isImageGenerationTurn
++    ) {
++      throw new Error(MISSING_FINAL_ANSWER_MESSAGE)
++    }
+     applyMcpModuleDisclosureFromToolCalls(toolCalls)
+     const finalGenerationInfo = streamTransportInterrupted
+       ? {
+@@ -874,6 +884,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
+         userModelId,
+         userMessageId: resolvedUserMessageId,
+         userServerMessageId: modelClient?.userServerMessageId,
++        assistantServerMessageId: modelClient?.serverMessageId,
+         assistantMessageId: resolvedAssistantMessageId,
+         userParentMessageId: userParentMessageId ?? null,
+         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+@@ -1004,6 +1015,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
+           ? normalizeImageVariantsForMessage(
+               updateActiveVariant(msg, {
+                 message: assistantContent,
++                ...(modelClient?.serverMessageId ? { serverMessageId: modelClient.serverMessageId } : {}),
+                 generationInfo: {
+                   ...(msg.generationInfo || {}),
+                   interrupted: true,
+@@ -1038,6 +1050,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
+         userModelId,
+         userMessageId: resolvedUserMessageId,
+         userServerMessageId: modelClient?.userServerMessageId,
++        assistantServerMessageId: modelClient?.serverMessageId,
+         assistantMessageId: resolvedAssistantMessageId,
+         userParentMessageId: userParentMessageId ?? null,
+         assistantParentMessageId: assistantParentMessageId ?? null,
+diff --git a/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx b/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx
+index 851585b2b7..38b67ca12d 100644
+--- a/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx
++++ b/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx
+@@ -1,12 +1,14 @@
+ // @vitest-environment jsdom
+ import React from "react"
+-import { act, renderHook } from "@testing-library/react"
++import { act, renderHook, waitFor } from "@testing-library/react"
+ import { beforeEach, describe, expect, it, vi } from "vitest"
+ 
+ import { useChatActions } from "../useChatActions"
++import type { Message } from "@/store/option"
+ 
+ const {
+   saveLocalSuccessMock,
++  saveLocalErrorMock,
+   addChatMessageMock,
+   createChatMock,
+   detectCharacterMoodMock,
+@@ -15,6 +17,7 @@ const {
+   normalChatModeMock,
+   resolveVisualIdentityBindingMock
+ } = vi.hoisted(() => ({
++  saveLocalErrorMock: vi.fn(async (_payload: unknown) => "history-character"),
+   saveLocalSuccessMock: vi.fn(async (_payload: unknown) => "history-character"),
+   addChatMessageMock: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
+   createChatMock: vi.fn(),
+@@ -41,6 +44,8 @@ const {
+   }))
+ }))
+ 
++const recoveryAuthority = vi.hoisted(() => ({ controller: new AbortController() }))
++
+ const messageStoreState = vi.hoisted(() => ({
+   value: {
+     selectedModel: "deepseek-chat" as string | null,
+@@ -54,7 +59,7 @@ const messageStoreState = vi.hoisted(() => ({
+ vi.mock("@/services/service-prompts", () => ({
+   loadServicePromptSnapshot: async (_ids: unknown, { signal }: { signal: AbortSignal }) => ({
+     scopeKey: "scope:test-chat", requestScope: { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }, userId: null },
+-    scopeSignal: signal, scopeInvalidatedSignal: signal, definitions: {}, capability: "unchecked", release: vi.fn()
++    scopeSignal: signal, scopeInvalidatedSignal: recoveryAuthority.controller.signal, definitions: {}, capability: "unchecked", release: vi.fn()
+   })
+ }))
+ 
+@@ -84,9 +89,7 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
+     () => saveLocalSuccessMock
+   ),
+   createSaveMessageOnError: vi.fn(
+-    () =>
+-      async (_payload?: unknown): Promise<string | null> =>
+-        "history-character"
++    () => saveLocalErrorMock
+   )
+ }))
+ 
+@@ -268,6 +271,7 @@ const createHookOptions = () => ({
+ 
+ describe("useChatActions character integration", () => {
+   beforeEach(() => {
++    recoveryAuthority.controller = new AbortController()
+     vi.clearAllMocks()
+     normalChatModeMock.mockResolvedValue(undefined)
+     createChatMock.mockResolvedValue({
+@@ -301,6 +305,43 @@ describe("useChatActions character integration", () => {
+     resolveVisualIdentityBindingMock.mockClear()
+   })
+ 
++  it("does not publish recovered IDs or save an old owner's partial after the lease invalidates", async () => {
++    streamCharacterChatCompletionMock.mockImplementationOnce(async function* () { yield "<think>Only reasoning</think>" })
++    addChatMessageMock.mockResolvedValueOnce({ id: "user-server-1", version: 1 })
++    let release!: (value: { id: string; version: number }) => void
++    const held = new Promise<{ id: string; version: number }>(resolve => { release = resolve })
++    addChatMessageMock.mockImplementationOnce(() => held)
++    const options = createHookOptions()
++    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
++    let pending!: ReturnType<typeof result.current.onSubmit>
++    await act(async () => { pending = result.current.onSubmit({ message: "Question", image: "" }); await new Promise(resolve => setTimeout(resolve, 0)) })
++    await waitFor(() => expect(addChatMessageMock).toHaveBeenCalledTimes(2))
++    recoveryAuthority.controller.abort()
++    options.setMessages.mockClear()
++    await act(async () => { release({ id: "old-assistant", version: 1 }); await pending })
++    expect(saveLocalErrorMock).not.toHaveBeenCalled()
++    expect(options.setMessages).not.toHaveBeenCalled()
++  })
++
++  it.each([
++    ["closed", "<think>Only reasoning</think>"],
++    ["unclosed", "<think>Only reasoning"],
++    ["structured", { choices: [{ delta: { reasoning_content: "Only reasoning" } }] }]
++  ])("preserves %s reasoning as a recoverable tracked completion with acknowledged IDs", async (_label, chunk) => {
++    addChatMessageMock.mockResolvedValueOnce({ id: "user-server-1", version: 1 })
++    addChatMessageMock.mockResolvedValueOnce({ id: "assistant-server-1", version: 1 })
++    streamCharacterChatCompletionMock.mockImplementationOnce(async function* () { yield chunk })
++    let rows: Message[] = []
++    const options = { ...createHookOptions(), setMessages: vi.fn((next: Message[] | ((previous: Message[]) => Message[])) => { rows = typeof next === "function" ? next(rows) : next }) }
++    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
++    await act(async () => { await result.current.onSubmit({ message: "Question", image: "" }) })
++    expect(saveLocalSuccessMock).not.toHaveBeenCalled()
++    expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectContaining({
++      botMessage: expect.stringContaining("Only reasoning"), userServerMessageId: "user-server-1", assistantServerMessageId: "assistant-server-1"
++    }))
++    expect(rows.find(row => row.isBot)).toMatchObject({ generationInfo: { interrupted: true, interruptionReason: expect.stringContaining("final answer") } })
++  })
++
+   it.each(["fallback", "degraded"])("forwards the confirmed assistant ID from %s success to local persistence", async (outcome) => {
+     persistCharacterCompletionMock.mockRejectedValueOnce(outcome === "fallback"
+       ? new Error("Persist endpoint unavailable")
+@@ -829,6 +870,7 @@ describe("useChatActions character integration", () => {
+     expect(persistPayload).not.toHaveProperty("mood_confidence")
+     expect(persistPayload).not.toHaveProperty("mood_topic")
+     expect(detectCharacterMoodMock).not.toHaveBeenCalled()
++    expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectContaining({ assistantServerMessageId: "assistant-server-1" }))
+ 
+     const assistantMessages = messageSnapshots
+       .flatMap((snapshot) => snapshot.filter((message) => message?.isBot))
+@@ -897,6 +939,7 @@ describe("useChatActions character integration", () => {
+         ([, payload]: [unknown, any]) => payload?.role === "assistant"
+       )
+       expect(tldwAddCalls).toHaveLength(0)
++      expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectContaining({ assistantServerMessageId: "assistant-degraded-1" }))
+       expect(messagesState).toEqual(
+         expect.arrayContaining([
+           expect.objectContaining({
+diff --git a/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx b/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx
+index e3d115a4d8..29f60104de 100644
+--- a/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx
++++ b/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx
+@@ -627,6 +627,48 @@ describe("saved normal Chat pipeline with autosave", () => {
+     })
+   })
+ 
++  it("real failed-turn regeneration sends the intended user once without its display error", async () => {
++    const projected: unknown[][] = []
++    mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => ({
++      saveToDb: true, conversationId,
++      stream: async function* (messages: unknown[]) {
++        projected.push(messages)
++        if (projected.length === 1) throw new Error("Provider failed")
++        yield "Recovered final answer"
++      }
++    }))
++    const { result } = renderWorkspace()
++    await act(async () => { await result.current.actions.onSubmit({ message: "Retry question", image: "" }) })
++    expect(result.current.state.messages.at(-1)?.message).toContain("__tldw_error__:")
++    await act(async () => { await result.current.actions.regenerateLastMessage() })
++    const request = JSON.stringify(projected[1])
++    expect(request).not.toContain("__tldw_error__:")
++    expect(request.match(/Retry question/g)).toHaveLength(1)
++    expect(result.current.state.messages.filter(row => !row.isBot)).toHaveLength(1)
++    expect(result.current.state.messages.at(-1)?.message).toBe("Recovered final answer")
++  })
++
++  it("persists a real acknowledged reasoning-only stream as one recoverable saved pair", async () => {
++    mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => new ChatTldw({ model: "test", saveToDb: true, conversationId }))
++    mocks.streamMessage.mockImplementation(async function* (_messages, options, onChunk) {
++      onChunk({ tldw_conversation_id: options.conversationId, tldw_user_message_id: "reasoning-user" })
++      yield "<think>Still working</think>"
++      onChunk({ tldw_message_id: "reasoning-assistant" })
++    })
++    const { result } = renderWorkspace()
++    await act(async () => { await result.current.actions.onSubmit({ message: "Question", image: "" }) })
++    expect(mocks.rows.map(row => [row.role, row.serverMessageId, row.content])).toEqual([
++      ["user", "reasoning-user", "Question"],
++      ["assistant", "reasoning-assistant", "<think>Still working</think>"]
++    ])
++    expect(result.current.state.messages.at(-1)).toMatchObject({
++      serverMessageId: "reasoning-assistant",
++      generationInfo: { interrupted: true, interruptionReason: expect.stringContaining("final answer") }
++    })
++    expect(result.current.state.history.map(row => row.content)).toEqual(["Question", "<think>Still working</think>"])
++    expect(mocks.addChatMessage).not.toHaveBeenCalled()
++  })
++
+   it("acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft", async () => {
+     mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => new ChatTldw({
+       model: "test", saveToDb: true, conversationId
+diff --git a/apps/packages/ui/src/hooks/chat/useChatActions.ts b/apps/packages/ui/src/hooks/chat/useChatActions.ts
+index 2832a9eb91..2d3d3a3315 100644
+--- a/apps/packages/ui/src/hooks/chat/useChatActions.ts
++++ b/apps/packages/ui/src/hooks/chat/useChatActions.ts
+@@ -24,7 +24,10 @@ import {
+   runChatPersistenceTransaction
+ } from "@/db/dexie/chat-persistence-transaction"
+ import { getModelNicknameByID } from "@/db/dexie/nickname"
+-import { isReasoningEnded, isReasoningStarted } from "@/libs/reasoning"
++import {
++  isReasoningEnded, isReasoningStarted, isReasoningOnlyResponse,
++  MISSING_FINAL_ANSWER_MESSAGE
++} from "@/libs/reasoning"
+ import type { ChatDocuments } from "@/models/ChatTypes"
+ import { normalChatMode } from "@/hooks/chat-modes/normalChatMode"
+ import { getRequiredServicePrompt } from "@/hooks/chat-modes/chatModePipeline"
+@@ -1703,7 +1706,8 @@ export const useChatActions = ({
+     regenerateFromMessage,
+     character,
+     messageSteering,
+-    serverChatIdOverride
++    serverChatIdOverride,
++    servicePromptSnapshot
+   }: {
+     message: string
+     image: string
+@@ -1715,6 +1719,7 @@ export const useChatActions = ({
+     regenerateFromMessage?: Message
+     character?: Character | null
+     serverChatIdOverride?: string | null
++    servicePromptSnapshot?: ServicePromptSnapshot
+     messageSteering: {
+       continueAsUser: boolean
+       impersonateUser: boolean
+@@ -2406,6 +2411,9 @@ export const useChatActions = ({
+ 
+       const finalContent = contentToSave || fullText
+       const finalPersistedContent = finalContent.trim()
++      if (isReasoningOnlyResponse(finalContent)) {
++        throw new Error(MISSING_FINAL_ANSWER_MESSAGE)
++      }
+ 
+       if (finalPersistedContent.length > 0) {
+         let fallbackSpeakerId: number | undefined
+@@ -2722,6 +2730,9 @@ export const useChatActions = ({
+       setStreaming(false)
+       return toChatSubmitResult()
+     } catch (e) {
++      if (servicePromptSnapshot?.scopeInvalidatedSignal.aborted) {
++        return chatSubmitSkipped("Request scope changed")
++      }
+       if (
+         discardAbortedTurnIfRequested({
+           discardRequested:
+@@ -2750,6 +2761,7 @@ export const useChatActions = ({
+         error: e,
+         persist: async (assistantContent) => {
+           if (!activeChatId) return false
++          throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
+           if (recoveryMoodLabel) {
+             try {
+               const persistPayload: Record<string, unknown> = {
+@@ -2763,18 +2775,27 @@ export const useChatActions = ({
+               }
+               const persisted = (await tldwClient.persistCharacterCompletion(
+                 activeChatId,
+-                persistPayload
++                persistPayload,
++                {
++                  ...(scope ? { scope } : {}),
++                  ...(servicePromptSnapshot ? {
++                    requestScope: servicePromptSnapshot.requestScope,
++                    signal: servicePromptSnapshot.scopeSignal
++                  } : {})
++                }
+               )) as {
+                 assistant_message_id?: string | number
+                 message_id?: string | number
+                 id?: string | number
+                 version?: number
+               } | null
++              throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
+               const createdAsstServerId =
+                 persisted?.assistant_message_id ??
+                 persisted?.message_id ??
+                 persisted?.id
+               if (createdAsstServerId != null) {
++                persistedAssistantServerMessageId = String(createdAsstServerId)
+                 assistantPersistedToServer = true
+                 setMessages((prev) =>
+                   ((prev as any[]).map((m) => {
+@@ -2795,9 +2816,12 @@ export const useChatActions = ({
+                 return true
+               }
+             } catch (persistError) {
++              throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
+               const savedOutcome =
+                 resolveSavedDegradedCharacterPersist(persistError)
+               if (savedOutcome?.saved) {
++                persistedAssistantServerMessageId = savedOutcome.assistantMessageId != null
++                  ? String(savedOutcome.assistantMessageId) : undefined
+                 assistantPersistedToServer = true
+                 setMessages((prev) =>
+                   ((prev as any[]).map((m) => {
+@@ -2833,12 +2857,20 @@ export const useChatActions = ({
+           const createdAsst = (await tldwClient.addChatMessage(
+             activeChatId,
+             payload,
+-            scope ? { scope } : undefined
++            {
++              ...(scope ? { scope } : {}),
++              ...(servicePromptSnapshot ? {
++                requestScope: servicePromptSnapshot.requestScope,
++                signal: servicePromptSnapshot.scopeSignal
++              } : {})
++            }
+           )) as {
+             id?: string | number
+             version?: number
+           } | null
++          throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
+           if (createdAsst?.id == null) return false
++          persistedAssistantServerMessageId = String(createdAsst.id)
+           assistantPersistedToServer = true
+           setMessages((prev) =>
+             ((prev as any[]).map((m) => {
+@@ -2863,6 +2895,9 @@ export const useChatActions = ({
+           return true
+         }
+       })
++      if (servicePromptSnapshot?.scopeInvalidatedSignal.aborted) {
++        return chatSubmitSkipped("Request scope changed")
++      }
+       const assistantContent = buildCharacterChatAssistantErrorContent(
+         fullText,
+         e,
+@@ -2912,6 +2947,10 @@ export const useChatActions = ({
+         message_source: "web-ui",
+         userMessageId: resolvedUserMessageId,
+         userServerMessageId: persistedUserServerMessageId,
++        assistantServerMessageId: persistedAssistantServerMessageId,
++        scopeSignal: servicePromptSnapshot?.scopeSignal,
++        scopeInvalidatedSignal: servicePromptSnapshot?.scopeInvalidatedSignal,
++        requestScope: servicePromptSnapshot?.requestScope,
+         assistantMessageId: resolvedAssistantMessageId,
+         assistantParentMessageId: resolvedAssistantParentMessageId ?? null
+       })
+@@ -3739,7 +3778,8 @@ export const useChatActions = ({
+               regenerateFromMessage,
+               character: resolvedSelectedCharacter,
+               messageSteering: messageSteeringForTurn,
+-              serverChatIdOverride
++              serverChatIdOverride,
++              servicePromptSnapshot: turnServicePromptSnapshot
+             })
+             return toChatSubmitResult(characterResult)
+           }
+diff --git a/apps/packages/ui/src/libs/reasoning.ts b/apps/packages/ui/src/libs/reasoning.ts
+index c063d42df0..0033bd0879 100644
+--- a/apps/packages/ui/src/libs/reasoning.ts
++++ b/apps/packages/ui/src/libs/reasoning.ts
+@@ -112,3 +112,13 @@ export function replaceThinkTagToEM(text: string): string {
+     .replaceAll("<think>", "")
+     .replaceAll("</think>", "")
+ }
++
++export const MISSING_FINAL_ANSWER_MESSAGE =
++  "No final answer was generated. Retry or continue to request an answer."
++
++/** A settled reasoning trace without any user-facing answer text. */
++export function isReasoningOnlyResponse(text: string): boolean {
++  const parts = parseReasoning(text)
++  return isReasoningStarted(text) &&
++    !parts.some(part => part.type === "text" && part.content.trim().length > 0)
++}
+diff --git a/apps/packages/ui/src/services/tldw/TldwApiClient.ts b/apps/packages/ui/src/services/tldw/TldwApiClient.ts
+index f76c5e92c1..f7db109d99 100644
+--- a/apps/packages/ui/src/services/tldw/TldwApiClient.ts
++++ b/apps/packages/ui/src/services/tldw/TldwApiClient.ts
+@@ -6104,16 +6104,25 @@ export class TldwApiClientBase {
+   async persistCharacterCompletion(
+     chat_id: string | number,
+     payload: Record<string, any>,
+-    options?: { scope?: ChatScope }
++    options?: {
++      scope?: ChatScope
++      signal?: AbortSignal
++      requestScope?: ServicePromptRequestScope
++    }
+   ): Promise<any> {
+     const cid = String(chat_id)
+     const query = this.buildQuery(toChatScopeParams(options?.scope))
++    const scopeFields = requestScopeFields(options?.requestScope)
+     try {
+       const res = await bgRequest<any>({
+         path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
+         method: "POST",
+-        headers: { "Content-Type": "application/json" },
+-        body: payload
++        headers: { "Content-Type": "application/json", ...scopeFields.headers },
++        body: payload,
++        abortSignal: options?.signal,
++        ...(scopeFields.servicePromptConfig
++          ? { servicePromptConfig: scopeFields.servicePromptConfig }
++          : {})
+       })
+       this.invalidateChatMessagesCache(cid)
+       return res
+diff --git a/apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts b/apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts
+index ebe7d03b9d..f425cd33a0 100644
+--- a/apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts
++++ b/apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts
+@@ -53,6 +53,23 @@ describe("TldwApiClient captured request scope", () => {
+     mocks.bgStream.mockReset()
+   })
+ 
++  it.each([true, false])("keeps captured character recovery scope optional without changing content (scoped: %s)", async scoped => {
++    const body = { assistant_content: "<think>Partial reasoning</think>", assistant_message_id: "acknowledged", mood_label: "calm" }
++    mocks.bgRequest.mockResolvedValue({ assistant_message_id: "acknowledged" })
++    const signal = new AbortController().signal
++    await new TldwApiClient().persistCharacterCompletion("owned", body, scoped ? { requestScope, signal } : undefined)
++    const request = mocks.bgRequest.mock.calls[0][0]
++    expect(request.body).toEqual(body)
++    expect(request.path).toBe("/api/v1/chats/owned/completions/persist?scope_type=global")
++    expect(request.method).toBe("POST")
++    if (scoped) {
++      expect(request).toMatchObject({ ...expectedScopeFields, abortSignal: signal })
++    } else {
++      expect(request.servicePromptConfig).toBeUndefined()
++      expect(request.headers).not.toHaveProperty("X-TLDW-Expected-User-ID")
++    }
++  })
++
+   it.each([
+     ["fetchWithAuth", ["/api/v1/chat/conversations/owned/messages-with-context"], "GET"],
+     ["listCharacters", [{ limit: 5 }], "GET"],
+diff --git a/apps/packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts b/apps/packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts
+index 683c349609..1a9f13c3c7 100644
+--- a/apps/packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts
++++ b/apps/packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts
+@@ -12,6 +12,20 @@ import {
+ } from "@/services/chat-surface-scope"
+ 
+ describe("Service Prompt scope policy", () => {
++  it.each([
++    ["/api/v1/chats/owned/completions/persist", "POST", true],
++    ["/api/v1/chats/other-owned/completions/persist?scope_type=global", "POST", true],
++    ["/api/v1/chats/owned/completions/persist", "GET", false],
++    ["/api/v1/chats/owned/completions/persist", "PUT", false],
++    ["/api/v1/chats/owned/completions", "POST", false],
++    ["/api/v1/chats/owned/completions/persist/extra", "POST", false],
++    ["/api/v1/chats//completions/persist", "POST", false],
++    ["/api/v1/chats/a%2fb/completions/persist", "POST", false],
++    ["/api/v1/chats/%2e%2e/completions/persist", "POST", false]
++  ])("bounds character recovery %s %s", (path, method, allowed) => {
++    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
++  })
++
+   it.each([
+     ["/api/v1/chats/owned-chat/messages?limit=200&offset=0", true],
+     ["/api/v1/chats/other-chat/messages", true],
+diff --git a/apps/packages/ui/src/services/tldw/domains/chat-rag.ts b/apps/packages/ui/src/services/tldw/domains/chat-rag.ts
+index 08463e767e..a48b3696c1 100644
+--- a/apps/packages/ui/src/services/tldw/domains/chat-rag.ts
++++ b/apps/packages/ui/src/services/tldw/domains/chat-rag.ts
+@@ -1312,16 +1312,25 @@ export const chatRagMethods = {
+     this: TldwApiClientCore,
+     chat_id: string | number,
+     payload: Record<string, any>,
+-    options?: { scope?: ChatScope }
++    options?: {
++      scope?: ChatScope
++      signal?: AbortSignal
++      requestScope?: ServicePromptRequestScope
++    }
+   ): Promise<any> {
+     const cid = String(chat_id)
+     const query = buildQuery(toChatScopeParams(options?.scope))
++    const scopeFields = requestScopeFields(options?.requestScope)
+     try {
+       const res = await bgRequest<any>({
+         path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
+         method: "POST",
+-        headers: { "Content-Type": "application/json" },
+-        body: payload
++        headers: { "Content-Type": "application/json", ...scopeFields.headers },
++        body: payload,
++        abortSignal: options?.signal,
++        ...(scopeFields.servicePromptConfig
++          ? { servicePromptConfig: scopeFields.servicePromptConfig }
++          : {})
+       })
+       this.invalidateChatMessagesCache(cid)
+       return res
+diff --git a/apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts b/apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts
+index 9bcb79931d..842812488d 100644
+--- a/apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts
++++ b/apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts
+@@ -141,6 +141,7 @@ export const isServicePromptRequestPath = (
+   if (requestMethod !== "POST") return false
+   if (pathname === "/api/v1/flashcards/review" || pathname === "/api/v1/flashcards/review-sessions/end") return true
+   if (["/api/v1/flashcards", "/api/v1/flashcards/decks", "/api/v1/flashcards/generate"].includes(pathname)) return true
++  if (/^\/api\/v1\/chats\/[^/]+\/completions\/persist$/.test(pathname)) return true
+   if (pathname === "/api/v1/chats/") return true
+   return /^\/api\/v1\/(?:auth\/refresh|chat\/completions|media\/add|rag\/search|research\/websearch)$/.test(pathname) ||
+     /^\/api\/v1\/chats\/[^/]+\/messages$/.test(pathname)
+diff --git a/apps/packages/ui/src/types/chat-modes.ts b/apps/packages/ui/src/types/chat-modes.ts
+index 3e2038e0ab..3d9cddaf38 100644
+--- a/apps/packages/ui/src/types/chat-modes.ts
++++ b/apps/packages/ui/src/types/chat-modes.ts
+@@ -17,6 +17,7 @@ export interface SaveMessageBase {
+   userModelId?: string
+   userMessageId?: string
+   userServerMessageId?: string
++  assistantServerMessageId?: string
+   assistantMessageId: string
+   userParentMessageId?: string | null
+   assistantParentMessageId?: string | null
+@@ -34,7 +35,6 @@ export interface SaveMessageBase {
+ }
+ 
+ export interface SaveMessageData extends SaveMessageBase {
+-  assistantServerMessageId?: string
+   isRegenerate: boolean
+   message: string
+   fullText: string
+diff --git a/apps/packages/ui/src/utils/__tests__/generate-history.image-generation.test.ts b/apps/packages/ui/src/utils/__tests__/generate-history.image-generation.test.ts
+index e3970bc665..5f0a280e09 100644
+--- a/apps/packages/ui/src/utils/__tests__/generate-history.image-generation.test.ts
++++ b/apps/packages/ui/src/utils/__tests__/generate-history.image-generation.test.ts
+@@ -1,4 +1,5 @@
+ import { describe, expect, it } from "vitest"
++import { buildAssistantErrorContent, encodeChatErrorPayload } from "@/utils/chat-error-message"
+ import { generateHistory } from "@/utils/generate-history"
+ import {
+   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
+@@ -37,3 +38,21 @@ describe("generateHistory image-generation filtering", () => {
+   })
+ })
+ 
++
++describe("generateHistory display-error projection", () => {
++  const error = encodeChatErrorPayload({ summary: "Provider failed", hint: "Retry", detail: "Upstream failed" })
++  it("omits only a recognized assistant display error", () => {
++    const history = generateHistory([{ role: "user", content: "Question" }, { role: "assistant", content: error }], "gpt-test")
++    expect(history.map(row => row._getType())).toEqual(["human"])
++  })
++  it("retains a user quotation, malformed marker and genuine partial prose", () => {
++    const history = generateHistory([
++      { role: "user", content: error },
++      { role: "assistant", content: "__tldw_error__:not-json" },
++      { role: "assistant", content: buildAssistantErrorContent("Partial answer", new Error("Interrupted")) }
++    ], "gpt-test")
++    expect(history).toHaveLength(3)
++    expect(JSON.stringify(history)).toContain("__tldw_error__:not-json")
++    expect(JSON.stringify(history)).toContain("Partial answer")
++  })
++})
+diff --git a/apps/packages/ui/src/utils/generate-history.ts b/apps/packages/ui/src/utils/generate-history.ts
+index 6dced5ac15..7418731309 100644
+--- a/apps/packages/ui/src/utils/generate-history.ts
++++ b/apps/packages/ui/src/utils/generate-history.ts
+@@ -1,4 +1,5 @@
+ import { isCustomModel } from "@/db/dexie/models"
++import { decodeChatErrorPayload } from "@/utils/chat-error-message"
+ import { removeReasoning } from "@/libs/reasoning"
+ import { isImageGenerationMessageType } from "@/utils/image-generation-chat"
+ import {
+@@ -54,6 +55,7 @@ export const generateHistory = (
+         })
+       )
+     } else if (message.role === "assistant") {
++      if (decodeChatErrorPayload(message.content)) continue
+       history.push(
+         new AIMessage({
+           content: isCustom
+diff --git a/backlog/tasks/task-13260.49 - Exclude-failed-Chat-display-placeholders-from-retry-model-context.md b/backlog/tasks/task-13260.49 - Exclude-failed-Chat-display-placeholders-from-retry-model-context.md
+index f08e5373b4..b18b068127 100644
+--- a/backlog/tasks/task-13260.49 - Exclude-failed-Chat-display-placeholders-from-retry-model-context.md	
++++ b/backlog/tasks/task-13260.49 - Exclude-failed-Chat-display-placeholders-from-retry-model-context.md	
+@@ -1,10 +1,10 @@
+ ---
+ id: TASK-13260.49
+ title: Exclude failed Chat display placeholders from retry model context
+-status: To Do
++status: In Progress
+ assignee: []
+ created_date: '2026-09-16 00:56'
+-updated_date: '2026-09-16 01:05'
++updated_date: '2026-09-16 03:29'
+ labels:
+   - uat
+   - frontend
+@@ -27,10 +27,20 @@ UAT108: After a real502 Chat failure, visible Retry with another selected model
+ - [ ] #3 Behavioral request-capture regressions and native failure-to-recovery evidence are retained.
+ <!-- AC:END -->
+ 
++## Implementation Plan
++
++<!-- SECTION:PLAN:BEGIN -->
++Cycle4 plan Task5: permanent actual Retry and serializer RED; reuse failed-turn regeneration/history override so intended user occurs once; omit only decoded assistant display envelopes; preserve quoted/malformed markers and partial answers. Focused tests/lint, independent review and parent-owned native verification.
++<!-- SECTION:PLAN:END -->
++
+ ## Implementation Notes
+ 
+ <!-- SECTION:NOTES:BEGIN -->
+ Read-only diagnosis confirms actual Retry uses full failed history plus last user text; generateHistory serializes its valid __tldw_error__ assistant as AI content. Private in-memory real serializer probe /private/tmp/uat108-history-probe.config.ts reproduces 1 expected failure/3 controls pass; output /private/tmp/uat108-history-probe-red.log. Controls retain image filtering, user-quoted/malformed markers and legitimate partial answer. Initial wrong Vitest entrypoint is separate startup-only evidence, not product RED. Backend filters only DB-loaded error envelopes, not request_messages. This observed400 request was rejected before inference; do not claim model consumption. Repair plan requires valid-envelope model projection plus actual Retry failed-turn reuse, preserving visible failures/partial text and intentional repeated user turns. Full diagnosis /private/tmp/uat107-108-read-only-diagnosis.md. No product/browser/runtime changes.
++
++Task5 implementation: actual Retry banner now uses existing failed-turn regeneration; serializer omits only decoded assistant display-error envelopes. Permanent final RED: /private/tmp/cycle4-task5-retry-final-red.log (2 failed/5 passed). Broader recovery run /private/tmp/cycle4-task5-final-tests.log (233 passed/19 files, overlapping). User quotations, malformed markers, partial prose and one intended user retained. Independent review of this stable bounded subset requested; native rerun remains parent-owned.
++
++Full Task5 code freeze 2026-09-16T03:28:25.266Z; /private/tmp/cycle4-task5-code-freeze.json and production subset retained. Final root-config lint24 paths0errors979existingwarnings0added1removed. No Python changed (Bandit not applicable); full compiler/native remain parent-owned. Review report /private/tmp/cycle4-chat-recovery-implementation.md; no commits/runtime/browser/inference performed.
+ <!-- SECTION:NOTES:END -->
+ 
+ ## Definition of Done
+diff --git a/backlog/tasks/task-13260.53 - Restore-saved-character-conversation-on-normal-route-reload.md b/backlog/tasks/task-13260.53 - Restore-saved-character-conversation-on-normal-route-reload.md
+index c11dbf4cd1..e39a308ef3 100644
+--- a/backlog/tasks/task-13260.53 - Restore-saved-character-conversation-on-normal-route-reload.md	
++++ b/backlog/tasks/task-13260.53 - Restore-saved-character-conversation-on-normal-route-reload.md	
+@@ -1,10 +1,10 @@
+ ---
+ id: TASK-13260.53
+ title: Restore saved character conversation on normal route reload
+-status: To Do
++status: In Progress
+ assignee: []
+ created_date: '2026-09-16 01:13'
+-updated_date: '2026-09-16 01:21'
++updated_date: '2026-09-16 03:29'
+ labels:
+   - uat
+   - frontend
+@@ -27,10 +27,20 @@ UAT113: Fresh multi-user character Chat id4 real complete-v2 succeeds200 with CE
+ - [ ] #3 Real route-entry/save/reload regression and native saved history controls pass.
+ <!-- AC:END -->
+ 
++## Implementation Plan
++
++<!-- SECTION:PLAN:BEGIN -->
++Cycle4 plan Task5: actual character entry/save/session/reload RED; promote accepted entry to confirmed current owned saved chatId while retaining explicit same/different-character draft entry, hash/query parameters and authority guards. Coordinate Playground/Form ownership; focused route/session controls, review and parent-owned native acceptance.
++<!-- SECTION:PLAN:END -->
++
+ ## Implementation Notes
+ 
+ <!-- SECTION:NOTES:BEGIN -->
+ Read-only diagnosis confirmed route-command replay: Playground.tsx959–978 clears active and persisted saved identity for characterId-only mount; initialize1655 returns before restore; URL synchronization1080–1084 leaves same-character creation query untouched after save. Private actual Playground + real session hook/store + WebUI storage probe is 1 expected RED/3 positive controls (ordinary /chat, canonical chatId, explicit different character); /private/tmp/uat113-route-session-{config.ts,cases.txt,red.log}. Full diagnosis /private/tmp/uat113-readonly-diagnosis.md. Cycle4 runner normal Recent conversations Server reopen restores saved bd564030-70fe-41bc-9c91-4b661408f8e3 title and all3 messages at /chat; evidence character-history-reopened.txt. Proposed bounded repair consumes entry intent or promotes successful owned save to canonical URL, preserving deliberate new-character entry, scope and late-completion guards. Five inspected source/test hashes match frozen7c9409. No source/test/browser/runtime/provider changes. Implementation and native acceptance remain pending frozen matrix; status/AC unchanged.
++
++Task5 implementation: accepted character creation query/hash is replaced with matching loaded server ID only after its scoped session records that same ID. Real session plus real loader regression covers entry, acknowledged target, reload, same/different deliberate creation, unrelated query retention and delayed scope hydration after boundary clear. /private/tmp/cycle4-task5-route-red.log 2 expected failures/37 passes; final route controls /private/tmp/cycle4-task5-route-final.log 41 passed. No session persistence redesign or new authority watcher.
++
++Full Task5 code freeze 2026-09-16T03:28:25.266Z; /private/tmp/cycle4-task5-code-freeze.json and production subset retained. Final root-config lint24 paths0errors979existingwarnings0added1removed. No Python changed (Bandit not applicable); full compiler/native remain parent-owned. Route tests use actual web storage/session/loader with controlled transport acknowledgement and router; delayed-owner controls explicitly apply boundary clear rather than claiming native login coverage. Review report /private/tmp/cycle4-chat-recovery-implementation.md.
+ <!-- SECTION:NOTES:END -->
+ 
+ ## Definition of Done
+diff --git a/backlog/tasks/task-13260.57 - Report-reasoning-only-Chat-completion-as-missing-a-final-answer.md b/backlog/tasks/task-13260.57 - Report-reasoning-only-Chat-completion-as-missing-a-final-answer.md
+index 625de8cee8..ac541a7f23 100644
+--- a/backlog/tasks/task-13260.57 - Report-reasoning-only-Chat-completion-as-missing-a-final-answer.md	
++++ b/backlog/tasks/task-13260.57 - Report-reasoning-only-Chat-completion-as-missing-a-final-answer.md	
+@@ -1,9 +1,10 @@
+ ---
+ id: TASK-13260.57
+ title: Report reasoning-only Chat completion as missing a final answer
+-status: To Do
++status: In Progress
+ assignee: []
+ created_date: '2026-09-16 02:00'
++updated_date: '2026-09-16 03:29'
+ labels:
+   - uat
+   - bug
+@@ -26,6 +27,22 @@ Cycle4 UAT117: multi Media-to-character Chat completes200 and persists a respons
+ - [ ] #3 Saved history and legitimate partial responses remain available without false success; review and targeted native checks pass
+ <!-- AC:END -->
+ 
++## Implementation Plan
++
++<!-- SECTION:PLAN:BEGIN -->
++Cycle4 plan Task5: actual normal+tracked pipeline RED for closed/unclosed/structured reasoning-only completion; reuse reasoning parser and existing interruption recovery metadata, preserve reasoning/history, allow normal final answers/tool/image output. Focused behavior tests/lint, review and parent-owned native acceptance.
++<!-- SECTION:PLAN:END -->
++
++## Implementation Notes
++
++<!-- SECTION:NOTES:BEGIN -->
++Approved bounded scope addition: reasoning-only tracked recovery reuses the existing acquired ServicePromptSnapshot; invalidation-during-recovery RED in /private/tmp/cycle4-task5-recovery-authority-red.log proves prior late local acknowledgement publication. Existing persistCharacterCompletion lacks optional captured scope forwarding, unlike addChatMessage. Add only optional requestScope/signal with requestScopeFields to that method, exact POST /api/v1/chats/{id}/completions/persist policy, scoped/unscoped content-preservation and malformed/sibling/method controls; preserve cache and degraded-save behavior. Focused transport RED /private/tmp/cycle4-task5-recovery-transport-red.log. No new authority framework.
++
++Actual client forwarding regression identified runtime delegation: services/tldw/domains/chat-rag.ts owns persistCharacterCompletion execution, while TldwApiClient.ts retains the public/base method. The exact same optional captured-scope forwarding must be applied to this one delegated method too; no other QA/domain methods change. Unchanged real-client scoped assertion stayed RED after base-only edit (314 passed/1 failed broader run), preventing a false green.
++
++Task5 frozen implementation: parser-derived missing-final-answer recovery covers closed/unclosed/structured and empty think-only output while preserving reasoning; actual restored Message recovery uses the same parser and excludes active stream, final prose, tools/images. Confirmed assistant IDs now reach scoped error persistence (normal pipeline and tracked primary/degraded/fallback recovery). Permanent RED counts: reasoning9; invalidated recovery1; empty tag1; corrected transport3. Core233/19 GREEN, added completion76/3 GREEN, final delegated transport72/2 GREEN overlap; last broad314/1 isolated the delegated transport assertion before its correction. Parent owns fresh combined run/typecheck/native. Frozen24 code paths at /private/tmp/cycle4-task5-code-freeze.json. Root-config ESLint24 paths:0errors979existingwarnings,0added1removed. No Python changed; Bandit not applicable. Report /private/tmp/cycle4-chat-recovery-implementation.md.
++<!-- SECTION:NOTES:END -->
++
+ ## Definition of Done
+ <!-- DOD:BEGIN -->
+ - [ ] #1 Acceptance criteria completed

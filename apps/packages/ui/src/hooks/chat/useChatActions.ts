@@ -24,7 +24,10 @@ import {
   runChatPersistenceTransaction
 } from "@/db/dexie/chat-persistence-transaction"
 import { getModelNicknameByID } from "@/db/dexie/nickname"
-import { isReasoningEnded, isReasoningStarted } from "@/libs/reasoning"
+import {
+  isReasoningEnded, isReasoningStarted, isReasoningOnlyResponse,
+  MISSING_FINAL_ANSWER_MESSAGE
+} from "@/libs/reasoning"
 import type { ChatDocuments } from "@/models/ChatTypes"
 import { normalChatMode } from "@/hooks/chat-modes/normalChatMode"
 import { getRequiredServicePrompt } from "@/hooks/chat-modes/chatModePipeline"
@@ -1703,7 +1706,8 @@ export const useChatActions = ({
     regenerateFromMessage,
     character,
     messageSteering,
-    serverChatIdOverride
+    serverChatIdOverride,
+    servicePromptSnapshot
   }: {
     message: string
     image: string
@@ -1715,6 +1719,7 @@ export const useChatActions = ({
     regenerateFromMessage?: Message
     character?: Character | null
     serverChatIdOverride?: string | null
+    servicePromptSnapshot?: ServicePromptSnapshot
     messageSteering: {
       continueAsUser: boolean
       impersonateUser: boolean
@@ -2406,6 +2411,9 @@ export const useChatActions = ({
 
       const finalContent = contentToSave || fullText
       const finalPersistedContent = finalContent.trim()
+      if (isReasoningOnlyResponse(finalContent)) {
+        throw new Error(MISSING_FINAL_ANSWER_MESSAGE)
+      }
 
       if (finalPersistedContent.length > 0) {
         let fallbackSpeakerId: number | undefined
@@ -2722,6 +2730,9 @@ export const useChatActions = ({
       setStreaming(false)
       return toChatSubmitResult()
     } catch (e) {
+      if (servicePromptSnapshot?.scopeInvalidatedSignal.aborted) {
+        return chatSubmitSkipped("Request scope changed")
+      }
       if (
         discardAbortedTurnIfRequested({
           discardRequested:
@@ -2750,6 +2761,7 @@ export const useChatActions = ({
         error: e,
         persist: async (assistantContent) => {
           if (!activeChatId) return false
+          throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
           if (recoveryMoodLabel) {
             try {
               const persistPayload: Record<string, unknown> = {
@@ -2763,18 +2775,27 @@ export const useChatActions = ({
               }
               const persisted = (await tldwClient.persistCharacterCompletion(
                 activeChatId,
-                persistPayload
+                persistPayload,
+                {
+                  ...(scope ? { scope } : {}),
+                  ...(servicePromptSnapshot ? {
+                    requestScope: servicePromptSnapshot.requestScope,
+                    signal: servicePromptSnapshot.scopeSignal
+                  } : {})
+                }
               )) as {
                 assistant_message_id?: string | number
                 message_id?: string | number
                 id?: string | number
                 version?: number
               } | null
+              throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
               const createdAsstServerId =
                 persisted?.assistant_message_id ??
                 persisted?.message_id ??
                 persisted?.id
               if (createdAsstServerId != null) {
+                persistedAssistantServerMessageId = String(createdAsstServerId)
                 assistantPersistedToServer = true
                 setMessages((prev) =>
                   ((prev as any[]).map((m) => {
@@ -2795,9 +2816,12 @@ export const useChatActions = ({
                 return true
               }
             } catch (persistError) {
+              throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
               const savedOutcome =
                 resolveSavedDegradedCharacterPersist(persistError)
               if (savedOutcome?.saved) {
+                persistedAssistantServerMessageId = savedOutcome.assistantMessageId != null
+                  ? String(savedOutcome.assistantMessageId) : undefined
                 assistantPersistedToServer = true
                 setMessages((prev) =>
                   ((prev as any[]).map((m) => {
@@ -2833,12 +2857,20 @@ export const useChatActions = ({
           const createdAsst = (await tldwClient.addChatMessage(
             activeChatId,
             payload,
-            scope ? { scope } : undefined
+            {
+              ...(scope ? { scope } : {}),
+              ...(servicePromptSnapshot ? {
+                requestScope: servicePromptSnapshot.requestScope,
+                signal: servicePromptSnapshot.scopeSignal
+              } : {})
+            }
           )) as {
             id?: string | number
             version?: number
           } | null
+          throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
           if (createdAsst?.id == null) return false
+          persistedAssistantServerMessageId = String(createdAsst.id)
           assistantPersistedToServer = true
           setMessages((prev) =>
             ((prev as any[]).map((m) => {
@@ -2863,6 +2895,9 @@ export const useChatActions = ({
           return true
         }
       })
+      if (servicePromptSnapshot?.scopeInvalidatedSignal.aborted) {
+        return chatSubmitSkipped("Request scope changed")
+      }
       const assistantContent = buildCharacterChatAssistantErrorContent(
         fullText,
         e,
@@ -2912,6 +2947,10 @@ export const useChatActions = ({
         message_source: "web-ui",
         userMessageId: resolvedUserMessageId,
         userServerMessageId: persistedUserServerMessageId,
+        assistantServerMessageId: persistedAssistantServerMessageId,
+        scopeSignal: servicePromptSnapshot?.scopeSignal,
+        scopeInvalidatedSignal: servicePromptSnapshot?.scopeInvalidatedSignal,
+        requestScope: servicePromptSnapshot?.requestScope,
         assistantMessageId: resolvedAssistantMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null
       })
@@ -3739,7 +3778,8 @@ export const useChatActions = ({
               regenerateFromMessage,
               character: resolvedSelectedCharacter,
               messageSteering: messageSteeringForTurn,
-              serverChatIdOverride
+              serverChatIdOverride,
+              servicePromptSnapshot: turnServicePromptSnapshot
             })
             return toChatSubmitResult(characterResult)
           }

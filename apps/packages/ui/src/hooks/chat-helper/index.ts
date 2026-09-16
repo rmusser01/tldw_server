@@ -90,6 +90,7 @@ export const saveMessageOnError = async ({
   userMessageId,
   userServerMessageId,
   assistantMessageId,
+  assistantServerMessageId,
   userParentMessageId,
   assistantParentMessageId,
   generationInfo,
@@ -128,6 +129,7 @@ export const saveMessageOnError = async ({
   userModelId?: string
   userMessageId?: string
   userServerMessageId?: string
+  assistantServerMessageId?: string
   assistantMessageId?: string
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
@@ -234,6 +236,7 @@ export const saveMessageOnError = async ({
         } else {
           await saveMessage({
             id: assistantMessageId,
+            serverMessageId: assistantServerMessageId,
             history_id: targetHistoryId,
             name: selectedModel,
             role: "assistant",
@@ -297,6 +300,7 @@ export const saveMessageOnError = async ({
       } else {
         await saveMessage({
           id: assistantMessageId,
+          serverMessageId: assistantServerMessageId,
           history_id: historyId,
           name: selectedModel,
           role: "assistant",
@@ -343,6 +347,7 @@ export const saveMessageOnError = async ({
 
       await saveMessage({
         id: assistantMessageId,
+        serverMessageId: assistantServerMessageId,
         history_id: newHistoryId.id,
         name: selectedModel,
         role: "assistant",
@@ -394,6 +399,7 @@ export const saveMessageOnError = async ({
       // Save assistant error message
       await saveMessage({
         id: assistantMessageId,
+        serverMessageId: assistantServerMessageId,
         history_id: historyId,
         name: selectedModel,
         role: "assistant",
@@ -440,6 +446,7 @@ export const saveMessageOnError = async ({
       }
       await saveMessage({
         id: assistantMessageId,
+        serverMessageId: assistantServerMessageId,
         history_id: newHistoryId.id,
         name: selectedModel,
         role: "assistant",

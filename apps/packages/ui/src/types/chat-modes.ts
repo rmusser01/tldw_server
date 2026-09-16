@@ -17,6 +17,7 @@ export interface SaveMessageBase {
   userModelId?: string
   userMessageId?: string
   userServerMessageId?: string
+  assistantServerMessageId?: string
   assistantMessageId: string
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
@@ -34,7 +35,6 @@ export interface SaveMessageBase {
 }
 
 export interface SaveMessageData extends SaveMessageBase {
-  assistantServerMessageId?: string
   isRegenerate: boolean
   message: string
   fullText: string

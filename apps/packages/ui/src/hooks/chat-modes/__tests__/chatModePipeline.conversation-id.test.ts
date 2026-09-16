@@ -58,6 +58,38 @@ describe("runChatPipeline conversation id handoff", () => {
   })
 
   it.each([
+    ["closed", "<think>Only reasoning</think>", "<think>Only reasoning</think>"],
+    ["unclosed", "<think>Only reasoning", "<think>Only reasoning"],
+    ["structured", { choices: [{ delta: { reasoning_content: "Only reasoning" } }] }, "<think>Only reasoning"]
+  ])("keeps %s reasoning and canonical acknowledgements in recoverable error persistence", async (_label, chunk, expectedText) => {
+    mocks.pageAssistModel.mockResolvedValue({
+      conversationId: "server-chat-1", saveToDb: true,
+      userServerMessageId: "server-user", serverMessageId: "server-assistant",
+      stream: async function* () { yield chunk }
+    })
+    let rows: Message[] = [
+      { id: "local-user", isBot: false, name: "You", message: "Hello" },
+      { id: "generated-assistant-id", isBot: true, name: "Assistant", message: "" }
+    ]
+    mocks.setMessages.mockImplementation(next => { rows = typeof next === "function" ? next(rows) : next })
+    await runChatPipeline({
+      id: "normal", setupMessages: () => ({ targetMessageId: "generated-assistant-id" }),
+      preparePrompt: async () => ({ chatHistory: [], humanMessage: { role: "user", content: "Hello" }, sources: [] })
+    }, "Hello", "", false, rows, [], new AbortController().signal, {
+      selectedModel: "test", useOCR: false, userMessageId: "local-user",
+      setMessages: mocks.setMessages, saveMessageOnSuccess: mocks.saveMessageOnSuccess,
+      saveMessageOnError: mocks.saveMessageOnError, setHistory: mocks.setHistory,
+      setIsProcessing: mocks.setIsProcessing, setStreaming: mocks.setStreaming,
+      setAbortController: mocks.setAbortController, historyId: "history-1", setHistoryId: mocks.setHistoryId
+    })
+    expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+    expect(mocks.saveMessageOnError).toHaveBeenCalledWith(expect.objectContaining({
+      botMessage: expectedText, userServerMessageId: "server-user", assistantServerMessageId: "server-assistant"
+    }))
+    expect(rows[1]).toMatchObject({ message: expectedText, generationInfo: { interrupted: true, interruptionReason: expect.stringContaining("final answer") } })
+  })
+
+  it.each([
     { acknowledgement: "server-assistant-1", expected: "server-assistant-1" },
     { acknowledgement: undefined, expected: undefined }
   ])("exposes the saved assistant identity only when acknowledged ($acknowledgement)", async ({ acknowledgement, expected }) => {

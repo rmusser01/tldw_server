@@ -1,7 +1,10 @@
 import { startTransition } from "react"
 import { generateID } from "@/db/dexie/helpers"
 import { getModelNicknameByID } from "@/db/dexie/nickname"
-import { isReasoningEnded, isReasoningStarted } from "@/libs/reasoning"
+import {
+  isReasoningEnded, isReasoningStarted, isReasoningOnlyResponse,
+  MISSING_FINAL_ANSWER_MESSAGE
+} from "@/libs/reasoning"
 import { pageAssistModel } from "@/models"
 import type { ActorSettings } from "@/types/actor"
 import type { ChatDocuments } from "@/models/ChatTypes"
@@ -803,6 +806,13 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     ) {
       throw new Error(EMPTY_RESPONSE_ERROR_MESSAGE)
     }
+    if (
+      isReasoningOnlyResponse(fullText) &&
+      (!Array.isArray(toolCalls) || toolCalls.length === 0) &&
+      !isImageGenerationTurn
+    ) {
+      throw new Error(MISSING_FINAL_ANSWER_MESSAGE)
+    }
     applyMcpModuleDisclosureFromToolCalls(toolCalls)
     const finalGenerationInfo = streamTransportInterrupted
       ? {
@@ -874,6 +884,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         userModelId,
         userMessageId: resolvedUserMessageId,
         userServerMessageId: modelClient?.userServerMessageId,
+        assistantServerMessageId: modelClient?.serverMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         userParentMessageId: userParentMessageId ?? null,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
@@ -1004,6 +1015,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
           ? normalizeImageVariantsForMessage(
               updateActiveVariant(msg, {
                 message: assistantContent,
+                ...(modelClient?.serverMessageId ? { serverMessageId: modelClient.serverMessageId } : {}),
                 generationInfo: {
                   ...(msg.generationInfo || {}),
                   interrupted: true,
@@ -1038,6 +1050,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         userModelId,
         userMessageId: resolvedUserMessageId,
         userServerMessageId: modelClient?.userServerMessageId,
+        assistantServerMessageId: modelClient?.serverMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         userParentMessageId: userParentMessageId ?? null,
         assistantParentMessageId: assistantParentMessageId ?? null,

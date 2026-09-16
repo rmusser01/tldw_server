@@ -1,0 +1,146 @@
+{
+  "unit": "chat-recovery108-113-117",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-chat-recovery-implementation.md",
+      "bytes": 8993,
+      "sha256": "d74f2e158c1dbbee8cb9458010cd9c6c1deca36beb73c5bff9fe904e2d92a919"
+    },
+    {
+      "file": "cycle4-task5-broader.log",
+      "bytes": 46571,
+      "sha256": "2e7068c2cd5a1adf32113db547eacb256056e88e38141efe3cc492377ec6a8d3"
+    },
+    {
+      "file": "cycle4-task5-code-freeze.json",
+      "bytes": 5058,
+      "sha256": "ce5e9f1ea9c3086c51329eb7f663f60d663bc4d9d081662259ec60983a4d73e4"
+    },
+    {
+      "file": "cycle4-task5-completion-controls.log",
+      "bytes": 10873,
+      "sha256": "4b746892aeee195020aa9d6925febd53be0e28582e97c2daa20cc3bcd8ef895a"
+    },
+    {
+      "file": "cycle4-task5-empty-reasoning-red.log",
+      "bytes": 1684,
+      "sha256": "aa2d8218b529887772f27d3be9e8a46a6524a62672f51027001d71fa80bc9a8d"
+    },
+    {
+      "file": "cycle4-task5-final-independent-review.md",
+      "bytes": 6009,
+      "sha256": "1f54f16377db2e3db64ce0452fcdd6fa0c4618b598f7fbdbafd1c738188f3740"
+    },
+    {
+      "file": "cycle4-task5-final-tests.log",
+      "bytes": 22303,
+      "sha256": "717bf2370d112c5efcc6e79cef1035db21e9167b0e0c51e8fe292d490d1b5c02"
+    },
+    {
+      "file": "cycle4-task5-frontend-paths.json",
+      "bytes": 1828,
+      "sha256": "b11fabd660e4261e1fb7f1535adfce42adb70edda0bc6b3569c0f392ba350bb4"
+    },
+    {
+      "file": "cycle4-task5-lint-baseline.json",
+      "bytes": 2240713,
+      "sha256": "a992b3335fe395456a640992814cd490a2f156867d2f463993eb088819daf922"
+    },
+    {
+      "file": "cycle4-task5-lint-comparison.json",
+      "bytes": 299,
+      "sha256": "f11760d200148a415fc63d3ade87d08f6cce92e30969703ad411ce53e3a533b5"
+    },
+    {
+      "file": "cycle4-task5-lint-current.json",
+      "bytes": 2251978,
+      "sha256": "12f5eca4d508f544efe1f0aeb26bef154b93e834f22c1fb45323db45f1970752"
+    },
+    {
+      "file": "cycle4-task5-owned-manifest.json",
+      "bytes": 5749,
+      "sha256": "b8a3b8dfab2705e90adfadc4059a07c52fa19cb850fc8edf855ddb46dad213fb"
+    },
+    {
+      "file": "cycle4-task5-owned.diff",
+      "bytes": 72422,
+      "sha256": "b156abbd091b4f90320be5c158f38448141fcf986c17f46ab880a13507fbcd05"
+    },
+    {
+      "file": "cycle4-task5-paths.json",
+      "bytes": 1828,
+      "sha256": "b11fabd660e4261e1fb7f1535adfce42adb70edda0bc6b3569c0f392ba350bb4"
+    },
+    {
+      "file": "cycle4-task5-production-freeze.json",
+      "bytes": 2388,
+      "sha256": "da85f97417a63b366f9245e2ff0e6b0610ca76a1ec00299e77a6ae97e226b5eb"
+    },
+    {
+      "file": "cycle4-task5-reasoning-red.log",
+      "bytes": 23748,
+      "sha256": "9d383d11fc4aa52cc3e8cebf7d7bfa34f09ea8ef1345131ab8ce0ba37a7de855"
+    },
+    {
+      "file": "cycle4-task5-recovery-authority-red.log",
+      "bytes": 7535,
+      "sha256": "3f07f85b2b67cd21a0f3ee9cd4c767ae0d4bf0db68c6f3216e72fcce619d9c39"
+    },
+    {
+      "file": "cycle4-task5-recovery-green.log",
+      "bytes": 4575,
+      "sha256": "c049f60a3d54ff04150b21c27b04136b2d5fb437a776068e11bae1fc7db1b525"
+    },
+    {
+      "file": "cycle4-task5-recovery-transport-green.log",
+      "bytes": 422,
+      "sha256": "d7cc0cf9f9a670d773c74cbd202e399e51185dae0d76ec048f052b1d056a8882"
+    },
+    {
+      "file": "cycle4-task5-recovery-transport-red.log",
+      "bytes": 8593,
+      "sha256": "fb86076e9d6cf897531c87fe75e2847dccff4c8e82373e0c441f420596b6889f"
+    },
+    {
+      "file": "cycle4-task5-retry-final-red.log",
+      "bytes": 2736,
+      "sha256": "0c45fbd1d9e04590dbd267c71dcb66d46e02802054a9b60b42856fac786aeb38"
+    },
+    {
+      "file": "cycle4-task5-retry-independent-review.md",
+      "bytes": 3596,
+      "sha256": "62d09ab8217478731035b1bfbc2bb6f6ef584697bc7e39cb34dd2e0450592af6"
+    },
+    {
+      "file": "cycle4-task5-retry-owner-red.log",
+      "bytes": 21330,
+      "sha256": "71ca66638c15fa8961debb22c6659f4f0667461a0c544a3f82ae1cf077560547"
+    },
+    {
+      "file": "cycle4-task5-retry-red.log",
+      "bytes": 31580,
+      "sha256": "4d183440cea0c1a5e6d742cee03da7c9a575fb06ad089a63f48cab569c7fda7b"
+    },
+    {
+      "file": "cycle4-task5-route-final.log",
+      "bytes": 983,
+      "sha256": "c1e14f5f0b3e7a60a886f655400b43f5d909ab4cb9553ece26b8aa1908b91faa"
+    },
+    {
+      "file": "cycle4-task5-route-green.log",
+      "bytes": 12451,
+      "sha256": "44bb6fd6ece3c1d034dcb7ee4701ebe7b1455d5a4ca9d372704f6f23db2496ba"
+    },
+    {
+      "file": "cycle4-task5-route-red.log",
+      "bytes": 20439,
+      "sha256": "f2398db94e0c0ae5021478863861d7e759d0d8d2b9aec0ee09c60c551c345feb"
+    },
+    {
+      "file": "cycle4-task5-static.log",
+      "bytes": 299,
+      "sha256": "f11760d200148a415fc63d3ade87d08f6cce92e30969703ad411ce53e3a533b5"
+    }
+  ]
+}

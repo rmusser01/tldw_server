@@ -1,0 +1,326 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (39 tests | 2 failed) 12597ms
+     × promotes accepted entry to saved route and restores its transcript on remount: /chat?mode=character&characterId=4&keep=1 2567ms
+     × promotes accepted entry to saved route and restores its transcript on remount: /options.html#/chat?mode=character&characterId=4&keep=1 2541ms
+     ✓ registers the webui chat route context on mount 9ms
+     ✓ waits for session scope readiness before consuming the one-time restore pass 9ms
+     ✓ falls back to recent chat only when restore reports nothing restored 59ms
+     ✓ stops recent-chat initialization when restore reports cancellation 8ms
+     ✓ does not overwrite a server chat selected while session scope initializes 12ms
+     ✓ applies explicit character chat route ids before persisted session restore 9ms
+     ✓ applies character route ids before persisted session restore 9ms
+     ✓ applies a settings-return server chat before persisted session restore 8ms
+     ✓ selects the saved Flashcard source conversation through the actual neutral Chat route consumer 8ms
+     ✓ applies a sidepanel handoff before persisted session restore 12ms
+     ✓ starts a fresh character route chat over an active server chat 10ms
+     ✓ settles canonical saved entry with the real session subscription and local loader (StrictMode=false) 12ms
+     ✓ settles canonical saved entry with the real session subscription and local loader (StrictMode=true) 14ms
+     ✓ cancels pending generic restoration before applying an explicit settings target 8ms
+     ✓ finishes a delayed current settings local-history load 61ms
+     ✓ finishes a delayed current timeline local-history load 12ms
+     ✓ does not complete a failed local settings return as a successful server selection 121ms
+     ✓ keeps a saved target over a previous character while profile is delayed 260ms
+     ✓ keeps a saved target over a previous character while messages is delayed 260ms
+     ✓ does not install a late saved identity after picker changes during metadata fetch 254ms
+     ✓ does not install a late saved identity after picker-roundtrip changes during metadata fetch 261ms
+     ✓ does not install a late saved identity after replacement changes during metadata fetch 256ms
+     ✓ does not install a late saved identity after principal changes during metadata fetch 254ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn false)  519ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn true)  516ms
+     ✓ discards optional profile completion after replacement 254ms
+     ✓ discards optional profile completion after principal 250ms
+     ✓ discards optional profile completion after unmount 248ms
+     ✓ loads canonical messages without waiting for optional global selection persistence 223ms
+     ✓ preserves canonical saved identity with actual WebUI storage and six loaders: immediate 261ms
+     ✓ preserves canonical saved identity with actual WebUI storage and six loaders: profile 267ms
+     ✓ preserves canonical saved identity with actual WebUI storage and six loaders: messages 258ms
+     ✓ preserves canonical saved identity with actual WebUI storage and six loaders: sidebar  414ms
+     ✓ preserves canonical saved identity with actual WebUI storage and six loaders: cross-tab 263ms
+     ✓ uses the real picker to deliberately select Robot with a saved target  741ms
+     ✓ uses the real picker to deliberately select New choice with a saved target  688ms
+     ✓ keeps the saved conversation and preference after cancelling the real legacy picker confirmation  661ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > Playground coordinator integration > promotes accepted entry to saved route and restores its transcript on remount: /chat?mode=character&characterId=4&keep=1
+AssertionError: expected 'http://localhost:3000/chat?mode=chara…' to contain 'chatId=saved-cedar'
+
+Ignored nodes: comments, script, style
+[36m<html[39m
+  [33mclass[39m=[32m"dark"[39m
+[36m>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"relative flex h-full min-h-0 w-full flex-col items-center bg-bg text-text data-[is-dragging=true]:bg-surface2"[39m
+        [33mdata-is-dragging[39m=[32m"false"[39m
+        [33mstyle[39m=[32m"--chat-message-opacity: 0.6; --chat-character-image-opacity: 1;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"relative z-10 flex h-full min-h-0 w-full"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden text-text bg-bg"[39m
+            [33mdata-left-rail[39m=[32m"hidden"[39m
+            [33mdata-mode[39m=[32m"cockpit"[39m
+            [33mdata-right-rail[39m=[32m"hidden"[39m
+            [33mdata-testid[39m=[32m"playground-cockpit-shell"[39m
+          [36m>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"sr-only"[39m
+              [33mdata-testid[39m=[32m"playground-cockpit-mode-summary"[39m
+            [36m>[39m
+              [0mCockpit rails hidden. Chat and composer remain active.[0m
+            [36m</p>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid shrink-0 grid-cols-1 gap-2 border-b border-border bg-surface2/40 p-2 text-xs lg:hidden"[39m
+              [33mdata-mobile-panel[39m=[32m"none"[39m
+              [33mdata-testid[39m=[32m"playground-cockpit-mobile-rails"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33maria-label[39m=[32m"Mobile cockpit panels"[39m
+                [33mclass[39m=[32m"grid grid-cols-2 gap-1 rounded-md border border-border bg-surface p-1"[39m
+                [33mrole[39m=[32m"tablist"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"playground-cockpit-mobile-context-panel"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-selected[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus text-text-muted hover:bg-bg"[39m
+                  [33mid[39m=[32m"playground-cockpit-mobile-context-tab"[39m
+                  [33mrole[39m=[32m"tab"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0mRestore context sidechannel[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"playground-cockpit-mobile-runtime-panel"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-selected[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus text-text-muted hover:bg-bg"[39m
+                  [33mid[39m=[32m"playground-cockpit-mobile-runtime-tab"[39m
+                  [33mrole[39m=[32m"tab"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0mRestore runtime sidechannel[0m
+                [36m</button>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"grid grid-cols-2 gap-1"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"playground-cockpit-mobile-context-panel"[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"min-h-[36px] rounded-md border border-border bg-bg px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0mShow context rail[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"playground-cockpit-mobile-runtime-panel"[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"min-h-[36px] rounded-md border border-border bg-bg px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0mShow runtime rail[0m
+                [36m</button>[39m
+              [36m</div>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"sr-only"[39m
+                [33mdata-testid[39m=[32m"playground-cockpit-mobile-panel-summary"[39m
+                [33mid[39m=[32m"playground-cockpit-mobile-panel-summary"[39m
+              [36m>[39m
+                [0mCockpit panels hidden. Composer draft remains available below.[0m
+              [36m</p>[39m
+              [36m<section[39m
+                [33maria-describedby[39m=[32m"playground-cockpit-mobile-panel-summary"[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33maria-labelledby[39m=[32m"playground-cockpit-mobile-context-tab"[39m
+                [33mclass[39m=[32m"max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 hidden"[39m
+                [33mhidden[39m=[32m""[39m
+                [33mid[39m=[32m"playground-cockpit-mobile-context-panel"[39m
+                [33mrole[39m=[32m"tabpanel"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"flex min-w-0 flex-col gap-2 text-sm"[39m
+                  [33mdata-testid[39m=[32m"playground-context-rail"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"rounded-md border border-border/70 bg-surface px-3 py-2"[39m
+                  [36m>[39m
+                    [36m<section[39m
+                      [33maria-label[39m=[32m"Next message composition"[39m
+                      [33mclass[39m=[32m"min-w-0"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"flex items-start justify-between gap-2"[39m
+                      [36m>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"min-w-0"[39m
+                        [36m>[39m
+                          [36m<h2[39m
+                            [33mclass[39m=[32m"text-[11px] font-semibold uppercase text-text-muted"[39m
+                          [36m>[39m
+                            [0mComposition[0m
+                          [36m</h2>[39m
+                          [36m<p[39m
+                            [33mclass[39m=[32m"mt-1 text-sm font-medium text-text"[39m
+                        ...
+
+Expected: "chatId=saved-cedar"
+Received: "http://localhost:3000/chat?mode=character&characterId=4&keep=1"
+
+ ❯ __vi_import_2__.waitFor.timeout src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx:431:54
+
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > Playground coordinator integration > promotes accepted entry to saved route and restores its transcript on remount: /options.html#/chat?mode=character&characterId=4&keep=1
+AssertionError: expected 'http://localhost:3000/options.html#/c…' to contain 'chatId=saved-cedar'
+
+Ignored nodes: comments, script, style
+[36m<html[39m
+  [33mclass[39m=[32m"dark"[39m
+[36m>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"relative flex h-full min-h-0 w-full flex-col items-center bg-bg text-text data-[is-dragging=true]:bg-surface2"[39m
+        [33mdata-is-dragging[39m=[32m"false"[39m
+        [33mstyle[39m=[32m"--chat-message-opacity: 0.6; --chat-character-image-opacity: 1;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"relative z-10 flex h-full min-h-0 w-full"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden text-text bg-bg"[39m
+            [33mdata-left-rail[39m=[32m"hidden"[39m
+            [33mdata-mode[39m=[32m"cockpit"[39m
+            [33mdata-right-rail[39m=[32m"hidden"[39m
+            [33mdata-testid[39m=[32m"playground-cockpit-shell"[39m
+          [36m>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"sr-only"[39m
+              [33mdata-testid[39m=[32m"playground-cockpit-mode-summary"[39m
+            [36m>[39m
+              [0mCockpit rails hidden. Chat and composer remain active.[0m
+            [36m</p>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid shrink-0 grid-cols-1 gap-2 border-b border-border bg-surface2/40 p-2 text-xs lg:hidden"[39m
+              [33mdata-mobile-panel[39m=[32m"none"[39m
+              [33mdata-testid[39m=[32m"playground-cockpit-mobile-rails"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33maria-label[39m=[32m"Mobile cockpit panels"[39m
+                [33mclass[39m=[32m"grid grid-cols-2 gap-1 rounded-md border border-border bg-surface p-1"[39m
+                [33mrole[39m=[32m"tablist"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"playground-cockpit-mobile-context-panel"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-selected[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus text-text-muted hover:bg-bg"[39m
+                  [33mid[39m=[32m"playground-cockpit-mobile-context-tab"[39m
+                  [33mrole[39m=[32m"tab"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0mRestore context sidechannel[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"playground-cockpit-mobile-runtime-panel"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-selected[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus text-text-muted hover:bg-bg"[39m
+                  [33mid[39m=[32m"playground-cockpit-mobile-runtime-tab"[39m
+                  [33mrole[39m=[32m"tab"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0mRestore runtime sidechannel[0m
+                [36m</button>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"grid grid-cols-2 gap-1"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"playground-cockpit-mobile-context-panel"[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"min-h-[36px] rounded-md border border-border bg-bg px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0mShow context rail[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"playground-cockpit-mobile-runtime-panel"[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"min-h-[36px] rounded-md border border-border bg-bg px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0mShow runtime rail[0m
+                [36m</button>[39m
+              [36m</div>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"sr-only"[39m
+                [33mdata-testid[39m=[32m"playground-cockpit-mobile-panel-summary"[39m
+                [33mid[39m=[32m"playground-cockpit-mobile-panel-summary"[39m
+              [36m>[39m
+                [0mCockpit panels hidden. Composer draft remains available below.[0m
+              [36m</p>[39m
+              [36m<section[39m
+                [33maria-describedby[39m=[32m"playground-cockpit-mobile-panel-summary"[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33maria-labelledby[39m=[32m"playground-cockpit-mobile-context-tab"[39m
+                [33mclass[39m=[32m"max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 hidden"[39m
+                [33mhidden[39m=[32m""[39m
+                [33mid[39m=[32m"playground-cockpit-mobile-context-panel"[39m
+                [33mrole[39m=[32m"tabpanel"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"flex min-w-0 flex-col gap-2 text-sm"[39m
+                  [33mdata-testid[39m=[32m"playground-context-rail"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"rounded-md border border-border/70 bg-surface px-3 py-2"[39m
+                  [36m>[39m
+                    [36m<section[39m
+                      [33maria-label[39m=[32m"Next message composition"[39m
+                      [33mclass[39m=[32m"min-w-0"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"flex items-start justify-between gap-2"[39m
+                      [36m>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"min-w-0"[39m
+                        [36m>[39m
+                          [36m<h2[39m
+                            [33mclass[39m=[32m"text-[11px] font-semibold uppercase text-text-muted"[39m
+                          [36m>[39m
+                            [0mComposition[0m
+                          [36m</h2>[39m
+                          [36m<p[39m
+                            [33mclass[39m=[32m"mt-1 text-sm font-medium text-text"[39m
+                        ...
+
+Expected: "chatId=saved-cedar"
+Received: "http://localhost:3000/options.html#/chat?mode=character&characterId=4&keep=1"
+
+ ❯ __vi_import_2__.waitFor.timeout src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx:431:54
+
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 37 passed (39)
+   Start at  20:12:23
+   Duration  15.03s (transform 1.24s, setup 79ms, import 2.08s, tests 12.60s, environment 210ms)
+

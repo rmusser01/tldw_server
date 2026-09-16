@@ -1,0 +1,144 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/services/tldw/__tests__/service-prompt-scope-error.test.ts (48 tests | 2 failed) 7ms
+     × bounds character recovery /api/v1/chats/owned/completions/persist POST 3ms
+     × bounds character recovery /api/v1/chats/other-owned/completions/persist?scope_type=global POST 0ms
+     ✓ bounds character recovery /api/v1/chats/owned/completions/persist GET 0ms
+     ✓ bounds character recovery /api/v1/chats/owned/completions/persist PUT 0ms
+     ✓ bounds character recovery /api/v1/chats/owned/completions POST 0ms
+     ✓ bounds character recovery /api/v1/chats/owned/completions/persist/extra POST 0ms
+     ✓ bounds character recovery /api/v1/chats//completions/persist POST 0ms
+     ✓ bounds character recovery /api/v1/chats/a%2fb/completions/persist POST 0ms
+     ✓ bounds character recovery /api/v1/chats/%2e%2e/completions/persist POST 0ms
+     ✓ bounds the scoped message-list route /api/v1/chats/owned-chat/messages?limit=200&offset=0 0ms
+     ✓ bounds the scoped message-list route /api/v1/chats/other-chat/messages 0ms
+     ✓ bounds the scoped message-list route /api/v1/chats/owned-chat 0ms
+     ✓ bounds the scoped message-list route /api/v1/chats/owned-chat/messages/other-message 0ms
+     ✓ bounds the scoped message-list route /api/v1/chats/a%2fb/messages 0ms
+     ✓ bounds the scoped message-list route /api/v1/chats/%2e%2e/messages 0ms
+     ✓ bounds the scoped message-list route /api/v1/chats//messages 0ms
+     ✓ bounds Notes request /api/v1/notes/ POST 0ms
+     ✓ bounds Notes request /api/v1/notes/private-note GET 0ms
+     ✓ bounds Notes request /api/v1/notes/private-note PUT 0ms
+     ✓ bounds Notes request /api/v1/notes/ GET 0ms
+     ✓ bounds Notes request /api/v1/notes/private-note DELETE 0ms
+     ✓ bounds Notes request /api/v1/notes/private-note PATCH 0ms
+     ✓ bounds Notes request /api/v1/notes/private-note/attachments POST 0ms
+     ✓ bounds Notes request /api/v1/notes/%2e%2e PUT 0ms
+     ✓ bounds Notes request /api/v1/notes/a%2fb PUT 0ms
+     ✓ allows only GET for the bounded context read /api/v1/writing/manuscripts/scenes/scene-a 0ms
+     ✓ allows only GET for the bounded context read /api/v1/writing/manuscripts/projects/project-a/characters?role=protagonist 0ms
+     ✓ allows only GET for the bounded context read /api/v1/writing/manuscripts/projects/project-a/world-info?kind=location 0ms
+     ✓ does not widen scoped access to /api/v1/writing/manuscripts/projects/project-a 0ms
+     ✓ does not widen scoped access to /api/v1/writing/manuscripts/scenes/scene-a/annotations 0ms
+     ✓ does not widen scoped access to /api/v1/writing/manuscripts/projects/project-a/characters/relationships 0ms
+     ✓ does not widen scoped access to /api/v1/writing/manuscripts/projects/%2e%2e/characters 0ms
+     ✓ does not widen scoped access to /api/v1/writing/manuscripts/scenes/a%2fb 0ms
+     ✓ does not widen scoped access to /api/v1/writing/manuscripts/scenes/a%5cb 0ms
+     ✓ does not widen scoped access to /api/v1/writing/manuscripts/scenes/ 0ms
+     ✓ compares only the frozen target keys 0ms
+     ✓ requires the captured single-user API-key scope to match 0ms
+     ✓ rejects a changed API key that collides in the UI scope hash 0ms
+     ✓ allows only Service Prompt and exact scoped execution routes 0ms
+     ✓ rejects ambiguous scoped pathname /api/v1/chats/%2e%2e/messages 0ms
+     ✓ rejects ambiguous scoped pathname /api/v1/chats/./messages 0ms
+     ✓ rejects ambiguous scoped pathname /api/v1/chats/../messages 0ms
+     ✓ rejects ambiguous scoped pathname /api/v1/chats/chat%2fid/messages 0ms
+     ✓ rejects ambiguous scoped pathname /api/v1/chats/chat%5cid/messages 0ms
+     ✓ rejects ambiguous scoped pathname /api/v1/chats/chat\id/messages 0ms
+     ✓ rejects ambiguous scoped pathname /api/v1/chats//messages 0ms
+     ✓ matches only the pathname while leaving query data inert 0ms
+     ✓ creates the structured scope-change error 0ms
+ ❯ src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts (24 tests | 1 failed) 10ms
+     × keeps captured character recovery scope optional without changing content (scoped: true) 4ms
+     ✓ keeps captured character recovery scope optional without changing content (scoped: false) 0ms
+     ✓ binds the QA fetchWithAuth request without changing its body 0ms
+     ✓ binds the QA listCharacters request without changing its body 0ms
+     ✓ binds the QA searchCharacters request without changing its body 0ms
+     ✓ binds the QA getChat request without changing its body 0ms
+     ✓ binds the QA updateChat request without changing its body 0ms
+     ✓ binds the QA deleteChat request without changing its body 0ms
+     ✓ binds the QA createConversationShareLink request without changing its body 0ms
+     ✓ binds the QA revokeConversationShareLink request without changing its body 0ms
+     ✓ binds the QA exportChatbook request without changing its body 0ms
+     ✓ binds the QA downloadChatbookExport request without changing its body 0ms
+     ✓ binds the QA createNote request without changing its body 0ms
+     ✓ binds the QA ragSourceHealth request without changing its body 0ms
+     ✓ binds QA streaming scope outside the inference body 0ms
+     ✓ binds non-streaming chat without serializing the scope 1ms
+     ✓ binds streaming chat without serializing the scope 0ms
+     ✓ does not replay scoped RAG POSTs and keeps scope out of JSON 1ms
+     ✓ preserves structured scope errors in the exported base RAG method 0ms
+     ✓ binds web search and keeps request scope out of JSON 0ms
+     ✓ binds mirrored chat messages to the captured account and signal 0ms
+     ✓ binds chat-session creation to the captured account and signal 0ms
+     ✓ reads fresh promotion messages with captured scope without joining cached or pending reads 0ms
+     ✓ serializes raw recovery listing as explicit false while keeping the captured owner 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts > TldwApiClient captured request scope > keeps captured character recovery scope optional without changing content (scoped: true)
+AssertionError: expected { …(4) } to match object { headers: { …(2) }, …(2) }
+(6 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "abortSignal": AbortSignal {
+-     Symbol(kEvents): Map {},
+-     Symbol(events.maxEventTargetListeners): 0,
+-     Symbol(events.maxEventTargetListenersWarned): false,
+-     Symbol(kHandlers): Map {},
+-     Symbol(kAborted): false,
+-     Symbol(kReason): undefined,
+-     Symbol(kComposite): false,
+-   },
+    "headers": {
+      "Content-Type": "application/json",
+-     "X-TLDW-Expected-User-ID": "42",
+-   },
+-   "servicePromptConfig": {
+-     "authMode": "multi-user",
+-     "expectedUserId": 42,
+-     "serverUrl": "https://research-one.test",
+    },
+  }
+
+ ❯ src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts:66:23
+     64|     expect(request.method).toBe("POST")
+     65|     if (scoped) {
+     66|       expect(request).toMatchObject({ ...expectedScopeFields, abortSig…
+       |                       ^
+     67|     } else {
+     68|       expect(request.servicePromptConfig).toBeUndefined()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/services/tldw/__tests__/service-prompt-scope-error.test.ts > Service Prompt scope policy > bounds character recovery /api/v1/chats/owned/completions/persist POST
+ FAIL  src/services/tldw/__tests__/service-prompt-scope-error.test.ts > Service Prompt scope policy > bounds character recovery /api/v1/chats/other-owned/completions/persist?scope_type=global POST
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/services/tldw/__tests__/service-prompt-scope-error.test.ts:26:54
+     24|     ["/api/v1/chats/%2e%2e/completions/persist", "POST", false]
+     25|   ])("bounds character recovery %s %s", (path, method, allowed) => {
+     26|     expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+       |                                                      ^
+     27|   })
+     28| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  3 failed | 69 passed (72)
+   Start at  20:26:17
+   Duration  817ms (transform 462ms, setup 164ms, import 522ms, tests 17ms, environment 452ms)
+

@@ -13,6 +13,20 @@ import {
 
 describe("Service Prompt scope policy", () => {
   it.each([
+    ["/api/v1/chats/owned/completions/persist", "POST", true],
+    ["/api/v1/chats/other-owned/completions/persist?scope_type=global", "POST", true],
+    ["/api/v1/chats/owned/completions/persist", "GET", false],
+    ["/api/v1/chats/owned/completions/persist", "PUT", false],
+    ["/api/v1/chats/owned/completions", "POST", false],
+    ["/api/v1/chats/owned/completions/persist/extra", "POST", false],
+    ["/api/v1/chats//completions/persist", "POST", false],
+    ["/api/v1/chats/a%2fb/completions/persist", "POST", false],
+    ["/api/v1/chats/%2e%2e/completions/persist", "POST", false]
+  ])("bounds character recovery %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
+  it.each([
     ["/api/v1/chats/owned-chat/messages?limit=200&offset=0", true],
     ["/api/v1/chats/other-chat/messages", true],
     ["/api/v1/chats/owned-chat", true],

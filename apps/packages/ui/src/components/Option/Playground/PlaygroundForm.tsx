@@ -541,6 +541,7 @@ export const PlaygroundForm = ({
   );
   const {
     onSubmit,
+    regenerateLastMessage,
     messages,
     setMessages,
     selectedModel,
@@ -3036,33 +3037,8 @@ export const PlaygroundForm = ({
   });
 
   const handleRetryChatError = React.useCallback(() => {
-    let lastUserMessage: any = null
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const entry = messages[i]
-      const role = typeof entry?.role === "string" ? entry.role.toLowerCase() : ""
-      if (role === "user" || entry?.isBot === false) {
-        lastUserMessage = entry
-        break
-      }
-    }
-    const retryText =
-      typeof lastUserMessage?.message === "string"
-        ? lastUserMessage.message
-        : typeof lastUserMessage?.content === "string"
-          ? lastUserMessage.content
-          : ""
-    const trimmed = retryText.trim()
-    if (!trimmed) {
-      textAreaFocus()
-      return
-    }
-
-    void sendMessage({
-      message: trimmed,
-      image: "",
-      docs: [],
-    })
-  }, [messages, sendMessage, textAreaFocus])
+    void regenerateLastMessage().catch(() => textAreaFocus())
+  }, [regenerateLastMessage, textAreaFocus])
 
   const handleEditChatProvider = React.useCallback(() => {
     setOpenModelSettings(true)

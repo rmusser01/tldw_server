@@ -87,13 +87,13 @@ describe("saveMessageOnError", () => {
       e: new Error("provider failed"), history: [], setHistory: vi.fn(), image: "",
       userMessage: "Question", botMessage: "Partial", historyId: "history-1",
       selectedModel: "test", setHistoryId: vi.fn(), isRegenerating: false,
-      userMessageId: "local-user", userServerMessageId: "server-user", assistantMessageId: "local-assistant"
+      userMessageId: "local-user", userServerMessageId: "server-user", assistantMessageId: "local-assistant", assistantServerMessageId: "server-assistant"
     })
     expect(mocks.saveMessage).toHaveBeenCalledWith(expect.objectContaining({
       id: "local-user", serverMessageId: "server-user", role: "user", content: "Question"
     }))
     expect(mocks.saveMessage).toHaveBeenCalledWith(expect.objectContaining({
-      id: "local-assistant", role: "assistant"
+      id: "local-assistant", serverMessageId: "server-assistant", role: "assistant"
     }))
   })
 

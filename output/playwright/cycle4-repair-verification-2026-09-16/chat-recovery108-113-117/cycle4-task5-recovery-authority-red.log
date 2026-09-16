@@ -1,0 +1,106 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+stderr | src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from fallback success to local persistence
+Failed to persist assistant message via completions/persist: Error: Persist endpoint unavailable
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:346:9
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1026:60
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+
+stderr | src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from degraded success to local persistence
+Failed to persist assistant message via completions/persist: Error: Saved with validation warning
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:347:23
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1026:60
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21) {
+  status: 503,
+  detail: {
+    code: 'persist_validation_degraded',
+    saved: true,
+    assistant_message_id: 'fallback-assistant'
+  }
+}
+
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx (19 tests | 1 failed) 89ms
+     × does not publish recovered IDs or save an old owner's partial after the lease invalidates 63ms
+     ✓ preserves closed reasoning as a recoverable tracked completion with acknowledged IDs 2ms
+     ✓ preserves unclosed reasoning as a recoverable tracked completion with acknowledged IDs 1ms
+     ✓ preserves structured reasoning as a recoverable tracked completion with acknowledged IDs 1ms
+     ✓ forwards the confirmed assistant ID from fallback success to local persistence 2ms
+     ✓ forwards the confirmed assistant ID from degraded success to local persistence 1ms
+     ✓ keeps tracked character routing anchored to current chat metadata when global character state is stale 1ms
+     ✓ rebinds a greeting to the newly created conversation after a failed session 1ms
+     ✓ handles emote commands without sending chat 1ms
+     ✓ uses manual visual identity override when resolving assistant message metadata 2ms
+     ✓ does not let stale overlay assistant state override the active character chat 1ms
+     ✓ honors an explicit tracked character switch over the current chat metadata 1ms
+     ✓ reuses the latest store character chat when greeting persistence updates before the send closure 1ms
+     ✓ uses the latest store character id when the hook prop still points at another character 1ms
+     ✓ passes workspace scope through when creating a character-backed chat 4ms
+     ✓ strips explicit streaming emote directives and persists emote events 2ms
+     ✓ preserves explicit emote metadata when recovering a failed stream 1ms
+     ✓ does not duplicate recovery persistence when saved-degraded includes emote metadata 1ms
+     ✓ sends emote metadata when normal persist falls back to addChatMessage 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > does not publish recovered IDs or save an old owner's partial after the lease invalidates
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "assistantMessageId": "generated-id",
+        "assistantParentMessageId": "generated-id",
+        "assistantServerMessageId": "old-assistant",
+        "botMessage": "<think>Only reasoning</think>",
+        "conversationId": "tracked-chat-1",
+        "e": [Error: No final answer was generated. Retry or continue to request an answer.],
+        "history": Array [],
+        "historyId": "history-character",
+        "image": "",
+        "isRegenerating": false,
+        "message_source": "web-ui",
+        "modelId": "deepseek-chat",
+        "selectedModel": "deepseek-chat",
+        "userMessage": "Question",
+        "userMessageId": "generated-id",
+        "userServerMessageId": "user-server-1",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:321:36
+    319|     options.setMessages.mockClear()
+    320|     await act(async () => { release({ id: "old-assistant", version: 1 …
+    321|     expect(saveLocalErrorMock).not.toHaveBeenCalled()
+       |                                    ^
+    322|     expect(options.setMessages).not.toHaveBeenCalled()
+    323|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 18 passed (19)
+   Start at  20:19:15
+   Duration  1.31s (transform 487ms, setup 71ms, import 905ms, tests 89ms, environment 188ms)
+
