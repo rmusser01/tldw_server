@@ -654,7 +654,7 @@ export function ContentViewer({
   }
 
   return (
-    <div ref={setRootContainerRef} className="relative flex-1 flex flex-col bg-bg">
+    <div ref={setRootContainerRef} className="relative min-h-0 flex-1 flex flex-col bg-bg">
       <div
         className="sr-only"
         aria-live="polite"
@@ -664,7 +664,7 @@ export function ContentViewer({
         {readingProgress.contentSelectionAnnouncement}
       </div>
       {/* Compact Header */}
-      <div className="px-4 py-2 border-b border-border bg-surface">
+      <div className="shrink-0 px-4 py-2 border-b border-border bg-surface">
         <div className="flex flex-col md:flex-row items-center gap-3">
           {/* Left: Navigation */}
           <div className="flex items-center gap-1">
@@ -761,7 +761,7 @@ export function ContentViewer({
       {/* Content Area */}
       <div
         ref={contentScrollContainerRef}
-        className="flex-1 overflow-y-auto p-4"
+        className="min-h-0 flex-1 overflow-y-auto p-4"
         data-testid="content-scroll-container"
       >
         {isDetailLoading ? (

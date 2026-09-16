@@ -1,12 +1,18 @@
 import React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import ViewMediaPage from '../ViewMediaPage'
 import { getFlashcardSourceMeta } from '@/components/Flashcards/utils/source-reference'
+import { useReadingProgress, type UseReadingProgressDeps } from '@/components/Media/hooks/useReadingProgress'
 
 const mocks = vi.hoisted(() => ({
   canDelete: true,
+  readingProbe: false,
+  navigationData: { nodes: [] as Array<{ id: string; title: string; level: number; target_type: 'char_range'; target_start: number; target_end: number }> },
+  getNavigationResume: vi.fn(),
+  getReadingProgress: vi.fn(),
+  updateReadingProgress: vi.fn(),
   queryData: [] as Array<any>,
   detailById: {} as Record<string, any>,
   refetch: vi.fn(),
@@ -136,7 +142,7 @@ vi.mock('@/hooks/useUndoNotification', () => ({
 }))
 
 vi.mock('@/hooks/useFeatureFlags', () => ({
-  useMediaNavigationPanel: () => [false],
+  useMediaNavigationPanel: () => [mocks.readingProbe],
   useMediaNavigationGeneratedFallbackDefault: () => [false],
   useMediaRichRendering: () => [false],
   useMediaAnalysisDisplayModeSelector: () => [false]
@@ -144,16 +150,24 @@ vi.mock('@/hooks/useFeatureFlags', () => ({
 
 vi.mock('@/hooks/useMediaNavigation', () => ({
   useMediaNavigation: () => ({
-    data: { nodes: [] },
+    data: mocks.navigationData,
     isLoading: false,
     error: null,
     refetch: vi.fn()
   })
 }))
 
+vi.mock('@/utils/media-navigation-resume', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/utils/media-navigation-resume')>(),
+  getMediaNavigationResumeEntry: mocks.getNavigationResume,
+  saveMediaNavigationResumeSelection: vi.fn().mockResolvedValue(null)
+}))
+
 vi.mock('@/services/tldw/TldwApiClient', () => ({
   tldwClient: {
-    getConfig: vi.fn().mockResolvedValue({})
+    getConfig: vi.fn().mockResolvedValue({}),
+    getReadingProgress: mocks.getReadingProgress,
+    updateReadingProgress: mocks.updateReadingProgress
   }
 }))
 
@@ -223,7 +237,9 @@ vi.mock('@/components/Media/Pagination', () => ({
 }))
 
 vi.mock('@/components/Media/MediaSectionNavigator', () => ({
-  MediaSectionNavigator: () => <div data-testid="media-section-navigator" />
+  MediaSectionNavigator: ({ nodes, onSelectNode }: { nodes: Array<{ id: string; title: string }>; onSelectNode: (node: { id: string; title: string }) => void }) => <div data-testid="media-section-navigator">
+    {nodes.map(node => <button key={node.id} onClick={() => onSelectNode(node)}>Jump to {node.title}</button>)}
+  </div>
 }))
 
 vi.mock('@/components/Media/ResultsList', () => ({
@@ -253,9 +269,11 @@ vi.mock('@/components/Media/ContentViewer', () => ({
     hasPrevious,
     onDeleteItem,
     onChatWithMedia,
-    onChatAboutMedia
+    onChatAboutMedia,
+    ...readingProps
   }: any) => (
     <div data-testid="mock-content-viewer">
+      {mocks.readingProbe && <ReadingProgressProbe selectedMedia={selectedMedia} {...readingProps} />}
       <div data-testid="selected-media-id">
         {selectedMedia?.id != null ? String(selectedMedia.id) : 'none'}
       </div>
@@ -307,6 +325,37 @@ vi.mock('@/components/Media/ContentViewer', () => ({
   )
 }))
 
+// Real reading/navigation hooks run beneath the real page owner. Only browser
+// dimensions/scroll events and external storage are controlled by this fixture.
+function ReadingProgressProbe(props: Omit<UseReadingProgressDeps, 'contentScrollContainerRef' | 'contentBodyRef' | 'selectedMediaId' | 't'>) {
+  const containerRef = React.useRef<HTMLDivElement | null>(null)
+  const bodyRef = React.useRef<HTMLDivElement | null>(null)
+  const attachContainer = React.useCallback((el: HTMLDivElement | null) => {
+    containerRef.current = el
+    if (!el) return
+    let top = 0
+    Object.defineProperties(el, {
+      scrollHeight: { configurable: true, get: () => 835 },
+      clientHeight: { configurable: true, get: () => 540 },
+      scrollTop: { configurable: true, get: () => top, set: (next: number) => {
+        if (top === next) return
+        top = next
+        queueMicrotask(() => el.dispatchEvent(new Event('scroll')))
+      } }
+    })
+    el.scrollTo = ((options: ScrollToOptions) => { el.scrollTop = options.top ?? 0 }) as typeof el.scrollTo
+  }, [])
+  useReadingProgress({
+    ...props,
+    content: props.content ?? '',
+    contentScrollContainerRef: containerRef,
+    contentBodyRef: bodyRef,
+    selectedMediaId: props.selectedMedia ? String(props.selectedMedia.id) : null,
+    t: (_key: string, options?: Record<string, unknown>) => typeof options?.defaultValue === 'string' ? options.defaultValue : _key
+  })
+  return <div ref={attachContainer} data-testid="reading-scroller"><div ref={bodyRef}>{props.content}</div></div>
+}
+
 const LocationProbe = () => {
   const location = useLocation()
   return <div data-testid="location-search">{location.search}</div>
@@ -336,6 +385,11 @@ const renderMediaPage = (initialEntry: string) => {
 describe('ViewMediaPage Stage 3 permalinks', () => {
   beforeEach(() => {
     mocks.canDelete = true
+    mocks.readingProbe = false
+    mocks.navigationData = { nodes: [] }
+    mocks.getNavigationResume.mockReset().mockResolvedValue(null)
+    mocks.getReadingProgress.mockReset().mockResolvedValue({ media_id: 1, percent_complete: 54.2, cfi: 'scroll:54.24' })
+    mocks.updateReadingProgress.mockReset().mockResolvedValue({})
     mocks.queryData = []
     mocks.detailById = {}
     mocks.refetch.mockReset()
@@ -381,6 +435,41 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
     mocks.detailById['1'] = { media_id: 1, source: { title: 'First source' }, content: { text: 'Cedar source' } }
     renderMediaPage('/media?id=1')
     await waitFor(() => expect(screen.getByTestId('selected-media-id')).toHaveTextContent('1'))
+  })
+
+  it.each([false, true])('keeps saved reading position when passive chapter selection resolves after progress restoration (remembered=%s)', async remembered => {
+    mocks.readingProbe = true
+    mocks.navigationData = { nodes: [{ id: 'chapter-1', title: 'Opening', level: 1, target_type: 'char_range', target_start: 0, target_end: 12 }] }
+    mocks.detailById['1'] = { media_id: 1, source: { title: 'Aster' }, content: { text: 'Original Aster source' } }
+    let release!: (value: unknown) => void
+    mocks.getNavigationResume.mockReturnValue(new Promise(resolve => { release = resolve }))
+    renderMediaPage('/media?id=1')
+    await waitFor(() => expect(screen.getByTestId('reading-scroller').scrollTop).toBe(160))
+    await waitFor(() => expect(mocks.getNavigationResume).toHaveBeenCalled())
+
+    await act(async () => {
+      release(remembered ? { media_id: '1', node_id: 'chapter-1', title: 'Opening', level: 1 } : null)
+      await new Promise(resolve => setTimeout(resolve, 1100))
+    })
+
+    expect(screen.getByTestId('reading-scroller').scrollTop).toBe(160)
+    expect(mocks.updateReadingProgress.mock.calls.some(([, payload]) => payload.percentage === 0)).toBe(false)
+  })
+
+  it('allows genuine scrolling and an explicit chapter jump to save their current positions', async () => {
+    mocks.readingProbe = true
+    mocks.navigationData = { nodes: [{ id: 'chapter-1', title: 'Opening', level: 1, target_type: 'char_range', target_start: 0, target_end: 12 }] }
+    mocks.detailById['1'] = { media_id: 1, source: { title: 'Aster' }, content: { text: 'Original Aster source' } }
+    renderMediaPage('/media?id=1')
+    await screen.findByRole('button', { name: 'Jump to Opening' })
+    const scroller = screen.getByTestId('reading-scroller')
+    await act(async () => { scroller.scrollTop = 90; await new Promise(resolve => setTimeout(resolve, 1100)) })
+    expect(mocks.updateReadingProgress).toHaveBeenCalledWith('1', expect.objectContaining({ percentage: 30.51, zoom_level: 100 }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to Opening' }))
+    await waitFor(() => expect(scroller.scrollTop).toBe(0))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1100)) })
+    expect(mocks.updateReadingProgress).toHaveBeenLastCalledWith('1', expect.objectContaining({ percentage: 0, zoom_level: 100 }))
   })
 
   it('clears a deleted deep link without hydrating its cached row again', async () => {

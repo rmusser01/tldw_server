@@ -456,7 +456,9 @@ const MediaPageContent: React.FC = () => {
 
   const effectiveContentFormat: null = null
   const selectedNavigationTarget = useMemo(() => {
-    if (!showNavigationPanel || !selectedNavigationNodeId) return null
+    // Passive section highlighting must not seek over precise saved progress.
+    // Only an explicit chapter action in this view requests a navigation target.
+    if (!showNavigationPanel || !selectedNavigationNodeId || navigationSelectionNonce === 0) return null
     if (!selectedNavigationNode) return null
     return {
       target_type: selectedNavigationNode.target_type,
@@ -464,7 +466,7 @@ const MediaPageContent: React.FC = () => {
       target_end: selectedNavigationNode.target_end,
       target_href: selectedNavigationNode.target_href
     }
-  }, [selectedNavigationNode, selectedNavigationNodeId, showNavigationPanel])
+  }, [navigationSelectionNonce, selectedNavigationNode, selectedNavigationNodeId, showNavigationPanel])
 
   const navigationPageCountHint = useMemo(() => {
     const toPositiveInt = (value: unknown): number | null => {
@@ -763,7 +765,6 @@ const MediaPageContent: React.FC = () => {
       if (!nextNode) return
 
       setSelectedNavigationNodeId(nextNode.id)
-      setNavigationSelectionNonce((prev) => prev + 1)
       void persistNavigationSelection(nextNode)
 
       if (resumeEntry && resolvedSelection) {
@@ -1134,8 +1135,7 @@ const MediaPageContent: React.FC = () => {
   if (isEmptyLibrary) {
     return (
       <div
-        className="relative flex min-h-full bg-bg"
-        style={{ minHeight: `${sidebarDimensions.mediaPageMinHeightPx}px` }}
+        className="relative flex min-h-0 flex-1 overflow-auto bg-bg"
       >
         <div className="flex flex-1 items-center justify-center p-8">
           <div className="max-w-lg w-full">
@@ -1175,8 +1175,7 @@ const MediaPageContent: React.FC = () => {
 
   return (
     <div
-      className="relative flex min-h-full bg-bg"
-      style={{ minHeight: `${sidebarDimensions.mediaPageMinHeightPx}px` }}
+      className="relative flex min-h-0 flex-1 overflow-hidden bg-bg"
     >
       {/* Left Sidebar */}
       <div

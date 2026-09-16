@@ -9,6 +9,7 @@ interface UseMediaReadingProgressArgs {
   contentLength: number
   scrollContainerRef: MutableRefObject<HTMLDivElement | null>
   hasNavigationTarget?: boolean
+  isContentReady?: boolean
   debounceMs?: number
 }
 
@@ -126,6 +127,7 @@ export function useMediaReadingProgress({
   contentLength,
   scrollContainerRef,
   hasNavigationTarget = false,
+  isContentReady = true,
   debounceMs = 900
 }: UseMediaReadingProgressArgs) {
   const mediaIdKey =
@@ -138,16 +140,16 @@ export function useMediaReadingProgress({
   const lastSavedSignatureRef = useRef<string>('')
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const restoreTokenRef = useRef(0)
+  const scrollRevisionRef = useRef(0)
   const lastMediaIdKeyRef = useRef<string | null>(null)
   const [progressPercent, setProgressPercent] = useState<number | null>(null)
 
   const saveProgress = useCallback(
-    async () => {
-      if (!mediaIdKey) return
+    async (scrolledPayload?: ReadingProgressPayload) => {
+      if (!mediaIdKey || !isContentReady) return
       const container = scrollContainerRef.current
-      if (!container) return
-
-      const payload = computeReadingProgress(container, totalPages)
+      const payload = scrolledPayload ?? (container ? computeReadingProgress(container, totalPages) : null)
+      if (!payload) return
       setProgressPercent(payload.percentage ?? 0)
       const signature = buildProgressSignature(payload)
       if (signature === lastSavedSignatureRef.current) {
@@ -162,7 +164,7 @@ export function useMediaReadingProgress({
         console.debug('Failed to persist media reading progress', error)
       }
     },
-    [mediaIdKey, scrollContainerRef, totalPages]
+    [isContentReady, mediaIdKey, scrollContainerRef, totalPages]
   )
 
   const clearProgress = useCallback(async () => {
@@ -177,9 +179,10 @@ export function useMediaReadingProgress({
   }, [mediaIdKey])
 
   useEffect(() => {
-    if (!mediaIdKey || hasNavigationTarget) return
+    if (!mediaIdKey || hasNavigationTarget || !isContentReady) return
     restoreTokenRef.current += 1
     const restoreToken = restoreTokenRef.current
+    const scrollRevision = scrollRevisionRef.current
     let cancelled = false
 
     const restore = async () => {
@@ -187,7 +190,7 @@ export function useMediaReadingProgress({
         const progress = (await tldwClient.getReadingProgress(
           mediaIdKey
         )) as ReadingProgressResponse
-        if (cancelled || restoreToken !== restoreTokenRef.current) return
+        if (cancelled || restoreToken !== restoreTokenRef.current || scrollRevision !== scrollRevisionRef.current) return
         if (progress.has_progress === false) {
           lastSavedSignatureRef.current = ''
           setProgressPercent(0)
@@ -206,7 +209,7 @@ export function useMediaReadingProgress({
         let attempts = 0
         const maxAttempts = 12
         const tryApply = () => {
-          if (cancelled || restoreToken !== restoreTokenRef.current) return
+          if (cancelled || restoreToken !== restoreTokenRef.current || scrollRevision !== scrollRevisionRef.current) return
           const container = scrollContainerRef.current
           if (!container) return
           const applied = applyProgressToScroll(container, percentage)
@@ -228,7 +231,7 @@ export function useMediaReadingProgress({
     return () => {
       cancelled = true
     }
-  }, [hasNavigationTarget, mediaIdKey, scrollContainerRef, totalPages])
+  }, [hasNavigationTarget, isContentReady, mediaIdKey, scrollContainerRef, totalPages])
 
   useEffect(() => {
     if (lastMediaIdKeyRef.current !== mediaIdKey) {
@@ -239,18 +242,23 @@ export function useMediaReadingProgress({
   }, [mediaIdKey])
 
   useEffect(() => {
-    if (!mediaIdKey) return
+    if (!mediaIdKey || !isContentReady) return
     const container = scrollContainerRef.current
     if (!container) return
+    let pendingPayload: ReadingProgressPayload | undefined
 
     const onScroll = () => {
+      scrollRevisionRef.current += 1
       const payload = computeReadingProgress(container, totalPages)
+      pendingPayload = payload
       setProgressPercent(payload.percentage ?? 0)
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current)
       }
       saveTimerRef.current = setTimeout(() => {
-        void saveProgress()
+        saveTimerRef.current = null
+        void saveProgress(pendingPayload)
+        pendingPayload = undefined
       }, debounceMs)
     }
 
@@ -260,10 +268,10 @@ export function useMediaReadingProgress({
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current)
         saveTimerRef.current = null
+        void saveProgress(pendingPayload)
       }
-      void saveProgress()
     }
-  }, [debounceMs, mediaIdKey, saveProgress, scrollContainerRef, totalPages])
+  }, [debounceMs, isContentReady, mediaIdKey, saveProgress, scrollContainerRef, totalPages])
 
   return {
     saveProgress,
