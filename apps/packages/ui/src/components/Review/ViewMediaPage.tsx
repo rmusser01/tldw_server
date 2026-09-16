@@ -1175,12 +1175,12 @@ const MediaPageContent: React.FC = () => {
 
   return (
     <div
-      className="relative flex min-h-0 flex-1 overflow-hidden bg-bg"
+      className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"
     >
       {/* Left Sidebar */}
       <div
-        className={`bg-surface border-r border-border flex h-full min-h-0 flex-col transition-[width] duration-300 ease-in-out ${
-          viewPrefs.sidebarCollapsedValue ? 'w-0' : 'w-full md:w-[22rem] lg:w-[25rem]'
+        className={`absolute inset-y-0 left-0 z-10 bg-surface border-r border-border flex h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out md:relative md:inset-auto md:z-auto ${
+          viewPrefs.sidebarCollapsedValue ? 'w-0' : 'w-[calc(100%-1.5rem)] md:w-[22rem] lg:w-[25rem]'
         }`}
         style={{
           overflowX: 'hidden',
@@ -1666,7 +1666,9 @@ const MediaPageContent: React.FC = () => {
       {/* Collapse Button */}
       <button
         onClick={() => viewPrefs.setSidebarCollapsed(!viewPrefs.sidebarCollapsedValue)}
-        className="relative w-6 self-stretch bg-surface border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors"
+        className={`absolute inset-y-0 z-20 w-6 shrink-0 self-stretch bg-surface border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors md:relative md:inset-auto md:z-auto ${
+          viewPrefs.sidebarCollapsedValue ? 'left-0' : 'left-[calc(100%-1.5rem)]'
+        } md:left-auto`}
         aria-label={viewPrefs.sidebarCollapsedValue ? 'Expand sidebar' : 'Collapse sidebar'}
       >
         <div className="flex items-center justify-center w-full h-full">
@@ -1679,7 +1681,7 @@ const MediaPageContent: React.FC = () => {
       </button>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex min-h-0 flex-col">
+      <div className="ml-6 flex-1 flex min-h-0 min-w-0 flex-col md:ml-0">
         {navigationEnabled ? (
           <div className="border-b border-border bg-surface px-3 py-2">
             <div className="flex flex-wrap items-center gap-3 text-xs text-text-muted">
@@ -1722,7 +1724,7 @@ const MediaPageContent: React.FC = () => {
           </div>
         ) : null}
 
-        <div className="flex-1 flex min-h-0 flex-col md:flex-row">
+        <div className="flex-1 flex min-h-0 min-w-0 flex-col md:flex-row">
           {showNavigationPanel ? (
             <React.Suspense fallback={null}>
               <LazyMediaSectionNavigator
@@ -1747,7 +1749,7 @@ const MediaPageContent: React.FC = () => {
             </React.Suspense>
           ) : null}
 
-          <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 flex flex-col min-h-0 min-w-0">
             <div className="flex items-center justify-end gap-2 border-b border-border bg-surface px-3 py-2">
               <button
                 type="button"
