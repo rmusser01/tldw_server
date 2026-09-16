@@ -2,6 +2,8 @@
 
 ## Run status
 
+- **23:49 UTC native acceptance failure:180 findings —163 verified,16 awaiting acceptance,1 unresolved (reopened024).** On committed `d9c76d616f`, the actual local provider negative control returns200 generation/verifier replies; the real application returns422 `claim_verification_failed` with `numerical_error`. Inline guidance is clear, but a blocking Next Runtime Error overlay still displays the raw verification JSON.024 is counted once. The generator mutation's console-driven overlay requires the same bounded error-reporting correction already applied to create mutations; no verifier bypass or full UAT restart.
+
 - **23:45 UTC reviewed-repair checkpoint:180 findings —163 verified,17 awaiting native acceptance,0 unresolved implementation defects.**179 passes independent28 required PostgreSQL/SQLite HTTP/schema tests;180 passes independent22 lifecycle/transaction tests, both zero skips. All known repairs are reviewed; the next work is targeted native acceptance, not full UAT. A separately labeled local provider fixture will exercise024's actual backend verification rejection, then the exact original profile config must be restored before normal model checks.
 
 - **23:41 UTC checkpoint:180 findings —163 verified,15 awaiting native acceptance,2 unresolved (179/180).** Analytics177 and Cram recovery178 are independently reviewed and committed `f817f4aa96` (15 required PostgreSQL/SQLite and65 UI tests, separate runs, zero skips).179 timestamp-contract tests reproduce both session and populated assistant failures;180 deletion/reset regression is in progress. Native acceptance resumes after these repairs are frozen.

@@ -1,0 +1,61 @@
+{
+  "at": "2026-09-16T23:50:04.250Z",
+  "files": [
+    {
+      "file": "native-rejection-result.txt",
+      "source": ".tmp/uat024-native-20260916/native-rejection-result.txt",
+      "original_sha256": "e0f095840dbb3dde85830d7f62d378cacd97e3b424e55df78b28260069dc4bbc",
+      "retained_sha256": "0a53063a443e4eb86a5d3684d16a3a6351e91e86e3627b46b86688233dbcad6e",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "native-rejection-snapshot.txt",
+      "source": ".tmp/uat024-native-20260916/native-rejection-snapshot.txt",
+      "original_sha256": "075847f4aa0bcd78a6df2e934fdbd202d36c782648189bb987bfc66d6acba0e6",
+      "retained_sha256": "f25919425ed006003dd5560cacc9e4fcb46f9e8970a4701316df3de294a11e98",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "native-rejection-overlay.png",
+      "source": ".tmp/uat024-native-20260916/native-rejection-overlay.png",
+      "original_sha256": "0317e6f7a53fb8f8f51058a238b11be6a00da21f8330249ad0f81cb3b3a0b92b",
+      "retained_sha256": "0317e6f7a53fb8f8f51058a238b11be6a00da21f8330249ad0f81cb3b3a0b92b",
+      "normalization": "none"
+    },
+    {
+      "file": "fixture-definition.json",
+      "source": ".tmp/uat024-native-20260916/fixture-definition.json",
+      "original_sha256": "d5fcf016e5083108b9712be3b0cdf7bd138093824330e7b72b4493ef56af4838",
+      "retained_sha256": "d5fcf016e5083108b9712be3b0cdf7bd138093824330e7b72b4493ef56af4838",
+      "normalization": "none"
+    },
+    {
+      "file": "probe-result.json",
+      "source": ".tmp/uat024-native-20260916/probe-result.json",
+      "original_sha256": "277aeb8c23be7c70b939d6ce0bdf7cef611a7ee57ce1c038b980d9d05b346dd0",
+      "retained_sha256": "277aeb8c23be7c70b939d6ce0bdf7cef611a7ee57ce1c038b980d9d05b346dd0",
+      "normalization": "none"
+    },
+    {
+      "file": "SETUP-AND-LIMITS.md",
+      "source": ".tmp/uat024-native-20260916/SETUP-AND-LIMITS.md",
+      "original_sha256": "bdb319c86cfcc1038ff890c6d2759c6be1c8636ceb75914d0db59d9ac27fb1d9",
+      "retained_sha256": "bdb319c86cfcc1038ff890c6d2759c6be1c8636ceb75914d0db59d9ac27fb1d9",
+      "normalization": "none"
+    },
+    {
+      "file": "config-change-receipt.json",
+      "source": ".tmp/uat024-native-20260916/config-change-receipt.json",
+      "original_sha256": "98c06671f8e50dd667bc28f6b181c9cef4637f21c0eaddd56391d1e3964d0daf",
+      "retained_sha256": "98c06671f8e50dd667bc28f6b181c9cef4637f21c0eaddd56391d1e3964d0daf",
+      "normalization": "none"
+    },
+    {
+      "file": "provider-process-receipt.json",
+      "source": ".tmp/uat024-native-20260916/provider-process-receipt.json",
+      "original_sha256": "221d1d6c1673d5a4f1cef4a860a832a93e83cb9617e65a419f5440f5d8f42b69",
+      "retained_sha256": "221d1d6c1673d5a4f1cef4a860a832a93e83cb9617e65a419f5440f5d8f42b69",
+      "normalization": "none"
+    }
+  ]
+}
