@@ -103,6 +103,22 @@ export const updateMessage = async (
   await db.updateMessage(history_id, message_id, content)
 }
 
+/** Attach a server acknowledgement to an existing owned user row without replacing its draft fields. */
+export const acknowledgeSavedUserMessage = async (
+  historyId: string,
+  messageId: string,
+  serverMessageId: string,
+  expectedContent: string
+) => {
+  await chatDB.messages.where("id").equals(messageId).modify((row) => {
+    if (row.history_id !== historyId || row.role !== "user" || row.content !== expectedContent) return
+    if (row.serverMessageId && row.serverMessageId !== serverMessageId) {
+      throw new Error("The saved user message changed. Reload the conversation before retrying.")
+    }
+    row.serverMessageId = serverMessageId
+  })
+}
+
 export const updateMessageMedia = async (
   message_id: string,
   updates: { images?: string[]; generationInfo?: any }

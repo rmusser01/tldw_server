@@ -1,0 +1,27 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:72100) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/models/__tests__/pageAssistModel.mcp-tools.test.ts (11 tests) 5ms
+(node:72128) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > preserves a streaming request-scope change error
+Stream completion failed: scope changed
+
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > aborts the internal request when the caller's signal fires
+Stream completion failed: Aborted
+
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > cancelStream aborts every in-flight stream (global stop everything)
+Stream completion failed: Aborted
+
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > cancelStream aborts every in-flight stream (global stop everything)
+Stream completion failed: Aborted
+
+ ✓ src/services/tldw/__tests__/TldwChat.abort.test.ts (9 tests) 7ms
+
+ Test Files  2 passed (2)
+      Tests  20 passed (20)
+   Start at  21:27:54
+   Duration  1.76s (transform 352ms, setup 202ms, import 407ms, tests 12ms, environment 812ms)
+

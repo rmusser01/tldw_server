@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
+  acknowledgeUser: vi.fn(async () => undefined),
   events: [] as string[],
   generateTitle: vi.fn(async () => {
     mocks.events.push("title")
@@ -46,6 +47,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/db/dexie/helpers", () => ({
+  acknowledgeSavedUserMessage: mocks.acknowledgeUser,
   addFileToSession: mocks.addFileToSession,
   getLastChatHistory: mocks.getLastChatHistory,
   saveHistory: mocks.saveHistory,
@@ -71,7 +73,7 @@ vi.mock("@/utils/chat-error-message", () => ({
   buildAssistantErrorContent: vi.fn()
 }))
 
-import { saveMessageOnSuccess } from "../index"
+import { saveMessageOnSuccess, saveMessageOnError } from "../index"
 
 const requestScope = Object.freeze({
   config: Object.freeze({
@@ -109,6 +111,24 @@ describe("saveMessageOnSuccess request scope", () => {
     }))
     const userWrite = mocks.saveMessage.mock.calls.find(([message]) => message.role === "user")?.[0]
     expect(userWrite).toMatchObject({ id: "user-1", serverMessageId: "server-user-1" })
+  })
+
+  it("acknowledges the existing user on retry without rewriting its content or position", async () => {
+    await saveMessageOnSuccess(payload({ isRegenerate: true, retryFailedTurn: true, userServerMessageId: "saved-user" }))
+    expect(mocks.acknowledgeUser).toHaveBeenCalledWith("history-1", "user-1", "saved-user", "question")
+    expect(mocks.saveMessage.mock.calls.filter(([message]) => message.role === "user")).toHaveLength(0)
+  })
+
+  it.each([undefined, false, true])("only acknowledges explicit failed retries on either outcome: %s", async (retryFailedTurn) => {
+    await saveMessageOnSuccess(payload({ isRegenerate: true, retryFailedTurn, userServerMessageId: "saved-user" }))
+    await saveMessageOnError({
+      e: new Error("Provider failed again"), history: [], setHistory: vi.fn(),
+      historyId: "history-1", setHistoryId: vi.fn(), image: "", userMessage: "question",
+      botMessage: "", selectedModel: "model-1", isRegenerating: true,
+      retryFailedTurn, userMessageId: "user-1", userServerMessageId: "saved-user",
+      scopeSignal: new AbortController().signal
+    })
+    expect(mocks.acknowledgeUser).toHaveBeenCalledTimes(retryFailedTurn ? 2 : 0)
   })
 
   it("commits the complete existing-history turn in one scoped transaction", async () => {

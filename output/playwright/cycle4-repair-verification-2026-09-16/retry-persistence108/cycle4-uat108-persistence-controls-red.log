@@ -1,0 +1,79 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=4220257138
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 54 items / 44 deselected / 10 selected
+
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py ...F. [ 50%]
+..F.F                                                                    [100%]2026-09-15 21:23:03.504 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-15 21:23:03.505 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 21:23:03.510 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 21:23:03.516 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 21:23:03.521 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 21:23:03.527 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 21:23:03.529 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 21:23:03.532 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-15 21:23:03.533 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-15 21:23:03.533 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-15 21:23:03.533 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-15 21:23:03.547 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-15 21:23:03.547 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-15 21:23:03.547 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-15 21:23:03.549 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-c8f59b05
+2026-09-15 21:23:03.552 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-c8f59b05/1/workflows/workflows_scheduler.db
+2026-09-15 21:23:03.552 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-15 21:23:03.553 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 21:23:03.554 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+
+
+=================================== FAILURES ===================================
+_ test_failed_retry_identity_conflict_and_compatibility_controls[matching-image] _
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:456: in test_failed_retry_identity_conflict_and_compatibility_controls
+    await call
+tldw_Server_API/app/core/Chat/chat_service.py:4298: in build_context_and_messages
+    raise HTTPException(status_code=409, detail="The unanswered turn changed. Reload the conversation before retrying.")
+E   fastapi.exceptions.HTTPException: 409: The unanswered turn changed. Reload the conversation before retrying.
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 21:23:02.990 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+2026-09-15 21:23:02.992 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_service:build_context_and_messages:4235 - Loaded 1 historical messages for conv_id 'conv'.
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 21:23:03.420 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 21:23:03.420 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 21:23:03.421 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 21:23:03.421 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_explicit_failed_retry_uses_actual_tail_even_outside_context_window[0-asc] _
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:401: in test_explicit_failed_retry_uses_actual_tail_even_outside_context_window
+    request = ChatCompletionRequest(
+E   pydantic_core._pydantic_core.ValidationError: 1 validation error for ChatCompletionRequest
+E   history_message_limit
+E     Input should be greater than or equal to 1 [type=greater_than_equal, input_value=0, input_type=int]
+E       For further information visit https://errors.pydantic.dev/2.11/v/greater_than_equal
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 21:23:03.452 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 21:23:03.453 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 21:23:03.453 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 21:23:03.454 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_failed_retry_identity_conflict_and_compatibility_controls[legacy-error] _
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:457: in test_failed_retry_identity_conflict_and_compatibility_controls
+    assert state["user_message_id"] == ("new-user" if kind in {"ordinary-repeat", "not-persisted"} else "failed-user")
+E   AssertionError: assert None == 'failed-user'
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 21:23:03.464 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+2026-09-15 21:23:03.466 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_service:build_context_and_messages:4235 - Loaded 2 historical messages for conv_id 'conv'.
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 21:23:03.473 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 21:23:03.473 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 21:23:03.474 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 21:23:03.474 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+=========================== short test summary info ============================
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_failed_retry_identity_conflict_and_compatibility_controls[matching-image]
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_explicit_failed_retry_uses_actual_tail_even_outside_context_window[0-asc]
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_failed_retry_identity_conflict_and_compatibility_controls[legacy-error]
+============ 3 failed, 7 passed, 44 deselected, 4 warnings in 8.38s ============

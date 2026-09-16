@@ -1,0 +1,120 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:90606) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:90605) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts (8 tests) 5ms
+(node:90610) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > preserves a streaming request-scope change error
+Stream completion failed: scope changed
+
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > aborts the internal request when the caller's signal fires
+Stream completion failed: Aborted
+
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > cancelStream aborts every in-flight stream (global stop everything)
+Stream completion failed: Aborted
+
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > cancelStream aborts every in-flight stream (global stop everything)
+Stream completion failed: Aborted
+
+ ✓ src/services/tldw/__tests__/TldwChat.abort.test.ts (9 tests) 8ms
+(node:90611) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/models/__tests__/pageAssistModel.mcp-tools.test.ts (11 tests) 4ms
+(node:90616) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/db/dexie/__tests__/helpers.user-acknowledgement.test.ts (6 tests) 3ms
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 0 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 1 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > persists a real acknowledged reasoning-only stream as one recoverable saved pair
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to B
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to A
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cannot autosave a second conversation while the completed first pair is waiting for local persistence
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps temporary inference unsaved and promotes its existing pair only once
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > returns a recoverable creation failure and retries without a duplicate pair
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > rechecks the current conversation after promotion finishes during send initialization
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cancels a waiting follow-up without cancelling the owning promotion
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cleans up a failed promotion so retry saves the original pair before the next turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 0 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 1 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after ambiguous commit acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after new history on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after A to B to A on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old stream completes
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old local persistence completes
+Using normalChatMode
+
+ ✓ src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx (48 tests) 2546ms
+
+ Test Files  5 passed (5)
+      Tests  82 passed (82)
+   Start at  21:35:22
+   Duration  4.56s (transform 859ms, setup 467ms, import 1.78s, tests 2.57s, environment 1.43s)
+

@@ -53,6 +53,7 @@ import type { MessageMetadataExtra } from "@/store/option"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import type { KnownServicePromptId } from "@/services/tldw/domains/service-prompts"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 
 const STREAMING_UPDATE_INTERVAL_MS = 80
 const EMPTY_RESPONSE_ERROR_MESSAGE = "No response text was returned."
@@ -224,9 +225,16 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     ? String(rawModelIdOverride).trim()
     : undefined
 
+  const retryFailedTurn = Boolean(
+    isRegenerate && decodeChatErrorPayload(regenerateFromMessage?.message || "")
+  )
   const resolvedAssistantMessageId = assistantMessageId ?? generateID()
   const resolvedUserMessageId =
-    !isRegenerate ? userMessageId ?? generateID() : undefined
+    !isRegenerate
+      ? userMessageId ?? generateID()
+      : retryFailedTurn
+        ? userMessageId ?? regenerateFromMessage?.parentMessageId ?? getLastUserMessageId(messages) ?? undefined
+        : undefined
   const createdAt = Date.now()
   let generateMessageId = resolvedAssistantMessageId
   const modelInfo = await getModelNicknameByID(selectedModel)
@@ -391,7 +399,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
               message: pendingStreamingText,
               reasoning_time_taken: pendingReasoningTime
             })
-          : msg.id === resolvedUserMessageId && modelClient?.userServerMessageId
+          : msg.id === resolvedUserMessageId && msg.message === message && modelClient?.userServerMessageId
             ? { ...msg, serverMessageId: modelClient.userServerMessageId }
             : msg
       )
@@ -609,6 +617,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         modelId: resolvedModelId,
         userModelId,
         userMessageId: resolvedUserMessageId,
+        retryFailedTurn,
         assistantMessageId: resolvedAssistantMessageId,
         userParentMessageId: userParentMessageId ?? null,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
@@ -669,6 +678,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       toolChoice,
       conversationId,
       researchContext: context.researchContext,
+      retryFailedTurn,
       requestScope: params.servicePromptSnapshot?.requestScope
     })
 
@@ -850,7 +860,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                   : {})
               })
             )
-          : msg.id === resolvedUserMessageId && modelClient?.userServerMessageId
+          : msg.id === resolvedUserMessageId && msg.message === message && modelClient?.userServerMessageId
             ? { ...msg, serverMessageId: modelClient.userServerMessageId }
             : msg
       )
@@ -883,6 +893,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         modelId: resolvedModelId,
         userModelId,
         userMessageId: resolvedUserMessageId,
+        retryFailedTurn,
         userServerMessageId: modelClient?.userServerMessageId,
         assistantServerMessageId: modelClient?.serverMessageId,
         assistantMessageId: resolvedAssistantMessageId,
@@ -933,6 +944,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       modelId: resolvedModelId,
       userModelId,
       userMessageId: resolvedUserMessageId,
+      retryFailedTurn,
       userServerMessageId: modelClient?.userServerMessageId,
       assistantMessageId: resolvedAssistantMessageId,
       userParentMessageId: userParentMessageId ?? null,
@@ -1024,7 +1036,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                 }
               })
             )
-          : msg.id === resolvedUserMessageId && modelClient?.userServerMessageId
+          : msg.id === resolvedUserMessageId && msg.message === message && modelClient?.userServerMessageId
             ? { ...msg, serverMessageId: modelClient.userServerMessageId }
             : msg
       )
@@ -1049,6 +1061,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         modelId: resolvedModelId,
         userModelId,
         userMessageId: resolvedUserMessageId,
+        retryFailedTurn,
         userServerMessageId: modelClient?.userServerMessageId,
         assistantServerMessageId: modelClient?.serverMessageId,
         assistantMessageId: resolvedAssistantMessageId,

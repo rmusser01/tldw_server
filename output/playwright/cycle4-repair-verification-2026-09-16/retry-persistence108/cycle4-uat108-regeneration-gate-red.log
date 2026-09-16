@@ -1,0 +1,9 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2
+
+No test files found, exiting with code 1
+
+filter: apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx, apps/packages/ui/src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts
+include: src/**/__tests__/**/*.test.{ts,tsx}, src/**/__tests__/**/*.spec.{ts,tsx}
+exclude:  node_modules/**, dist/**, build/**
+

@@ -33,6 +33,7 @@ type PageAssistModelOptions = {
   extraBody?: string
   researchContext?: ChatResearchContext
   requestScope?: ServicePromptRequestScope
+  retryFailedTurn?: boolean
 }
 
 const parseJsonObject = (value?: string) => {
@@ -63,7 +64,8 @@ export const pageAssistModel = async ({
   extraHeaders,
   extraBody,
   researchContext,
-  requestScope
+  requestScope,
+  retryFailedTurn
 }: PageAssistModelOptions): Promise<ChatTldw> => {
   const currentChatModelSettings = useStoreChatModelSettings.getState()
   const {
@@ -267,6 +269,7 @@ export const pageAssistModel = async ({
     extraBody: resolvedExtraBody,
     researchContext,
     requestScope,
+    retryFailedTurn,
     chatDebugMetadata: {
       toolChoice: toolRequest.toolChoice,
       toolOmissionReason: toolRequest.omittedReason,

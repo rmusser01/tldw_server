@@ -1,0 +1,122 @@
+{
+  "task": "TASK-13260.49",
+  "frozenAt": "2026-09-16T04:45:35.385Z",
+  "sourceBaseline": "8097d672d5",
+  "checkpointHead": "d94077c3543121f35f31fb9cd415c379600d2e8e",
+  "production": 8,
+  "tests": 7,
+  "entries": [
+    {
+      "path": "tldw_Server_API/app/core/Chat/chat_service.py",
+      "kind": "production",
+      "bytes": 309905,
+      "sha256": "beda4eddd3875a04b9aedeae745ebba7f060c1198c7e0377949c740c39fcbbcc",
+      "baselineSha256": "8768e9d627379969db2a0ad43de3db59177758db33e475d642b757fd159a9036"
+    },
+    {
+      "path": "tldw_Server_API/tests/Chat/integration/test_persona_backed_chat_conversations.py",
+      "kind": "test",
+      "bytes": 34467,
+      "sha256": "cc3584adcbdea8cd974f9af4941dae01c3a38e487f0497487cf5500320bc1ab8",
+      "baselineSha256": "63681b4ba96d6cf55aa7f5c650c7d897f9428812cd0a4d3185ce08a3d567f558"
+    },
+    {
+      "path": "tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py",
+      "kind": "test",
+      "bytes": 29723,
+      "sha256": "64c6b41abb4e0acdedbd3bab7600db98dedbb6086b0e92bce0459c7525e4b98a",
+      "baselineSha256": "095b6fc6b57ce00e82e7ea5e657e9aed4f9ee4504305827da09e116a341a3b01"
+    },
+    {
+      "path": "apps/packages/ui/src/db/dexie/helpers.ts",
+      "kind": "production",
+      "bytes": 31785,
+      "sha256": "aa7091c62dbfe62b8bb13817e366637d34f28d6d4f2742c18754fa138683fb07",
+      "baselineSha256": "ce1741da9b6b4e77b9c576b5a42f493b97b1a0103faccb6d33866004ccdcfaee"
+    },
+    {
+      "path": "apps/packages/ui/src/db/dexie/__tests__/helpers.user-acknowledgement.test.ts",
+      "kind": "test",
+      "bytes": 2545,
+      "sha256": "c6045dca46e3df9652503e854d94a0f5619d88d86e5ceea7a7d5e8a2e864ccdc",
+      "baselineSha256": null
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-helper/index.ts",
+      "kind": "production",
+      "bytes": 19076,
+      "sha256": "406e021c9c4a38e763d392dac4833dec80578fcefec8d7a2a265a49a8c966dd9",
+      "baselineSha256": "54fd6dc63f597fa154b5aa6ddb07990b284f76ba7b1e96ca804e8e7be9fa121b"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts",
+      "kind": "test",
+      "bytes": 10219,
+      "sha256": "8befdb3e26360b24cbcfe29a9f200c31b8b97b037f0ffe02eeb8b592c43090a9",
+      "baselineSha256": "309f42358f8e199cf967ab50382c02206edc59e0ca5ea949103ef77caf340734"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "kind": "production",
+      "bytes": 39089,
+      "sha256": "c295d2263768e5bb004c32d295f77f6c2953d40a290aeef509008a242e4bf2a9",
+      "baselineSha256": "7584ca2529d44041ebc589bf034516fc02c6fc5143f28a078b62e251f9012d97"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "kind": "test",
+      "bytes": 56437,
+      "sha256": "495746925989c930e08edb9ede017384e7bc3a34a6bf686c49185e8300046b79",
+      "baselineSha256": "bf9d255bdbf1587de3be46a4723b06c3ad22fcac1c014d7b6a85024163e4d25f"
+    },
+    {
+      "path": "apps/packages/ui/src/models/index.ts",
+      "kind": "production",
+      "bytes": 9523,
+      "sha256": "40668c49c2d4142541aa3f4e3924d8610480fa44e4a524ed5b5786808ed9b1e1",
+      "baselineSha256": "1bbab7521c0a0eea9019e6a9c182e34a75cf237b630fb283d3a235710350d4fa"
+    },
+    {
+      "path": "apps/packages/ui/src/models/ChatTldw.ts",
+      "kind": "production",
+      "bytes": 16633,
+      "sha256": "8c73793e1cd63f9e10873d290d6bee05a4c3fe77a5a07bf5bfab30f0b6f31deb",
+      "baselineSha256": "7148b20f8eca219de7c3d48c81fecdc012d11a2ac97ba816e2aa35af265b0728"
+    },
+    {
+      "path": "apps/packages/ui/src/models/__tests__/pageAssistModel.mcp-tools.test.ts",
+      "kind": "test",
+      "bytes": 9081,
+      "sha256": "28473b35cdc5d619678a5a36f7917429fd5a19b38e90a102c82bdefb7ed3c2e9",
+      "baselineSha256": "00aaa1b86812fd0423f73de4c6a20aab77b09f8c1cadc2f73e6ceaa978356933"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/TldwChat.ts",
+      "kind": "production",
+      "bytes": 25000,
+      "sha256": "2aeba02eb736de1f5850762cba1806c5d11d641f3e8923b75147937467370767",
+      "baselineSha256": "b389d9a67e39b6657aa42c139c6eb7814c466875dc8138fdbfd73a385af0ce6e"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/__tests__/TldwChat.abort.test.ts",
+      "kind": "test",
+      "bytes": 7778,
+      "sha256": "40dfceea5ef889525bf1b3a06d50916b1004330ac5abf7abdf4bf60f530e418a",
+      "baselineSha256": "e8fedee7837f661ea1cce12235ed7684a8bfb7ac3b7d2d7dd1b4cfc5bb8a73f1"
+    },
+    {
+      "path": "apps/packages/ui/src/types/chat-modes.ts",
+      "kind": "production",
+      "bytes": 1993,
+      "sha256": "e8c2486e700a64463397c29d59c31749396dd69945abc7c17299fdecb7a34c45",
+      "baselineSha256": "802bc19588ac565677dc37b6acb81fb3163508b78a0ecb0c19e5bd4485f61053"
+    },
+    {
+      "path": "backlog/tasks/task-13260.49 - Exclude-failed-Chat-display-placeholders-from-retry-model-context.md",
+      "kind": "task",
+      "bytes": 7919,
+      "sha256": "c82b063178028d78118f88f2a845d5968fbf70c09065e255abbba33cf9e6137b",
+      "baselineSha256": "d46c6c4f0205c41852478ef5f7072cb845f54182c5263e9a2ca23d2c1576d6fe"
+    }
+  ]
+}

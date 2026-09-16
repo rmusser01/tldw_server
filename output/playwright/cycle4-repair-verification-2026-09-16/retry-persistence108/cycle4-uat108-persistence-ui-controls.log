@@ -1,0 +1,27 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:65058) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts (8 tests) 8ms
+(node:65443) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-helper/__tests__/saveMessageOnError.test.ts (9 tests) 8ms
+(node:65748) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts (3 tests) 3ms
+(node:66039) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/models/__tests__/ChatTldw.abort-signal.test.ts (3 tests) 3ms
+(node:66040) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/models/__tests__/ChatTldw.stream-metadata.test.ts (4 tests) 2ms
+(node:66042) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/db/dexie/__tests__/helpers.user-acknowledgement.test.ts (5 tests) 7ms
+
+ Test Files  6 passed (6)
+      Tests  32 passed (32)
+   Start at  21:25:25
+   Duration  3.75s (transform 551ms, setup 495ms, import 831ms, tests 31ms, environment 1.80s)
+

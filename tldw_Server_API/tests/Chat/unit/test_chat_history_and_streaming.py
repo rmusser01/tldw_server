@@ -386,6 +386,80 @@ async def test_failed_turn_retry_preserves_history_without_replaying_diagnostics
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("history_limit,history_order", [(1, "asc"), (20, "asc"), (20, "desc")])
+async def test_explicit_failed_retry_uses_actual_tail_even_outside_context_window(history_limit, history_order):
+    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+
+    class SavedDB(DummyChatDB):
+        def get_conversation_by_id(self, _id):
+            return {"id": "conv", "character_id": 1, "client_id": "client"}
+
+    records = [
+        {"id": "earlier", "sender": "assistant", "content": "Earlier reply", "timestamp": 1},
+        {"id": "failed-user", "sender": "user", "content": "Question for {{char}}", "timestamp": 2},
+    ]
+    request = ChatCompletionRequest(
+        model="test", conversation_id="conv", save_to_db=True,
+        history_message_limit=history_limit, history_message_order=history_order,
+        messages=[{"role": "user", "content": records[-1]["content"]}],
+        metadata={"tldw_retry_failed_turn": True},
+    )
+    save = AsyncMock()
+    state = {}
+    result = await chat_service.build_context_and_messages(
+        chat_db=SavedDB(records), request_data=request, loop=asyncio.get_running_loop(), metrics=MagicMock(),
+        default_save_to_db=False, final_conversation_id="conv", save_message_fn=save, runtime_state=state,
+    )
+    save.assert_not_awaited()
+    assert state["user_message_id"] == "failed-user"
+    assert sum(message["role"] == "user" for message in result[4]) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["matching-image", "changed-image", "answered", "legacy-error", "not-persisted", "ordinary-repeat"])
+async def test_failed_retry_identity_conflict_and_compatibility_controls(kind):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+
+    class SavedDB(DummyChatDB):
+        def get_conversation_by_id(self, _id):
+            return {"id": "conv", "character_id": 1, "client_id": "client"}
+
+    records = [{"id": "failed-user", "sender": "user", "content": "Question", "timestamp": 1}]
+    content = "Question"
+    if "image" in kind:
+        records[0]["images"] = [{"image_data": b"image", "image_mime_type": "image/png"}]
+        content = [{"type": "text", "text": "Question"}, {"type": "image_url", "image_url": {
+            "url": "data:image/png;base64," + ("aW1hZ2U=" if kind == "matching-image" else "b3RoZXI=")
+        }}]
+    if kind in {"answered", "legacy-error"}:
+        records.append({"id": "assistant", "sender": "assistant", "timestamp": 2,
+                        "content": "Answer" if kind == "answered" else '__tldw_error__:{"summary":"Failed","hint":"Retry"}'})
+    if kind == "not-persisted":
+        records = []
+    request = ChatCompletionRequest(
+        model="test", save_to_db=True, conversation_id="conv", messages=[{"role": "user", "content": content}],
+        metadata={"tldw_retry_failed_turn": kind != "ordinary-repeat"},
+    )
+    save = AsyncMock(return_value="new-user")
+    state = {}
+    call = chat_service.build_context_and_messages(
+        chat_db=SavedDB(records), request_data=request, loop=asyncio.get_running_loop(), metrics=MagicMock(),
+        default_save_to_db=False, final_conversation_id="conv", save_message_fn=save, runtime_state=state,
+    )
+    if kind in {"changed-image", "answered"}:
+        with pytest.raises(HTTPException) as error:
+            await call
+        assert error.value.status_code == 409
+        save.assert_not_awaited()
+    else:
+        await call
+        assert state["user_message_id"] == ("new-user" if kind in {"ordinary-repeat", "not-persisted"} else "failed-user")
+        assert save.await_count == (1 if kind in {"ordinary-repeat", "not-persisted"} else 0)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "owner,requested_character,expected_id,expected_created",
     [

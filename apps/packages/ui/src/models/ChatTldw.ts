@@ -49,6 +49,7 @@ export interface ChatTldwOptions {
   researchContext?: ChatResearchContext
   chatDebugMetadata?: ChatRequestDebugMetadata
   requestScope?: ServicePromptRequestScope
+  retryFailedTurn?: boolean
 }
 
 export class ChatTldw {
@@ -78,6 +79,7 @@ export class ChatTldw {
   researchContext?: ChatResearchContext
   chatDebugMetadata?: ChatRequestDebugMetadata
   requestScope?: ServicePromptRequestScope
+  retryFailedTurn?: boolean
 
   constructor(options: ChatTldwOptions) {
     // Normalize model id: drop internal prefix like "tldw:" so server receives provider/model
@@ -105,6 +107,7 @@ export class ChatTldw {
     this.researchContext = options.researchContext
     this.chatDebugMetadata = options.chatDebugMetadata
     this.requestScope = options.requestScope
+    this.retryFailedTurn = options.retryFailedTurn
   }
 
   /**
@@ -227,6 +230,7 @@ export class ChatTldw {
         toolChoice: this.toolChoice,
         tools: this.tools,
         saveToDb: this.saveToDb,
+        retryFailedTurn: this.retryFailedTurn,
         conversationId: this.conversationId,
         historyMessageLimit: this.historyMessageLimit,
         historyMessageOrder: this.historyMessageOrder,
@@ -306,6 +310,7 @@ export class ChatTldw {
       toolChoice: this.toolChoice,
       tools: this.tools,
       saveToDb: this.saveToDb,
+      retryFailedTurn: this.retryFailedTurn,
       conversationId: this.conversationId,
       historyMessageLimit: this.historyMessageLimit,
       historyMessageOrder: this.historyMessageOrder,

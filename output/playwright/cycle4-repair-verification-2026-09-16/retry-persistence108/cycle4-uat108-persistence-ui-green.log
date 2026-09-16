@@ -1,0 +1,193 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:56254) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 0 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 1 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > persists a real acknowledged reasoning-only stream as one recoverable saved pair
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to B
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to A
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cannot autosave a second conversation while the completed first pair is waiting for local persistence
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps temporary inference unsaved and promotes its existing pair only once
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > returns a recoverable creation failure and retries without a duplicate pair
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > rechecks the current conversation after promotion finishes during send initialization
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cancels a waiting follow-up without cancelling the owning promotion
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cleans up a failed promotion so retry saves the original pair before the next turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 0 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 1 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after ambiguous commit acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after new history on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after A to B to A on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old stream completes
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old local persistence completes
+Using normalChatMode
+
+ ❯ src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx (48 tests | 1 failed) 4169ms
+     ✓ deletes a qualified mirror row and clears its local reply target using the canonical request ID 31ms
+     ✓ deletes a qualified mirror row and clears its server reply target using the canonical request ID 7ms
+     ✓ retains incomplete promotion across same-authority reconnect after 0 copies  496ms
+     ✓ retains incomplete promotion across same-authority reconnect after 1 copies 122ms
+     ✓ pauses rather than completes when readiness is lost during create 143ms
+     ✓ pauses rather than completes when readiness is lost during first copy 132ms
+     ✓ blocks changed server history after a readiness pause during create 188ms
+     ✓ blocks changed server history after a readiness pause during acknowledged copy 181ms
+     ✓ reconciles literal placeholder text using raw listing content 78ms
+     × real failed-turn regeneration sends the intended user once without its display error 23ms
+     ✓ persists a real acknowledged reasoning-only stream as one recoverable saved pair 11ms
+     ✓ acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft 12ms
+     ✓ does not apply late stream acknowledgements after switching A to B to B 62ms
+     ✓ does not apply late stream acknowledgements after switching A to B to A 64ms
+     ✓ establishes one neutral conversation and local history before inference, including a queued second turn 73ms
+     ✓ cannot autosave a second conversation while the completed first pair is waiting for local persistence 64ms
+     ✓ keeps temporary inference unsaved and promotes its existing pair only once 66ms
+     ✓ returns a recoverable creation failure and retries without a duplicate pair 12ms
+     ✓ waits for the entire local promotion during create before a follow-up and queued turn 72ms
+     ✓ waits for the entire local promotion during message before a follow-up and queued turn 75ms
+     ✓ rechecks the current conversation after promotion finishes during send initialization 69ms
+     ✓ cancels a waiting follow-up without cancelling the owning promotion 72ms
+     ✓ cleans up a failed promotion so retry saves the original pair before the next turn 71ms
+     ✓ retries incomplete promotion through the visible notification after 0 acknowledged copies 187ms
+     ✓ retries incomplete promotion through the visible notification after 1 acknowledged copies 180ms
+     ✓ retries incomplete promotion through the visible notification after ambiguous commit acknowledged copies 182ms
+     ✓ keeps incomplete promotion blocked when reconciliation finds changed identity 69ms
+     ✓ keeps incomplete promotion blocked when reconciliation finds additional row 70ms
+     ✓ keeps incomplete promotion blocked when reconciliation finds reordered rows 70ms
+     ✓ keeps incomplete promotion blocked when reconciliation finds deleted acknowledgement 69ms
+     ✓ keeps incomplete promotion blocked when reconciliation finds read failure 69ms
+     ✓ releases incomplete promotion and removes its retry action on new history 83ms
+     ✓ releases incomplete promotion and removes its retry action on A to B to A 80ms
+     ✓ releases incomplete promotion and removes its retry action on unmount 77ms
+     ✓ discards a delayed retry read after an A to B to A boundary 122ms
+     ✓ does not join or publish an older promotion after new history on the same surface 72ms
+     ✓ does not join or publish an older promotion after A to B to A on the same surface 73ms
+     ✓ does not publish a cancelled creation response or invoke inference 69ms
+     ✓ does not attach a pending first-turn creation to a different local history 71ms
+     ✓ rejects an A to B to A response during initialize before inference 18ms
+     ✓ rejects an A to B to A response during create before inference 69ms
+     ✓ rejects an A to B to A response during link before inference 71ms
+     ✓ rechecks an autosave after initialization when the send path has established a conversation 20ms
+     ✓ keeps the new account's state when an old stream completes 71ms
+     ✓ keeps the new account's state when an old local persistence completes 76ms
+     ✓ stops old autosave writes after A to B to A during initialize 21ms
+     ✓ stops old autosave writes after A to B to A during create 76ms
+     ✓ stops old autosave writes after A to B to A during message 76ms
+(node:56302) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts (8 tests) 17ms
+(node:56308) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > preserves a streaming request-scope change error
+Stream completion failed: scope changed
+
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > aborts the internal request when the caller's signal fires
+Stream completion failed: Aborted
+
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > cancelStream aborts every in-flight stream (global stop everything)
+Stream completion failed: Aborted
+
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > cancelStream aborts every in-flight stream (global stop everything)
+Stream completion failed: Aborted
+
+ ✓ src/services/tldw/__tests__/TldwChat.abort.test.ts (9 tests) 6ms
+(node:56315) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/models/__tests__/pageAssistModel.mcp-tools.test.ts (11 tests) 4ms
+(node:56317) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts (8 tests) 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+AssertionError: expected [ false, false ] to deeply equal [ false, true ]
+
+- Expected
++ Received
+
+  [
+    false,
+-   true,
++   false,
+  ]
+
+ ❯ src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx:654:90
+    652|     expect(result.current.state.messages.filter(row => !row.isBot)).to…
+    653|     expect(result.current.state.messages.at(-1)?.message).toBe("Recove…
+    654|     expect(mocks.pageAssistModel.mock.calls.map(([options]) => options…
+       |                                                                                          ^
+    655|     expect(result.current.state.messages.find(row => !row.isBot)?.serv…
+    656|     expect(mocks.rows.filter(row => row.role === "user").map(row => ro…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  1 failed | 83 passed (84)
+   Start at  21:21:52
+   Duration  11.37s (transform 2.71s, setup 386ms, import 4.65s, tests 4.20s, environment 1.49s)
+

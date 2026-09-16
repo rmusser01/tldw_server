@@ -1,0 +1,40 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:74023) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/db/dexie/__tests__/helpers.user-acknowledgement.test.ts (6 tests | 1 failed) 12ms
+     ✓ updates only the acknowledgement, preserving content, position and metadata 3ms
+     ✓ cannot acknowledge different-history 1ms
+     ✓ cannot acknowledge assistant 0ms
+     ✓ cannot acknowledge missing 0ms
+     ✓ rejects a contradictory existing acknowledgement 2ms
+     × leaves a newer unsaved edit unacknowledged 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/dexie/__tests__/helpers.user-acknowledgement.test.ts > acknowledge an existing local user > leaves a newer unsaved edit unacknowledged
+AssertionError: expected { id: 'user', …(7) } to not have property "serverMessageId"
+
+- Expected: 
+undefined
+
++ Received: 
+"server-user"
+
+ ❯ src/db/dexie/__tests__/helpers.user-acknowledgement.test.ts:43:31
+     41|     state.rows[0].content = "Newer draft"
+     42|     await acknowledgeSavedUserMessage("owned", "user", "server-user", …
+     43|     expect(state.rows[0]).not.toHaveProperty("serverMessageId")
+       |                               ^
+     44|   })
+     45| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 passed (6)
+   Start at  21:28:42
+   Duration  1.82s (transform 308ms, setup 297ms, import 323ms, tests 12ms, environment 898ms)
+

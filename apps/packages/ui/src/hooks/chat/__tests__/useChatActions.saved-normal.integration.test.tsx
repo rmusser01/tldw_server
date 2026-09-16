@@ -1,4 +1,5 @@
 import React from "react"
+import i18n from "i18next"
 import { ConfigProvider, notification } from "antd"
 import {
   act,
@@ -97,6 +98,13 @@ vi.mock("@/services/actor-settings", () => ({
   getActorSettingsForChat: mocks.getActorSettings
 }))
 vi.mock("@/db/dexie/helpers", () => ({
+  acknowledgeSavedUserMessage: async (historyId: string, id: string, serverMessageId: string) => {
+    const row = mocks.rows.find(row => row.history_id === historyId && row.id === id && row.role === "user")
+    if (row) {
+      if (row.serverMessageId && row.serverMessageId !== serverMessageId) throw new Error("The saved user message changed. Reload the conversation before retrying.")
+      row.serverMessageId = serverMessageId
+    }
+  },
   generateID: () => crypto.randomUUID(),
   saveHistory: mocks.saveHistory,
   saveMessage: mocks.saveMessage,
@@ -627,10 +635,30 @@ describe("saved normal Chat pipeline with autosave", () => {
     })
   })
 
+  it("successful regeneration does not re-ACK the already acknowledged user", async () => {
+    let calls = 0
+    mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => ({
+      saveToDb: true,
+      conversationId,
+      userServerMessageId: `server-user-${++calls}`,
+      stream: async function* () { yield "Ordinary final answer" }
+    }))
+    const { result } = renderWorkspace()
+    await act(async () => { await result.current.actions.onSubmit({ message: "Ordinary question", image: "" }) })
+    const original = result.current.state.messages.find(row => !row.isBot)?.serverMessageId
+    expect(original).toBe("server-user-1")
+    await act(async () => { await result.current.actions.regenerateLastMessage() })
+    expect(mocks.pageAssistModel.mock.calls.map(([options]) => options.retryFailedTurn)).toEqual([false, false])
+    expect(result.current.state.messages.find(row => !row.isBot)?.serverMessageId).toBe(original)
+    expect(mocks.rows.filter(row => row.role === "user").map(row => row.serverMessageId)).toEqual([original])
+  })
+
   it("real failed-turn regeneration sends the intended user once without its display error", async () => {
+    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
     const projected: unknown[][] = []
     mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => ({
       saveToDb: true, conversationId,
+      userServerMessageId: projected.length ? "retry-user" : undefined,
       stream: async function* (messages: unknown[]) {
         projected.push(messages)
         if (projected.length === 1) throw new Error("Provider failed")
@@ -646,6 +674,9 @@ describe("saved normal Chat pipeline with autosave", () => {
     expect(request.match(/Retry question/g)).toHaveLength(1)
     expect(result.current.state.messages.filter(row => !row.isBot)).toHaveLength(1)
     expect(result.current.state.messages.at(-1)?.message).toBe("Recovered final answer")
+    expect(mocks.pageAssistModel.mock.calls.map(([options]) => options.retryFailedTurn)).toEqual([false, true])
+    expect(result.current.state.messages.find(row => !row.isBot)?.serverMessageId).toBe("retry-user")
+    expect(mocks.rows.filter(row => row.role === "user").map(row => row.serverMessageId)).toEqual(["retry-user"])
   })
 
   it("persists a real acknowledged reasoning-only stream as one recoverable saved pair", async () => {

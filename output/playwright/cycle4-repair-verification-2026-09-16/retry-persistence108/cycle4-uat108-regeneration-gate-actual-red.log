@@ -1,0 +1,113 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:92076) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > successful regeneration does not re-ACK the already acknowledged user
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > successful regeneration does not re-ACK the already acknowledged user
+Using normalChatMode
+
+ ❯ src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx (49 tests | 1 failed | 48 skipped) 31ms
+     ↓ deletes a qualified mirror row and clears its local reply target using the canonical request ID
+     ↓ deletes a qualified mirror row and clears its server reply target using the canonical request ID
+     ↓ retains incomplete promotion across same-authority reconnect after 0 copies
+     ↓ retains incomplete promotion across same-authority reconnect after 1 copies
+     ↓ pauses rather than completes when readiness is lost during create
+     ↓ pauses rather than completes when readiness is lost during first copy
+     ↓ blocks changed server history after a readiness pause during create
+     ↓ blocks changed server history after a readiness pause during acknowledged copy
+     ↓ reconciles literal placeholder text using raw listing content
+     × successful regeneration does not re-ACK the already acknowledged user 30ms
+     ↓ real failed-turn regeneration sends the intended user once without its display error
+     ↓ persists a real acknowledged reasoning-only stream as one recoverable saved pair
+     ↓ acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+     ↓ does not apply late stream acknowledgements after switching A to B to B
+     ↓ does not apply late stream acknowledgements after switching A to B to A
+     ↓ establishes one neutral conversation and local history before inference, including a queued second turn
+     ↓ cannot autosave a second conversation while the completed first pair is waiting for local persistence
+     ↓ keeps temporary inference unsaved and promotes its existing pair only once
+     ↓ returns a recoverable creation failure and retries without a duplicate pair
+     ↓ waits for the entire local promotion during create before a follow-up and queued turn
+     ↓ waits for the entire local promotion during message before a follow-up and queued turn
+     ↓ rechecks the current conversation after promotion finishes during send initialization
+     ↓ cancels a waiting follow-up without cancelling the owning promotion
+     ↓ cleans up a failed promotion so retry saves the original pair before the next turn
+     ↓ retries incomplete promotion through the visible notification after 0 acknowledged copies
+     ↓ retries incomplete promotion through the visible notification after 1 acknowledged copies
+     ↓ retries incomplete promotion through the visible notification after ambiguous commit acknowledged copies
+     ↓ keeps incomplete promotion blocked when reconciliation finds changed identity
+     ↓ keeps incomplete promotion blocked when reconciliation finds additional row
+     ↓ keeps incomplete promotion blocked when reconciliation finds reordered rows
+     ↓ keeps incomplete promotion blocked when reconciliation finds deleted acknowledgement
+     ↓ keeps incomplete promotion blocked when reconciliation finds read failure
+     ↓ releases incomplete promotion and removes its retry action on new history
+     ↓ releases incomplete promotion and removes its retry action on A to B to A
+     ↓ releases incomplete promotion and removes its retry action on unmount
+     ↓ discards a delayed retry read after an A to B to A boundary
+     ↓ does not join or publish an older promotion after new history on the same surface
+     ↓ does not join or publish an older promotion after A to B to A on the same surface
+     ↓ does not publish a cancelled creation response or invoke inference
+     ↓ does not attach a pending first-turn creation to a different local history
+     ↓ rejects an A to B to A response during initialize before inference
+     ↓ rejects an A to B to A response during create before inference
+     ↓ rejects an A to B to A response during link before inference
+     ↓ rechecks an autosave after initialization when the send path has established a conversation
+     ↓ keeps the new account's state when an old stream completes
+     ↓ keeps the new account's state when an old local persistence completes
+     ↓ stops old autosave writes after A to B to A during initialize
+     ↓ stops old autosave writes after A to B to A during create
+     ↓ stops old autosave writes after A to B to A during message
+(node:92084) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts (11 tests | 2 failed | 8 skipped) 4ms
+     ↓ retains the server acknowledgement on each matching locally persisted row
+     ↓ acknowledges the existing user on retry without rewriting its content or position
+     × only acknowledges explicit failed retries on either outcome: undefined 3ms
+     × only acknowledges explicit failed retries on either outcome: false 0ms
+     ✓ only acknowledges explicit failed retries on either outcome: true 0ms
+     ↓ commits the complete existing-history turn in one scoped transaction
+     ↓ commits document session files in the same scoped transaction
+     ↓ defers existing-history metadata for a scoped Compare aggregate
+     ↓ generates a scoped title before atomically creating a new history
+     ↓ finishes a new history when Stop is pressed during post-success title generation
+     ↓ writes nothing for an already-aborted request scope
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts > saveMessageOnSuccess request scope > only acknowledges explicit failed retries on either outcome: undefined
+ FAIL  src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts > saveMessageOnSuccess request scope > only acknowledges explicit failed retries on either outcome: false
+AssertionError: expected "vi.fn()" to be called +0 times, but got 2 times
+ ❯ src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts:131:35
+    129|       scopeSignal: new AbortController().signal
+    130|     })
+    131|     expect(mocks.acknowledgeUser).toHaveBeenCalledTimes(retryFailedTur…
+       |                                   ^
+    132|   })
+    133| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > successful regeneration does not re-ACK the already acknowledged user
+AssertionError: expected 'server-user-2' to be 'server-user-1' // Object.is equality
+
+Expected: "server-user-1"
+Received: "server-user-2"
+
+ ❯ src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx:650:82
+    648|     await act(async()=>{await result.current.actions.regenerateLastMes…
+    649|     expect(mocks.pageAssistModel.mock.calls.map(([options])=>options.r…
+    650|     expect(result.current.state.messages.find(row=>!row.isBot)?.server…
+       |                                                                                  ^
+    651|     expect(mocks.rows.filter(row=>row.role==='user').map(row=>row.serv…
+    652|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  3 failed | 1 passed | 56 skipped (60)
+   Start at  21:39:00
+   Duration  2.95s (transform 994ms, setup 176ms, import 1.90s, tests 35ms, environment 631ms)
+

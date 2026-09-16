@@ -3,6 +3,7 @@ import {
   saveHistory,
   saveMessage,
   updateMessage,
+  acknowledgeSavedUserMessage,
   addFileToSession,
   updateLastUsedModel as setLastUsedChatModel,
   updateLastUsedPrompt as setLastUsedChatSystemPrompt,
@@ -89,6 +90,7 @@ export const saveMessageOnError = async ({
   userModelId,
   userMessageId,
   userServerMessageId,
+  retryFailedTurn = false,
   assistantMessageId,
   assistantServerMessageId,
   userParentMessageId,
@@ -129,6 +131,7 @@ export const saveMessageOnError = async ({
   userModelId?: string
   userMessageId?: string
   userServerMessageId?: string
+  retryFailedTurn?: boolean
   assistantServerMessageId?: string
   assistantMessageId?: string
   userParentMessageId?: string | null
@@ -208,6 +211,10 @@ export const saveMessageOnError = async ({
         const shouldSaveUser = !isRegenerating && (
           !historyId || !isAbort || !isContinue
         )
+
+        if (isRegenerating && retryFailedTurn && userMessageId && userServerMessageId) {
+          await acknowledgeSavedUserMessage(targetHistoryId, userMessageId, userServerMessageId, userMessage)
+        }
 
         if (shouldSaveUser) {
           await saveMessage({
@@ -488,6 +495,7 @@ export const saveMessageOnSuccess = async ({
   userModelId,
   userMessageId,
   userServerMessageId,
+  retryFailedTurn = false,
   assistantMessageId,
   assistantServerMessageId,
   userParentMessageId,
@@ -527,6 +535,7 @@ export const saveMessageOnSuccess = async ({
   userModelId?: string
   userMessageId?: string
   userServerMessageId?: string
+  retryFailedTurn?: boolean
   assistantMessageId?: string
   assistantServerMessageId?: string
   userParentMessageId?: string | null
@@ -568,6 +577,10 @@ export const saveMessageOnSuccess = async ({
       const targetHistoryId = historyId ?? (
         await saveHistory(title!, false, message_source)
       ).id
+
+      if (isRegenerate && retryFailedTurn && userMessageId && userServerMessageId) {
+        await acknowledgeSavedUserMessage(targetHistoryId, userMessageId, userServerMessageId, message)
+      }
 
       if (!historyId || (!isRegenerate && !isContinue)) {
         await saveMessage({

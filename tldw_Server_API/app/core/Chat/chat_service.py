@@ -4115,6 +4115,7 @@ async def build_context_and_messages(
     db_order = "ASC" if history_order == "asc" else "DESC"
 
     historical_msgs: list[dict[str, Any]] = []
+    historical_ids: list[str | None] = []
     if conv_id and (not conversation_created):
         raw_hist: list[dict[str, Any]] = []
         if continuation_spec:
@@ -4230,6 +4231,7 @@ async def build_context_and_messages(
                     )
                     continue
                 historical_msgs.append(hist_entry)
+                historical_ids.append(db_msg.get("id"))
         logger.info(f"Loaded {len(historical_msgs)} historical messages for conv_id '{conv_id}'.")
 
     # Keep failure diagnostics in saved history, but never send them as model
@@ -4239,7 +4241,10 @@ async def build_context_and_messages(
         historical_msgs
         and _is_saved_chat_error_envelope(historical_msgs[0 if history_order == "desc" else -1])
     )
-    historical_msgs = [message for message in historical_msgs if not _is_saved_chat_error_envelope(message)]
+    visible_history = [(message, message_id) for message, message_id in zip(historical_msgs, historical_ids)
+                       if not _is_saved_chat_error_envelope(message)]
+    historical_msgs = [message for message, _ in visible_history]
+    historical_ids = [message_id for _, message_id in visible_history]
 
     # Process current turn messages (persist if needed)
     request_messages: list[dict[str, Any]] = []
@@ -4255,6 +4260,55 @@ async def build_context_and_messages(
             else:
                 msg_dict.pop("name", None)
         request_messages.append(msg_dict)
+
+    metadata = getattr(request_data, "metadata", None)
+    explicit_failed_retry = isinstance(metadata, dict) and metadata.get("tldw_retry_failed_turn") is True
+    retry_user_message_id: str | None = None
+    if explicit_failed_retry and should_persist and not conversation_created and request_messages:
+        # Read the actual tail independently of the requested context window.
+        # Retry is an explicit operation; equal text on an ordinary send is new.
+        tail_rows = await loop.run_in_executor(None, chat_db.get_messages_for_conversation, conv_id, 2, 0, "DESC")
+        requested_user = request_messages[-1]
+        if requested_user.get("role") != "user":
+            raise HTTPException(status_code=409, detail="The failed turn changed. Reload the conversation before retrying.")
+
+        def matches_saved_user(row: dict[str, Any]) -> bool:
+            if str(row.get("sender", "")).lower() != "user":
+                return False
+            parts = [{"type": "text", "text": row["content"]}] if row.get("content") else []
+            images = row.get("images") or []
+            if not images and row.get("image_data"):
+                images = [row]
+            for image in images:
+                data = image.get("image_data")
+                if not data:
+                    continue
+                mime = image.get("image_mime_type") or "image/png"
+                parts.append({"type": "image_url", "image_url": {
+                    "url": f"data:{mime};base64,{base64.b64encode(data).decode('utf-8')}"
+                }})
+            content = requested_user.get("content")
+            requested_parts = [{"type": "text", "text": content}] if isinstance(content, str) else content
+            if isinstance(requested_parts, list):
+                requested_parts = [
+                    {**part, "image_url": {key: value for key, value in part["image_url"].items()
+                                         if key != "detail" or value != "auto"}}
+                    if part.get("type") == "image_url" and isinstance(part.get("image_url"), dict) else part
+                    for part in requested_parts
+                ]
+            return requested_parts == parts
+
+        if tail_rows:
+            tail = tail_rows[0]
+            if str(tail.get("sender", "")).lower() == "user":
+                if not matches_saved_user(tail):
+                    raise HTTPException(status_code=409, detail="The unanswered turn changed. Reload the conversation before retrying.")
+                retry_user_message_id = str(tail["id"])
+            elif len(tail_rows) > 1 and matches_saved_user(tail_rows[1]):
+                if _is_saved_chat_error_envelope({"role": "assistant", "content": tail.get("content", "")}):
+                    retry_user_message_id = str(tail_rows[1]["id"])
+                else:
+                    raise HTTPException(status_code=409, detail="This turn already has an answer. Reload the conversation before retrying.")
 
     # If the client included history with conversation_id, trim overlaps against DB history
     overlap_cut = 0
@@ -4322,7 +4376,7 @@ async def build_context_and_messages(
                 }
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 user_only_trim = False
-            retrying_failed_turn = history_ended_with_error and len(request_messages) == 1
+            retrying_failed_turn = (history_ended_with_error or retry_user_message_id is not None) and len(request_messages) == 1
             if (user_only_trim or retrying_failed_turn) and all_user_roles:
                 hist_for_overlap = (
                     list(reversed(historical_msgs)) if history_order == "desc" else historical_msgs
@@ -4338,15 +4392,16 @@ async def build_context_and_messages(
                             conv_id,
                         )
 
-    persisted_user_message_id: str | None = None
+    persisted_user_message_id: str | None = retry_user_message_id
     current_turn: list[dict[str, Any]] = []
-    for msg_dict in request_messages[overlap_cut:]:
+    for index, msg_dict in enumerate(request_messages[overlap_cut:], start=overlap_cut):
         role = msg_dict.get("role")
         msg_for_db = msg_dict.copy()
         if role == "assistant" and character_card:
             # Persist assistant sender as sanitized character name
             msg_for_db["name"] = sanitize_sender_name(character_card.get("name", "Assistant"))
-        if should_persist:
+        reused_retry = retry_user_message_id is not None and index == len(request_messages) - 1
+        if should_persist and not reused_retry:
             saved_message_id = await save_message_fn(chat_db, conv_id, msg_for_db, use_transaction=True)
             if role == "user":
                 persisted_user_message_id = str(saved_message_id) if saved_message_id else None
@@ -4355,7 +4410,8 @@ async def build_context_and_messages(
             name = sanitize_sender_name(character_card.get("name"))
             if name:
                 msg_for_llm["name"] = name
-        current_turn.append(msg_for_llm)
+        if not reused_retry or retry_user_message_id not in historical_ids:
+            current_turn.append(msg_for_llm)
 
     if continuation_spec and assistant_prefill:
         prefill_payload: dict[str, Any] = {

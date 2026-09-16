@@ -1,0 +1,27 @@
+✘ [ERROR] Could not resolve "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/node_modules/vitest/config"
+
+    ../../../../../../../../private/tmp/cycle4-uat108-valid-envelope-baseline.config.ts:1:322:
+      1 │ ...fig } from "/Users/macbook-dev/Documents/GitHub/tldw_server2/app...
+        ╵               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+failed to load config from /private/tmp/cycle4-uat108-valid-envelope-baseline.config.ts
+
+⎯⎯⎯⎯⎯⎯⎯ Startup Error ⎯⎯⎯⎯⎯⎯⎯⎯
+Error: Build failed with 1 error:
+../../../../../../../../private/tmp/cycle4-uat108-valid-envelope-baseline.config.ts:1:322: ERROR: Could not resolve "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/node_modules/vitest/config"
+    at failureErrorWithLog (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/esbuild@0.27.2/node_modules/esbuild/lib/main.js:1467:15)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/esbuild@0.27.2/node_modules/esbuild/lib/main.js:926:25
+    at runOnEndCallbacks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/esbuild@0.27.2/node_modules/esbuild/lib/main.js:1307:45)
+    at buildResponseToResult (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/esbuild@0.27.2/node_modules/esbuild/lib/main.js:924:7)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/esbuild@0.27.2/node_modules/esbuild/lib/main.js:951:16
+    at responseCallbacks.<computed> (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/esbuild@0.27.2/node_modules/esbuild/lib/main.js:603:9)
+    at handleIncomingPacket (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/esbuild@0.27.2/node_modules/esbuild/lib/main.js:658:12)
+    at Socket.readFromStdout (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/esbuild@0.27.2/node_modules/esbuild/lib/main.js:581:7)
+    at Socket.emit (node:events:509:20)
+    at addChunk (node:internal/streams/readable:564:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+
+

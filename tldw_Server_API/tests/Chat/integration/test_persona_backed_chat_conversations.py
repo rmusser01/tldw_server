@@ -5,6 +5,7 @@ import json
 from unittest.mock import patch
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint_module
@@ -256,6 +257,57 @@ def test_saved_turn_acknowledges_exact_user_and_assistant_rows(
         assert assistant_ids == {rows[-1]["id"]}
     assert len(set(acknowledged_users)) == 2
     assert len(rows) == 5
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("explicit_retry", [False, True])
+def test_actual_provider_failure_then_retry_preserves_canonical_user(
+    persona_chat_client, persona_chat_db, stream, explicit_retry
+):
+    client, headers, provider_call = persona_chat_client
+    conversation_id = persona_chat_db.add_conversation({"title": "Failed turn", "client_id": "1"})
+    provider_call.side_effect = HTTPException(status_code=502, detail="Provider unavailable")
+    body = {**_chat_completion_body(conversation_id), "stream": stream}
+    failed = client.post("/api/v1/chat/completions", json=body, headers=headers)
+    assert failed.status_code == 502, failed.text
+    before = persona_chat_db.get_messages_for_conversation(conversation_id)
+    original_user = [row for row in before if row["sender"] == "user"]
+    assert len(original_user) == 1
+    assert not any(row["sender"] == "assistant" for row in before)
+
+    provider_call.side_effect = None
+    if stream:
+        provider_call.return_value = iter([
+            'data: {"choices":[{"delta":{"content":"Recovered"},"finish_reason":null}]}\n\n',
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+            'data: [DONE]\n\n',
+        ])
+    if explicit_retry:
+        body["metadata"] = {"tldw_retry_failed_turn": True}
+    response = client.post("/api/v1/chat/completions", json=body, headers=headers)
+    assert response.status_code == 200, response.text
+    rows = persona_chat_db.get_messages_for_conversation(conversation_id)
+    users = [row for row in rows if row["sender"] == "user"]
+    assert len(users) == (1 if explicit_retry else 2)
+    payloads = ([json.loads(line[6:]) for line in response.text.splitlines()
+                 if line.startswith("data: ") and line[6:] != "[DONE]"]
+                if stream else [response.json()])
+    expected_id = original_user[0]["id"] if explicit_retry else users[-1]["id"]
+    assert {p["tldw_user_message_id"] for p in payloads if p.get("tldw_user_message_id")} == {expected_id}
+    assert "metadata" not in provider_call.call_args.kwargs
+    assert "tldw_retry_failed_turn" not in json.dumps(provider_call.call_args.kwargs["messages_payload"])
+
+
+def test_failed_turn_retry_rejects_conflicting_unanswered_tail(persona_chat_client, persona_chat_db):
+    client, headers, provider_call = persona_chat_client
+    conversation_id = persona_chat_db.add_conversation({"title": "Other pending turn", "client_id": "1"})
+    persona_chat_db.add_message({"conversation_id": conversation_id, "sender": "user", "content": "Different pending question"})
+    before = persona_chat_db.get_messages_for_conversation(conversation_id)
+    body = {**_chat_completion_body(conversation_id), "metadata": {"tldw_retry_failed_turn": True}}
+    response = client.post("/api/v1/chat/completions", json=body, headers=headers)
+    assert response.status_code == 409, response.text
+    assert persona_chat_db.get_messages_for_conversation(conversation_id) == before
+    provider_call.assert_not_called()
 
 
 @pytest.mark.parametrize("stream", [False, True])

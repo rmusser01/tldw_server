@@ -266,6 +266,7 @@ export interface TldwChatOptions {
   toolChoice?: "auto" | "none" | "required"
   tools?: Record<string, unknown>[]
   saveToDb?: boolean
+  retryFailedTurn?: boolean
   conversationId?: string
   historyMessageLimit?: number
   historyMessageOrder?: string
@@ -382,6 +383,7 @@ export class TldwChatService {
             }
           : {}),
         save_to_db: options.saveToDb,
+        ...(options.retryFailedTurn ? { metadata: { tldw_retry_failed_turn: true } } : {}),
         conversation_id: options.conversationId,
         history_message_limit: options.historyMessageLimit,
         history_message_order: options.historyMessageOrder,
@@ -505,6 +507,7 @@ export class TldwChatService {
             }
           : {}),
         save_to_db: options.saveToDb,
+        ...(options.retryFailedTurn ? { metadata: { tldw_retry_failed_turn: true } } : {}),
         conversation_id: options.conversationId,
         history_message_limit: options.historyMessageLimit,
         history_message_order: options.historyMessageOrder,

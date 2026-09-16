@@ -46,6 +46,20 @@ describe("TldwChatService abort lifecycle", () => {
     })
   })
 
+  it.each([false, true])("keeps explicit retry intent in request metadata (retry=%s)", async (retryFailedTurn) => {
+    mocks.createChatCompletion.mockResolvedValue({ json: async () => ({ choices: [{ message: { content: "answer" } }] }) })
+    mocks.streamChatCompletion.mockImplementation(async function* () { yield chunk("answer") })
+    const service = new TldwChatService()
+    const messages = [{ role: "user" as const, content: "Retry question" }]
+    await service.sendMessage(messages, { model: "m", retryFailedTurn })
+    for await (const _token of service.streamMessage(messages, { model: "m", retryFailedTurn })) { /* consume */ }
+    for (const request of [mocks.createChatCompletion.mock.calls[0][0], mocks.streamChatCompletion.mock.calls[0][0]]) {
+      expect(request.metadata).toEqual(retryFailedTurn ? { tldw_retry_failed_turn: true } : undefined)
+      expect(request.messages).toEqual(messages)
+      expect(request.extra_body).toBeUndefined()
+    }
+  })
+
   it("passes the captured request scope to both completion transports", async () => {
     mocks.createChatCompletion.mockResolvedValue({
       json: async () => ({ choices: [{ message: { content: "answer" } }] })
