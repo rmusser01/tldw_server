@@ -365,7 +365,8 @@ describe("ImportExportTab deck creation flows", () => {
       scopeKey: "owner-1", requestScope: { config: { serverUrl: "https://owner.test", authMode: "multi-user" }, userId: 1 },
       scopeSignal: controller.signal, scopeInvalidatedSignal: controller.signal, capability: "unchecked", definitions: {}, release: () => controller.abort()
     } as ServicePromptSnapshot
-    vi.mocked(useDecksQuery).mockReturnValue({ data: [], isLoading: state === "pending", isError: state === "error", isSuccess: state === "ready" } as ReturnType<typeof useDecksQuery>)
+    const refetch = vi.fn().mockRejectedValue(new Error("Deck service unavailable"))
+    vi.mocked(useDecksQuery).mockReturnValue({ data: [], isLoading: state === "pending", isError: state === "error", isSuccess: state === "ready", refetch } as ReturnType<typeof useDecksQuery>)
     generateMutateAsync.mockResolvedValue({ flashcards: [{ front: "Question", back: "Answer", model_type: "basic" }], count: 1 })
     createDeckMutateAsync.mockResolvedValue({ id: 12, name: "Generated Flashcards", version: 1 })
     createCardMutateAsync.mockResolvedValue({})
@@ -377,6 +378,7 @@ describe("ImportExportTab deck creation flows", () => {
       await waitFor(() => expect(messageSpies.error).toHaveBeenCalled())
       expect(createDeckMutateAsync).not.toHaveBeenCalled()
       expect(createCardMutateAsync).not.toHaveBeenCalled()
+      expect(refetch).toHaveBeenCalledTimes(state === "error" ? 1 : 0)
       expect(screen.getByTestId("flashcards-generate-deck")).not.toHaveTextContent("Create new deck")
       return
     }

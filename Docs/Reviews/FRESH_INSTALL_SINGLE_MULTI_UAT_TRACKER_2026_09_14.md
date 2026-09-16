@@ -2,6 +2,14 @@
 
 ## Run status
 
+- **23:17 UTC targeted repair checkpoint:176 unique findings.**171 read ownership and172 deck-query recovery pass independent review and targeted tests; native acceptance remains pending.173 quota repair exposes176 world-book initialization in actual PostgreSQL router tests. Retained native174 duplicate-deck conflict and175 runtime-overlay failures require separate repairs. The original draft remains preserved; no full UAT restart.
+
+- **23:08 UTC targeted discovery:173 unique findings.** Native PostgreSQL character Chat creation returns503 before any provider completion; new173 tracks the positional conversation quota-count read. The planned one-request provider fault was never reached and has been removed.031 remains unaccepted.171/172 repairs are under regression verification; full UAT remains gated.
+
+- **23:04 UTC reconciliation:172 findings —163 verified,7 awaiting acceptance,2 unresolved (171/172), zero tool-blocked checks.** [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-172-recovery-checkpoint.json).169/170 are accepted;024/031/137/151/166/167/168 await native acceptance.171 retained-read transactions and172 deck-query retry require repair. All newly captured failure evidence is retained. No full UAT restart.
+
+- **22:56 UTC targeted recovery:171 unique findings.** Repairs166–170 are committed in `1d79053797`;170 has retained native acceptance.166–168 still require native acceptance.169 naturally executes successfully at22:49:33UTC; its independent evidence audit is underway. New171 records a retained PostgreSQL Notes read transaction blocking replacement API schema initialization. Stopping only the already-shutting-down owned API releases the lock and restores requests; that recovery is not a durable fix. The preserved Flashcards draft shows a deck-readiness error and a stuck Save indicator without a new save request, under separate diagnosis. No full UAT restart.
+
 - **22:37 UTC reconciliation:170 findings —161 verified,4 awaiting acceptance,5 unresolved (166–170), zero tool-blocked checks.** [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-170-targeted-checkpoint.json). Retained independent native acceptance closes138/139/141/163/164/165. Remaining older acceptance:024/031/137/151. PostgreSQL native Flashcards work found167 timestamp serialization and168 row-index failures;169 scheduled auth monitoring and170 narrow selectors are also tracked.166 is singular generation feedback. Repairs precede any full UAT restart.
 
 - **21:52 UTC reconciliation: 164 unique findings — 155 verified, 7 awaiting acceptance, 2 unresolved (163/164), zero tool-blocked checks.** [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-164-source-checkpoint.json). Independent retained native acceptance passes013/103/152/156 on `223591ac4f`;162 is already accepted. Pending acceptance:024/031/137/138/139/141/151.163 repair is under review;164 is misleading empty-model guidance observed during actual PostgreSQL multi-user setup. Official PostgreSQL admin creation and native login pass; full native PostgreSQL matrix remains pending. No full UAT restart.
@@ -88,30 +96,63 @@
 - UAT095 audit correction: independent follow-up found the launched-browser private-path sentinel requirement was stronger than the actual task/design. Retained real endpoint/transport/sink tests and independent review verify the original synthetic transport defect. No native private disclosure or launched-extension claim is made.
 - UAT114 remains tool-blocked: current supported native inventory offers only Codex in-app browser. Two actual probe tabs both report `document.visibilityState=visible` after switching. Both temporary tabs were closed; no visibility override or product/tooling patch was applied.
 
+## UAT-176 — P1: PostgreSQL character creation fails initializing world books
+
+- Required actual-router PostgreSQL tests advance past173's quota count, then both global and workspace character creation return500. WorldBookService._init_tables uses the connection as a context manager; PostgreSQL BackendConnectionWrapper does not implement that protocol.
+- Status: unresolved, TASK13260.112. Keep the real initialization in tests, use supported transaction ownership, and verify PostgreSQL/SQLite plus native character creation. Failure evidence: `.tmp/uat173-repair-20260916/quota-green-followup-failure.log`, pending repair retention.
+
+## UAT-175 — P2: Failed generated-deck save opens a blocking runtime error overlay
+
+- The duplicate-deck save displays inline error/retry feedback but also opens a Next Runtime Error overlay. The overlay intercepts normal deck-picker clicks, blocking the recovery suggested by the inline message. Root visually confirmed the screenshot; escaped-rejection diagnosis is separate from the server's174 conflict mapping.
+- Status: unresolved, TASK13260.113. [Native evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup174-175-native-failures/README.md). Preserve failure reporting and drafts while containing the handled save failure in the recovery UI.
+
+## UAT-174 — P2: PostgreSQL duplicate-deck creation returns a generic server error
+
+- The original167 response failure committed Alice's deck. A later recovered list returns it200, but another POST with that same name returns500 `Failed to create deck`, rather than an actionable conflict. PostgreSQL backend redaction removes the raw uniqueness details that ChaCha's string-based conflict helper expects.
+- Status: unresolved, TASK13260.111. Restore privacy-preserving uniqueness classification, preserving unrelated failure behavior. [Native evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup174-175-native-failures/README.md).
+
+## UAT-173 — P1: PostgreSQL conversation quota count prevents Chat creation
+
+- Alice's actual Characters → Chat → Send returns503 from POST /chats at23:06:05UTC: `Quota enforcement unavailable. Please try again later.` The backend logs a count failure `0`; count_conversations_for_user reads row[0] although PostgreSQL returns the named cnt column. No complete-v2 request is sent.
+- Status: unresolved, TASK13260.110. Preserve owner/workspace/deleted/character filters and fail-closed quota enforcement while correcting the result access. Official PostgreSQL and SQLite count/route regressions, review and native acceptance are required. [Retained native failure](../../output/playwright/cycle5-repair-verification-2026-09-16/followup173-native-failure/README.md).
+- A planned first-completion provider fault never triggered; it was removed after this earlier failure. This is not evidence of UAT031 failed-provider Retry behavior.
+
+## UAT-172 — P2: Generated-card Retry cannot recover a failed deck list
+
+- After the API recovers, Alice's retained generated draft still cannot save: Retry at22:57:06UTC repeats the deck-readiness error without fetching decks or sending a save request. The scoped deck query remains errored; global query focus/reconnect refetch is disabled. Draft and source provenance remain visible.
+- Status: implemented, TASK13260.109; native acceptance pending. Explicit errored-list refetch uses the current account and newly returned target list. Author65/4 and independent25/3 tests pass; compiler retains90 existing signatures, lint unchanged. [Repair and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup172/README.md), [native failure](../../output/playwright/cycle5-repair-verification-2026-09-16/followup166-168-172-native-failures/README.md). HMR refreshed the retained tab before its latest Save; that attempt does not prove explicit failed-query retry and encountered174/175.
+- The older accessibility snapshot showed a stale loading icon. Direct live DOM confirms both controls are enabled and not busy; no stuck-mutation defect is inferred from that snapshot artifact.
+
+## UAT-171 — P1: Retained PostgreSQL Notes read blocks replacement API initialization
+
+- A standalone Notes folder SELECT leaves the thread-pinned connection idle in transaction. During owned API restart, its AccessShareLock blocks the replacement process's note_folders schema DDL; Buddy requests return500 while initialization waits. The old API is draining established requests and retains its database connections.
+- Captured backend5829 blocks16272. Stopping only the old owned process68056 at22:47:35.129UTC removes the blocker; waiting requests return200161ms later. This is distinct from147's repaired sequence ownership defect. Existing explicit/nested transactions must remain intact.
+- Status: implemented, TASK13260.108; native restart acceptance pending. Nine known pure reads close only newly owned PostgreSQL transactions, preserving caller transactions and SQLite. Author and independent46/4 tests each pass with zero skips; Ruff/Bandit clean. [Repair and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup171/README.md), [diagnosis](../../output/playwright/cycle5-repair-verification-2026-09-16/followup171-diagnosis/README.md).
+
 ## UAT-170 — P3: Model default selectors overflow on narrow screens
 
 - At390px, actual Models default-provider and default-model selectors extend past the Set your defaults card and viewport, clipping their selected values and right-side controls. The separately repaired165 readiness value stays contained.
-- Status: unresolved, TASK13260.107. Preserve selection semantics and full option labels while constraining both selectors to their available width. Native screenshot `.tmp/uat165-repair-20260916/native-narrow.png` is retained with165.
+- Status: verified, TASK13260.107, commit `1d79053797`. The defaults grid uses a zero-minimum single column below the existing two-column breakpoint. Actual390px and1200px geometry, visible selector arrows and a real option selection pass;21/3 regressions and independent review pass. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup170/README.md). The original overflow screenshot is retained with165.
 
 ## UAT-169 — P2: PostgreSQL authentication monitor fails on its timestamp cutoff
 
 - Current PostgreSQL multi-user logs show the scheduled authentication-failure monitor failing every five minutes. At AuthNZ/scheduler.py644, asyncpg rejects the aware cutoff against a naive timestamp parameter. Existing users self-verification task12167 covers a different table/path.
-- Status: unresolved, TASK13260.106. Match the actual audit-log timestamp contract, preserve UTC cutoff semantics, and execute required PostgreSQL plus control regressions. Independent log inventory found four current failures through22:30:35UTC; no current Buddy500/deadlock was observed.
+- Status: verified, TASK13260.106, commit `1d79053797`. UTC cutoff matches the PostgreSQL naive timestamp contract; actual PostgreSQL/SQLite boundary regressions and independent review pass. Natural22:49:33 and22:54:33UTC runs succeed with zero matching caught-monitor failures through22:56:50. [Independent native audit](../../output/playwright/cycle5-repair-verification-2026-09-16/followup169-native/independent-audit.md), [repair evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup169/README.md). No live alert-delivery or future-uptime claim.
 
 ## UAT-168 — P1: PostgreSQL Flashcards listing fails when reading its count
 
 - Two actual GET /flashcards requests return500 during the PostgreSQL Notes handoff. count_flashcards uses row[0] on a mapping result containing the named cnt column, raising KeyError0. This is distinct from167's response timestamp validation failure.
-- Status: unresolved, TASK13260.105. Use the existing named-column convention without changing visibility/filter SQL; verify empty/nonempty/filtered counts on actual PostgreSQL and SQLite, then repeat the native list.
+- Status: implemented, TASK13260.105, commit `1d79053797`; native acceptance pending. Named columns repair count, deck version, asset reconciliation and card update/no-op paths without changing SQL semantics. Combined167/168 actual PostgreSQL/SQLite checks pass38 with zero skips; independent review and Bandit pass. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup168/README.md).
 
 ## UAT-167 — P1: PostgreSQL generated-card save fails while returning the new deck
 
 - Alice's actual Notes handoff and real Gemma generation succeed with one grounded card. Save generated cards then returns HTTP500 from POST /flashcards/decks. Backend response validation rejects PostgreSQL datetime values for created_at and last_modified because the public schema expects strings. The generated draft remains visible; the deck write may already have committed, so a failed response cannot be treated as a rolled-back operation.
-- Status: unresolved. TASK13260.104 tracks backend-neutral timestamp serialization, required real PostgreSQL tests, SQLite controls, independent review and native recovery with provenance. UAT151/137 acceptance is paused at this dependency. Evidence: `.tmp/uat151-137-native-20260916/alice-deck-save-failure-events.txt` and screenshot, pending durable retention.
+- Status: implemented, TASK13260.104, commit `1d79053797`; native recovery with provenance pending. Datetime values serialize through the existing public string contract; combined167/168 actual PostgreSQL/SQLite checks pass38 with zero skips, independent review and Bandit pass. UAT151/137 acceptance remains pending. [Repair evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup167/README.md). Original native failure remains in `.tmp/uat151-137-native-20260916/`, pending durable retention.
 
 ## UAT-166 — P3: One generated flashcard uses plural feedback
 
 - Actual successful one-card generation displays “Generated 1 cards.” in the Import/Export last-action summary. This is separate from137's Study remaining-card label.
-- Status: unresolved, TASK13260.103. Use existing localization plural rules without changing card counts. Native evidence: `.tmp/uat151-137-native-20260916/alice-generation-result.txt`, pending durable retention.
+- Status: implemented, TASK13260.103, commit `1d79053797`; native acceptance pending. Three ICU fallback messages handle singular and plural counts;61/4 regressions pass and full compiler retains the90 existing signatures with zero added/removed. [Repair evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup166/README.md). Original native failure remains in `.tmp/uat151-137-native-20260916/`, pending durable retention.
 
 ## UAT-165 — P3: Long default model identifier overlaps the neighboring readiness tile
 

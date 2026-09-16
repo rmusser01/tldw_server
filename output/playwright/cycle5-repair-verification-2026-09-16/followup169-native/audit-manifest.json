@@ -1,0 +1,15 @@
+{
+  "task": "TASK-13260.106",
+  "uat": "UAT169",
+  "result": "PASS",
+  "files": [
+    {
+      "path": "sanitized-receipt.json",
+      "sha256": "a3f06d389bed0fc332ad782c14fc16970367fbf4da7416430bf325ebd833c429"
+    },
+    {
+      "path": "independent-audit.md",
+      "sha256": "761466e0b4583e72bc8992fc9bd55ee9f4469316f9cf367bd79612af4b928caa"
+    }
+  ]
+}

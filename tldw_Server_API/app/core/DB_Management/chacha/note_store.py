@@ -548,7 +548,7 @@ class NoteStore:
         if not include_deleted:
             query += " AND deleted = ?"
             params.append(False if self._db.backend_type == BackendType.POSTGRESQL else 0)
-        cursor = self._db.execute_query(query, tuple(params))
+        cursor = self._db.execute_query(query, tuple(params), read_only=True)
         row = cursor.fetchone()
         note = dict(row) if row else None
         if note and include_studio_summary:
@@ -1744,7 +1744,7 @@ class NoteStore:
             "LIMIT ? OFFSET ?"
         )
         params.extend([limit, offset])
-        cursor = self._db.execute_query(query, tuple(params))
+        cursor = self._db.execute_query(query, tuple(params), read_only=True)
         return [dict(row) for row in cursor.fetchall()]
 
     def list_note_ids_page(
@@ -1967,7 +1967,7 @@ class NoteStore:
 
         query = f"SELECT COUNT(*) AS cnt FROM notes{where_clause}"  # nosec B608
         try:
-            cursor = self._db.execute_query(query, tuple(params) if params else None)
+            cursor = self._db.execute_query(query, tuple(params) if params else None, read_only=True)
             row = cursor.fetchone()
             return int(row["cnt"]) if row else 0
         except CharactersRAGDBError as exc:
@@ -2637,7 +2637,7 @@ class NoteStore:
                   AND k.deleted = 0 \
                 {order_clause}
                 """.format_map(locals())  # nosec B608
-        cursor = self._db.execute_query(query, (note_id,))
+        cursor = self._db.execute_query(query, (note_id,), read_only=True)
         return [dict(row) for row in cursor.fetchall()]
 
     def get_keywords_for_notes(self, note_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
@@ -2660,7 +2660,7 @@ class NoteStore:
                       AND k.deleted = 0 \
                     {order_clause}
                     """.format_map(locals())  # nosec B608
-            cursor = self._db.execute_query(query, tuple(batch))
+            cursor = self._db.execute_query(query, tuple(batch), read_only=True)
             rows = cursor.fetchall()
             for row in rows:
                 record = dict(row)

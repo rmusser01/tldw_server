@@ -1,0 +1,82 @@
+{
+  "at": "2026-09-16T23:16:10.357Z",
+  "files": [
+    {
+      "file": "IMPLEMENTATION.md",
+      "source": ".tmp/uat171-repair-20260916/IMPLEMENTATION.md",
+      "original_sha256": "a25ab7c541526c1a5aa73e44619855b3f2547e8bb72c7ea4bed465332e702970",
+      "retained_sha256": "a25ab7c541526c1a5aa73e44619855b3f2547e8bb72c7ea4bed465332e702970",
+      "normalization": "none"
+    },
+    {
+      "file": "owned-manifest.json",
+      "source": ".tmp/uat171-repair-20260916/owned-manifest.json",
+      "original_sha256": "93e59d2d5e2feb2c1986f853e2bbf6115046e0169ffb350cab7b39f36d20c1f5",
+      "retained_sha256": "93e59d2d5e2feb2c1986f853e2bbf6115046e0169ffb350cab7b39f36d20c1f5",
+      "normalization": "none"
+    },
+    {
+      "file": "owned.patch",
+      "source": ".tmp/uat171-repair-20260916/owned.patch",
+      "original_sha256": "6b6cb032dc8cc5c281a84405aa9fd05bbcbb8cd8f4e41c84d250aa2b0ade89a1",
+      "retained_sha256": "1e54f22adef528bf364164039c5a5fdb977527e9db6e043a3dd41ea82fd4bc7f",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "independent-review.md",
+      "source": ".tmp/uat171-repair-20260916/independent-review.md",
+      "original_sha256": "4e41a26b92ed524bf8b4ada49e44bd44405ccaa20fca1474ae3fd6a853b5cd17",
+      "retained_sha256": "4e41a26b92ed524bf8b4ada49e44bd44405ccaa20fca1474ae3fd6a853b5cd17",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-review.log",
+      "source": ".tmp/uat171-repair-20260916/independent-review.log",
+      "original_sha256": "a98ee3082ccb717e85de4712f51201c56226cd564ef74c818930f0909a161e73",
+      "retained_sha256": "a98ee3082ccb717e85de4712f51201c56226cd564ef74c818930f0909a161e73",
+      "normalization": "none"
+    },
+    {
+      "file": "uat171-red.redacted.log",
+      "source": ".tmp/uat171-repair-20260916/uat171-red.redacted.log",
+      "original_sha256": "ffa1850028b58c35a79c6f605e1beaed28bc7235bcb1c825c0f7c065d3717309",
+      "retained_sha256": "3ff28720815a966ef9eab939d2ab3671d9b5e6afc4ebfeea5c0ccd41c80eee70",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "uat171-green.redacted.log",
+      "source": ".tmp/uat171-repair-20260916/uat171-green.redacted.log",
+      "original_sha256": "0e6522d381ea569a0e4c5d94047a513d1d1535d455b5e9fde5b1580ebe8b8b86",
+      "retained_sha256": "f018978f27e1e1e09200374785966574f35f144ff6bd4e16161d0cd2d6644087",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "uat171-final-controls.redacted.log",
+      "source": ".tmp/uat171-repair-20260916/uat171-final-controls.redacted.log",
+      "original_sha256": "56bd59ba66e1c8d4bb9b4a6b73865a41dd2cd97e9e1d23e67359517b801f67c9",
+      "retained_sha256": "56bd59ba66e1c8d4bb9b4a6b73865a41dd2cd97e9e1d23e67359517b801f67c9",
+      "normalization": "none"
+    },
+    {
+      "file": "ruff-final.json",
+      "source": ".tmp/uat171-repair-20260916/ruff-final.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retained_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "bandit-production.json",
+      "source": ".tmp/uat171-repair-20260916/bandit-production.json",
+      "original_sha256": "fa3937b5f523b33fc72ac4d1a9b80e82165e66a5a891ed368919b514e5ef2034",
+      "retained_sha256": "a1f0bf61efbc5f15bffdfb903790712a8089e88ad8c00029f593f3258bd37b02",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "bandit-tests.json",
+      "source": ".tmp/uat171-repair-20260916/bandit-tests.json",
+      "original_sha256": "4abf08a7048e0fda4f1079ca2e5d8afafe7eabf22429f8015ee6603643cba49d",
+      "retained_sha256": "e12af5d792ba47a6f08a5e305196ef5913dbe0fa71d3453d52b2df173a36c05d",
+      "normalization": "trailing text whitespace only; final newline"
+    }
+  ]
+}

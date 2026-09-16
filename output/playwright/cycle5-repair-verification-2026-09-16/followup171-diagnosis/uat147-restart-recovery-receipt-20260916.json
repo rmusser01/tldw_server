@@ -1,0 +1,59 @@
+{
+  "captured_at_utc": "2026-09-16T22:50:29.446509+00:00",
+  "new_log_path": ".tmp/fresh-uat-recovery-20260916/profiles/tldw-onboarding-uat-recovery-targeted-pg-multi-20260916/logs/live-tier-uat/backend-1789598664696.private.log",
+  "new_log_prefix_bytes": 438849,
+  "new_log_prefix_sha256": "bd9aa42a254167a3550f59838876ae30cfdc3e8a87dc97fcf15545bf8af1e985",
+  "buddy_500_count": 70,
+  "buddy_500_first": [
+    {
+      "line": 595,
+      "at_local": "2026-09-16 15:44:40.776",
+      "request": "GET /api/v1/buddies",
+      "status": 500,
+      "duration_ms": 5311
+    }
+  ],
+  "buddy_500_last": [
+    {
+      "line": 1272,
+      "at_local": "2026-09-16 15:47:31.127",
+      "request": "GET /api/v1/buddies/attachment",
+      "status": 500,
+      "duration_ms": 5118
+    }
+  ],
+  "buddy_200_count": 144,
+  "buddy_200_first": [
+    {
+      "line": 1286,
+      "at_local": "2026-09-16 15:47:35.290",
+      "request": "GET /api/v1/buddies/attachment",
+      "status": 200,
+      "duration_ms": 4157
+    },
+    {
+      "line": 1287,
+      "at_local": "2026-09-16 15:47:35.290",
+      "request": "GET /api/v1/buddies",
+      "status": 200,
+      "duration_ms": 4158
+    }
+  ],
+  "buddy_200_last": [
+    {
+      "line": 2095,
+      "at_local": "2026-09-16 15:50:28.837",
+      "request": "GET /api/v1/buddies",
+      "status": 200,
+      "duration_ms": 33
+    },
+    {
+      "line": 2096,
+      "at_local": "2026-09-16 15:50:28.837",
+      "request": "GET /api/v1/buddies/attachment",
+      "status": 200,
+      "duration_ms": 33
+    }
+  ],
+  "flashcards_http_receipts": []
+}

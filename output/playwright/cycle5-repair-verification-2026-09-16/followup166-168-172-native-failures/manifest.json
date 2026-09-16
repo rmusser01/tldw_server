@@ -1,0 +1,82 @@
+{
+  "at": "2026-09-16T23:00:21.447Z",
+  "files": [
+    {
+      "file": "alice-note-saved.txt",
+      "source": ".tmp/uat151-137-native-20260916/alice-note-saved.txt",
+      "original_sha256": "2e09c0329c58de40f627017ea87f268a708d45cd79a6cab485b907d154f6175c",
+      "retained_sha256": "93bff3b128b31f032c9d8d6eef836d8c6307acc13c46cd48aeb4964bc26cdf22",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "alice-generation-result.txt",
+      "source": ".tmp/uat151-137-native-20260916/alice-generation-result.txt",
+      "original_sha256": "530869f13a217746b4902a26a19e940016ad47c1f45cc4992d32b783a2d050d3",
+      "retained_sha256": "9465258e5afaffb9be2f5e75603d76b7e968259ce18579bbaf31ff5486de058f",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "alice-generation-events.txt",
+      "source": ".tmp/uat151-137-native-20260916/alice-generation-events.txt",
+      "original_sha256": "766d0c6a21f9b7ff4c5c3a9ef868b554e5acb3ff5c768d1a5a4995b007ed7150",
+      "retained_sha256": "1bec787938929d7bd3091a214924d3560962cf145ada4cf5633895f1380b658f",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "alice-deck-save-failure-events.txt",
+      "source": ".tmp/uat151-137-native-20260916/alice-deck-save-failure-events.txt",
+      "original_sha256": "66a7633d9019bd8fe475940c97d180376a13f6a1345c9e1ad6797e402494dd28",
+      "retained_sha256": "de416b8c0a3d4d5192c88c20ca2536135d0cb9420393bd0e08e26fc4c1a5e516",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "alice-deck-save-failure.png",
+      "source": ".tmp/uat151-137-native-20260916/alice-deck-save-failure.png",
+      "original_sha256": "66f88e54d9705a8d1f4bd07a57835c17d82ed036e7c7149b0068a05263853fbc",
+      "retained_sha256": "66f88e54d9705a8d1f4bd07a57835c17d82ed036e7c7149b0068a05263853fbc",
+      "normalization": "none"
+    },
+    {
+      "file": "pre-restart-draft.txt",
+      "source": ".tmp/uat151-137-native-20260916/pre-restart-draft.txt",
+      "original_sha256": "f87154b4750c49222a64f459471968ee1e33152df3696f8c38fbafa098f518da",
+      "retained_sha256": "2059de89ad09727490870a186f194769bd8854090738abe6edc70f51ea900726",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "requests-after-lock-release.txt",
+      "source": ".tmp/uat151-137-native-20260916/requests-after-lock-release.txt",
+      "original_sha256": "7219558bf0aa71d472b5e9b18f53608347ef11634c5ea299f84281e9d597d8ce",
+      "retained_sha256": "c8c7af055246fb4aadc0f599fdfce39e7becbedc33cdf25b4fbe8dc4cdd83c71",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "pending-save-dom-return.txt",
+      "source": ".tmp/uat151-137-native-20260916/pending-save-dom-return.txt",
+      "original_sha256": "e666891d8bce35f9d359b914d54034bedba747f9a28c5adc54497bfab0867ba6",
+      "retained_sha256": "619761eb9dacc444ef94c3dd6a18a871efdb33ffbd131c2e529f9a77d69fe470",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "requests-after-refocus.txt",
+      "source": ".tmp/uat151-137-native-20260916/requests-after-refocus.txt",
+      "original_sha256": "0fa64da7f840b7ad76a1bfc11158ff898e8ffd1e48947c512857e1d90d665aa5",
+      "retained_sha256": "ee14317ae14e7bac4b5eb9fc3f185730cbb9af31c5943266aa45b1b6e6851eb5",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "retry-deck-readiness.txt",
+      "source": ".tmp/uat151-137-native-20260916/retry-deck-readiness.txt",
+      "original_sha256": "2ea35a45158b7a4227b1b466cd3c3ca5c629604a211225033edd616f720e07af",
+      "retained_sha256": "2ea35a45158b7a4227b1b466cd3c3ca5c629604a211225033edd616f720e07af",
+      "normalization": "none"
+    },
+    {
+      "file": "retry-current-dom.txt",
+      "source": ".tmp/uat151-137-native-20260916/retry-current-dom.txt",
+      "original_sha256": "8b460b71c94b3d04a5b38c609cf4ff9def54e10845894635f11520a3a4e50437",
+      "retained_sha256": "085da0f0058530407657635be4d8c12db50af800349971b5ff6eb5b0c3ea29c8",
+      "normalization": "trailing text whitespace only; final newline"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "task": "TASK-13260.109",
+  "uat": "UAT172",
+  "head": "1d790537974aadcce71c78b2c5b2329c4cf6007f",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx",
+      "sha256": "fad0096cb8c6168fe9fe34b3bd0ce644af31db2b9d128b8371139f99dc7a1e49",
+      "snapshot": ".tmp/uat172-repair-20260916/review-snapshot/apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx",
+      "sha256": "8594fe946162c48bd28be636a04e0d28cad5f4bb13cb1dc1dd63df3468a55714",
+      "snapshot": ".tmp/uat172-repair-20260916/review-snapshot/apps/packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.deck-creation.test.tsx",
+      "sha256": "117cfeff66b18c889855eeae7a5ed1b482e6d8942058e527ec57a0e13a1dd12d",
+      "snapshot": ".tmp/uat172-repair-20260916/review-snapshot/apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.deck-creation.test.tsx"
+    }
+  ],
+  "baselineChecks": [
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx",
+      "baselineSha256": "6b5c2777391652b860ba5101348c1e788eecee04f09ddc72aa8ad9532301323f",
+      "headSha256": "6b5c2777391652b860ba5101348c1e788eecee04f09ddc72aa8ad9532301323f"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.deck-creation.test.tsx",
+      "baselineSha256": "c0bd73f1118065ada0253780c7e232c88affb718b7182961b4846ad85b03bc56",
+      "headSha256": "c0bd73f1118065ada0253780c7e232c88affb718b7182961b4846ad85b03bc56"
+    }
+  ],
+  "patchSha256": "66b8e7bde04b3595a91646c0f91e266e3b6af39ecad65d4ec78c2e1899283816"
+}

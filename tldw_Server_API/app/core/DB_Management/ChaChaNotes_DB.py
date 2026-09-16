@@ -8166,6 +8166,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         script: bool = False,
         log_params: bool = True,
         log_errors: bool = True,
+        read_only: bool = False,
     ) -> Any:
         """
         Executes a single SQL query or an entire SQL script.
@@ -8183,6 +8184,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     Sensitive query paths set this to False. Defaults to True.
             log_errors: Whether driver errors may be logged verbatim. Sensitive
                     source reads set this to False. Defaults to True.
+            read_only: Opt in a known side-effect-free read to completing its own
+                    PostgreSQL transaction. Pre-existing or explicitly managed
+                    transactions and SQLite are unchanged. Defaults to False.
 
         Returns:
             The sqlite3.Cursor object after execution.
@@ -8192,6 +8196,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For other SQLite errors or general query execution failures.
         """
         conn = self.get_connection()
+        read_scope: contextlib.AbstractContextManager[Any] = contextlib.nullcontext()
+        if read_only and self.backend_type == BackendType.POSTGRESQL:
+            raw_conn = conn._connection
+            backend = conn._backend
+            status = getattr(getattr(raw_conn, "info", None), "transaction_status", None)
+            if (
+                getattr(status, "name", None) == "IDLE"
+                and getattr(self._local, "tx_depth", 0) == 0
+                and backend._tx_depth(raw_conn) == 0
+            ):
+                # Own only this new read; never settle an existing caller's work.
+                read_scope = backend.transaction(connection=raw_conn)
         try:
             logger.debug(
                 'Executing SQL (script={}, backend={}): {}... Params: {}...',
@@ -8201,18 +8217,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 str(params)[:200] if log_params else "[redacted]",
             )
 
-            if script:
-                if self.backend_type == BackendType.SQLITE:
-                    cursor = conn.executescript(query)
+            with read_scope:
+                if script:
+                    if self.backend_type == BackendType.SQLITE:
+                        cursor = conn.executescript(query)
+                    else:
+                        cursor = conn.executescript(query, log_errors=log_errors)
                 else:
-                    cursor = conn.executescript(query, log_errors=log_errors)
-            else:
-                prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-                if self.backend_type == BackendType.SQLITE:
-                    cursor = conn.cursor()
-                else:
-                    cursor = conn.cursor(log_errors=log_errors)
-                cursor.execute(prepared_query, prepared_params or ())
+                    prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+                    if self.backend_type == BackendType.SQLITE:
+                        cursor = conn.cursor()
+                    else:
+                        cursor = conn.cursor(log_errors=log_errors)
+                    cursor.execute(prepared_query, prepared_params or ())
 
             if commit:
                 try:
@@ -34354,6 +34371,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              WHERE LOWER(path) = LOWER(?) AND deleted = ?
             """,
             (normalized_path, self._active_note_folder_deleted_value()),
+            read_only=True,
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -34373,6 +34391,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         cursor = self.execute_query(
             query,
             (self._active_note_folder_deleted_value(), limit, max(0, offset)),
+            read_only=True,
         )
         return [dict(row) for row in cursor.fetchall()]
 
@@ -34550,7 +34569,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                    )
                 {order_clause}
                 """.format_map(locals())  # nosec B608
-        cursor = self.execute_query(query, (note_id, note_id, note_id))
+        cursor = self.execute_query(query, (note_id, note_id, note_id), read_only=True)
         return [dict(row) for row in cursor.fetchall()]
 
     def get_note_folders_for_notes(self, note_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
@@ -34584,7 +34603,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                        )
                      ORDER BY memberships.note_id, {path_order_expr}
                     """.format_map(locals())  # nosec B608
-            cursor = self.execute_query(query, tuple(batch + batch))
+            cursor = self.execute_query(query, tuple(batch + batch), read_only=True)
             for row in cursor.fetchall():
                 record = dict(row)
                 current_note_id = str(record.pop("note_id"))

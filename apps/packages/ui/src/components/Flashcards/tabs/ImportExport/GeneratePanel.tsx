@@ -77,6 +77,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   const message = useAntdMessage()
   const qc = useQueryClient()
   const decksQuery = useDecksQuery(generationScope === undefined ? undefined : { scope: generationScope })
+  const { isError: deckListFailed, refetch: refetchDecks } = decksQuery
   const generateMutation = useGenerateFlashcardsMutation()
   const createMutation = useCreateFlashcardMutation()
   const createDeckMutation = useCreateDeckMutation()
@@ -363,13 +364,20 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
 
   const resolveTargetDeckId = React.useCallback(async (): Promise<number> => {
     assertCurrentScope()
-    if (!deckListReady) throw new Error("Wait for the current account's decks to load before saving.")
+    let availableDecks = decks
+    if (!deckListReady) {
+      if (!deckListFailed) throw new Error("Wait for the current account's decks to load before saving.")
+      const refreshed = await refetchDecks({ throwOnError: true })
+      assertCurrentScope()
+      if (!refreshed.isSuccess) throw new Error("Wait for the current account's decks to load before saving.")
+      availableDecks = refreshed.data
+    }
     if (typeof targetDeckId === "number") {
-      if (decks.some(deck => deck.id === targetDeckId)) return targetDeckId
+      if (availableDecks.some(deck => deck.id === targetDeckId)) return targetDeckId
       throw new Error("Choose a deck from the current account before saving.")
     }
-    if (targetDeckId === undefined && decks.length > 0) return decks[0].id
-    if (targetDeckId === NEW_DECK_OPTION_VALUE || (targetDeckId == null && decks.length === 0)) {
+    if (targetDeckId === undefined && availableDecks.length > 0) return availableDecks[0].id
+    if (targetDeckId === NEW_DECK_OPTION_VALUE || (targetDeckId == null && availableDecks.length === 0)) {
       const name = newDeckName.trim()
       if (!name) {
         throw new Error(
@@ -398,13 +406,13 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
       setTargetDeckId(createdDeck.id)
       return createdDeck.id
     }
-    if (targetDeckId == null && decks.length > 0) return decks[0].id
+    if (targetDeckId == null && availableDecks.length > 0) return availableDecks[0].id
     throw new Error(
       t("option:flashcards.newDeckNameRequired", {
         defaultValue: "Enter a deck name."
       })
     )
-  }, [assertCurrentScope, generationScope, deckListReady, requestOptions, createDeckMutation, decks, generatedDeckSchedulerDraft, newDeckName, reviewPromptSide, t, targetDeckId])
+  }, [assertCurrentScope, generationScope, deckListReady, deckListFailed, refetchDecks, requestOptions, createDeckMutation, decks, generatedDeckSchedulerDraft, newDeckName, reviewPromptSide, t, targetDeckId])
 
   const handleSaveGeneratedCards = React.useCallback(async () => {
     if (generatedCards.length === 0) return

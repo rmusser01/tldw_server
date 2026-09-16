@@ -1,0 +1,48 @@
+{
+  "errors": [
+    {
+      "filename": "./apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.deck-creation.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    }
+  ],
+  "generated_at": "2026-09-16T23:06:54Z",
+  "metrics": {
+    "./apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx": {
+      "loc": 928,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx": {
+      "loc": 226,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.deck-creation.test.tsx": {
+      "loc": 364,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 1518,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": []
+}

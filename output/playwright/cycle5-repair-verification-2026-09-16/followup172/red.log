@@ -1,0 +1,1020 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:86708) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx (9 tests | 7 failed) 8026ms
+     × recovers via visible Retry and saves the edited draft with its original account and source 1411ms
+     × retains drafts and clears busy state when Retry still cannot read the deck list 1037ms
+     ✓ does not restart or bypass an initially pending deck list 45ms
+     × rejects a recovered list after the account becomes aborted 1103ms
+     × rejects a recovered list after the account becomes changed 1039ms
+     × rejects a recovered list after the account becomes unresolved 1128ms
+     × rejects a selected deck deleted from the successfully recovered catalogue 1038ms
+     × creates a deck once after recovering an empty current-account catalogue 1118ms
+     ✓ uses a ready list without another read before the card save 106ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx > GeneratePanel recovery through its scoped deck query > recovers via visible Retry and saves the edited draft with its original account and source
+AssertionError: expected "vi.fn()" to be called 2 times, but got 1 times
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-col gap-3"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+        [36m>[39m
+          [0mGenerate cards from pasted text, review/edit them, then save to a deck.[0m
+        [36m</span>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg border p-3 border-primary/30 bg-primary/10"[39m
+          [33mdata-ds-component[39m=[32m"Alert"[39m
+          [33mdata-testid[39m=[32m"flashcards-generate-source-context"[39m
+          [33mrole[39m=[32m"status"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"mt-0.5 flex-shrink-0 text-primary"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-info size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<circle[39m
+                [33mcx[39m=[32m"12"[39m
+                [33mcy[39m=[32m"12"[39m
+                [33mr[39m=[32m"10"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 16v-4"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 8h.01"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+          [36m</span>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-0 flex-1"[39m
+          [36m>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"text-sm font-medium text-primary"[39m
+            [36m>[39m
+              [0mSource context attached[0m
+            [36m</p>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"text-sm text-primary mt-1"[39m
+            [36m>[39m
+              [0mCards saved from this draft will be linked to {{sourceType}} {{sourceId}}.[0m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<textarea[39m
+          [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+          [33mdata-testid[39m=[32m"flashcards-generate-text"[39m
+          [33mplaceholder[39m=[32m"Paste transcript, notes, or study material..."[39m
+          [33mrows[39m=[32m"6"[39m
+        [36m>[39m
+          [0mCitrine study volunteers meet every Tuesday at 14:00.[0m
+        [36m</textarea>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-typography ant-typography-secondary text-xs -mt-1 css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+        [36m>[39m
+          [0mTip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph.[0m
+        [36m</span>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"grid grid-cols-1 gap-2 md:grid-cols-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"md:col-span-2 flex flex-wrap items-center gap-2"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-checked[39m=[32m"false"[39m
+              [33maria-labelledby[39m=[32m"flashcards-generate-advanced-label"[39m
+              [33mclass[39m=[32m"ant-switch css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mdata-testid[39m=[32m"flashcards-generate-advanced-toggle"[39m
+              [33mrole[39m=[32m"switch"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-switch-handle"[39m
+              [36m/>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"ant-switch-inner"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-switch-inner-checked"[39m
+                [36m/>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-switch-inner-unchecked"[39m
+                [36m/>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mid[39m=[32m"flashcards-generate-advanced-label"[39m
+            [36m>[39m
+              [0mAdvanced mix[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-form-item !mb-2 css-var-root ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [36m>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m""[39m
+                  [33mtitle[39m=[32m"Number of cards"[39m
+                [36m>[39m
+                  [0mNumber of cards[0m
+                [36m</label>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                  [36m>[39m
+                    [36m<input[39m
+                      [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+                      [33mdata-testid[39m=[32m"flashcards-generate-count"[39m
+                      [33mmax[39m=[32m"100"[39m
+                      [33mmin[39m=[32m"1"[39m
+                      [33mtype[39m=[32m"number"[39m
+                      [33mvalue[39m=[32m"10"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+            ...
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx:113:43
+    111|     const beforeRetry = vi.mocked(listDecks).mock.calls.length
+    112|     fireEvent.click(screen.getByTestId("flashcards-generate-save-retry…
+    113|     await waitFor(() => expect(listDecks).toHaveBeenCalledTimes(before…
+       |                                           ^
+    114|     expect(createFlashcard).not.toHaveBeenCalled()
+    115|     expect(screen.getByTestId("flashcards-generate-save-button")).toHa…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx > GeneratePanel recovery through its scoped deck query > retains drafts and clears busy state when Retry still cannot read the deck list
+AssertionError: expected 'pending' to be 'error' // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-col gap-3"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+        [36m>[39m
+          [0mGenerate cards from pasted text, review/edit them, then save to a deck.[0m
+        [36m</span>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg border p-3 border-primary/30 bg-primary/10"[39m
+          [33mdata-ds-component[39m=[32m"Alert"[39m
+          [33mdata-testid[39m=[32m"flashcards-generate-source-context"[39m
+          [33mrole[39m=[32m"status"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"mt-0.5 flex-shrink-0 text-primary"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-info size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<circle[39m
+                [33mcx[39m=[32m"12"[39m
+                [33mcy[39m=[32m"12"[39m
+                [33mr[39m=[32m"10"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 16v-4"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 8h.01"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+          [36m</span>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-0 flex-1"[39m
+          [36m>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"text-sm font-medium text-primary"[39m
+            [36m>[39m
+              [0mSource context attached[0m
+            [36m</p>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"text-sm text-primary mt-1"[39m
+            [36m>[39m
+              [0mCards saved from this draft will be linked to {{sourceType}} {{sourceId}}.[0m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<textarea[39m
+          [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+          [33mdata-testid[39m=[32m"flashcards-generate-text"[39m
+          [33mplaceholder[39m=[32m"Paste transcript, notes, or study material..."[39m
+          [33mrows[39m=[32m"6"[39m
+        [36m>[39m
+          [0mCitrine study volunteers meet every Tuesday at 14:00.[0m
+        [36m</textarea>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-typography ant-typography-secondary text-xs -mt-1 css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+        [36m>[39m
+          [0mTip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph.[0m
+        [36m</span>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"grid grid-cols-1 gap-2 md:grid-cols-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"md:col-span-2 flex flex-wrap items-center gap-2"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-checked[39m=[32m"false"[39m
+              [33maria-labelledby[39m=[32m"flashcards-generate-advanced-label"[39m
+              [33mclass[39m=[32m"ant-switch css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mdata-testid[39m=[32m"flashcards-generate-advanced-toggle"[39m
+              [33mrole[39m=[32m"switch"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-switch-handle"[39m
+              [36m/>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"ant-switch-inner"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-switch-inner-checked"[39m
+                [36m/>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-switch-inner-unchecked"[39m
+                [36m/>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mid[39m=[32m"flashcards-generate-advanced-label"[39m
+            [36m>[39m
+              [0mAdvanced mix[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-form-item !mb-2 css-var-root ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [36m>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m""[39m
+                  [33mtitle[39m=[32m"Number of cards"[39m
+                [36m>[39m
+                  [0mNumber of cards[0m
+                [36m</label>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                  [36m>[39m
+                    [36m<input[39m
+                      [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+                      [33mdata-testid[39m=[32m"flashcards-generate-count"[39m
+                      [33mmax[39m=[32m"100"[39m
+                      [33mmin[39m=[32m"1"[39m
+                      [33mtype[39m=[32m"number"[39m
+                      [33mvalue[39m=[32m"10"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+            ...
+
+Expected: "error"
+Received: "pending"
+
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx:129:59
+    127|   it("retains drafts and clears busy state when Retry still cannot rea…
+    128|     const { deckQuery } = mount()
+    129|     await waitFor(() => expect(deckQuery()?.state.status).toBe("error"…
+       |                                                           ^
+    130|     await generate()
+    131|     await failedSave()
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx > GeneratePanel recovery through its scoped deck query > rejects a recovered list after the account becomes aborted
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx > GeneratePanel recovery through its scoped deck query > rejects a recovered list after the account becomes unresolved
+AssertionError: expected "vi.fn()" to be called 2 times, but got 1 times
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-col gap-3"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+        [36m>[39m
+          [0mGenerate cards from pasted text, review/edit them, then save to a deck.[0m
+        [36m</span>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg border p-3 border-primary/30 bg-primary/10"[39m
+          [33mdata-ds-component[39m=[32m"Alert"[39m
+          [33mdata-testid[39m=[32m"flashcards-generate-source-context"[39m
+          [33mrole[39m=[32m"status"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"mt-0.5 flex-shrink-0 text-primary"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-info size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<circle[39m
+                [33mcx[39m=[32m"12"[39m
+                [33mcy[39m=[32m"12"[39m
+                [33mr[39m=[32m"10"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 16v-4"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 8h.01"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+          [36m</span>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-0 flex-1"[39m
+          [36m>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"text-sm font-medium text-primary"[39m
+            [36m>[39m
+              [0mSource context attached[0m
+            [36m</p>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"text-sm text-primary mt-1"[39m
+            [36m>[39m
+              [0mCards saved from this draft will be linked to {{sourceType}} {{sourceId}}.[0m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<textarea[39m
+          [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+          [33mdata-testid[39m=[32m"flashcards-generate-text"[39m
+          [33mplaceholder[39m=[32m"Paste transcript, notes, or study material..."[39m
+          [33mrows[39m=[32m"6"[39m
+        [36m>[39m
+          [0mCitrine study volunteers meet every Tuesday at 14:00.[0m
+        [36m</textarea>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-typography ant-typography-secondary text-xs -mt-1 css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+        [36m>[39m
+          [0mTip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph.[0m
+        [36m</span>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"grid grid-cols-1 gap-2 md:grid-cols-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"md:col-span-2 flex flex-wrap items-center gap-2"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-checked[39m=[32m"false"[39m
+              [33maria-labelledby[39m=[32m"flashcards-generate-advanced-label"[39m
+              [33mclass[39m=[32m"ant-switch css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mdata-testid[39m=[32m"flashcards-generate-advanced-toggle"[39m
+              [33mrole[39m=[32m"switch"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-switch-handle"[39m
+              [36m/>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"ant-switch-inner"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-switch-inner-checked"[39m
+                [36m/>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-switch-inner-unchecked"[39m
+                [36m/>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mid[39m=[32m"flashcards-generate-advanced-label"[39m
+            [36m>[39m
+              [0mAdvanced mix[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-form-item !mb-2 css-var-root ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [36m>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m""[39m
+                  [33mtitle[39m=[32m"Number of cards"[39m
+                [36m>[39m
+                  [0mNumber of cards[0m
+                [36m</label>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                  [36m>[39m
+                    [36m<input[39m
+                      [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+                      [33mdata-testid[39m=[32m"flashcards-generate-count"[39m
+                      [33mmax[39m=[32m"100"[39m
+                      [33mmin[39m=[32m"1"[39m
+                      [33mtype[39m=[32m"number"[39m
+                      [33mvalue[39m=[32m"10"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+            ...
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx:162:43
+    160|     const beforeRetry = vi.mocked(listDecks).mock.calls.length
+    161|     fireEvent.click(screen.getByTestId("flashcards-generate-save-retry…
+    162|     await waitFor(() => expect(listDecks).toHaveBeenCalledTimes(before…
+       |                                           ^
+    163|     if (transition === "aborted") controller.abort()
+    164|     else changeOwner(transition === "unresolved" ? null : makeScope(2)…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx > GeneratePanel recovery through its scoped deck query > rejects a recovered list after the account becomes changed
+AssertionError: expected 'pending' to be 'error' // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-col gap-3"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+        [36m>[39m
+          [0mGenerate cards from pasted text, review/edit them, then save to a deck.[0m
+        [36m</span>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg border p-3 border-primary/30 bg-primary/10"[39m
+          [33mdata-ds-component[39m=[32m"Alert"[39m
+          [33mdata-testid[39m=[32m"flashcards-generate-source-context"[39m
+          [33mrole[39m=[32m"status"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"mt-0.5 flex-shrink-0 text-primary"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-info size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<circle[39m
+                [33mcx[39m=[32m"12"[39m
+                [33mcy[39m=[32m"12"[39m
+                [33mr[39m=[32m"10"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 16v-4"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 8h.01"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+          [36m</span>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-0 flex-1"[39m
+          [36m>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"text-sm font-medium text-primary"[39m
+            [36m>[39m
+              [0mSource context attached[0m
+            [36m</p>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"text-sm text-primary mt-1"[39m
+            [36m>[39m
+              [0mCards saved from this draft will be linked to {{sourceType}} {{sourceId}}.[0m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<textarea[39m
+          [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+          [33mdata-testid[39m=[32m"flashcards-generate-text"[39m
+          [33mplaceholder[39m=[32m"Paste transcript, notes, or study material..."[39m
+          [33mrows[39m=[32m"6"[39m
+        [36m>[39m
+          [0mCitrine study volunteers meet every Tuesday at 14:00.[0m
+        [36m</textarea>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-typography ant-typography-secondary text-xs -mt-1 css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+        [36m>[39m
+          [0mTip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph.[0m
+        [36m</span>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"grid grid-cols-1 gap-2 md:grid-cols-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"md:col-span-2 flex flex-wrap items-center gap-2"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-checked[39m=[32m"false"[39m
+              [33maria-labelledby[39m=[32m"flashcards-generate-advanced-label"[39m
+              [33mclass[39m=[32m"ant-switch css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mdata-testid[39m=[32m"flashcards-generate-advanced-toggle"[39m
+              [33mrole[39m=[32m"switch"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-switch-handle"[39m
+              [36m/>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"ant-switch-inner"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-switch-inner-checked"[39m
+                [36m/>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-switch-inner-unchecked"[39m
+                [36m/>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mid[39m=[32m"flashcards-generate-advanced-label"[39m
+            [36m>[39m
+              [0mAdvanced mix[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-form-item !mb-2 css-var-root ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [36m>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m""[39m
+                  [33mtitle[39m=[32m"Number of cards"[39m
+                [36m>[39m
+                  [0mNumber of cards[0m
+                [36m</label>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                  [36m>[39m
+                    [36m<input[39m
+                      [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+                      [33mdata-testid[39m=[32m"flashcards-generate-count"[39m
+                      [33mmax[39m=[32m"100"[39m
+                      [33mmin[39m=[32m"1"[39m
+                      [33mtype[39m=[32m"number"[39m
+                      [33mvalue[39m=[32m"10"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+            ...
+
+Expected: "error"
+Received: "pending"
+
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx:155:59
+    153|     const { scope, controller } = makeScope()
+    154|     const { deckQuery, changeOwner } = mount(scope)
+    155|     await waitFor(() => expect(deckQuery()?.state.status).toBe("error"…
+       |                                                           ^
+    156|     await generate()
+    157|     await failedSave()
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx > GeneratePanel recovery through its scoped deck query > rejects a selected deck deleted from the successfully recovered catalogue
+AssertionError: expected 'pending' to be 'success' // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-col gap-3"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+        [36m>[39m
+          [0mGenerate cards from pasted text, review/edit them, then save to a deck.[0m
+        [36m</span>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg border p-3 border-primary/30 bg-primary/10"[39m
+          [33mdata-ds-component[39m=[32m"Alert"[39m
+          [33mdata-testid[39m=[32m"flashcards-generate-source-context"[39m
+          [33mrole[39m=[32m"status"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"mt-0.5 flex-shrink-0 text-primary"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-info size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<circle[39m
+                [33mcx[39m=[32m"12"[39m
+                [33mcy[39m=[32m"12"[39m
+                [33mr[39m=[32m"10"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 16v-4"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 8h.01"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+          [36m</span>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-0 flex-1"[39m
+          [36m>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"text-sm font-medium text-primary"[39m
+            [36m>[39m
+              [0mSource context attached[0m
+            [36m</p>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"text-sm text-primary mt-1"[39m
+            [36m>[39m
+              [0mCards saved from this draft will be linked to {{sourceType}} {{sourceId}}.[0m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<textarea[39m
+          [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+          [33mdata-testid[39m=[32m"flashcards-generate-text"[39m
+          [33mplaceholder[39m=[32m"Paste transcript, notes, or study material..."[39m
+          [33mrows[39m=[32m"6"[39m
+        [36m>[39m
+          [0mCitrine study volunteers meet every Tuesday at 14:00.[0m
+        [36m</textarea>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-typography ant-typography-secondary text-xs -mt-1 css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+        [36m>[39m
+          [0mTip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph.[0m
+        [36m</span>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"grid grid-cols-1 gap-2 md:grid-cols-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"md:col-span-2 flex flex-wrap items-center gap-2"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-checked[39m=[32m"false"[39m
+              [33maria-labelledby[39m=[32m"flashcards-generate-advanced-label"[39m
+              [33mclass[39m=[32m"ant-switch css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mdata-testid[39m=[32m"flashcards-generate-advanced-toggle"[39m
+              [33mrole[39m=[32m"switch"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-switch-handle"[39m
+              [36m/>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"ant-switch-inner"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-switch-inner-checked"[39m
+                [36m/>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-switch-inner-unchecked"[39m
+                [36m/>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mid[39m=[32m"flashcards-generate-advanced-label"[39m
+            [36m>[39m
+              [0mAdvanced mix[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-form-item !mb-2 css-var-root ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [36m>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m""[39m
+                  [33mtitle[39m=[32m"Number of cards"[39m
+                [36m>[39m
+                  [0mNumber of cards[0m
+                [36m</label>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                  [36m>[39m
+                    [36m<input[39m
+                      [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+                      [33mdata-testid[39m=[32m"flashcards-generate-count"[39m
+                      [33mmax[39m=[32m"100"[39m
+                      [33mmin[39m=[32m"1"[39m
+                      [33mtype[39m=[32m"number"[39m
+                      [33mvalue[39m=[32m"10"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+            ...
+
+Expected: "success"
+Received: "pending"
+
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx:174:59
+    172|     vi.mocked(listDecks).mockResolvedValue([deck(7)])
+    173|     const { client, deckQuery } = mount()
+    174|     await waitFor(() => expect(deckQuery()?.state.status).toBe("succes…
+       |                                                           ^
+    175|     await generate()
+    176|     vi.mocked(listDecks).mockRejectedValue(new Error("Deck service una…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx > GeneratePanel recovery through its scoped deck query > creates a deck once after recovering an empty current-account catalogue
+AssertionError: expected "vi.fn()" to be called 1 times, but got 0 times
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-col gap-3"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+        [36m>[39m
+          [0mGenerate cards from pasted text, review/edit them, then save to a deck.[0m
+        [36m</span>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg border p-3 border-primary/30 bg-primary/10"[39m
+          [33mdata-ds-component[39m=[32m"Alert"[39m
+          [33mdata-testid[39m=[32m"flashcards-generate-source-context"[39m
+          [33mrole[39m=[32m"status"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"mt-0.5 flex-shrink-0 text-primary"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-info size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<circle[39m
+                [33mcx[39m=[32m"12"[39m
+                [33mcy[39m=[32m"12"[39m
+                [33mr[39m=[32m"10"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 16v-4"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 8h.01"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+          [36m</span>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-0 flex-1"[39m
+          [36m>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"text-sm font-medium text-primary"[39m
+            [36m>[39m
+              [0mSource context attached[0m
+            [36m</p>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"text-sm text-primary mt-1"[39m
+            [36m>[39m
+              [0mCards saved from this draft will be linked to {{sourceType}} {{sourceId}}.[0m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<textarea[39m
+          [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+          [33mdata-testid[39m=[32m"flashcards-generate-text"[39m
+          [33mplaceholder[39m=[32m"Paste transcript, notes, or study material..."[39m
+          [33mrows[39m=[32m"6"[39m
+        [36m>[39m
+          [0mCitrine study volunteers meet every Tuesday at 14:00.[0m
+        [36m</textarea>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-typography ant-typography-secondary text-xs -mt-1 css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+        [36m>[39m
+          [0mTip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph.[0m
+        [36m</span>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"grid grid-cols-1 gap-2 md:grid-cols-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"md:col-span-2 flex flex-wrap items-center gap-2"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-checked[39m=[32m"false"[39m
+              [33maria-labelledby[39m=[32m"flashcards-generate-advanced-label"[39m
+              [33mclass[39m=[32m"ant-switch css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mdata-testid[39m=[32m"flashcards-generate-advanced-toggle"[39m
+              [33mrole[39m=[32m"switch"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-switch-handle"[39m
+              [36m/>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"ant-switch-inner"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-switch-inner-checked"[39m
+                [36m/>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-switch-inner-unchecked"[39m
+                [36m/>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mid[39m=[32m"flashcards-generate-advanced-label"[39m
+            [36m>[39m
+              [0mAdvanced mix[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-form-item !mb-2 css-var-root ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [36m>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m""[39m
+                  [33mtitle[39m=[32m"Number of cards"[39m
+                [36m>[39m
+                  [0mNumber of cards[0m
+                [36m</label>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                  [36m>[39m
+                    [36m<input[39m
+                      [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+                      [33mdata-testid[39m=[32m"flashcards-generate-count"[39m
+                      [33mmax[39m=[32m"100"[39m
+                      [33mmin[39m=[32m"1"[39m
+                      [33mtype[39m=[32m"number"[39m
+                      [33mvalue[39m=[32m"10"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+            ...
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx:195:49
+    193|     vi.mocked(listDecks).mockResolvedValue([])
+    194|     fireEvent.click(screen.getByTestId("flashcards-generate-save-retry…
+    195|     await waitFor(() => expect(createFlashcard).toHaveBeenCalledTimes(…
+       |                                                 ^
+    196|     expect(createDeck).toHaveBeenCalledTimes(1)
+    197|     expect(createDeck).toHaveBeenCalledWith(expect.objectContaining({ …
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 2 passed (9)
+   Start at  16:01:25
+   Duration  9.32s (transform 193ms, setup 112ms, import 753ms, tests 8.03s, environment 343ms)

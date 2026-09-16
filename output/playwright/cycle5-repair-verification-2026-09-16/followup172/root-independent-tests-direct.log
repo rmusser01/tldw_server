@@ -1,0 +1,21 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:88839) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:88840) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:88841) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.llm-gating.test.tsx (9 tests) 1006ms
+     ✓ shows useful grounding guidance and retains the source after rejected generation  425ms
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx (11 tests) 1658ms
+     ✓ recovers via visible Retry and saves the edited draft with its original account and source  445ms
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.deck-creation.test.tsx (5 tests) 2340ms
+     ✓ creates a new structured-import deck with scheduler settings from the selector flow  1379ms
+     ✓ creates a new generated-cards deck with scheduler settings from the selector flow  614ms
+
+ Test Files  3 passed (3)
+      Tests  25 passed (25)
+   Start at  16:08:34
+   Duration  4.06s (transform 1.54s, setup 266ms, import 3.16s, tests 5.00s, environment 658ms)

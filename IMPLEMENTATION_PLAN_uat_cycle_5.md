@@ -6,6 +6,8 @@ Parent TASK13260. Design: [cycle5 repairs](Docs/Design/2026-09-16-uat-cycle-5-re
 
 **Gate: BLOCKED — user reaffirmed repair and verification before rerun on 2026-09-16.** Continue bounded repairs and targeted acceptance checks. Stage 4 cannot begin merely because implementation or automated suites pass.
 
+- At23:04UTC,172 findings reconcile to163verified/7awaiting/2unresolved171/172.169 natural PostgreSQL scheduler and170 native layout/picker acceptance pass.166–168 are reviewed and committed but require native acceptance alongside024/031/137/151. Actual restart exposed171 retained Notes read transactions; preserved-draft Retry exposed172 failed deck-query recovery. Repair both before another full matrix; no full UAT restart.
+
 - At22:37UTC,170 findings reconcile to161verified/4awaiting/5unresolved166–170. Native138/139/141/163/164/165 accepted and retained. Older024/031/137/151 still need acceptance; new PostgreSQL Flashcards timestamp/count failures and auth-monitor failure require fixes. No full UAT restart; official PostgreSQL remains mandatory.
 
 - At21:52UTC,164 findings reconcile to155verified/7awaiting/2unresolved (163/164). Retained independent native013/103/152/156 acceptance passes on223591ac4f;162 is accepted. Remaining original acceptances are024/031/137/138/139/141/151. New163 preserves same-conversation retrieval activation through cold reload;164 corrects false extension/API-key guidance for a successful but unready model catalog. PostgreSQL operator bootstrap and native admin login succeed; full PostgreSQL A/B/C matrix remains required. No full UAT restart.

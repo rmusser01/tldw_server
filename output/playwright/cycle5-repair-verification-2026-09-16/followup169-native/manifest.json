@@ -1,0 +1,26 @@
+{
+  "at": "2026-09-16T23:00:21.440Z",
+  "files": [
+    {
+      "file": "independent-audit.md",
+      "source": ".tmp/uat169-native-20260916/independent-audit.md",
+      "original_sha256": "761466e0b4583e72bc8992fc9bd55ee9f4469316f9cf367bd79612af4b928caa",
+      "retained_sha256": "761466e0b4583e72bc8992fc9bd55ee9f4469316f9cf367bd79612af4b928caa",
+      "normalization": "none"
+    },
+    {
+      "file": "sanitized-receipt.json",
+      "source": ".tmp/uat169-native-20260916/sanitized-receipt.json",
+      "original_sha256": "a3f06d389bed0fc332ad782c14fc16970367fbf4da7416430bf325ebd833c429",
+      "retained_sha256": "a3f06d389bed0fc332ad782c14fc16970367fbf4da7416430bf325ebd833c429",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-manifest.json",
+      "source": ".tmp/uat169-native-20260916/audit-manifest.json",
+      "original_sha256": "c1faa0c96e9c13ab8e85e28e5edf50da89364a8092eb1904181c992205c0cca6",
+      "retained_sha256": "c1faa0c96e9c13ab8e85e28e5edf50da89364a8092eb1904181c992205c0cca6",
+      "normalization": "none"
+    }
+  ]
+}
