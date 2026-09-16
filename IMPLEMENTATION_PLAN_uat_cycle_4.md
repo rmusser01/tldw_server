@@ -179,3 +179,14 @@ Initial independent units: Task1 Chat acknowledgement, Task2 model selection, Ta
 Native image118 verification found the composer/local transcript retaining an image while actual transport and canonical persistence drop it for supportsMultimodal=false. Root recorded the exact request and canonical IDs. Chat author owns read-only minimal design initially; source edits wait until both Next runtimes are paused. Actual formatter/model/action tests must cover unsupported handling, supported MIME preservation, image-only input and Retry. Full fresh cycle5 stays pending.
 
 119/120 native checks pass with the explicit offline-readiness-gate adaptation.111/121/actual new117 negative+reload pass. Separate direct-route/prior-mode observations are being classified before the next source window.
+
+## Additional saved-conversation mode repair — TASK13260.63 / UAT123
+
+Actual History/Note navigation loads an ordinary canonical chat while persisted new-chat Character mode keeps the wrong banner/gating active. Account-access author owns Playground.tsx/coordinator regression scope; canonical loaded metadata governs existing-chat mode, with explicit fresh Character and true unsaved drafts preserved. The manually constructed bare chatId URL is unsupported by current product producers and is excluded from implementation scope. Both Next runtimes paused; APIs/data unchanged.
+
+### Current repair verification stages
+
+1. Reproduce/design — Complete: native122 image omission and123 stale canonical mode; approved122 design in Docs/Design/2026-09-16-uat-image-input-validation.md,123 bounded derivation recorded above. Task62/63 own disjoint code.
+2. Implement/regress — In Progress: actual formatter/factory/model/action tests for122; existing real selection/coordinator controls for123. Preserve owner/unsaved-work and freshCharacter behavior.
+3. Review/targeted — Not Started: independent source and integrated boundary review, scoped lint/compiler comparison, native no-loss refusal and History/Note mode checks on committed code.
+4. Full fresh cycle5 — Not Started: only after these repairs and preserved evidence, use prepared fresh protocol. Existing vision/Postgres/hidden-tab limitations remain explicit.

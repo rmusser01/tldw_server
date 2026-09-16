@@ -182,6 +182,13 @@ Initial runtime checkpoint: all four verified cycle4 API/Next server processes s
 - AnswerPanel conflates empty answers with disabled generation. The old timeout also remains in a screen-reader-only assertive region after the error clears; it is not a second visible error panel.
 - Status: open, TASK13260.56. Preserve retrieved evidence and distinguish deliberately disabled generation, requested-but-empty output, evidence insufficiency and transport failure using the completed request's settings. Multi evidence `cedar-qa-final-request.json`, `cedar-qa-fast-recovery-no-answer.txt`.
 
+### UAT-123 — P2: Ordinary saved Chat retains the prior Character workflow
+
+- On `e7bf2184d3`, stable authenticated Alice opens ordinaryc244 from actual Recent conversations after Character416f. Canonical messages/title correctly change, but Character Chat / Choose a character remains. The real Note backlink repeats that stale mode; no ordinary send was attempted.
+- The global new-chat mode preference overrides the resolved canonical ordinary assistant state. TASK13260.63 will derive existing-chat mode from the owned loaded conversation, preserving pending metadata, true unsaved Character drafts and explicit fresh Character entry.
+- The initial manually constructed bare `/chat?chatId=…` is not produced by current product links; its ignored parameter is a harness route-contract mismatch, not a confirmed failing supported deep link. No ordinary deep-link feature is being added. Private probe report uses provisional123/124 numbers; this entry is the final123 classification.
+- Status: open. Evidence `/private/tmp/cycle4-route-mode-probe-` retained before edits.
+
 ### UAT-122 — P2: Chat silently drops a visible attachment for a non-vision model
 
 - Native on `e7bf2184d3`: real128×128 blue PNG uploaded through Attach image; composer shows Attachments1 and a vision recommendation. Send to unavailable Ollama/gemma3:1b returns502, but its actual request contains only user text. Local transcript retains the PNG. Authenticated canonical GET200 shows user`9437ffc0-ce39-45bf-b120-fc2fc99f35eb`, conversation`0a114e79-e70b-4c36-a7f7-528f3110000b`, `has_image:false` and `images:[]`.
