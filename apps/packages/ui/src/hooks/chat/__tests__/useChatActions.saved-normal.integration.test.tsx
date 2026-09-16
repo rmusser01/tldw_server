@@ -8,9 +8,11 @@ import {
   waitFor
 } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { ChatTldw } from "@/models/ChatTldw"
 import { useChatActions } from "../useChatActions"
 import { usePlaygroundPersistence } from "@/components/Option/Playground/hooks/usePlaygroundPersistence"
 import { useStoreMessageOption } from "@/store/option"
+import { reconcileServerChatMessages } from "@/db/dexie/server-chat-mirror"
 import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue"
 
 const mocks = vi.hoisted(() => ({
@@ -22,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   listChatMessages: vi.fn(),
   initialize: vi.fn(),
   pageAssistModel: vi.fn(),
+  streamMessage: vi.fn(),
   saveHistory: vi.fn(),
   saveMessage: vi.fn(),
   ensureHistory: vi.fn(),
@@ -69,6 +72,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     listChatMessages: mocks.listChatMessages
   }
 }))
+vi.mock("@/services/tldw", async () => {
+  const actual = await vi.importActual<typeof import("@/services/tldw")>("@/services/tldw")
+  return { ...actual, tldwChat: { ...actual.tldwChat, streamMessage: mocks.streamMessage } }
+})
 vi.mock("@/models", () => ({ pageAssistModel: mocks.pageAssistModel }))
 vi.mock("@/services/title", () => ({
   generateTitle: async () => "First question"
@@ -618,6 +625,71 @@ describe("saved normal Chat pipeline with autosave", () => {
         }
       }
     })
+  })
+
+  it("acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft", async () => {
+    mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => new ChatTldw({
+      model: "test", saveToDb: true, conversationId
+    }))
+    mocks.streamMessage.mockImplementation(async function* (messages, options, onChunk) {
+      const rows = mocks.serverRows.get(options.conversationId)!
+      if (!rows.length) rows.push({ id: "system", role: "system", content: "System" })
+      const userId = `user-${rows.length}`
+      const assistantId = `assistant-${rows.length}`
+      const content = messages.at(-1)!.content
+      rows.push({ id: userId, role: "user", content },
+        { id: assistantId, role: "assistant", content: `Answer: ${content}` })
+      onChunk({ tldw_conversation_id: options.conversationId, tldw_user_message_id: userId })
+      yield `Answer: ${content}`
+      onChunk({ tldw_message_id: assistantId })
+    })
+    const { result } = renderWorkspace()
+    for (const message of ["Same question", "Same question"]) {
+      await act(async () => { await result.current.actions.onSubmit({ message, image: "" }) })
+    }
+    const visible = useStoreMessageOption.getState().messages
+    expect(visible.filter(row => row.message?.trim() && !row.serverMessageId)).toEqual([])
+    const local = mocks.rows.map(row => ({
+      id: String(row.id), serverMessageId: row.serverMessageId as string | undefined,
+      message: String(row.content), isBot: row.role !== "user", name: String(row.name || ""),
+      sources: [], parentMessageId: row.parent_message_id as string | null
+    }))
+    expect(local.map(row => row.serverMessageId)).toEqual(["user-1", "assistant-1", "user-3", "assistant-3"])
+    const remote = mocks.serverRows.get("chat-1")!.map(row => ({
+      id: row.id!, serverMessageId: row.id!, message: row.content,
+      isBot: row.role !== "user", role: row.role, name: "", sources: []
+    }))
+    expect(reconcileServerChatMessages(local, remote)).toHaveLength(5)
+    const draft = { id: "unsent", message: "Same question", isBot: false, name: "You", sources: [] }
+    expect(reconcileServerChatMessages([...local, draft], remote)).toEqual([
+      ...reconcileServerChatMessages(local, remote), draft
+    ])
+    expect(mocks.createChat).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["B", "A"])("does not apply late stream acknowledgements after switching A to B to %s", async (destination) => {
+    const held = deferred<void>()
+    mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => new ChatTldw({ model: "test", saveToDb: true, conversationId }))
+    mocks.streamMessage.mockImplementation(async function* (_messages, options, onChunk) {
+      await held.promise
+      onChunk({ tldw_conversation_id: options.conversationId, tldw_user_message_id: "old-user", tldw_message_id: "old-assistant" })
+      yield "Old reply"
+    })
+    const { result } = renderWorkspace()
+    let pending!: Promise<unknown>
+    act(() => { pending = result.current.actions.onSubmit({ message: "Old question", image: "" }) })
+    await waitFor(() => expect(mocks.streamMessage).toHaveBeenCalled())
+    const draft = { id: "new-draft", isBot: false, name: "You", message: "New draft" }
+    await act(async () => {
+      replaceAuthority("synthetic-b")
+      if (destination === "A") replaceAuthority("synthetic-a")
+      useStoreMessageOption.setState({ historyId: "new-local", serverChatId: "new-chat", messages: [draft], history: [] })
+      held.resolve()
+      await pending
+    })
+    expect(result.current.state.messages).toEqual([draft])
+    expect(mocks.rows).toEqual([])
+    expect(result.current.state.serverChatId).toBe("new-chat")
   })
 
   it("establishes one neutral conversation and local history before inference, including a queued second turn", async () => {

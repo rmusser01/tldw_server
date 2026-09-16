@@ -1,0 +1,186 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=1109593764
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 6 items
+
+tldw_Server_API/tests/Setup/test_setup_chat_model_refresh.py FFFFFF      [100%]
+
+=================================== FAILURES ===================================
+_ test_setup_save_refreshes_cold_and_warm_chat_inventory_without_restart[custom_openai-custom-openai-api-startup-custom-False] _
+tldw_Server_API/tests/Setup/test_setup_chat_model_refresh.py:68: in test_setup_save_refreshes_cold_and_warm_chat_inventory_without_restart
+    assert chat_service.is_model_known_for_provider(provider, request.model) is True
+E   AssertionError: assert False is True
+E    +  where False = <function is_model_known_for_provider at 0x10f9dcfe0>('custom-openai-api', 'first-saved-model')
+E    +    where <function is_model_known_for_provider at 0x10f9dcfe0> = chat_service.is_model_known_for_provider
+E    +    and   'first-saved-model' = namespace(api_provider='custom-openai-api', model='first-saved-model').model
+---------------------------- Captured stderr setup -----------------------------
+2026-09-15 19:50:05.182 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - No .env/.ENV file found in /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API, /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files, /Users/macbook-dev/Documents/GitHub/tldw_server2, or /Users/macbook-dev/Documents/GitHub/tldw_server2/Config_Files; using config.txt and system env
+2026-09-15 19:50:05.183 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11775/test_setup_save_refreshes_cold0/config.txt
+2026-09-15 19:50:05.183 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['API', 'Local-API']
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:50:05.185 | INFO     | tldw_Server_API.app.core.Setup.setup_manager:update_config:606 - Created backup of config.txt at /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11775/test_setup_save_refreshes_cold0/config.txt.pre-setup-20260916025005.bak
+2026-09-15 19:50:05.186 | INFO     | tldw_Server_API.app.core.Setup.setup_manager:update_config:618 - Configuration file updated via setup manager (comments preserved)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:50:05.239 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:50:05.239 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:50:05.241 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - No .env/.ENV file found in /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API, /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files, /Users/macbook-dev/Documents/GitHub/tldw_server2, or /Users/macbook-dev/Documents/GitHub/tldw_server2/Config_Files; using config.txt and system env
+2026-09-15 19:50:05.241 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11775/test_setup_save_refreshes_cold0/config.txt
+2026-09-15 19:50:05.242 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['API', 'Local-API']
+2026-09-15 19:50:05.245 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:50:05.245 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_________ test_setup_save_keeps_effective_environment_model_precedence _________
+tldw_Server_API/tests/Setup/test_setup_chat_model_refresh.py:95: in test_setup_save_keeps_effective_environment_model_precedence
+    assert chat_service.is_model_known_for_provider("custom-openai-api", "environment-model") is True
+E   AssertionError: assert False is True
+E    +  where False = <function is_model_known_for_provider at 0x10f9dcfe0>('custom-openai-api', 'environment-model')
+E    +    where <function is_model_known_for_provider at 0x10f9dcfe0> = chat_service.is_model_known_for_provider
+---------------------------- Captured stderr setup -----------------------------
+2026-09-15 19:50:05.247 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - No .env/.ENV file found in /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API, /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files, /Users/macbook-dev/Documents/GitHub/tldw_server2, or /Users/macbook-dev/Documents/GitHub/tldw_server2/Config_Files; using config.txt and system env
+2026-09-15 19:50:05.248 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11775/test_setup_save_keeps_effectiv0/config.txt
+2026-09-15 19:50:05.248 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['API', 'Local-API']
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:50:05.250 | INFO     | tldw_Server_API.app.core.Setup.setup_manager:update_config:606 - Created backup of config.txt at /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11775/test_setup_save_keeps_effectiv0/config.txt.pre-setup-20260916025005.bak
+2026-09-15 19:50:05.251 | INFO     | tldw_Server_API.app.core.Setup.setup_manager:update_config:618 - Configuration file updated via setup manager (comments preserved)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:50:05.255 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:50:05.256 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:50:05.256 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:50:05.257 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_setup_save_refreshes_cold_and_warm_chat_inventory_without_restart[ollama-ollama-startup-local-False] _
+tldw_Server_API/tests/Setup/test_setup_chat_model_refresh.py:68: in test_setup_save_refreshes_cold_and_warm_chat_inventory_without_restart
+    assert chat_service.is_model_known_for_provider(provider, request.model) is True
+E   AssertionError: assert False is True
+E    +  where False = <function is_model_known_for_provider at 0x10f9dcfe0>('ollama', 'first-saved-model')
+E    +    where <function is_model_known_for_provider at 0x10f9dcfe0> = chat_service.is_model_known_for_provider
+E    +    and   'first-saved-model' = namespace(api_provider='ollama', model='first-saved-model').model
+---------------------------- Captured stderr setup -----------------------------
+2026-09-15 19:50:05.259 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - No .env/.ENV file found in /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API, /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files, /Users/macbook-dev/Documents/GitHub/tldw_server2, or /Users/macbook-dev/Documents/GitHub/tldw_server2/Config_Files; using config.txt and system env
+2026-09-15 19:50:05.259 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11775/test_setup_save_refreshes_cold1/config.txt
+2026-09-15 19:50:05.260 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['API', 'Local-API']
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:50:05.262 | INFO     | tldw_Server_API.app.core.Setup.setup_manager:update_config:606 - Created backup of config.txt at /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11775/test_setup_save_refreshes_cold1/config.txt.pre-setup-20260916025005.bak
+2026-09-15 19:50:05.262 | INFO     | tldw_Server_API.app.core.Setup.setup_manager:update_config:618 - Configuration file updated via setup manager (comments preserved)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:50:05.265 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:50:05.266 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:50:05.266 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:50:05.267 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_____________ test_numbered_custom_provider_refresh_remains_scoped _____________
+tldw_Server_API/tests/Setup/test_setup_chat_model_refresh.py:79: in test_numbered_custom_provider_refresh_remains_scoped
+    assert chat_service.is_model_known_for_provider("custom-openai-api-2", "new-second") is True
+E   AssertionError: assert False is True
+E    +  where False = <function is_model_known_for_provider at 0x10f9dcfe0>('custom-openai-api-2', 'new-second')
+E    +    where <function is_model_known_for_provider at 0x10f9dcfe0> = chat_service.is_model_known_for_provider
+---------------------------- Captured stderr setup -----------------------------
+2026-09-15 19:50:05.269 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - No .env/.ENV file found in /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API, /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files, /Users/macbook-dev/Documents/GitHub/tldw_server2, or /Users/macbook-dev/Documents/GitHub/tldw_server2/Config_Files; using config.txt and system env
+2026-09-15 19:50:05.270 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11775/test_numbered_custom_provider_0/config.txt
+2026-09-15 19:50:05.270 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['API', 'Local-API']
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:50:05.271 | INFO     | tldw_Server_API.app.core.Setup.setup_manager:update_config:606 - Created backup of config.txt at /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11775/test_numbered_custom_provider_0/config.txt.pre-setup-20260916025005.bak
+2026-09-15 19:50:05.272 | INFO     | tldw_Server_API.app.core.Setup.setup_manager:update_config:618 - Configuration file updated via setup manager (comments preserved)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:50:05.275 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:50:05.275 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:50:05.276 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:50:05.276 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_setup_save_refreshes_cold_and_warm_chat_inventory_without_restart[ollama-ollama-startup-local-True] _
+tldw_Server_API/tests/Setup/test_setup_chat_model_refresh.py:68: in test_setup_save_refreshes_cold_and_warm_chat_inventory_without_restart
+    assert chat_service.is_model_known_for_provider(provider, request.model) is True
+E   AssertionError: assert False is True
+E    +  where False = <function is_model_known_for_provider at 0x10f9dcfe0>('ollama', 'first-saved-model')
+E    +    where <function is_model_known_for_provider at 0x10f9dcfe0> = chat_service.is_model_known_for_provider
+E    +    and   'first-saved-model' = namespace(api_provider='ollama', model='first-saved-model').model
+---------------------------- Captured stderr setup -----------------------------
+2026-09-15 19:50:05.278 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - No .env/.ENV file found in /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API, /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files, /Users/macbook-dev/Documents/GitHub/tldw_server2, or /Users/macbook-dev/Documents/GitHub/tldw_server2/Config_Files; using config.txt and system env
+2026-09-15 19:50:05.279 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11775/test_setup_save_refreshes_cold2/config.txt
+2026-09-15 19:50:05.280 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['API', 'Local-API']
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:50:05.282 | INFO     | tldw_Server_API.app.core.Setup.setup_manager:update_config:606 - Created backup of config.txt at /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11775/test_setup_save_refreshes_cold2/config.txt.pre-setup-20260916025005.bak
+2026-09-15 19:50:05.284 | INFO     | tldw_Server_API.app.core.Setup.setup_manager:update_config:618 - Configuration file updated via setup manager (comments preserved)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:50:05.288 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:50:05.289 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:50:05.289 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:50:05.290 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_setup_save_refreshes_cold_and_warm_chat_inventory_without_restart[custom_openai-custom-openai-api-startup-custom-True] _
+tldw_Server_API/tests/Setup/test_setup_chat_model_refresh.py:68: in test_setup_save_refreshes_cold_and_warm_chat_inventory_without_restart
+    assert chat_service.is_model_known_for_provider(provider, request.model) is True
+E   AssertionError: assert False is True
+E    +  where False = <function is_model_known_for_provider at 0x10f9dcfe0>('custom-openai-api', 'first-saved-model')
+E    +    where <function is_model_known_for_provider at 0x10f9dcfe0> = chat_service.is_model_known_for_provider
+E    +    and   'first-saved-model' = namespace(api_provider='custom-openai-api', model='first-saved-model').model
+---------------------------- Captured stderr setup -----------------------------
+2026-09-15 19:50:05.292 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - No .env/.ENV file found in /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API, /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files, /Users/macbook-dev/Documents/GitHub/tldw_server2, or /Users/macbook-dev/Documents/GitHub/tldw_server2/Config_Files; using config.txt and system env
+2026-09-15 19:50:05.292 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11775/test_setup_save_refreshes_cold3/config.txt
+2026-09-15 19:50:05.293 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['API', 'Local-API']2026-09-15 19:50:05.336 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-15 19:50:05.337 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:50:05.343 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:50:05.348 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:50:05.350 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:50:05.356 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:50:05.361 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:50:05.364 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:50:05.367 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-15 19:50:05.367 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-15 19:50:05.368 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:<module>:532 - Using cachetools.LRUCache for audit service instances (maxsize=20).
+2026-09-15 19:50:05.369 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-15 19:50:05.369 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-15 19:50:05.383 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-15 19:50:05.384 | WARNING  | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-15 19:50:05.384 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-15 19:50:05.384 | INFO     | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-15 19:50:05.428 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlist_run
+2026-09-15 19:50:05.429 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_enrich_output
+2026-09-15 19:50:05.429 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_deliver_briefing
+2026-09-15 19:50:05.430 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: acp_run
+2026-09-15 19:50:05.431 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: workflow_run
+2026-09-15 19:50:05.432 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-ed366a07
+2026-09-15 19:50:05.433 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-ed366a07/1/workflows/workflows_scheduler.db
+2026-09-15 19:50:05.436 | INFO     | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-ed366a07/1/workflows/workflows_scheduler.db
+2026-09-15 19:50:05.439 | INFO     | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-15 19:50:05.439 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:50:05.440 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:50:05.684 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_cache_get_total
+2026-09-15 19:50:05.685 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_cache_put_total
+2026-09-15 19:50:05.685 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_process_total
+2026-09-15 19:50:05.686 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_frontmatter_duration_seconds
+2026-09-15 19:50:05.686 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_header_extract_seconds
+2026-09-15 19:50:05.687 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_chunking_duration_seconds
+2026-09-15 19:50:05.687 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_normalization_seconds
+2026-09-15 19:50:05.687 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_last_chunk_count
+2026-09-15 19:50:05.688 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_output_bytes
+2026-09-15 19:50:05.688 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_input_bytes
+2026-09-15 19:50:05.689 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_process_total_seconds
+2026-09-15 19:50:05.689 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:50:05.691 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:50:05.296 | INFO     | tldw_Server_API.app.core.Setup.setup_manager:update_config:606 - Created backup of config.txt at /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11775/test_setup_save_refreshes_cold3/config.txt.pre-setup-20260916025005.bak
+2026-09-15 19:50:05.297 | INFO     | tldw_Server_API.app.core.Setup.setup_manager:update_config:618 - Configuration file updated via setup manager (comments preserved)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:50:05.300 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:50:05.301 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:50:05.301 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:50:05.301 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+=========================== short test summary info ============================
+FAILED tldw_Server_API/tests/Setup/test_setup_chat_model_refresh.py::test_setup_save_refreshes_cold_and_warm_chat_inventory_without_restart[custom_openai-custom-openai-api-startup-custom-False]
+FAILED tldw_Server_API/tests/Setup/test_setup_chat_model_refresh.py::test_setup_save_keeps_effective_environment_model_precedence
+FAILED tldw_Server_API/tests/Setup/test_setup_chat_model_refresh.py::test_setup_save_refreshes_cold_and_warm_chat_inventory_without_restart[ollama-ollama-startup-local-False]
+FAILED tldw_Server_API/tests/Setup/test_setup_chat_model_refresh.py::test_numbered_custom_provider_refresh_remains_scoped
+FAILED tldw_Server_API/tests/Setup/test_setup_chat_model_refresh.py::test_setup_save_refreshes_cold_and_warm_chat_inventory_without_restart[ollama-ollama-startup-local-True]
+FAILED tldw_Server_API/tests/Setup/test_setup_chat_model_refresh.py::test_setup_save_refreshes_cold_and_warm_chat_inventory_without_restart[custom_openai-custom-openai-api-startup-custom-True]
+======================== 6 failed, 4 warnings in 1.43s =========================
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/pathlib.py:96: PytestWarning: (rm_rf) error removing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-8c985ed4-c2bc-4963-b0bb-107d37baaa7d/test_kokoro_constructor_direct3
+<class 'OSError'>: [Errno 66] Directory not empty: 'test_kokoro_constructor_direct3'
+  warnings.warn(
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/pathlib.py:96: PytestWarning: (rm_rf) error removing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-8c985ed4-c2bc-4963-b0bb-107d37baaa7d
+<class 'OSError'>: [Errno 66] Directory not empty: '/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-8c985ed4-c2bc-4963-b0bb-107d37baaa7d'
+  warnings.warn(

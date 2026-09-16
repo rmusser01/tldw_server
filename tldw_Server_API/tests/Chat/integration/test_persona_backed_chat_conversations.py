@@ -225,6 +225,58 @@ def test_normal_chat_saves_reply_in_existing_neutral_conversation(
     assert saved_conversation["assistant_id"] is None
 
 
+@pytest.mark.parametrize("stream", [False, True])
+def test_saved_turn_acknowledges_exact_user_and_assistant_rows(
+    persona_chat_client, persona_chat_db, stream
+):
+    client, headers, provider_call = persona_chat_client
+    conversation_id = persona_chat_db.add_conversation({"title": "Canonical turns", "client_id": "1"})
+    acknowledged_users = []
+    for index in range(2):
+        if stream:
+            provider_call.return_value = iter([
+                'data: {"choices":[{"delta":{"content":"Reply"},"finish_reason":null}]}\n\n',
+                'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+                'data: [DONE]\n\n',
+            ])
+        body = _chat_completion_body(conversation_id)
+        body["stream"] = stream
+        response = client.post("/api/v1/chat/completions", json=body, headers=headers)
+        assert response.status_code == 200, response.text
+        payloads = ([json.loads(line[6:]) for line in response.text.splitlines()
+                     if line.startswith("data: ") and line[6:] != "[DONE]"]
+                    if stream else [response.json()])
+        user_ids = {p["tldw_user_message_id"] for p in payloads if p.get("tldw_user_message_id")}
+        rows = persona_chat_db.get_messages_for_conversation(conversation_id)
+        users = [row for row in rows if row["sender"] == "user"]
+        assert len(users) == index + 1
+        assert user_ids == {users[-1]["id"]}
+        acknowledged_users.extend(user_ids)
+        assistant_ids = {p["tldw_message_id"] for p in payloads if p.get("tldw_message_id")}
+        assert assistant_ids == {rows[-1]["id"]}
+    assert len(set(acknowledged_users)) == 2
+    assert len(rows) == 5
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_ephemeral_turn_never_acknowledges_persisted_user(persona_chat_client, persona_chat_db, stream):
+    client, headers, provider_call = persona_chat_client
+    conversation_id = persona_chat_db.add_conversation({"title": "Local", "client_id": "1"})
+    before = persona_chat_db.get_messages_for_conversation(conversation_id)
+    if stream:
+        provider_call.return_value = iter([
+            'data: {"choices":[{"delta":{"content":"Reply"},"finish_reason":null}]}\n\n',
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+            'data: [DONE]\n\n',
+        ])
+    body = _chat_completion_body(conversation_id)
+    body.update(save_to_db=False, stream=stream)
+    response = client.post("/api/v1/chat/completions", json=body, headers=headers)
+    assert response.status_code == 200
+    assert "tldw_user_message_id" not in response.text
+    assert persona_chat_db.get_messages_for_conversation(conversation_id) == before
+
+
 def test_persona_backed_chat_uses_persona_identity_when_loading_prompt(
     persona_chat_client,
     persona_chat_db,

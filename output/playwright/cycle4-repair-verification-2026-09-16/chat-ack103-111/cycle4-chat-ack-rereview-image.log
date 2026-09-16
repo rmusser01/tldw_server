@@ -1,0 +1,12 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:3541) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts (25 tests | 24 skipped) 4ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 24 skipped (25)
+   Start at  19:51:46
+   Duration  787ms (transform 96ms, setup 165ms, import 85ms, tests 4ms, environment 426ms)
+

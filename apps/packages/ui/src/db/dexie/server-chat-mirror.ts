@@ -42,10 +42,38 @@ export const linkServerChatMirror = async ({
 
 const canonicalId = (message: ChatMessage) => message.serverMessageId?.trim() || null
 
+/** Recover only a local user paired to an acknowledged saved reply. Text alone is never identity. */
+const recoverAnchoredUsers = (current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] => {
+  const claims = new Map<string, string[]>()
+  for (let index = 1; index < incoming.length; index++) {
+    const reply = incoming[index]
+    const user = incoming[index - 1]
+    const replyId = canonicalId(reply)
+    const userId = canonicalId(user)
+    if (!reply.isBot || (reply.role && reply.role !== "assistant") || user.isBot || (user.role && user.role !== "user") || !replyId || !userId) continue
+    if (reply.parentMessageId && reply.parentMessageId !== userId && reply.parentMessageId !== user.id) continue
+    if (current.some(message => canonicalId(message) === userId || message.id === userId)) continue
+    const anchors = current.filter(message => message.isBot && canonicalId(message) === replyId)
+    if (anchors.length !== 1 || !anchors[0].parentMessageId) continue
+    const candidates = current.filter(message => message.id === anchors[0].parentMessageId)
+    const local = candidates[0]
+    if (candidates.length !== 1 || local.isBot || canonicalId(local) || local.message !== user.message ||
+      // Text-only local saves historically retained the empty composer image.
+      JSON.stringify((local.images || []).filter(image => image !== "")) !==
+        JSON.stringify((user.images || []).filter(image => image !== ""))) continue
+    claims.set(local.id!, [...(claims.get(local.id!) || []), userId])
+  }
+  return current.map(message => {
+    const ids = message.id ? claims.get(message.id) : undefined
+    return ids?.length === 1 ? { ...message, serverMessageId: ids[0] } : message
+  })
+}
+
 /** Add a completed owned snapshot without dropping local work or rolling back newer rows. */
 export const reconcileServerChatMessages = (
   current: ChatMessage[], incoming: ChatMessage[], beforeAwait?: ChatMessage[]
 ): ChatMessage[] => {
+  current = recoverAnchoredUsers(current, incoming)
   const serverIds = new Set(incoming.map(canonicalId).filter(Boolean))
   const key = (message: ChatMessage) => {
     const serverId = canonicalId(message) ||
@@ -68,6 +96,7 @@ export const reconcileServerChatMessages = (
     const changedDuringAwait = beforeAwait !== undefined && beforeById.get(id)?.message !== local.message
     const preserveContent = (changedDuringAwait || local.serverMessageVersion == null || localVersion >= remoteVersion) && local.message !== remote.message
     return { ...local, ...remote, ...(preserveContent ? local : {}),
+      parentMessageId: remote.parentMessageId ?? local.parentMessageId,
       id: local.id || remote.id, serverMessageId: canonicalId(remote) || canonicalId(local) || undefined,
       serverMessageVersion: Math.max(localVersion, remoteVersion) || undefined }
   })
@@ -92,11 +121,18 @@ export const reconcileServerChatMirror = async ({
     throw createServicePromptScopeChangedError()
   }
   const rows = await db.messages.where("history_id").equals(historyId).toArray()
+  const recovered = recoverAnchoredUsers(rows.map<ChatMessage>(row => ({
+    id: row.id, serverMessageId: row.serverMessageId, message: row.content,
+    name: row.name, isBot: row.role !== "user",
+    role: row.role === "user" ? "user" : row.role === "assistant" ? "assistant" : "system",
+    images: row.images, sources: row.sources || [], parentMessageId: row.parent_message_id
+  })), messages)
+  const acknowledgedRows = rows.map((row, index) => ({ ...row, serverMessageId: recovered[index].serverMessageId }))
   const localIds = new Map<string, string>()
   for (const remote of messages) {
     const serverMessageId = canonicalId(remote)
     if (!serverMessageId) continue
-    const local = rows.find(row => row.serverMessageId === serverMessageId ||
+    const local = acknowledgedRows.find(row => row.serverMessageId === serverMessageId ||
       (!row.serverMessageId && row.id === serverMessageId))
     const id = local?.id || `${historyId}:server:${encodeURIComponent(serverMessageId)}`
     const existing = await db.messages.get(id)
@@ -110,7 +146,7 @@ export const reconcileServerChatMirror = async ({
       images: remote.images || [], sources: remote.sources || [], createdAt: remote.createdAt ?? local?.createdAt ?? Date.now(),
       messageType: remote.messageType, generationInfo: remote.generationInfo,
       metadataExtra: remote.metadataExtra, clusterId: remote.clusterId, modelId: remote.modelId,
-      modelName: remote.modelName, modelImage: remote.modelImage, parent_message_id: remote.parentMessageId ?? null,
+      modelName: remote.modelName, modelImage: remote.modelImage, parent_message_id: remote.parentMessageId ?? local?.parent_message_id ?? null,
       ...(preserveContent ? local : {}), serverMessageId,
       serverMessageVersion: Math.max(localVersion, remoteVersion) || undefined
     }

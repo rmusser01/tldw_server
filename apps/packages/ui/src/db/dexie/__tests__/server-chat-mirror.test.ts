@@ -24,6 +24,51 @@ const link = (ownerKey: string, extra = {}) => linkServerChatMirror({ chatId: "c
 
 describe("owned server Chat mirror", () => {
   beforeEach(() => { state.histories.clear(); state.messages.clear() })
+  it.each([{ images: [] }, { images: [""] }])("recovers an anchored legacy user with images $images and keeps equal-text drafts", async ({ images }) => {
+    state.histories.set("alice", history("alice", "A"))
+    state.messages.set("local-q", { ...row("local-q", "alice", "Repeat"), images })
+    state.messages.set("local-a", { ...row("local-a", "alice", "Reply", "answer"), role: "assistant", parent_message_id: "local-q" })
+    state.messages.set("draft", { ...row("draft", "alice", "Repeat"), images })
+    const remote = [incoming("question", "Repeat"), { ...incoming("answer", "Reply"), isBot: true, role: "assistant" }]
+    await reconcileServerChatMirror({ historyId: "alice", chatId: "chat-1", ownerKey: "A", messages: remote })
+    expect([...state.messages.values()].map(r => [r.id, r.serverMessageId])).toEqual([
+      ["local-q", "question"], ["local-a", "answer"], ["draft", undefined]
+    ])
+    expect(state.messages.get("local-a")?.parent_message_id).toBe("local-q")
+    const current = [
+      { ...incoming("local-q", "Repeat"), images, serverMessageId: undefined },
+      { ...remote[1], id: "local-a", parentMessageId: "local-q" },
+      { ...incoming("draft", "Repeat"), images, serverMessageId: undefined }
+    ]
+    expect(reconcileServerChatMessages(current, remote).map(r => [r.id, r.serverMessageId])).toEqual([
+      ["local-q", "question"], ["local-a", "answer"], ["draft", undefined]
+    ])
+  })
+  it.each([
+    { localImages: ["data:image/png;base64,local"], remoteImages: [] },
+    { localImages: [""], remoteImages: ["data:image/png;base64,remote"] },
+    { localImages: ["data:image/png;base64,local"], remoteImages: ["data:image/png;base64,remote"] }
+  ])("preserves anchored work when substantive images differ ($localImages / $remoteImages)", async ({ localImages, remoteImages }) => {
+    state.histories.set("alice", history("alice", "A"))
+    state.messages.set("local-q", { ...row("local-q", "alice", "Repeat"), images: localImages })
+    state.messages.set("local-a", { ...row("local-a", "alice", "Reply", "answer"), role: "assistant", parent_message_id: "local-q" })
+    const remote = [
+      { ...incoming("question", "Repeat"), images: remoteImages },
+      { ...incoming("answer", "Reply"), isBot: true, role: "assistant" }
+    ]
+    await reconcileServerChatMirror({ historyId: "alice", chatId: "chat-1", ownerKey: "A", messages: remote })
+    expect(state.messages.get("local-q")).toMatchObject({ serverMessageId: undefined, images: localImages })
+    expect(state.messages.size).toBe(3)
+  })
+  it.each(["missing-parent", "edited-user", "already-mirrored", "wrong-reply", "conflicting-parent"])("keeps ambiguous legacy work: %s", async kind => {
+    state.histories.set("alice", history("alice", "A"))
+    state.messages.set("local-q", row("local-q", "alice", kind === "edited-user" ? "Edited" : "Repeat"))
+    state.messages.set("local-a", { ...row("local-a", "alice", "Reply", kind === "wrong-reply" ? "other-answer" : "answer"), role: "assistant", parent_message_id: kind === "missing-parent" ? null : "local-q" })
+    if (kind === "already-mirrored") state.messages.set("canonical-q", row("canonical-q", "alice", "Repeat", "question"))
+    const remote = [incoming("question", "Repeat"), { ...incoming("answer", "Reply"), isBot: true, role: "assistant", ...(kind === "conflicting-parent" ? { parentMessageId: "other-user" } : {}) }]
+    await reconcileServerChatMirror({ historyId: "alice", chatId: "chat-1", ownerKey: "A", messages: remote })
+    expect(state.messages.get("local-q")).toMatchObject({ serverMessageId: undefined, content: kind === "edited-user" ? "Edited" : "Repeat" })
+  })
   it("keeps identical conversation IDs in different owners' histories", async () => {
     state.histories.set("alice", history("alice", "A"))
     const bob = await link("B", { currentHistoryId: "alice" })

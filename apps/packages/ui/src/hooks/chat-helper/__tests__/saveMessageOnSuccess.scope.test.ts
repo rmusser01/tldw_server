@@ -102,13 +102,13 @@ describe("saveMessageOnSuccess request scope", () => {
     mocks.events.length = 0
   })
 
-  it("retains the server acknowledgement on the locally persisted assistant only", async () => {
-    await saveMessageOnSuccess(payload({ assistantServerMessageId: "server-assistant-1" }))
+  it("retains the server acknowledgement on each matching locally persisted row", async () => {
+    await saveMessageOnSuccess(payload({ assistantServerMessageId: "server-assistant-1", userServerMessageId: "server-user-1" }))
     expect(mocks.saveMessage).toHaveBeenCalledWith(expect.objectContaining({
       role: "assistant", serverMessageId: "server-assistant-1"
     }))
     const userWrite = mocks.saveMessage.mock.calls.find(([message]) => message.role === "user")?.[0]
-    expect(userWrite).not.toHaveProperty("serverMessageId", "server-assistant-1")
+    expect(userWrite).toMatchObject({ id: "user-1", serverMessageId: "server-user-1" })
   })
 
   it("commits the complete existing-history turn in one scoped transaction", async () => {

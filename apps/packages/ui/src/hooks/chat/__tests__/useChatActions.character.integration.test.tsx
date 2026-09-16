@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useChatActions } from "../useChatActions"
 
 const {
+  saveLocalSuccessMock,
   addChatMessageMock,
   createChatMock,
   detectCharacterMoodMock,
@@ -14,6 +15,7 @@ const {
   normalChatModeMock,
   resolveVisualIdentityBindingMock
 } = vi.hoisted(() => ({
+  saveLocalSuccessMock: vi.fn(async (_payload: unknown) => "history-character"),
   addChatMessageMock: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
   createChatMock: vi.fn(),
   detectCharacterMoodMock: vi.fn(),
@@ -79,9 +81,7 @@ vi.mock("@/hooks/chat-modes/documentChatMode", () => ({
 vi.mock("@/hooks/utils/messageHelpers", () => ({
   validateBeforeSubmit: vi.fn(() => true),
   createSaveMessageOnSuccess: vi.fn(
-    () =>
-      async (_payload?: unknown): Promise<string | null> =>
-        "history-character"
+    () => saveLocalSuccessMock
   ),
   createSaveMessageOnError: vi.fn(
     () =>
@@ -301,6 +301,25 @@ describe("useChatActions character integration", () => {
     resolveVisualIdentityBindingMock.mockClear()
   })
 
+  it.each(["fallback", "degraded"])("forwards the confirmed assistant ID from %s success to local persistence", async (outcome) => {
+    persistCharacterCompletionMock.mockRejectedValueOnce(outcome === "fallback"
+      ? new Error("Persist endpoint unavailable")
+      : Object.assign(new Error("Saved with validation warning"), {
+          status: 503,
+          detail: { code: "persist_validation_degraded", saved: true, assistant_message_id: "fallback-assistant" }
+        }))
+    addChatMessageMock.mockResolvedValueOnce({ id: "user-server-1", version: 1 })
+    if (outcome === "fallback") addChatMessageMock.mockResolvedValueOnce({ id: "fallback-assistant", version: 1 })
+    const options = createHookOptions()
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    await act(async () => { await result.current.onSubmit({ message: "Question", image: "" }) })
+    expect(addChatMessageMock).toHaveBeenCalledTimes(outcome === "fallback" ? 2 : 1)
+    expect(saveLocalSuccessMock).toHaveBeenCalledWith(expect.objectContaining({
+      userServerMessageId: "user-server-1", assistantServerMessageId: "fallback-assistant",
+      serverMessagesAlreadyPersisted: true
+    }))
+  })
+
   it("keeps tracked character routing anchored to current chat metadata when global character state is stale", async () => {
     const options = createHookOptions()
     const { result } = renderHook(() => useChatActions(options as any))
@@ -312,6 +331,9 @@ describe("useChatActions character integration", () => {
       })
     })
 
+    expect(saveLocalSuccessMock).toHaveBeenCalledWith(expect.objectContaining({
+      userServerMessageId: "user-server-1", assistantServerMessageId: "assistant-server-1"
+    }))
     expect(createChatMock).not.toHaveBeenCalled()
     expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1)
     expect(streamCharacterChatCompletionMock).toHaveBeenCalledWith(

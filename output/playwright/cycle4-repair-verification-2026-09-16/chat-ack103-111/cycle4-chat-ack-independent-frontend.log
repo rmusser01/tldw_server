@@ -1,0 +1,241 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:98967) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx (15 tests) 5462ms
+     ✓ shows conversation title labels with UUID debug tooltip in list and header  1114ms
+     ✓ retries transient conversation label lookups and hydrates once they recover  1654ms
+(node:99131) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx (10 tests) 2891ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting true)  629ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting false)  614ms
+(node:99141) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 0 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 1 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to B
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to A
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cannot autosave a second conversation while the completed first pair is waiting for local persistence
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps temporary inference unsaved and promotes its existing pair only once
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > returns a recoverable creation failure and retries without a duplicate pair
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > rechecks the current conversation after promotion finishes during send initialization
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cancels a waiting follow-up without cancelling the owning promotion
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cleans up a failed promotion so retry saves the original pair before the next turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 0 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 1 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after ambiguous commit acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after new history on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after A to B to A on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old stream completes
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old local persistence completes
+Using normalChatMode
+
+ ✓ src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx (46 tests) 2952ms
+(node:99182) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.abort-lifecycle.test.ts (12 tests) 115ms
+(node:99185) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat/__tests__/useChatActions.persona.integration.test.tsx (15 tests) 84ms
+(node:99195) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat/__tests__/useChatActions.service-prompts.test.tsx (28 tests) 68ms
+(node:99207) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx (13 tests) 40ms
+(node:99211) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > uses and releases a freshly loaded snapshot lease for the whole pipeline
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > uses but does not release a caller-owned snapshot lease
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > loads the Main RAG answer and rewrite snapshot before entering the pipeline
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > loads only the answer snapshot for Tab Chat
+Using tabChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > loads the web-search snapshot only when Normal Chat enables web search
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > loads the web-search snapshot only when Normal Chat enables web search
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > reuses a caller-supplied immutable snapshot in every wrapper
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > reuses a caller-supplied immutable snapshot in every wrapper
+Using tabChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > reuses a caller-supplied immutable snapshot in every wrapper
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > rejects a caller snapshot missing the Main RAG answer before pipeline retrieval
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > rejects a caller snapshot missing the rewrite before selected-source preflight
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > validates a freshly loaded Main RAG snapshot before pipeline entry
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > rejects a caller snapshot missing the Tab answer before pipeline entry
+Using tabChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > rejects a web-enabled Normal snapshot missing its answer before image preflight
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode wrapper ownership > does not read or validate Service Prompts for Normal Chat without web search
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > renders Main RAG once, keeps the original answer question, and locks rewrite tools
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > renders Tab Chat once with the original question and never rewrites
+Using tabChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > keeps the packaged Tab image provider message byte-identical
+Using tabChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > does not convert selected-source account cancellation into a handled response
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > renders the web-search ISO timestamp and normalized results in one pass
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > checks web-search prompt availability outside the best-effort search catch
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > keeps ordinary web-provider failure as a best-effort fallback after prompt resolution
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > does not swallow a web-search scope rejection before the signal aborts
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > does not convert a selected-source prompt failure into a grounding fallback
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > preserves selected-source retrieval failure as a grounded handled response
+Using ragMode
+
+stdout | src/hooks/chat-modes/__tests__/service-prompts.test.ts > Service Prompt mode definitions > keeps ordinary packaged RAG provider messages byte-identical
+Using ragMode
+
+ ✓ src/hooks/chat-modes/__tests__/service-prompts.test.ts (29 tests) 27ms
+(node:99220) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx (7 tests) 27ms
+(node:99225) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat/__tests__/useChatActions.persist-mirror.guard.test.ts (3 tests) 3ms
+(node:99227) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts (20 tests) 8ms
+(node:99229) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-modes/__tests__/ragMode.sanitization.test.ts (13 tests) 9ms
+(node:99231) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-helper/__tests__/saveMessageOnError.test.ts (9 tests) 11ms
+(node:99234) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/models/__tests__/ChatTldw.abort-signal.test.ts (3 tests) 3ms
+(node:99235) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts (5 tests) 7ms
+(node:99239) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/models/__tests__/ChatTldw.stream-metadata.test.ts (4 tests) 4ms
+(node:99251) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts (7 tests) 7ms
+(node:99405) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts > normalChatMode overlay prompt ordering > keeps base prompt first, overlay second, actor after overlay, and web search last
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts > normalChatMode overlay prompt ordering > keeps generic systemPromptAppendix appended to the active base prompt
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts > normalChatMode overlay prompt ordering > does not classify a no-web-search manual stop as scope invalidation
+Using normalChatMode
+
+ ✓ src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts (3 tests) 6ms
+(node:99412) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.dynamic-ui.test.ts (3 tests) 6ms
+(node:99415) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.provider-recovery.test.ts (2 tests) 6ms
+(node:99418) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/models/__tests__/ChatTldw.stream-transport-interrupted.test.ts (2 tests) 2ms
+(node:99419) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.error-recovery.guard.test.ts (2 tests) 2ms
+
+ Test Files  22 passed (22)
+      Tests  251 passed (251)
+   Start at  19:41:51
+   Duration  32.28s (transform 3.00s, setup 1.74s, import 9.17s, tests 11.74s, environment 6.94s)
+

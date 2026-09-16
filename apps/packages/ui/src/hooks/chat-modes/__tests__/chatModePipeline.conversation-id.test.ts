@@ -95,6 +95,34 @@ describe("runChatPipeline conversation id handoff", () => {
     expect(mocks.saveMessageOnSuccess.mock.calls[0]?.[0]?.assistantServerMessageId).toBe(expected)
   })
 
+  it("retains the acknowledged user when a saved stream fails after persistence", async () => {
+    mocks.pageAssistModel.mockResolvedValue({
+      conversationId: "server-chat-1", saveToDb: true, userServerMessageId: "server-user",
+      stream: async function* () { yield "Partial"; throw new Error("provider failed") }
+    })
+    let localMessages: Message[] = [
+      { id: "local-user", isBot: false, name: "You", message: "Hello" },
+      { id: "generated-assistant-id", isBot: true, name: "Assistant", message: "" }
+    ]
+    mocks.setMessages.mockImplementation(next => {
+      localMessages = typeof next === "function" ? next(localMessages) : next
+    })
+    const mode: ChatModeDefinition<ChatModeParamsBase> = {
+      id: "normal", setupMessages: () => ({ targetMessageId: "generated-assistant-id" }),
+      preparePrompt: async () => ({ chatHistory: [], humanMessage: { role: "user", content: "Hello" }, sources: [] })
+    }
+    await runChatPipeline(mode, "Hello", "", false, localMessages, [], new AbortController().signal, {
+      selectedModel: "test", useOCR: false, userMessageId: "local-user",
+      setMessages: mocks.setMessages, saveMessageOnSuccess: mocks.saveMessageOnSuccess,
+      saveMessageOnError: mocks.saveMessageOnError, setHistory: mocks.setHistory,
+      setIsProcessing: mocks.setIsProcessing, setStreaming: mocks.setStreaming,
+      setAbortController: mocks.setAbortController, historyId: "history-1", setHistoryId: mocks.setHistoryId
+    })
+    expect(localMessages[0]).toMatchObject({ id: "local-user", serverMessageId: "server-user" })
+    expect(mocks.saveMessageOnError).toHaveBeenCalledWith(expect.objectContaining({ userMessageId: "local-user", userServerMessageId: "server-user" }))
+    expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+  })
+
   it("passes explicit conversation ids into pageAssistModel instead of relying on store fallback", async () => {
     const mode: ChatModeDefinition<any> = {
       id: "normal",

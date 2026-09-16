@@ -16,6 +16,7 @@ export interface SaveMessageBase {
   modelId: string
   userModelId?: string
   userMessageId?: string
+  userServerMessageId?: string
   assistantMessageId: string
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null

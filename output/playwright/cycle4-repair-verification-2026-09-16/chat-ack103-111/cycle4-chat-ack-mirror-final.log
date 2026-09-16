@@ -1,0 +1,13 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts (20 tests) 5ms
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx (10 tests) 2880ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting true)  626ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting false)  613ms
+
+ Test Files  2 passed (2)
+      Tests  30 passed (30)
+   Start at  19:37:59
+   Duration  3.91s (transform 621ms, setup 169ms, import 725ms, tests 2.89s, environment 455ms)
+

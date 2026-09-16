@@ -1,0 +1,392 @@
+I001 [*] Import block is un-sorted or un-formatted
+  --> tldw_Server_API/app/api/v1/endpoints/chat.py:5:1
+   |
+ 3 |   #
+ 4 |   # Imports
+ 5 | / from __future__ import annotations
+ 6 | |
+ 7 | | import asyncio
+ 8 | | import base64
+ 9 | | import hashlib
+10 | | import hmac
+11 | | import inspect
+12 | | import json
+13 | | import math
+14 | | import os
+15 | | import re
+16 | | import sys
+17 | | import threading
+18 | | import time
+19 | | import uuid
+20 | | from collections import OrderedDict, defaultdict, deque
+21 | | from dataclasses import dataclass
+22 | | from datetime import date, datetime, timedelta, timezone
+23 | | from functools import lru_cache, partial
+24 | | from typing import Any, Callable, Literal
+25 | | from unittest.mock import Mock
+26 | | from weakref import WeakKeyDictionary
+27 | |
+28 | | from fastapi import (
+29 | |     APIRouter,
+30 | |     Body,
+31 | |     Depends,
+32 | |     Header,
+33 | |     HTTPException,
+34 | |     Path,
+35 | |     Query,
+36 | |     Request,
+37 | |     status,
+38 | | )
+39 | |
+40 | | from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+41 | |     apply_llm_provider_overrides_to_listing,
+42 | |     capture_provider_override_call_snapshot,
+43 | |     get_llm_provider_override,
+44 | |     get_llm_provider_overrides_snapshot,
+45 | |     get_override_default_model,
+46 | |     get_override_model_priority,
+47 | |     validate_provider_override,
+48 | | )
+49 | |
+50 | | # ---------------------------------------------------------------------------
+51 | | # Imports
+52 | | # ---------------------------------------------------------------------------
+53 | | from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+54 | |     get_auth_principal,
+55 | |     get_request_user,
+56 | |     rbac_rate_limit,
+57 | |     require_expected_user,
+58 | |     RequirePermission,
+59 | |     resolve_user_id_for_request,
+60 | |     TokenScopeGuard,
+61 | |     User,
+62 | | )
+63 | | from tldw_Server_API.app.core.Utils.image_validation import (
+64 | |     get_max_base64_bytes,
+65 | |     validate_image_url,
+66 | | )
+   | |_^
+67 |
+68 |   # Import new modules for integration
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> tldw_Server_API/app/api/v1/endpoints/chat.py:77:1
+    |
+ 75 |       """
+ 76 |       return True
+ 77 | / from loguru import logger
+ 78 | | from starlette.responses import JSONResponse, StreamingResponse
+ 79 | |
+ 80 | | from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
+ 81 | | from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
+ 82 | |     get_chacha_db_for_user,
+ 83 | |     get_chacha_db_for_user_id,
+ 84 | | )
+ 85 | | from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
+ 86 | | from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import (
+ 87 | |     NOTES_SYNC_EXCEPTIONS,
+ 88 | |     notes_sync_http_error,
+ 89 | | )
+ 90 | | from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
+ 91 | |     ChatAnalyticsBucket,
+ 92 | |     ChatAnalyticsPagination,
+ 93 | |     ChatAnalyticsResponse,
+ 94 | |     ConversationListItem,
+ 95 | |     ConversationListPagination,
+ 96 | |     ConversationListResponse,
+ 97 | |     ConversationMetadata,
+ 98 | |     ConversationScopeParams,
+ 99 | |     ConversationTreeNode,
+100 | |     ConversationTreePagination,
+101 | |     ConversationTreeResponse,
+102 | |     ConversationUpdateRequest,
+103 | | )
+104 | | from tldw_Server_API.app.api.v1.schemas.chat_knowledge_schemas import (
+105 | |     KnowledgeSaveRequest,
+106 | |     KnowledgeSaveResponse,
+107 | | )
+108 | | from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
+109 | |     API_KEYS as SCHEMAS_API_KEYS,
+110 | | )
+111 | | from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
+112 | |     ChatCompletionRequest,
+113 | |     ChatCompletionResponse,
+114 | |     ChatCompletionSystemMessageParam,
+115 | |     DEFAULT_LLM_PROVIDER,
+116 | |     RagContext,
+117 | |     get_api_keys,  # noqa: F401 - legacy tests patch this endpoint symbol
+118 | | )
+119 | | from tldw_Server_API.app.api.v1.schemas.chat_validators import (
+120 | |     validate_character_id,
+121 | |     validate_conversation_id,
+122 | |     validate_max_tokens,
+123 | |     validate_request_size,
+124 | |     validate_temperature,
+125 | |     validate_tool_definitions,
+126 | | )
+127 | | from tldw_Server_API.app.core.Audit.unified_audit_service import (
+128 | |     AuditContext,
+129 | |     AuditEventType,
+130 | |     MandatoryAuditWriteError,
+131 | | )
+132 | | from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
+133 | |     map_sender_to_role,
+134 | | )
+135 | | from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+136 | |     ChatSettingsSizeError,
+137 | |     validate_chat_settings_storage,
+138 | | )
+139 | | from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings import (
+140 | |     score_exemplars_with_embeddings,
+141 | | )
+142 | | from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_selector import (
+143 | |     PersonaExemplarSelectorConfig,
+144 | |     select_character_exemplars,
+145 | | )
+146 | | from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry import (
+147 | |     compute_persona_exemplar_telemetry,
+148 | | )
+149 | | from tldw_Server_API.app.core.Chat.persistence_service import save_workspace_chat_model_selection
+150 | | from tldw_Server_API.app.core.Chat.Chat_Deps import (
+151 | |     ChatAPIError,
+152 | |     ChatAuthenticationError,
+153 | |     ChatBadRequestError,
+154 | |     ChatConfigurationError,
+155 | |     ProviderCredentialTerminalError,
+156 | |     SanitizedProviderStreamError,
+157 | | )
+158 | | from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
+159 | | from tldw_Server_API.app.core.Chat.chat_exceptions import (
+160 | |     ChatDatabaseError,
+161 | |     ChatErrorCode,
+162 | |     ChatModuleException,
+163 | |     set_request_id,
+164 | | )
+165 | | from tldw_Server_API.app.core.Chat.chat_target_resolution import (
+166 | |     config_default_llm_provider,
+167 | |     get_default_model_for_provider,
+168 | |     get_default_provider,
+169 | | )
+170 | |
+171 | | # Note: streaming utilities are handled inside chat_service. No direct import needed here.
+172 | | from tldw_Server_API.app.core.Chat.chat_helpers import (
+173 | |     validate_request_payload,
+174 | | )
+175 | | from tldw_Server_API.app.core.Chat.chat_metrics import get_chat_metrics
+176 | | from tldw_Server_API.app.core.Chat.streaming_utils import (
+177 | |     PROVIDER_STREAM_ERROR_MESSAGES,
+178 | |     StreamTaskCapacityError,
+179 | |     create_bounded_stream_task,
+180 | |     is_trusted_local_stream_frame,
+181 | |     invoke_stream_close_bounded,
+182 | |     normalize_provider_stream_error,
+183 | |     provider_payload_structural_error_code,
+184 | |     provider_result_contains_error,
+185 | |     provider_stream_error_payload,
+186 | |     sanitized_provider_stream_exception,
+187 | | )
+188 | | from tldw_Server_API.app.core.exceptions import raise_detached_error
+189 | | from tldw_Server_API.app.core.Chat.chat_service import (
+190 | |     _nonstream_provider_result_is_usable,
+191 | |     apply_prompt_templating,
+192 | |     build_call_params_from_request,
+193 | |     build_context_and_messages,
+194 | |     estimate_tokens_from_json,
+195 | |     execute_non_stream_call,
+196 | |     execute_streaming_call,
+197 | |     inject_research_context_into_prompt,
+198 | |     moderate_input_messages,
+199 | |     perform_chat_api_call,
+200 | |     perform_chat_api_call_async,
+201 | |     queue_is_active,
+202 | |     resolve_input_moderation_chat_type,
+203 | |     resolve_moderation_chat_type,
+204 | |     resolve_provider_and_model,
+205 | |     resolve_provider_api_key,
+206 | |     is_model_known_for_provider,
+207 | |     trusted_local_chat_signal_kind,
+208 | |     write_mandatory_moderation_audit,
+209 | | )
+210 | | from tldw_Server_API.app.core.Moderation.review_service import (
+211 | |     capture_moderation_review_item,
+212 | |     is_moderation_review_capture_enabled,
+213 | | )
+214 | |
+215 | | # Backward-compatible re-exports for legacy tests patching these symbols on the endpoint module.
+216 | | from tldw_Server_API.app.core.Chat.prompt_template_manager import (  # noqa: F401
+217 | |     apply_template_to_string,
+218 | |     load_template,
+219 | | )
+220 | | from tldw_Server_API.app.core.LLM_Calls.routing import (
+221 | |     InMemoryRoutingDecisionStore,
+222 | |     RouterRequest,
+223 | |     RoutingUsageContext,
+224 | |     build_provider_order_for_routing,
+225 | |     extract_router_choice,  # noqa: F401 - legacy tests patch/use this endpoint symbol
+226 | |     extract_router_usage,
+227 | |     flatten_provider_listing_for_routing,
+228 | |     log_model_router_usage,
+229 | |     resolve_routing_policy,
+230 | |     route_model,
+231 | |     select_llm_router_choice,
+232 | | )
+233 | | from tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (
+234 | |     build_candidate_pool,
+235 | | )
+236 | | from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
+237 | | from tldw_Server_API.app.core.Chat.rate_limiter import get_rate_limiter
+238 | | from tldw_Server_API.app.core.Chat.request_queue import RequestPriority, get_request_queue
+239 | | from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+240 | |     CharactersRAGDB,
+241 | |     CharactersRAGDBError,
+242 | |     ConflictError,
+243 | |     InputError,
+244 | | )
+245 | | from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+246 | | from tldw_Server_API.app.core.DB_Management.transaction_utils import (
+247 | |     db_transaction,
+248 | | )
+249 | | from tldw_Server_API.app.core.Moderation.supervised_policy import (
+250 | |     bootstrap_guardian_moderation_runtime,
+251 | | )
+252 | | from tldw_Server_API.app.core.Notes.organization_capture import (
+253 | |     active_coordinator,
+254 | |     capture_note_upsert,
+255 | |     replace_keywords,
+256 | |     stable_note_id,
+257 | | )
+258 | | from tldw_Server_API.app.core.Skills.context_integration import (
+259 | |     add_skill_tool_to_tools_list_async,
+260 | |     build_system_message_with_skills_async,
+261 | | )
+262 | | from tldw_Server_API.app.core.Utils.chunked_image_processor import get_image_processor
+    | |______________________________________________________________________________________^
+263 |
+264 |   _ORIGINAL_PERFORM_CHAT_API_CALL = perform_chat_api_call
+    |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> tldw_Server_API/app/api/v1/endpoints/chat.py:265:1
+    |
+264 |   _ORIGINAL_PERFORM_CHAT_API_CALL = perform_chat_api_call
+265 | / from fastapi.encoders import jsonable_encoder
+266 | | from pydantic import BaseModel, Field, ValidationError
+267 | |
+268 | | from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
+269 | |     get_request_routing_decision_store,
+270 | | )
+271 | | from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
+272 | |     UsageEventLogger,
+273 | |     get_usage_event_logger,
+274 | | )
+275 | | from tldw_Server_API.app.api.v1.schemas.chat_commands_schemas import ChatCommandInfo, ChatCommandsListResponse
+276 | | from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
+277 | |     ValidateDictionaryRequest,
+278 | |     ValidateDictionaryResponse,
+279 | |     ValidationIssue,
+280 | | )
+281 | | from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+282 | | from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+283 | |     ByokResolutionError,
+284 | |     record_byok_missing_credentials,
+285 | | )
+286 | | from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+287 | |     derive_trusted_credential_scope,
+288 | | )
+289 | | from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+290 | |     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+291 | |     ProviderCallCredentials,
+292 | |     ProviderCredentialRuntime,
+293 | |     configured_provider_model_from_snapshot,
+294 | |     mark_provider_credential_used,
+295 | | )
+296 | | from tldw_Server_API.app.api.v1.API_Deps.billing_deps import (
+297 | |     LimitEnforcer,
+298 | |     get_billing_org_id,
+299 | |     require_within_limit,
+300 | | )
+301 | | from tldw_Server_API.app.core.Billing.enforcement import LimitCategory, enforcement_enabled, get_billing_enforcer
+302 | | from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
+303 | | from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
+304 | | from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
+305 | | from tldw_Server_API.app.core.AuthNZ.rbac import user_has_permission
+306 | | from tldw_Server_API.app.core.Chat import command_router
+307 | | from tldw_Server_API.app.core.Chat.command_authorization import (
+308 | |     authorize_command,
+309 | |     build_command_authorization_context,
+310 | | )
+311 | | from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroStorageError, MacroValidationError
+312 | | from tldw_Server_API.app.core.Chat_Macros.jobs import enqueue_chat_macro_run_job
+313 | | from tldw_Server_API.app.core.Chat_Macros.context_snapshot import build_macro_context_snapshot
+314 | | from tldw_Server_API.app.core.Chat_Macros.parser import enforce_background_execution, parse_macro_args
+315 | | from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
+316 | | from tldw_Server_API.app.core.Chat_Macros.service import ChatMacroCatalogItem, ChatMacrosService
+317 | | from tldw_Server_API.app.core.Chat_Macros.storage import ChatMacroStorage
+318 | | from tldw_Server_API.app.core.Chat.validate_dictionary import validate_dictionary as _validate_dictionary
+319 | | from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+320 | | from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
+321 | | from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
+322 | | from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
+323 | | from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
+324 | |     assemble_persona_exemplar_prompt,
+325 | | )
+326 | | from tldw_Server_API.app.core.Persona.exemplar_runtime import (
+327 | |     append_persona_exemplar_sections,
+328 | | )
+329 | | from tldw_Server_API.app.core.Persona.memory_integration import persist_persona_turn
+330 | | from tldw_Server_API.app.core.Resource_Governance import cost_units
+331 | | from tldw_Server_API.app.core.Resource_Governance.deps import derive_entity_key
+332 | | from tldw_Server_API.app.core.Resource_Governance.governor import RGRequest
+333 | | from tldw_Server_API.app.core.testing import (
+334 | |     env_flag_enabled as _shared_env_flag_enabled,
+335 | | )
+336 | | from tldw_Server_API.app.core.testing import (
+337 | |     is_test_mode as _shared_is_test_mode,
+338 | | )
+339 | | from tldw_Server_API.app.core.testing import (
+340 | |     is_truthy as _shared_is_truthy,
+341 | | )
+342 | | from tldw_Server_API.app.core.Usage.usage_tracker import backfill_legacy_tokens_to_ledger
+343 | |
+344 | | from . import chat_dictionaries, chat_documents, chat_grammars
+345 | | from .llm_providers import get_configured_providers
+    | |___________________________________________________^
+346 |
+347 |   _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS = (
+    |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> tldw_Server_API/tests/Chat/integration/test_persona_backed_chat_conversations.py:1:1
+   |
+ 1 | / from __future__ import annotations
+ 2 | |
+ 3 | | import asyncio
+ 4 | | import json
+ 5 | | from unittest.mock import patch
+ 6 | |
+ 7 | | import pytest
+ 8 | | from fastapi.testclient import TestClient
+ 9 | |
+10 | | from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint_module
+11 | | from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
+12 | |     DEFAULT_CHARACTER_NAME,
+13 | |     get_chacha_db_for_user,
+14 | | )
+15 | | from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+16 | | from tldw_Server_API.app.main import app
+17 | | from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+18 | | from tldw_Server_API.app.core.Chat.prompt_template_manager import DEFAULT_RAW_PASSTHROUGH_TEMPLATE
+19 | | from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+20 | | from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
+21 | | from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+22 | | from tldw_Server_API.tests.Persona.persona_chat_quality_cases import case_by_id
+   | |_______________________________________________________________________________^
+   |
+help: Organize imports
+
+Found 4 errors.
+[*] 4 fixable with the `--fix` option.

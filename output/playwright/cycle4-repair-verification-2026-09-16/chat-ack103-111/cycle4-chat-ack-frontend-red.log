@@ -1,0 +1,291 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx (13 tests | 1 failed) 30ms
+     × keeps tracked character routing anchored to current chat metadata when global character state is stale 16ms
+     ✓ rebinds a greeting to the newly created conversation after a failed session 2ms
+     ✓ handles emote commands without sending chat 1ms
+     ✓ uses manual visual identity override when resolving assistant message metadata 1ms
+     ✓ does not let stale overlay assistant state override the active character chat 1ms
+     ✓ honors an explicit tracked character switch over the current chat metadata 1ms
+     ✓ reuses the latest store character chat when greeting persistence updates before the send closure 1ms
+     ✓ uses the latest store character id when the hook prop still points at another character 1ms
+     ✓ passes workspace scope through when creating a character-backed chat 1ms
+     ✓ strips explicit streaming emote directives and persists emote events 2ms
+     ✓ preserves explicit emote metadata when recovering a failed stream 1ms
+     ✓ does not duplicate recovery persistence when saved-degraded includes emote metadata 1ms
+     ✓ sends emote metadata when normal persist falls back to addChatMessage 1ms
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 0 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 1 copies
+Using normalChatMode
+
+ ❯ src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts (7 tests | 1 failed) 8ms
+     × retains the server acknowledgement on each matching locally persisted row 5ms
+     ✓ commits the complete existing-history turn in one scoped transaction 1ms
+     ✓ commits document session files in the same scoped transaction 0ms
+     ✓ defers existing-history metadata for a scoped Compare aggregate 0ms
+     ✓ generates a scoped title before atomically creating a new history 0ms
+     ✓ finishes a new history when Stop is pressed during post-success title generation 0ms
+     ✓ writes nothing for an already-aborted request scope 0ms
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cannot autosave a second conversation while the completed first pair is waiting for local persistence
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps temporary inference unsaved and promotes its existing pair only once
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > returns a recoverable creation failure and retries without a duplicate pair
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+ ❯ src/models/__tests__/ChatTldw.stream-metadata.test.ts (4 tests | 1 failed) 4ms
+     × captures only the current saved assistant acknowledgement 2ms
+     ✓ ignores late acknowledgements after the request is aborted 0ms
+     ✓ keeps ephemeral stream IDs out of saved conversation linking 0ms
+     ✓ captures streamed conversation metadata without yielding it as assistant text 0ms
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > rechecks the current conversation after promotion finishes during send initialization
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cancels a waiting follow-up without cancelling the owning promotion
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cleans up a failed promotion so retry saves the original pair before the next turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 0 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 1 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after ambiguous commit acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after new history on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after A to B to A on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old stream completes
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old local persistence completes
+Using normalChatMode
+
+ ❯ src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx (44 tests | 1 failed) 2400ms
+     ✓ deletes a qualified mirror row and clears its local reply target using the canonical request ID 9ms
+     ✓ deletes a qualified mirror row and clears its server reply target using the canonical request ID 2ms
+     ✓ retains incomplete promotion across same-authority reconnect after 0 copies 127ms
+     ✓ retains incomplete promotion across same-authority reconnect after 1 copies 35ms
+     ✓ pauses rather than completes when readiness is lost during create 87ms
+     ✓ pauses rather than completes when readiness is lost during first copy 84ms
+     ✓ blocks changed server history after a readiness pause during create 98ms
+     ✓ blocks changed server history after a readiness pause during acknowledged copy 93ms
+     ✓ reconciles literal placeholder text using raw listing content 28ms
+     × acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft 8ms
+     ✓ establishes one neutral conversation and local history before inference, including a queued second turn 61ms
+     ✓ cannot autosave a second conversation while the completed first pair is waiting for local persistence 56ms
+     ✓ keeps temporary inference unsaved and promotes its existing pair only once 59ms
+     ✓ returns a recoverable creation failure and retries without a duplicate pair 7ms
+     ✓ waits for the entire local promotion during create before a follow-up and queued turn 61ms
+     ✓ waits for the entire local promotion during message before a follow-up and queued turn 64ms
+     ✓ rechecks the current conversation after promotion finishes during send initialization 61ms
+     ✓ cancels a waiting follow-up without cancelling the owning promotion 64ms
+     ✓ cleans up a failed promotion so retry saves the original pair before the next turn 60ms
+     ✓ retries incomplete promotion through the visible notification after 0 acknowledged copies 71ms
+     ✓ retries incomplete promotion through the visible notification after 1 acknowledged copies 62ms
+     ✓ retries incomplete promotion through the visible notification after ambiguous commit acknowledged copies 62ms
+     ✓ keeps incomplete promotion blocked when reconciliation finds changed identity 59ms
+     ✓ keeps incomplete promotion blocked when reconciliation finds additional row 58ms
+     ✓ keeps incomplete promotion blocked when reconciliation finds reordered rows 58ms
+     ✓ keeps incomplete promotion blocked when reconciliation finds deleted acknowledgement 60ms
+     ✓ keeps incomplete promotion blocked when reconciliation finds read failure 60ms
+     ✓ releases incomplete promotion and removes its retry action on new history 33ms
+     ✓ releases incomplete promotion and removes its retry action on A to B to A 29ms
+     ✓ releases incomplete promotion and removes its retry action on unmount 30ms
+     ✓ discards a delayed retry read after an A to B to A boundary 111ms
+     ✓ does not join or publish an older promotion after new history on the same surface 61ms
+     ✓ does not join or publish an older promotion after A to B to A on the same surface 61ms
+     ✓ does not publish a cancelled creation response or invoke inference 61ms
+     ✓ does not attach a pending first-turn creation to a different local history 61ms
+     ✓ rejects an A to B to A response during initialize before inference 9ms
+     ✓ rejects an A to B to A response during create before inference 58ms
+     ✓ rejects an A to B to A response during link before inference 61ms
+     ✓ rechecks an autosave after initialization when the send path has established a conversation 9ms
+     ✓ keeps the new account's state when an old stream completes 59ms
+     ✓ keeps the new account's state when an old local persistence completes 62ms
+     ✓ stops old autosave writes after A to B to A during initialize 12ms
+     ✓ stops old autosave writes after A to B to A during create 61ms
+     ✓ stops old autosave writes after A to B to A during message 66ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/models/__tests__/ChatTldw.stream-metadata.test.ts > ChatTldw stream metadata handoff > captures only the current saved assistant acknowledgement
+AssertionError: expected undefined to be 'saved-user' // Object.is equality
+
+- Expected: 
+"saved-user"
+
++ Received: 
+undefined
+
+ ❯ src/models/__tests__/ChatTldw.stream-metadata.test.ts:31:39
+     29|     for await (const _token of await model.stream([new HumanMessage("H…
+     30|     expect(model.serverMessageId).toBe("saved-assistant")
+     31|     expect(model.userServerMessageId).toBe("saved-user")
+       |                                       ^
+     32| 
+     33|     mocks.streamMessage.mockImplementationOnce(async function* (_messa…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts > saveMessageOnSuccess request scope > retains the server acknowledgement on each matching locally persisted row
+AssertionError: expected { id: 'user-1', …(14) } to match object { id: 'user-1', …(1) }
+(14 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "id": "user-1",
+-   "serverMessageId": "server-user-1",
+  }
+
+ ❯ src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts:111:23
+    109|     }))
+    110|     const userWrite = mocks.saveMessage.mock.calls.find(([message]) =>…
+    111|     expect(userWrite).toMatchObject({ id: "user-1", serverMessageId: "…
+       |                       ^
+    112|   })
+    113| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > keeps tracked character routing anchored to current chat metadata when global character state is stale
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Received: 
+
+  1st vi.fn() call:
+
+  [
+-   ObjectContaining {
+-     "assistantServerMessageId": "assistant-server-1",
+-     "userServerMessageId": "user-server-1",
++   {
++     "assistantMessageId": "generated-id",
++     "assistantParentMessageId": "generated-id",
++     "conversationId": "tracked-chat-1",
++     "fullText": "Tracked reply",
++     "historyId": "history-character",
++     "image": "",
++     "isRegenerate": false,
++     "message": "Hello tracked character",
++     "message_source": "web-ui",
++     "modelId": "deepseek-chat",
++     "reasoning_time_taken": 0,
++     "saveToDb": true,
++     "selectedModel": "deepseek-chat",
++     "serverMessagesAlreadyPersisted": true,
++     "setHistoryId": [Function anonymous],
++     "source": [],
++     "userMessageId": "generated-id",
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:315:34
+    313|     })
+    314| 
+    315|     expect(saveLocalSuccessMock).toHaveBeenCalledWith(expect.objectCon…
+       |                                  ^
+    316|       userServerMessageId: "user-server-1", assistantServerMessageId: …
+    317|     }))
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+AssertionError: expected [ { isBot: false, …(13) }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "clusterId": undefined,
++     "createdAt": 1789525571486,
++     "documents": [],
++     "id": "e69648de-3cc6-4a10-89ef-b9645b61df49",
++     "images": [],
++     "isBot": false,
++     "message": "Same question",
++     "messageType": undefined,
++     "modelId": "llama/test-model",
++     "modelImage": undefined,
++     "modelName": "llama/test-model",
++     "name": "You",
++     "parentMessageId": null,
++     "sources": [],
++   },
++   {
++     "clusterId": undefined,
++     "createdAt": 1789525571486,
++     "documents": [],
++     "id": "1cbffe7c-2df9-4768-b80b-ca789955ba17",
++     "images": [],
++     "isBot": false,
++     "message": "Same question",
++     "messageType": undefined,
++     "modelId": "llama/test-model",
++     "modelImage": undefined,
++     "modelName": "llama/test-model",
++     "name": "You",
++     "parentMessageId": null,
++     "sources": [],
++   },
++ ]
+
+ ❯ src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx:646:80
+    644|     }
+    645|     const visible = useStoreMessageOption.getState().messages
+    646|     expect(visible.filter(row => row.message?.trim() && !row.serverMes…
+       |                                                                                ^
+    647|     const local = mocks.rows.map(row => ({
+    648|       id: String(row.id), serverMessageId: row.serverMessageId as stri…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  4 failed (4)
+      Tests  4 failed | 64 passed (68)
+   Start at  19:26:09
+   Duration  3.94s (transform 895ms, setup 339ms, import 2.28s, tests 2.44s, environment 1.06s)
+

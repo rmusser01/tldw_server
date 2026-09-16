@@ -1809,6 +1809,7 @@ export const useChatActions = ({
     const resolvedAssistantMessageId = generateID()
     const resolvedUserMessageId = !isRegenerate ? generateID() : undefined
     let persistedUserServerMessageId: string | undefined
+    let persistedAssistantServerMessageId: string | undefined
     let activeChatId: string | null = null
     let assistantPersistedToServer = false
     let generateMessageId = resolvedAssistantMessageId
@@ -2553,6 +2554,8 @@ export const useChatActions = ({
             persisted?.message_id ??
             persisted?.id
           const createdAsstVersion = persisted?.version
+          persistedAssistantServerMessageId =
+            createdAsstServerId != null ? String(createdAsstServerId) : undefined
           assistantPersistedToServer = createdAsstServerId != null
           setMessages((prev) =>
             ((prev as any[]).map((m) => {
@@ -2581,6 +2584,10 @@ export const useChatActions = ({
           )
           const savedOutcome = resolveSavedDegradedCharacterPersist(e)
           if (savedOutcome?.saved) {
+            persistedAssistantServerMessageId =
+              savedOutcome.assistantMessageId != null
+                ? String(savedOutcome.assistantMessageId)
+                : undefined
             assistantPersistedToServer = true
             setMessages((prev) =>
               ((prev as any[]).map((m) => {
@@ -2616,6 +2623,8 @@ export const useChatActions = ({
                 id?: string | number
                 version?: number
               } | null
+              persistedAssistantServerMessageId =
+                createdAsst?.id != null ? String(createdAsst.id) : undefined
               assistantPersistedToServer = createdAsst?.id != null
               setMessages((prev) =>
                 ((prev as any[]).map((m) => {
@@ -2700,7 +2709,9 @@ export const useChatActions = ({
         message_source: "web-ui",
         reasoning_time_taken: timetaken,
         userMessageId: resolvedUserMessageId,
+        userServerMessageId: persistedUserServerMessageId,
         assistantMessageId: resolvedAssistantMessageId,
+        assistantServerMessageId: persistedAssistantServerMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
         conversationId: activeChatId,
         saveToDb: true,
@@ -2900,6 +2911,7 @@ export const useChatActions = ({
         isRegenerating: isRegenerate,
         message_source: "web-ui",
         userMessageId: resolvedUserMessageId,
+        userServerMessageId: persistedUserServerMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null
       })

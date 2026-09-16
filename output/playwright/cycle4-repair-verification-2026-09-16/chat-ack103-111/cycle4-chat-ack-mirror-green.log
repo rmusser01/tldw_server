@@ -1,0 +1,16 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx (10 tests) 2899ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting true)  632ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting false)  612ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts (20 tests) 4ms
+ ✓ src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx (15 tests) 4518ms
+     ✓ shows conversation title labels with UUID debug tooltip in list and header  795ms
+     ✓ retries transient conversation label lookups and hydrates once they recover  1604ms
+
+ Test Files  3 passed (3)
+      Tests  45 passed (45)
+   Start at  19:29:48
+   Duration  7.11s (transform 1.69s, setup 200ms, import 2.83s, tests 7.42s, environment 664ms)
+

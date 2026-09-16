@@ -446,4 +446,32 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     expect(chatAuthority.selection.id).toBe("5")
   })
 
+  it.each([false, true])("opens a normally acknowledged saved Chat while retaining the unsent-draft guard (draft=%s)", async (withDraft) => {
+    configureCommonRequests("normal-saved")
+    mockGetChat.mockResolvedValue({ id: "normal-saved", title: "Normal saved chat", character_id: null, assistant_kind: null, assistant_id: null, source: "webui-chat", version: 1 })
+    mockListChatMessages.mockResolvedValue([
+      { id: "server-user", sender: "user", content: "Question" },
+      { id: "server-answer", sender: "assistant", content: "Answer" }
+    ])
+    chatAuthority.selection = null
+    useStoreMessageOption.setState({ historyId: "local-normal", serverChatId: "normal-saved", serverChatCharacterId: null, serverChatMetaLoaded: true, messages: [
+      { id: "local-user", serverMessageId: "server-user", isBot: false, name: "You", message: "Question" },
+      { id: "local-answer", serverMessageId: "server-answer", isBot: true, name: "Assistant", message: "Answer" },
+      ...(withDraft ? [{ id: "unsent", isBot: false, name: "You", message: "Question" }] : [])
+    ], history: [], streaming: false, isProcessing: false })
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
+    fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText(/open linked conversation/i))
+    if (withDraft) {
+      expect(mockMessageWarning).toHaveBeenCalledWith("Finish or save the current chat before opening the linked conversation.")
+      expect(mockNavigate).not.toHaveBeenCalled()
+      expect(mockListChatMessages).not.toHaveBeenCalled()
+    } else {
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+      expect(useStoreMessageOption.getState().serverChatId).toBe("normal-saved")
+      expect(chatAuthority.selection).toBeNull()
+    }
+  })
+
 })

@@ -1,0 +1,95 @@
+{
+  "frozenAt": "2026-09-16T02:50:44.795608+00:00",
+  "base": "f4e9f954d7",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/models/ChatTldw.ts",
+      "sha256": "7148b20f8eca219de7c3d48c81fecdc012d11a2ac97ba816e2aa35af265b0728"
+    },
+    {
+      "path": "apps/packages/ui/src/types/chat-modes.ts",
+      "sha256": "bbc895534d6bc60ebbbbc81172b6f7e2d06ef41f207b4ba36a5295c488baae54"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "sha256": "7657d93af91c37593464f2fcf1fb5b851cba154756f2edb06029347727a81789"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-helper/index.ts",
+      "sha256": "bd8f1a68446cefa94cd8f757347d8a19997756805ad0a155ddf2bb786aade335"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "sha256": "d0fb7d1c165d58080690d195c30b2d29a5368260097c8321cca982de4f76b770"
+    },
+    {
+      "path": "apps/packages/ui/src/db/dexie/server-chat-mirror.ts",
+      "sha256": "3953c0031b421ca1d3a3c679c213ebf98216bdc780dd9d98e8af9397aa0b1008"
+    },
+    {
+      "path": "apps/packages/ui/src/models/__tests__/ChatTldw.stream-metadata.test.ts",
+      "sha256": "0a5d3c76da2198604dd6abcaa5400a510b8ec8170231820aba247687d5616125"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts",
+      "sha256": "79a4adb8d5af1fc92724988ce2d725bf3d796df0eec83d672841138d060ea045"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts",
+      "sha256": "309f42358f8e199cf967ab50382c02206edc59e0ca5ea949103ef77caf340734"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-helper/__tests__/saveMessageOnError.test.ts",
+      "sha256": "1e3fced1af0cabda4715fc1647b4d7656e79e6e3e803b28f07da8814e6c6acb2"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "sha256": "9a3228ff30afc684f684f9a9ac07449048a3a39bc11c7ed62d821d2235153bc3"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "sha256": "f2dd2f2b8a2833d8bf5303a7328344c23366c56642d19079def83a36d67785b8"
+    },
+    {
+      "path": "apps/packages/ui/src/db/dexie/__tests__/server-chat-mirror.test.ts",
+      "sha256": "37afd2f011133f07472dec18c648ebbb81ad6382cd134f054eab9e1746d3a7c3"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx",
+      "sha256": "829942fc07eedabb3ecf20eb93d49bbfa75651d57afc8a6c2da867a41b315a4b"
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/chat.py",
+      "sha256": "db6cb6aa68752aa8fa8eb3eac42da468fec69eecdd9df0fe4af7f4dbbd9a7409"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Chat/chat_service.py",
+      "sha256": "2f5d07fa3689108f5c8ab16cecc876f1f2e328deaa0542251d372696f6f8dc48"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Chat/streaming_pipeline.py",
+      "sha256": "f545b18e2039ea3e0fe771f05d7e188a3a004d7e9cb2b241d2659a605a33ff78"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Chat/streaming_utils.py",
+      "sha256": "224c45ad9821bee5147c28234a88833281461eac5c2bc8bcb5aa149be5e787a5"
+    },
+    {
+      "path": "tldw_Server_API/tests/Chat/integration/test_persona_backed_chat_conversations.py",
+      "sha256": "63681b4ba96d6cf55aa7f5c650c7d897f9428812cd0a4d3185ce08a3d567f558"
+    },
+    {
+      "path": "tldw_Server_API/tests/Chat/unit/test_streaming_utils.py",
+      "sha256": "5d87ba426d948a4f63802974005f56aaf88b7ccc1a6a209c684c57b7f0a1533d"
+    },
+    {
+      "path": "backlog/tasks/task-13260.44 - Prevent-duplicate-visible-user-messages-after-saved-Chat-reload.md",
+      "sha256": "bbfe926dff30aa877ea5bfd2d4a537110f9ca3e2dc38d7b7abea8c7e771cabf4"
+    },
+    {
+      "path": "backlog/tasks/task-13260.51 - Restore-normal-saved-Chat-navigation-from-its-Note-backlink.md",
+      "sha256": "0257c9cdb8142e1e42d817337316bd90c1e236497eb17e6e912b00bb1f78be59"
+    }
+  ],
+  "reviewCorrection": "Two confirmed P2s: empty image sentinels; Character successful fallback assistant acknowledgement."
+}

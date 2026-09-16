@@ -88,6 +88,7 @@ export const saveMessageOnError = async ({
   modelId,
   userModelId,
   userMessageId,
+  userServerMessageId,
   assistantMessageId,
   userParentMessageId,
   assistantParentMessageId,
@@ -126,6 +127,7 @@ export const saveMessageOnError = async ({
   modelId?: string
   userModelId?: string
   userMessageId?: string
+  userServerMessageId?: string
   assistantMessageId?: string
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
@@ -208,6 +210,7 @@ export const saveMessageOnError = async ({
         if (shouldSaveUser) {
           await saveMessage({
             id: userMessageId,
+            serverMessageId: userServerMessageId,
             history_id: targetHistoryId,
             name: selectedModel,
             role: "user",
@@ -269,6 +272,7 @@ export const saveMessageOnError = async ({
       if (!isRegenerating && !isContinue) {
         await saveMessage({
           id: userMessageId,
+          serverMessageId: userServerMessageId,
           history_id: historyId,
           name: selectedModel,
           role: "user",
@@ -319,6 +323,7 @@ export const saveMessageOnError = async ({
       if (!isRegenerating) {
         await saveMessage({
           id: userMessageId,
+          serverMessageId: userServerMessageId,
           history_id: newHistoryId.id,
           name: selectedModel,
           role: "user",
@@ -369,6 +374,7 @@ export const saveMessageOnError = async ({
       if (!isRegenerating) {
         await saveMessage({
           id: userMessageId,
+          serverMessageId: userServerMessageId,
           history_id: historyId,
           name: selectedModel,
           role: "user",
@@ -415,6 +421,7 @@ export const saveMessageOnError = async ({
       if (!isRegenerating) {
         await saveMessage({
           id: userMessageId,
+          serverMessageId: userServerMessageId,
           history_id: newHistoryId.id,
           name: selectedModel,
           role: "user",
@@ -473,6 +480,7 @@ export const saveMessageOnSuccess = async ({
   modelId,
   userModelId,
   userMessageId,
+  userServerMessageId,
   assistantMessageId,
   assistantServerMessageId,
   userParentMessageId,
@@ -511,6 +519,7 @@ export const saveMessageOnSuccess = async ({
   modelId?: string
   userModelId?: string
   userMessageId?: string
+  userServerMessageId?: string
   assistantMessageId?: string
   assistantServerMessageId?: string
   userParentMessageId?: string | null
@@ -556,6 +565,7 @@ export const saveMessageOnSuccess = async ({
       if (!historyId || (!isRegenerate && !isContinue)) {
         await saveMessage({
           id: userMessageId,
+          serverMessageId: userServerMessageId,
           history_id: targetHistoryId,
           name: selectedModel,
           role: "user",

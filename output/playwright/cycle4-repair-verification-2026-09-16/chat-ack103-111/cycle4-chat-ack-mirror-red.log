@@ -1,0 +1,72 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/db/dexie/__tests__/server-chat-mirror.test.ts (20 tests | 1 failed) 13ms
+     × recovers a legacy user only through its acknowledged reply parent and keeps equal-text drafts 6ms
+     ✓ keeps ambiguous legacy work: missing-parent 1ms
+     ✓ keeps ambiguous legacy work: edited-user 0ms
+     ✓ keeps ambiguous legacy work: already-mirrored 0ms
+     ✓ keeps ambiguous legacy work: wrong-reply 0ms
+     ✓ keeps ambiguous legacy work: conflicting-parent 0ms
+     ✓ keeps identical conversation IDs in different owners' histories 0ms
+     ✓ adopts only the explicitly validated current legacy history 0ms
+     ✓ leaves an unvalidated legacy history untouched 0ms
+     ✓ does not repurpose an owned history from another conversation 0ms
+     ✓ fills a nonempty old mirror, retaining canonical IDs across repeated reads 1ms
+     ✓ retains normalized metadata through mirror storage 0ms
+     ✓ adds missing replies without replacing an unsynced visible draft or a newer edit 0ms
+     ✓ preserves unsynced drafts and newer acknowledged rows 0ms
+     ✓ retains an unknown-version local edit when acknowledging an old visible row 0ms
+     ✓ retains an unknown-version local edit in the old persistent mirror 0ms
+     ✓ never moves another history's global message ID 0ms
+     ✓ refuses a qualified-ID collision with another history 1ms
+     ✓ rejects a wrong-owner mirror write 0ms
+     ✓ rejects a aborted mirror write 0ms
+ ✓ src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx (15 tests) 4302ms
+     ✓ shows conversation title labels with UUID debug tooltip in list and header  539ms
+     ✓ retries transient conversation label lookups and hydrates once they recover  1599ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > recovers a legacy user only through its acknowledged reply parent and keeps equal-text drafts
+AssertionError: expected [ [ 'local-q', undefined ], …(3) ] to deeply equal [ [ 'local-q', 'question' ], …(2) ]
+
+- Expected
++ Received
+
+  [
+    [
+      "local-q",
+-     "question",
++     undefined,
+    ],
+    [
+      "local-a",
+      "answer",
+    ],
+    [
+      "draft",
+      undefined,
++   ],
++   [
++     "alice:server:question",
++     "question",
+    ],
+  ]
+
+ ❯ src/db/dexie/__tests__/server-chat-mirror.test.ts:34:78
+     32|     const remote = [incoming("question", "Repeat"), { ...incoming("ans…
+     33|     await reconcileServerChatMirror({ historyId: "alice", chatId: "cha…
+     34|     expect([...state.messages.values()].map(r => [r.id, r.serverMessag…
+       |                                                                              ^
+     35|       ["local-q", "question"], ["local-a", "answer"], ["draft", undefi…
+     36|     ])
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 34 passed (35)
+   Start at  19:28:57
+   Duration  7.64s (transform 1.56s, setup 196ms, import 2.97s, tests 4.31s, environment 581ms)
+

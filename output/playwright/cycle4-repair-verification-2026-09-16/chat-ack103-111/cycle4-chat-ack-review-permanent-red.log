@@ -1,0 +1,169 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/db/dexie/__tests__/server-chat-mirror.test.ts (24 tests | 1 failed) 14ms
+     ✓ recovers an anchored legacy user with images [] and keeps equal-text drafts 2ms
+     × recovers an anchored legacy user with images [ '' ] and keeps equal-text drafts 5ms
+     ✓ preserves anchored work when substantive images differ ([ 'data:image/png;base64,local' ] / []) 1ms
+     ✓ preserves anchored work when substantive images differ ([ '' ] / [ 'data:image/png;base64,remote' ]) 0ms
+     ✓ preserves anchored work when substantive images differ ([ 'data:image/png;base64,local' ] / [ 'data:image/png;base64,remote' ]) 0ms
+     ✓ keeps ambiguous legacy work: missing-parent 0ms
+     ✓ keeps ambiguous legacy work: edited-user 0ms
+     ✓ keeps ambiguous legacy work: already-mirrored 0ms
+     ✓ keeps ambiguous legacy work: wrong-reply 0ms
+     ✓ keeps ambiguous legacy work: conflicting-parent 0ms
+     ✓ keeps identical conversation IDs in different owners' histories 0ms
+     ✓ adopts only the explicitly validated current legacy history 0ms
+     ✓ leaves an unvalidated legacy history untouched 0ms
+     ✓ does not repurpose an owned history from another conversation 0ms
+     ✓ fills a nonempty old mirror, retaining canonical IDs across repeated reads 0ms
+     ✓ retains normalized metadata through mirror storage 0ms
+     ✓ adds missing replies without replacing an unsynced visible draft or a newer edit 0ms
+     ✓ preserves unsynced drafts and newer acknowledged rows 0ms
+     ✓ retains an unknown-version local edit when acknowledging an old visible row 0ms
+     ✓ retains an unknown-version local edit in the old persistent mirror 0ms
+     ✓ never moves another history's global message ID 0ms
+     ✓ refuses a qualified-ID collision with another history 1ms
+     ✓ rejects a wrong-owner mirror write 0ms
+     ✓ rejects a aborted mirror write 0ms
+stderr | src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from fallback success to local persistence
+Failed to persist assistant message via completions/persist: Error: Persist endpoint unavailable
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:306:9
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1026:60
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+
+stderr | src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from degraded success to local persistence
+Failed to persist assistant message via completions/persist: Error: Saved with validation warning
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:307:23
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1026:60
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21) {
+  status: 503,
+  detail: {
+    code: 'persist_validation_degraded',
+    saved: true,
+    assistant_message_id: 'fallback-assistant'
+  }
+}
+
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx (15 tests | 2 failed) 37ms
+     × forwards the confirmed assistant ID from fallback success to local persistence 17ms
+     × forwards the confirmed assistant ID from degraded success to local persistence 2ms
+     ✓ keeps tracked character routing anchored to current chat metadata when global character state is stale 2ms
+     ✓ rebinds a greeting to the newly created conversation after a failed session 2ms
+     ✓ handles emote commands without sending chat 1ms
+     ✓ uses manual visual identity override when resolving assistant message metadata 1ms
+     ✓ does not let stale overlay assistant state override the active character chat 1ms
+     ✓ honors an explicit tracked character switch over the current chat metadata 1ms
+     ✓ reuses the latest store character chat when greeting persistence updates before the send closure 1ms
+     ✓ uses the latest store character id when the hook prop still points at another character 1ms
+     ✓ passes workspace scope through when creating a character-backed chat 2ms
+     ✓ strips explicit streaming emote directives and persists emote events 2ms
+     ✓ preserves explicit emote metadata when recovering a failed stream 1ms
+     ✓ does not duplicate recovery persistence when saved-degraded includes emote metadata 1ms
+     ✓ sends emote metadata when normal persist falls back to addChatMessage 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > recovers an anchored legacy user with images [ '' ] and keeps equal-text drafts
+AssertionError: expected [ [ 'local-q', undefined ], …(3) ] to deeply equal [ [ 'local-q', 'question' ], …(2) ]
+
+- Expected
++ Received
+
+  [
+    [
+      "local-q",
+-     "question",
++     undefined,
+    ],
+    [
+      "local-a",
+      "answer",
+    ],
+    [
+      "draft",
+      undefined,
++   ],
++   [
++     "alice:server:question",
++     "question",
+    ],
+  ]
+
+ ❯ src/db/dexie/__tests__/server-chat-mirror.test.ts:34:78
+     32|     const remote = [incoming("question", "Repeat"), { ...incoming("ans…
+     33|     await reconcileServerChatMirror({ historyId: "alice", chatId: "cha…
+     34|     expect([...state.messages.values()].map(r => [r.id, r.serverMessag…
+       |                                                                              ^
+     35|       ["local-q", "question"], ["local-a", "answer"], ["draft", undefi…
+     36|     ])
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from fallback success to local persistence
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from degraded success to local persistence
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Received: 
+
+  1st vi.fn() call:
+
+  [
+-   ObjectContaining {
+-     "assistantServerMessageId": "fallback-assistant",
++   {
++     "assistantMessageId": "generated-id",
++     "assistantParentMessageId": "generated-id",
++     "assistantServerMessageId": undefined,
++     "conversationId": "tracked-chat-1",
++     "fullText": "Tracked reply",
++     "historyId": "history-character",
++     "image": "",
++     "isRegenerate": false,
++     "message": "Question",
++     "message_source": "web-ui",
++     "modelId": "deepseek-chat",
++     "reasoning_time_taken": 0,
++     "saveToDb": true,
++     "selectedModel": "deepseek-chat",
+      "serverMessagesAlreadyPersisted": true,
++     "setHistoryId": [Function anonymous],
++     "source": [],
++     "userMessageId": "generated-id",
+      "userServerMessageId": "user-server-1",
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:317:34
+    315|     await act(async () => { await result.current.onSubmit({ message: "…
+    316|     expect(addChatMessageMock).toHaveBeenCalledTimes(outcome === "fall…
+    317|     expect(saveLocalSuccessMock).toHaveBeenCalledWith(expect.objectCon…
+       |                                  ^
+    318|       userServerMessageId: "user-server-1", assistantServerMessageId: …
+    319|       serverMessagesAlreadyPersisted: true
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  3 failed | 36 passed (39)
+   Start at  19:48:22
+   Duration  2.01s (transform 788ms, setup 318ms, import 1.50s, tests 51ms, environment 713ms)
+

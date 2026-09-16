@@ -68,6 +68,7 @@ export class ChatTldw {
   saveToDb?: boolean
   conversationId?: string
   serverMessageId?: string
+  userServerMessageId?: string
   historyMessageLimit?: number
   historyMessageOrder?: string
   slashCommandInjectionMode?: string
@@ -124,6 +125,7 @@ export class ChatTldw {
   ): Promise<AsyncGenerator<any, void, unknown>> {
     const { signal, callbacks } = options || {}
     this.serverMessageId = undefined
+    this.userServerMessageId = undefined
 
     const tldwMessages = this.convertToTldwMessages(messages)
     const toolCalls: ToolCall[] = []
@@ -181,6 +183,11 @@ export class ChatTldw {
       if (this.saveToDb !== false && typeof chunk?.tldw_message_id === "string") {
         const savedMessageId = chunk.tldw_message_id.trim()
         if (savedMessageId) this.serverMessageId = savedMessageId
+      }
+
+      if (this.saveToDb !== false && typeof chunk?.tldw_user_message_id === "string") {
+        const savedUserMessageId = chunk.tldw_user_message_id.trim()
+        if (savedUserMessageId) this.userServerMessageId = savedUserMessageId
       }
 
       const loopEvent = extractChatLoopEvent(chunk)

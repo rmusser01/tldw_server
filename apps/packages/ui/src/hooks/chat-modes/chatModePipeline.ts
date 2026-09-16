@@ -280,6 +280,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     regenerateVariants
   }
 
+  let modelClient: Awaited<ReturnType<typeof pageAssistModel>> | undefined
   let fullText = ""
   let contentToSave = ""
   let timetaken = 0
@@ -387,7 +388,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
               message: pendingStreamingText,
               reasoning_time_taken: pendingReasoningTime
             })
-          : msg
+          : msg.id === resolvedUserMessageId && modelClient?.userServerMessageId
+            ? { ...msg, serverMessageId: modelClient.userServerMessageId }
+            : msg
       )
     )
   }
@@ -658,7 +661,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     const sources = promptData.sources ?? []
     const humanMessage = promptData.humanMessage
 
-    const modelClient = await pageAssistModel({
+    modelClient = await pageAssistModel({
       model: selectedModel,
       toolChoice,
       conversationId,
@@ -837,7 +840,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                   : {})
               })
             )
-          : msg
+          : msg.id === resolvedUserMessageId && modelClient?.userServerMessageId
+            ? { ...msg, serverMessageId: modelClient.userServerMessageId }
+            : msg
       )
     )
 
@@ -868,6 +873,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         modelId: resolvedModelId,
         userModelId,
         userMessageId: resolvedUserMessageId,
+        userServerMessageId: modelClient?.userServerMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         userParentMessageId: userParentMessageId ?? null,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
@@ -916,6 +922,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       modelId: resolvedModelId,
       userModelId,
       userMessageId: resolvedUserMessageId,
+      userServerMessageId: modelClient?.userServerMessageId,
       assistantMessageId: resolvedAssistantMessageId,
       userParentMessageId: userParentMessageId ?? null,
       assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
@@ -1005,7 +1012,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                 }
               })
             )
-          : msg
+          : msg.id === resolvedUserMessageId && modelClient?.userServerMessageId
+            ? { ...msg, serverMessageId: modelClient.userServerMessageId }
+            : msg
       )
     )
 
@@ -1028,6 +1037,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         modelId: resolvedModelId,
         userModelId,
         userMessageId: resolvedUserMessageId,
+        userServerMessageId: modelClient?.userServerMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         userParentMessageId: userParentMessageId ?? null,
         assistantParentMessageId: assistantParentMessageId ?? null,

@@ -1,0 +1,10 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts (25 tests | 24 skipped) 3ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 24 skipped (25)
+   Start at  19:48:58
+   Duration  1.06s (transform 106ms, setup 141ms, import 96ms, tests 3ms, environment 626ms)
+

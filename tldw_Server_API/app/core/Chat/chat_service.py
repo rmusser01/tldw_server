@@ -180,6 +180,7 @@ from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
 from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
     discover_openrouter_models as _discover_openrouter_models_shared,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import resolve_provider_model_value
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
@@ -955,9 +956,8 @@ async def _resolve_assistant_context_for_chat(
     return character_card, character_db_id, existing_conversation, assistant_context
 
 
-@lru_cache(maxsize=64)
-def _configured_models_for_provider_cached(provider: str) -> tuple[str, ...]:
-    """Return models explicitly configured for a provider in config files."""
+def _configured_models_for_provider(provider: str) -> tuple[str, ...]:
+    """Read current models using the same config/env precedence as discovery."""
     provider_key = (provider or "").strip().lower()
     mapping = _PROVIDER_MODEL_CONFIG_FIELDS.get(provider_key)
     if not mapping:
@@ -965,18 +965,17 @@ def _configured_models_for_provider_cached(provider: str) -> tuple[str, ...]:
 
     section, field = mapping
     try:
-        if not _config or not _config.has_section(section):
-            return ()
-        raw_value = _config.get(section, field, fallback="")
+        raw_value = resolve_provider_model_value(
+            provider_key, load_comprehensive_config(), section, field
+        )
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         return ()
 
     return tuple(_split_model_list(raw_value))
 
 
-@lru_cache(maxsize=64)
 def known_models_for_provider_cached(provider: str) -> tuple[str, ...]:
-    """Return known model IDs for a provider from catalog + configured values."""
+    """Combine cached sources without retaining inventory across config refreshes."""
     provider_key = (provider or "").strip().lower()
     if not provider_key:
         return ()
@@ -990,7 +989,7 @@ def known_models_for_provider_cached(provider: str) -> tuple[str, ...]:
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         pass
 
-    for model_name in _configured_models_for_provider_cached(provider_key):
+    for model_name in _configured_models_for_provider(provider_key):
         normalized = str(model_name).strip()
         if normalized:
             known.add(normalized)
@@ -1697,10 +1696,6 @@ def invalidate_model_alias_caches() -> None:
         _provider_has_model_cached.cache_clear()
     with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
         _find_catalog_providers_for_model_cached.cache_clear()
-    with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-        _configured_models_for_provider_cached.cache_clear()
-    with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-        known_models_for_provider_cached.cache_clear()
     with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
         _clear_openrouter_model_cache_shared()
 
@@ -4343,6 +4338,7 @@ async def build_context_and_messages(
                             conv_id,
                         )
 
+    persisted_user_message_id: str | None = None
     current_turn: list[dict[str, Any]] = []
     for msg_dict in request_messages[overlap_cut:]:
         role = msg_dict.get("role")
@@ -4351,7 +4347,9 @@ async def build_context_and_messages(
             # Persist assistant sender as sanitized character name
             msg_for_db["name"] = sanitize_sender_name(character_card.get("name", "Assistant"))
         if should_persist:
-            await save_message_fn(chat_db, conv_id, msg_for_db, use_transaction=True)
+            saved_message_id = await save_message_fn(chat_db, conv_id, msg_for_db, use_transaction=True)
+            if role == "user":
+                persisted_user_message_id = str(saved_message_id) if saved_message_id else None
         msg_for_llm = msg_dict.copy()
         if role == "assistant" and character_card and character_card.get("name"):
             name = sanitize_sender_name(character_card.get("name"))
@@ -4374,6 +4372,7 @@ async def build_context_and_messages(
             continuation_metadata["assistant_prefill_applied"] = True
 
     if runtime_state is not None:
+        runtime_state["user_message_id"] = persisted_user_message_id
         runtime_state["assistant_context"] = dict(assistant_context)
         if continuation_spec and continuation_metadata is not None:
             runtime_state["tldw_continuation"] = continuation_metadata
@@ -4675,6 +4674,7 @@ async def execute_streaming_call(
     chat_db: Any,
     save_message_fn: Callable[..., Any],
     system_message_id: str | None = None,
+    user_message_id: str | None = None,
     audit_service: Any | None,
     audit_context: Any | None,
     client_id: str,
@@ -4751,6 +4751,8 @@ async def execute_streaming_call(
         if CHAT_STREAM_INCLUDE_METADATA and final_conversation_id:
             payload["conversation_id"] = final_conversation_id
             payload["tldw_conversation_id"] = final_conversation_id
+            if user_message_id:
+                payload["tldw_user_message_id"] = user_message_id
             if system_message_id:
                 payload["tldw_system_message_id"] = system_message_id
             if normalized_continuation_metadata:
@@ -5768,6 +5770,8 @@ async def execute_streaming_call(
                     "conversation_id": final_conversation_id,
                     "tldw_conversation_id": final_conversation_id,
                 }
+                if user_message_id:
+                    metadata_payload["tldw_user_message_id"] = user_message_id
                 if system_message_id:
                     metadata_payload["tldw_system_message_id"] = system_message_id
                 if normalized_continuation_metadata:
@@ -6017,6 +6021,7 @@ async def execute_streaming_call(
                     text_transform=_out_transform,
                     before_success_callback=_await_mandatory_moderation_audits,
                     system_message_id=system_message_id,
+                    user_message_id=user_message_id,
                     continuation_metadata=normalized_continuation_metadata,
                 ),
                 stream_factory=create_streaming_response_with_timeout,
@@ -6131,6 +6136,7 @@ async def _execute_non_stream_call_impl(
     chat_db: Any,
     save_message_fn: Callable[..., Any],
     system_message_id: str | None = None,
+    user_message_id: str | None = None,
     audit_service: Any | None,
     audit_context: Any | None,
     client_id: str,
@@ -7098,6 +7104,8 @@ async def _execute_non_stream_call_impl(
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 pass
         encoded_payload["tldw_conversation_id"] = final_conversation_id
+        if user_message_id:
+            encoded_payload["tldw_user_message_id"] = user_message_id
         if assistant_message_id:
             encoded_payload["tldw_message_id"] = assistant_message_id
         if system_message_id:

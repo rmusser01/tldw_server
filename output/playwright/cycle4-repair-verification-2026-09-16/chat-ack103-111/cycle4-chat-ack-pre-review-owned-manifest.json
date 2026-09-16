@@ -1,0 +1,94 @@
+{
+  "frozenAt": "2026-09-16T02:40:07.053512+00:00",
+  "base": "f4e9f954d7",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/models/ChatTldw.ts",
+      "sha256": "7148b20f8eca219de7c3d48c81fecdc012d11a2ac97ba816e2aa35af265b0728"
+    },
+    {
+      "path": "apps/packages/ui/src/types/chat-modes.ts",
+      "sha256": "bbc895534d6bc60ebbbbc81172b6f7e2d06ef41f207b4ba36a5295c488baae54"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "sha256": "7657d93af91c37593464f2fcf1fb5b851cba154756f2edb06029347727a81789"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-helper/index.ts",
+      "sha256": "bd8f1a68446cefa94cd8f757347d8a19997756805ad0a155ddf2bb786aade335"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "sha256": "5f88cb7260bab5fc51aab6448b3a5e3759101a8b3d3ef88f601208a49d85e030"
+    },
+    {
+      "path": "apps/packages/ui/src/db/dexie/server-chat-mirror.ts",
+      "sha256": "fe664be64c02aeaa42251e1848d71d986f4c142465ee3734735c0c55b5d243c3"
+    },
+    {
+      "path": "apps/packages/ui/src/models/__tests__/ChatTldw.stream-metadata.test.ts",
+      "sha256": "0a5d3c76da2198604dd6abcaa5400a510b8ec8170231820aba247687d5616125"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts",
+      "sha256": "79a4adb8d5af1fc92724988ce2d725bf3d796df0eec83d672841138d060ea045"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts",
+      "sha256": "309f42358f8e199cf967ab50382c02206edc59e0ca5ea949103ef77caf340734"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-helper/__tests__/saveMessageOnError.test.ts",
+      "sha256": "1e3fced1af0cabda4715fc1647b4d7656e79e6e3e803b28f07da8814e6c6acb2"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "sha256": "9a3228ff30afc684f684f9a9ac07449048a3a39bc11c7ed62d821d2235153bc3"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "sha256": "1ea249cefa9f3ea4c8bd3b44a3121e2374dec6f89769966e93e1560a001971b7"
+    },
+    {
+      "path": "apps/packages/ui/src/db/dexie/__tests__/server-chat-mirror.test.ts",
+      "sha256": "2d327818b5fe84c195879d0552bebbafae22ec14a43476ab5dfb3384ab6d62f0"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx",
+      "sha256": "829942fc07eedabb3ecf20eb93d49bbfa75651d57afc8a6c2da867a41b315a4b"
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/chat.py",
+      "sha256": "db6cb6aa68752aa8fa8eb3eac42da468fec69eecdd9df0fe4af7f4dbbd9a7409"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Chat/chat_service.py",
+      "sha256": "2f5d07fa3689108f5c8ab16cecc876f1f2e328deaa0542251d372696f6f8dc48"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Chat/streaming_pipeline.py",
+      "sha256": "f545b18e2039ea3e0fe771f05d7e188a3a004d7e9cb2b241d2659a605a33ff78"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Chat/streaming_utils.py",
+      "sha256": "224c45ad9821bee5147c28234a88833281461eac5c2bc8bcb5aa149be5e787a5"
+    },
+    {
+      "path": "tldw_Server_API/tests/Chat/integration/test_persona_backed_chat_conversations.py",
+      "sha256": "63681b4ba96d6cf55aa7f5c650c7d897f9428812cd0a4d3185ce08a3d567f558"
+    },
+    {
+      "path": "tldw_Server_API/tests/Chat/unit/test_streaming_utils.py",
+      "sha256": "5d87ba426d948a4f63802974005f56aaf88b7ccc1a6a209c684c57b7f0a1533d"
+    },
+    {
+      "path": "backlog/tasks/task-13260.44 - Prevent-duplicate-visible-user-messages-after-saved-Chat-reload.md",
+      "sha256": "d44f0a16d882059e1cc0d0c8164a539fc5a748a7251deaa2a186565ba776f5fb"
+    },
+    {
+      "path": "backlog/tasks/task-13260.51 - Restore-normal-saved-Chat-navigation-from-its-Note-backlink.md",
+      "sha256": "c223e2b0218066b0cecac9fc02d27644112116251414ba6bd782d75202e4a754"
+    }
+  ]
+}

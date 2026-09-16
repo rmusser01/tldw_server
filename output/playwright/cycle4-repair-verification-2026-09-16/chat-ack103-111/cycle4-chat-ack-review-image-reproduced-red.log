@@ -1,0 +1,69 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/db/dexie/__tests__/server-chat-mirror.test.ts (21 tests | 1 failed | 20 skipped) 5ms
+     ↓ recovers a legacy user only through its acknowledged reply parent and keeps equal-text drafts
+     ↓ keeps ambiguous legacy work: missing-parent
+     ↓ keeps ambiguous legacy work: edited-user
+     ↓ keeps ambiguous legacy work: already-mirrored
+     ↓ keeps ambiguous legacy work: wrong-reply
+     ↓ keeps ambiguous legacy work: conflicting-parent
+     ↓ keeps identical conversation IDs in different owners' histories
+     ↓ adopts only the explicitly validated current legacy history
+     ↓ leaves an unvalidated legacy history untouched
+     ↓ does not repurpose an owned history from another conversation
+     ↓ fills a nonempty old mirror, retaining canonical IDs across repeated reads
+     ↓ retains normalized metadata through mirror storage
+     ↓ adds missing replies without replacing an unsynced visible draft or a newer edit
+     ↓ preserves unsynced drafts and newer acknowledged rows
+     ↓ retains an unknown-version local edit when acknowledging an old visible row
+     ↓ retains an unknown-version local edit in the old persistent mirror
+     ↓ never moves another history's global message ID
+     ↓ refuses a qualified-ID collision with another history
+     ↓ rejects a wrong-owner mirror write
+     ↓ rejects a aborted mirror write
+     × independent legacy text-only save shape retains its anchored canonical identity 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > independent legacy text-only save shape retains its anchored canonical identity
+AssertionError: expected [ [ 'local-q', undefined ], …(3) ] to deeply equal [ [ 'local-q', 'question' ], …(2) ]
+
+- Expected
++ Received
+
+  [
+    [
+      "local-q",
+-     "question",
++     undefined,
+    ],
+    [
+      "local-a",
+      "answer",
+    ],
+    [
+      "draft",
+      undefined,
++   ],
++   [
++     "alice:server:question",
++     "question",
+    ],
+  ]
+
+ ❯ src/db/dexie/__tests__/server-chat-mirror.test.ts:152:78
+    140|     expect(state.messages.size).toBe(0)
+    141|   })
+    142| })
+       |   ^
+    143| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 20 skipped (21)
+   Start at  19:47:01
+   Duration  809ms (transform 77ms, setup 155ms, import 63ms, tests 5ms, environment 510ms)
+

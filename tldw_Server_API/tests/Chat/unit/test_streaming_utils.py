@@ -1789,6 +1789,7 @@ class TestSafeStreamGenerator:
         """Test stream metadata messages."""
         handler = StreamingResponseHandler("conv_123", "gpt-4")
         handler.system_message_id = "sys_123"
+        handler.user_message_id = "user_123"
         handler.continuation_metadata = {
             "applied": True,
             "mode": "branch",
@@ -1813,6 +1814,7 @@ class TestSafeStreamGenerator:
         assert len(start_lines) == 1
         start_payload = json.loads(start_lines[0][6:])
         assert start_payload.get("tldw_system_message_id") == "sys_123"
+        assert start_payload.get("tldw_user_message_id") == "user_123"
         assert start_payload.get("tldw_conversation_id") == "conv_123"
         assert start_payload.get("tldw_continuation", {}).get("mode") == "branch"
 
@@ -1825,6 +1827,7 @@ class TestSafeStreamGenerator:
         end_payload = json.loads(end_lines[0][6:])
         assert end_payload.get("tldw_message_id") == "msg_456"
         assert end_payload.get("tldw_system_message_id") == "sys_123"
+        assert end_payload.get("tldw_user_message_id") == "user_123"
         assert end_payload.get("tldw_conversation_id") == "conv_123"
         assert end_payload.get("tldw_continuation", {}).get("from_message_id") == "anchor-123"
 
