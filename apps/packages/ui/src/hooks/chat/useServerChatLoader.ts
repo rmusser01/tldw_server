@@ -1,3 +1,4 @@
+import { waitForChatPromotion } from "@/services/pending-chat-promotion"
 import React from "react"
 import { formatToMessage } from "@/db/dexie/helpers"
 import { shallow } from "zustand/shallow"
@@ -779,6 +780,8 @@ export const useServerChatLoader = ({
           snapshot.scopeInvalidatedSignal.addEventListener("abort", () => controller.abort(), { once: true })
           if (snapshot.scopeSignal.aborted || !canCommitCurrentLoad()) return
           stopWatchingAuthority = watchServerChatLoadAuthority(snapshot, controller)
+          await waitForChatPromotion(setServerChatId, useStoreMessageOption.getState().historyId, snapshot, { waitUntilSaved: true })
+          if (!canCommitCurrentLoad()) return
 
           let assistantName = "Assistant"
           let chatTitle = serverChatTitle || ""
@@ -1032,7 +1035,7 @@ export const useServerChatLoader = ({
           }
           const active = streamingRef.current || processingRef.current
           if (!active) {
-            const merged = reconcileServerChatMessages(messagesRef.current, mappedMessages)
+            const merged = reconcileServerChatMessages(useStoreMessageOption.getState().messages, mappedMessages)
             setHistory(merged.map(message => ({ role: message.role, content: message.message, image: message.images?.[0], messageType: message.messageType })))
             setMessages(merged)
           }
@@ -1091,6 +1094,7 @@ export const useServerChatLoader = ({
                 const mirror = await reconcileServerChatMirror({
                   historyId: localHistoryId, chatId: serverChatId,
                   ownerKey: serverChatMirrorOwnerKey(snapshot), messages: mappedMessages,
+                  localMessages: useStoreMessageOption.getState().messages,
                   signal: snapshot.scopeSignal
                 })
                 if (!canCommitCurrentLoad() || streamingRef.current || processingRef.current ||

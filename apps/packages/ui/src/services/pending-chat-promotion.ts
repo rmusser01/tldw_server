@@ -5,6 +5,8 @@ type PendingPromotion = {
   scope: Promise<ServicePromptSnapshot>
   snapshot?: ServicePromptSnapshot
   completion: Promise<void>
+  saved: Promise<void>
+  finishWaiting: () => void
   failed: boolean
   error?: unknown
   promote: (snapshot: ServicePromptSnapshot) => Promise<void>
@@ -35,6 +37,7 @@ export const clearChatPromotion = (owner: object, historyId: string | null) => {
   if (!pending || pending.historyId !== historyId) return
   pendingPromotions.delete(owner)
   pending.abort()
+  pending.finishWaiting()
   pending.snapshot?.release()
   pending.onComplete()
 }
@@ -53,6 +56,7 @@ const runPromotion = (
       if (pendingPromotions.get(owner) === pending)
         pendingPromotions.delete(owner)
       snapshot.release()
+      pending.finishWaiting()
       pending.onComplete()
     })
     .catch((error) => {
@@ -60,6 +64,7 @@ const runPromotion = (
         if (pendingPromotions.get(owner) === pending)
           pendingPromotions.delete(owner)
         pending.snapshot?.release()
+        pending.finishWaiting()
         throw error
       }
       pending.failed = true
@@ -77,7 +82,13 @@ export const trackChatPromotion = (
   promote: PendingPromotion["promote"],
   options: Pick<PendingPromotion, "abort" | "onFailure" | "onComplete">
 ): Promise<void> => {
+  const previous = pendingPromotions.get(owner)
+  if (previous) clearChatPromotion(owner, previous.historyId)
+  let finishWaiting!: () => void
+  const saved = new Promise<void>(resolve => { finishWaiting = resolve })
   const pending: PendingPromotion = {
+    saved,
+    finishWaiting,
     historyId,
     scope,
     promote,
@@ -130,7 +141,8 @@ const waitWithoutCancellingOwner = <T>(
 export const waitForChatPromotion = async (
   owner: object,
   historyId: string | null,
-  snapshot: ServicePromptSnapshot
+  snapshot: ServicePromptSnapshot,
+  options?: { waitUntilSaved?: boolean }
 ): Promise<void> => {
   snapshot.scopeSignal.throwIfAborted()
   const pending = pendingPromotions.get(owner)
@@ -151,7 +163,8 @@ export const waitForChatPromotion = async (
     ownerScope.scopeKey !== snapshot.scopeKey
   )
     return
-  if (pending.failed) pending.onFailure(pending.error, false)
-  await waitWithoutCancellingOwner(pending.completion, snapshot.scopeSignal)
+  if (pending.failed && !options?.waitUntilSaved) pending.onFailure(pending.error, false)
+  await waitWithoutCancellingOwner(options?.waitUntilSaved ? pending.saved : pending.completion, snapshot.scopeSignal)
+  if (options?.waitUntilSaved) ownerScope.scopeSignal.throwIfAborted()
   snapshot.scopeSignal.throwIfAborted()
 }

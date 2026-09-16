@@ -40,6 +40,31 @@ export const linkServerChatMirror = async ({
   return id
 })
 
+/** Persist a receipt only onto the captured source row; edits are never replaced. */
+export const acknowledgePromotedChatMessage = async ({
+  historyId, chatId, ownerKey, source, serverMessageId, version, signal, isCurrent
+}: {
+  historyId: string | null; chatId: string; ownerKey: string; source: ChatMessage
+  serverMessageId: string; version?: number; signal: AbortSignal; isCurrent: () => boolean
+}): Promise<void> => {
+  if (!historyId || !source.id) return
+  await runChatPersistenceTransaction(signal, async () => {
+    const history = await db.chatHistories.get(historyId)
+    if (!isCurrent()) throw createServicePromptScopeChangedError()
+    if (!history) return
+    if ((history.server_chat_id && history.server_chat_id !== chatId) ||
+      (history.server_scope_key && history.server_scope_key !== ownerKey)) throw createServicePromptScopeChangedError()
+    const row = await db.messages.get(source.id!)
+    if (!isCurrent()) throw createServicePromptScopeChangedError()
+    if (!row) return // A synthetic greeting has no durable row until the first mirror.
+    if (row.history_id !== historyId || row.role !== (source.role || (source.isBot ? "assistant" : "user")) ||
+      (row.serverMessageId && row.serverMessageId !== serverMessageId)) throw createServicePromptScopeChangedError()
+    await db.messages.put({ ...row, serverMessageId,
+      serverMessageVersion: row.serverMessageVersion ?? (row.content === source.message ? version : undefined) })
+    if (!isCurrent()) throw createServicePromptScopeChangedError()
+  })
+}
+
 const canonicalId = (message: ChatMessage) => message.serverMessageId?.trim() || null
 
 /** A request's local user ID is an identity anchor even when the provider failed before any ACK. */
@@ -134,9 +159,9 @@ export const reconcileServerChatMessages = (
 }
 
 export const reconcileServerChatMirror = async ({
-  historyId, chatId, ownerKey, messages, signal
+  historyId, chatId, ownerKey, messages, localMessages = [], signal
 }: {
-  historyId: string; chatId: string; ownerKey: string; messages: ChatMessage[]; signal?: AbortSignal
+  historyId: string; chatId: string; ownerKey: string; messages: ChatMessage[]; localMessages?: ChatMessage[]; signal?: AbortSignal
 }): Promise<{ localIds: Map<string, string>; rows: Message[] }> => runChatPersistenceTransaction(signal, async () => {
   const history = await db.chatHistories.get(historyId)
   if (history?.server_chat_id !== chatId || history.server_scope_key !== ownerKey) {
@@ -154,8 +179,16 @@ export const reconcileServerChatMirror = async ({
   for (const remote of messages) {
     const serverMessageId = canonicalId(remote)
     if (!serverMessageId) continue
-    const local = acknowledgedRows.find(row => row.serverMessageId === serverMessageId ||
+    const persisted = acknowledgedRows.find(row => row.serverMessageId === serverMessageId ||
       (!row.serverMessageId && row.id === serverMessageId))
+    const confirmed = localMessages.filter(message => canonicalId(message) === serverMessageId && message.id)
+    const captured = !persisted && confirmed.length === 1 ? confirmed[0] : undefined
+    const local = persisted || (captured ? {
+      id: captured.id!, history_id: historyId, role: captured.role || (captured.isBot ? "assistant" : "user"),
+      content: captured.message, name: captured.name, images: captured.images || [],
+      createdAt: captured.createdAt ?? Date.now(), messageType: captured.messageType,
+      parent_message_id: captured.parentMessageId, serverMessageId, serverMessageVersion: captured.serverMessageVersion
+    } as Message : undefined)
     const id = local?.id || `${historyId}:server:${encodeURIComponent(serverMessageId)}`
     const existing = await db.messages.get(id)
     if (existing && existing.history_id !== historyId) throw createServicePromptScopeChangedError()

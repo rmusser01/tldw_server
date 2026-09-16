@@ -1,0 +1,46 @@
+{
+  "frozenAt": "2026-09-16T13:46:18.211Z",
+  "baseline": "ba5233a5a9",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundPersistence.tsx",
+      "kind": "production",
+      "sha256": "ff0a690eb765070a97c31dd18ac3a579b02f76f3cfd45ee57f2c461b51420cec"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx",
+      "kind": "production",
+      "sha256": "935d72fbc13344b4865ad479efd23d453e4109f187dd72d383bbd49bc1566a10"
+    },
+    {
+      "path": "apps/packages/ui/src/db/dexie/server-chat-mirror.ts",
+      "kind": "production",
+      "sha256": "9474ea785c871a25954979efc07d34b344f3fbf09b53aec5348de63cbfbbc7c7"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useServerChatLoader.ts",
+      "kind": "production",
+      "sha256": "2578758cc6010e7310bd5456963cebaa5d78c8ad5889242610088b33a9e23720"
+    },
+    {
+      "path": "apps/packages/ui/src/services/pending-chat-promotion.ts",
+      "kind": "production",
+      "sha256": "32741e746ff652e3faa7bea24f5523f8ae423bf1f97a80c01f7382a93427baf2"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "kind": "test",
+      "sha256": "75f3c1877cdfcd6e7f884b8d39b836a4421a43284d2b7944d23868ab0fd68b5d"
+    },
+    {
+      "path": "apps/packages/ui/src/db/dexie/__tests__/server-chat-mirror.test.ts",
+      "kind": "test",
+      "sha256": "3d5f1094ab7a271081bee1de0ba7c46e9f48746b0693e2024f84af9e789fcbd3"
+    },
+    {
+      "path": "backlog/tasks/task-13260.71 - Prevent-saved-assistant-greetings-from-being-persisted-twice-on-the-first-ordinary-turn.md",
+      "kind": "task",
+      "sha256": "6357539c0dc0d2eede2e09f21f79627eaa74effb33742c63c8db8053d86096d3"
+    }
+  ]
+}

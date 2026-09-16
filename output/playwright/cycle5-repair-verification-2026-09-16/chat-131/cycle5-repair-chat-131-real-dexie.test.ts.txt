@@ -1,0 +1,34 @@
+import '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/node_modules/fake-indexeddb/auto/index.mjs'
+import { afterEach, describe, expect, it } from 'vitest'
+import { db } from '@/db/dexie/schema'
+import { acknowledgePromotedChatMessage, linkServerChatMirror, reconcileServerChatMirror } from '@/db/dexie/server-chat-mirror'
+import { formatToMessage } from '@/db/dexie/helpers'
+const source = { id: 'original-greeting', role: 'assistant' as const, isBot: true, name: 'Default Assistant', message: 'Hello', images: [], createdAt: 1 }
+afterEach(async () => { await db.delete() })
+describe('UAT131 real Dexie receipt and mirror reopen', () => {
+  it('retains exact synthetic identity and equal-text separate rows after database reopen', async () => {
+    await db.open()
+    const historyId = await linkServerChatMirror({ chatId: 'canonical-chat', title: 'Chat', ownerKey: 'owner-A' })
+    await db.messages.add({ id: 'distinct', history_id: historyId, role: 'assistant', name: 'Assistant', content: 'Hello', images: [], createdAt: 2 })
+    await reconcileServerChatMirror({ historyId, chatId: 'canonical-chat', ownerKey: 'owner-A', messages: [{ ...source, id: 'server-row', serverMessageId: 'server-row', serverMessageVersion: 1 }], localMessages: [{ ...source, serverMessageId: 'server-row', serverMessageVersion: 1 }] })
+    db.close(); await db.open()
+    const restored = formatToMessage(await db.messages.where('history_id').equals(historyId).toArray())
+    expect(restored.map(row => [row.id, row.serverMessageId])).toEqual([['original-greeting', 'server-row'], ['distinct', undefined]])
+  })
+  it('attaches the receipt without replacing an edit or equal-text separate message', async () => {
+    await db.open()
+    const historyId = await linkServerChatMirror({ chatId: 'canonical-chat', title: 'Chat', ownerKey: 'owner-A' })
+    await db.messages.add({ id: source.id, history_id: historyId, role: 'assistant', name: source.name, content: 'Later edit', images: [], createdAt: 1 })
+    await acknowledgePromotedChatMessage({ historyId, chatId: 'canonical-chat', ownerKey: 'owner-A', source, serverMessageId: 'server-row', version: 1, signal: new AbortController().signal, isCurrent: () => true })
+    db.close(); await db.open()
+    expect(await db.messages.get(source.id)).toMatchObject({ content: 'Later edit', serverMessageId: 'server-row' })
+  })
+  it('rolls back the receipt when target ownership changes within the transaction', async () => {
+    await db.open()
+    const historyId = await linkServerChatMirror({ chatId: 'canonical-chat', title: 'Chat', ownerKey: 'owner-A' })
+    await db.messages.add({ id: source.id, history_id: historyId, role: 'assistant', name: source.name, content: source.message, images: [], createdAt: 1 })
+    let checks = 0
+    await expect(acknowledgePromotedChatMessage({ historyId, chatId: 'canonical-chat', ownerKey: 'owner-A', source, serverMessageId: 'server-row', signal: new AbortController().signal, isCurrent: () => ++checks < 3 })).rejects.toThrow()
+    expect((await db.messages.get(source.id))?.serverMessageId).toBeUndefined()
+  })
+})

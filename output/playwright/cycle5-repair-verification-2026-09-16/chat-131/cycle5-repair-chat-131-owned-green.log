@@ -1,0 +1,23 @@
+$ vitest run src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx -t "UAT131"
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: immediate
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: delayed ACK
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: ambiguous ACK
+Using normalChatMode
+
+ ✓ src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx (73 tests | 66 skipped) 2112ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: immediate  439ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: delayed ACK  566ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: ambiguous ACK  567ms
+
+ Test Files  1 passed (1)
+      Tests  7 passed | 66 skipped (73)
+   Start at  06:38:38
+   Duration  3.84s (transform 600ms, setup 112ms, import 1.24s, tests 2.11s, environment 316ms)
+

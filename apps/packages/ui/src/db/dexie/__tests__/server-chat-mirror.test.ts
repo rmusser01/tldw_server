@@ -15,7 +15,7 @@ vi.mock("../schema", () => ({ db: {
   transaction: async (_mode: string, _tables: unknown[], operation: (transaction: { abort: () => void }) => Promise<unknown>) => operation({ abort: vi.fn() })
 } }))
 vi.mock("../helpers", () => ({ generateID: () => `history-${state.histories.size + 1}` }))
-import { linkServerChatMirror, reconcileServerChatMirror, reconcileServerChatMessages } from "../server-chat-mirror"
+import { acknowledgePromotedChatMessage, linkServerChatMirror, reconcileServerChatMirror, reconcileServerChatMessages } from "../server-chat-mirror"
 
 const history = (id: string, owner?: string): HistoryInfo => ({ id, title: "Cedar", is_rag: false, createdAt: 1, server_chat_id: "chat-1", ...(owner ? { server_scope_key: owner } : {}) })
 const row = (id: string, historyId: string, content: string, serverMessageId?: string): Message => ({ id, history_id: historyId, name: "You", role: "user", content, images: [], createdAt: 1, serverMessageId })
@@ -24,6 +24,32 @@ const link = (ownerKey: string, extra = {}) => linkServerChatMirror({ chatId: "c
 
 describe("owned server Chat mirror", () => {
   beforeEach(() => { state.histories.clear(); state.messages.clear() })
+  it.each(["unchanged", "edited"])("acknowledges the exact promotion source and preserves %s content", async kind => {
+    state.histories.set("alice", history("alice", "A"))
+    state.messages.set("source", { ...row("source", "alice", kind === "edited" ? "Later local edit" : "Greeting"), role: "assistant" })
+    state.messages.set("same-text", { ...row("same-text", "alice", "Greeting"), role: "assistant" })
+    await acknowledgePromotedChatMessage({ historyId: "alice", chatId: "chat-1", ownerKey: "A", source: { ...incoming("source", "Greeting"), serverMessageId: undefined, role: "assistant", isBot: true }, serverMessageId: "canonical", version: 1, signal: new AbortController().signal, isCurrent: () => true })
+    expect(state.messages.get("source")).toMatchObject({ content: kind === "edited" ? "Later local edit" : "Greeting", serverMessageId: "canonical" })
+    expect(state.messages.get("same-text")?.serverMessageId).toBeUndefined()
+  })
+  it.each(["owner", "history", "role", "ack", "cancelled", "target"])("rejects a promotion acknowledgement with changed %s", async kind => {
+    state.histories.set("alice", history("alice", kind === "owner" ? "B" : "A"))
+    state.messages.set("source", { ...row("source", kind === "history" ? "bob" : "alice", "Greeting", kind === "ack" ? "other-server" : undefined), role: kind === "role" ? "user" : "assistant" })
+    const signal = new AbortController()
+    if (kind === "cancelled") signal.abort()
+    await expect(acknowledgePromotedChatMessage({ historyId: "alice", chatId: "chat-1", ownerKey: "A", source: { ...incoming("source", "Greeting"), role: "assistant", isBot: true }, serverMessageId: "canonical", signal: signal.signal, isCurrent: () => kind !== "target" })).rejects.toThrow()
+    expect(state.messages.get("source")?.serverMessageId).toBe(kind === "ack" ? "other-server" : undefined)
+  })
+  it("persists an exact acknowledged synthetic source ID while preserving a distinct equal row", async () => {
+    state.histories.set("alice", history("alice", "A"))
+    state.messages.set("distinct", { ...row("distinct", "alice", "Greeting"), role: "assistant" })
+    const remote = { ...incoming("canonical", "Greeting"), role: "assistant", isBot: true }
+    await reconcileServerChatMirror({ historyId: "alice", chatId: "chat-1", ownerKey: "A", messages: [remote], localMessages: [{ ...remote, id: "original-local" }] })
+    expect(state.messages.get("original-local")?.serverMessageId).toBe("canonical")
+    expect(state.messages.get("distinct")?.serverMessageId).toBeUndefined()
+    expect(state.messages.size).toBe(2)
+  })
+
   it("links an unanswered user by exact client correlation while retaining equal-text drafts", async () => {
     state.histories.set("alice", history("alice", "A"))
     state.messages.set("local-q", { ...row("local-q", "alice", "Repeat"), images: [""] })

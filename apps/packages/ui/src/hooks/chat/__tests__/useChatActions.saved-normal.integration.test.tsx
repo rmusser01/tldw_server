@@ -15,6 +15,7 @@ import { useChatActions } from "../useChatActions"
 import { useServerChatLoader } from "../useServerChatLoader"
 import { usePlaygroundPersistence } from "@/components/Option/Playground/hooks/usePlaygroundPersistence"
 import { useStoreMessageOption } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { reconcileServerChatMessages, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue"
 import { decodeChatErrorPayload } from "@/utils/chat-error-message"
@@ -435,6 +436,104 @@ describe("saved normal Chat pipeline with autosave", () => {
     expect(mocks.removeMessageById).toHaveBeenCalledWith("mirror", localId)
     expect(useStoreMessageOption.getState().messages).toEqual([])
     expect(useStoreMessageOption.getState().replyTarget).toBeNull()
+  })
+
+  it.each(["immediate", "delayed ACK", "ambiguous ACK"])("UAT131 promotes exact greeting identity through loader, send and reload: %s", async boundary => {
+    mocks.withLoader = true
+    const greeting = { id: "original-greeting", role: "assistant" as const, isBot: true, name: "Default Assistant", message: "Hello! How can I help you today?", messageType: "character:greeting", images: [], sources: [], createdAt: 1 }
+    useStoreMessageOption.setState({ historyId: null, messages: [greeting], history: [{ role: "system", content: "Speak like a pirate. Say ARRR." }, { role: "assistant", content: greeting.message, messageType: greeting.messageType }] })
+    const ack = deferred<void>()
+    const originalAdd = mocks.addChatMessage.getMockImplementation()!
+    mocks.addChatMessage.mockImplementationOnce(async (...args) => {
+      const row = await originalAdd(...args)
+      if (boundary !== "immediate") await ack.promise
+      if (boundary === "ambiguous ACK") throw new Error("Acknowledgement lost after commit")
+      return row
+    })
+    let view = renderWorkspace(false, true)
+    await waitFor(() => expect(mocks.addChatMessage).toHaveBeenCalled())
+    if (boundary !== "immediate") {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)) })
+      expect(mocks.listChatMessages).not.toHaveBeenCalled()
+      expect(view.result.current.state.messages.map(row => row.id)).toEqual([greeting.id])
+      await act(async () => ack.resolve())
+    }
+    if (boundary === "ambiguous ACK") {
+      await waitFor(() => expect(mocks.notifyError).toHaveBeenCalled())
+      await act(async () => view.result.current.persistence.handleSaveChatToServer())
+    }
+    await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
+    const savedSystem = mocks.serverRows.get("chat-1")![0]
+    const savedGreeting = mocks.serverRows.get("chat-1")![1]
+    expect(view.result.current.state.messages.filter(row => row.role === "assistant")).toMatchObject([{ id: greeting.id, serverMessageId: savedGreeting.id, message: greeting.message }])
+    expect(view.result.current.state.messages).toHaveLength(2)
+    expect(savedSystem.content).toBe("Speak like a pirate. Say ARRR.")
+    expect(mocks.rows.filter(row => row.serverMessageId === savedGreeting.id)).toMatchObject([{ id: greeting.id, content: greeting.message }])
+    const sent: Array<Array<{ content: string }>> = []
+    mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => new ChatTldw({ model: "test", saveToDb: true, conversationId }))
+    mocks.streamMessage.mockImplementation(async function* (messages, options, onChunk) {
+      sent.push(messages)
+      const stored = mocks.serverRows.get(options.conversationId)!
+      stored.push({ id: "next-user", role: "user", content: "Weather?", version: 1 }, { id: "next-reply", role: "assistant", content: "ARRR clear skies", version: 1 })
+      onChunk({ tldw_user_message_id: "next-user", tldw_message_id: "next-reply" })
+      yield "ARRR clear skies"
+    })
+    await act(async () => view.result.current.actions.onSubmit({ message: "Weather?", image: "" }))
+    expect(sent[0].filter(row => (typeof row.content === "string" ? row.content : JSON.stringify(row.content)).includes(greeting.message))).toHaveLength(1)
+    expect(mocks.serverRows.get("chat-1")!.map(row => row.id)).toEqual([savedSystem.id, savedGreeting.id, "next-user", "next-reply"])
+    view.unmount()
+    act(() => useStoreMessageOption.setState({ messages: [], history: [], serverChatMetaLoaded: false, serverChatLoadState: "idle" }))
+    view = renderWorkspace(false, true)
+    await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
+    expect(view.result.current.state.messages.filter(row => row.serverMessageId === savedGreeting.id)).toMatchObject([{ id: greeting.id }])
+    expect(view.result.current.state.messages.map(row => row.serverMessageId)).toEqual([savedSystem.id, savedGreeting.id, "next-user", "next-reply"])
+    expect(mocks.addChatMessage).toHaveBeenCalledTimes(2)
+    view.unmount()
+  })
+
+  it.each(["late edit", "equal rows", "authority", "new history", "route roundtrip"])("UAT131 preserves captured source identity across %s", async boundary => {
+    mocks.withLoader = true
+    const original = { id: "source-one", role: "assistant" as const, isBot: true, name: "Assistant", message: "Same greeting", images: [], sources: [] }
+    const rows = boundary === "equal rows" ? [original, { ...original, id: "source-two" }] : [original]
+    useStoreMessageOption.setState({ historyId: "local-draft", messages: rows, history: rows.map(row => ({ role: row.role, content: row.message })) })
+    mocks.mirrorHistories.set("local-draft", { id: "local-draft" })
+    mocks.rows.push(...rows.map(row => ({ id: row.id, role: row.role, content: row.message, history_id: "local-draft", images: [] })))
+    const ack = deferred<void>()
+    const originalAdd = mocks.addChatMessage.getMockImplementation()!
+    mocks.addChatMessage.mockImplementationOnce(async (...args) => { const saved = await originalAdd(...args); await ack.promise; return saved })
+    const view = renderWorkspace(false, true)
+    await waitFor(() => expect(mocks.addChatMessage).toHaveBeenCalledTimes(1))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)) })
+    expect(mocks.listChatMessages).not.toHaveBeenCalled()
+    await act(async () => {
+      if (boundary === "late edit") {
+        useStoreMessageOption.getState().setMessages(current => current.map(row => ({ ...row, message: "New local edit" })))
+        mocks.rows[0].content = "New local edit"
+      } else if (boundary === "authority" || boundary === "new history" || boundary === "route roundtrip") {
+        if (boundary === "authority") { replaceAuthority("synthetic-b"); replaceAuthority("synthetic-a") }
+        if (boundary === "route roundtrip") {
+          usePlaygroundSessionStore.getState().cancelPendingRestore()
+          usePlaygroundSessionStore.getState().cancelPendingRestore()
+          useStoreMessageOption.setState({ serverChatId: null, messages: [], history: [{ role: "assistant", content: "Replacement context" }] })
+        } else useStoreMessageOption.setState({ historyId: "replacement", serverChatId: null, messages: [], history: [] })
+      }
+      ack.resolve()
+    })
+    if (boundary === "authority" || boundary === "new history" || boundary === "route roundtrip") {
+      expect(mocks.rows[0].serverMessageId).toBeUndefined()
+      expect(view.result.current.state.messages).toEqual([])
+    } else {
+      await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
+      const canonical = mocks.serverRows.get("chat-1")!
+      expect(view.result.current.state.messages.map(row => [row.id, row.serverMessageId])).toEqual(rows.map((row, index) => [row.id, canonical[index].id]))
+      expect(mocks.rows.map(row => [row.id, row.serverMessageId])).toEqual(rows.map((row, index) => [row.id, canonical[index].id]))
+      if (boundary === "late edit") {
+        expect(view.result.current.state.messages[0].message).toBe("New local edit")
+        expect(mocks.rows[0].content).toBe("New local edit")
+        expect(canonical[0].content).toBe("Same greeting")
+      }
+    }
+    view.unmount()
   })
 
   it.each([0, 1])(
@@ -1006,7 +1105,11 @@ describe("saved normal Chat pipeline with autosave", () => {
       response.resolve([{ id: "late-canonical-user", role: "user", content: original.message, metadata_extra: { client_message_id: original.id } }])
       await response.promise
     })
-    expect(view.result.current.state.messages).toEqual([draft])
+    expect(view.result.current.state.messages).toMatchObject([draft])
+    expect(view.result.current.state.messages).toHaveLength(1)
+    const ownReceipt = mocks.serverRows.get(view.result.current.state.serverChatId!)?.find(row => row.content === draft.message)
+    expect(view.result.current.state.messages[0].serverMessageId).toBe(ownReceipt?.id)
+    expect(view.result.current.state.messages[0].serverMessageId).not.toBe("late-canonical-user")
     expect(mocks.rows.find(row => row.id === original.id)?.serverMessageId).toBeUndefined()
     view.unmount()
   })

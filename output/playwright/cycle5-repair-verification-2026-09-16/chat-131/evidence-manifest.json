@@ -1,0 +1,173 @@
+{
+  "unit": "chat-131",
+  "retainedAt": "2026-09-16T13:56:33.208Z",
+  "knownCredentialMatches": 0,
+  "jwtPrivateKeyPatternMatches": 0,
+  "files": [
+    {
+      "name": "cycle5-repair-chat-131-baseline-red.log",
+      "bytes": 12024,
+      "sha256": "1c312e179995d76aa0cef61fdfbd10278c6cc03e9d59c67fd150fb8564c1bd2a"
+    },
+    {
+      "name": "cycle5-repair-chat-131-baseline.config.ts.txt",
+      "bytes": 1070,
+      "sha256": "e7d164be1bac1a28a83f95c1d12010e928181b8f91c262e77b04ed7f0f9ae7d7"
+    },
+    {
+      "name": "cycle5-repair-chat-131-before-waiter-fix-manifest.json",
+      "bytes": 1796,
+      "sha256": "dcec42579f7ba28792289ca4451c8ae235244736927f82c7d9d39ae38a5cbfa5"
+    },
+    {
+      "name": "cycle5-repair-chat-131-before-waiter-fix-production-freeze.json",
+      "bytes": 1112,
+      "sha256": "a8bfe0807e19aa6ed3fcbdeb904149b43b68ffe731a41f2d01e5a479f3c202cd"
+    },
+    {
+      "name": "cycle5-repair-chat-131-diff-check.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "cycle5-repair-chat-131-eslint-baseline.json",
+      "bytes": 397573,
+      "sha256": "dbf68a922ccd90493b9e3723efee232d9feddd0bd2ac3a690df4568facaf5fd1"
+    },
+    {
+      "name": "cycle5-repair-chat-131-eslint-comparison.json",
+      "bytes": 211,
+      "sha256": "9505996085902e6788d0b8522a64d1e76d3c672e4ea01d04703f0200e9e16ed5"
+    },
+    {
+      "name": "cycle5-repair-chat-131-eslint-final.json",
+      "bytes": 372324,
+      "sha256": "dbc0abaae8eb15789c1e2ef4acbe249fdfe74f1aca3594fea63730e5d9457307"
+    },
+    {
+      "name": "cycle5-repair-chat-131-eslint.log",
+      "bytes": 261,
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "name": "cycle5-repair-chat-131-final-green.log",
+      "bytes": 21262,
+      "sha256": "8b3bad07034db30651747a84270c547afef4a849c9180661a363a62d8f61f680"
+    },
+    {
+      "name": "cycle5-repair-chat-131-first-green.log",
+      "bytes": 8996,
+      "sha256": "26df407983c77b777fdbcbd838931cab4b663772aa0ddf7f72a719608be29904"
+    },
+    {
+      "name": "cycle5-repair-chat-131-focused-final.log",
+      "bytes": 21181,
+      "sha256": "32d3f2bf8fae7e0f93a0dbc33084ecba12840a4187d38afbb93719268c7a4e78"
+    },
+    {
+      "name": "cycle5-repair-chat-131-focused.log",
+      "bytes": 31929,
+      "sha256": "1b5bda4e51b33cfd5615474d6e5e0a69bb3556b2d3a763c94bd239e5a3e65918"
+    },
+    {
+      "name": "cycle5-repair-chat-131-generation-red.log",
+      "bytes": 8222,
+      "sha256": "feef5044f534823bb90e91f7a6f5be9398afc71e72a002fa8bd520ec97024636"
+    },
+    {
+      "name": "cycle5-repair-chat-131-green.log",
+      "bytes": 10785,
+      "sha256": "534f14935e70d7efde5e6fb981ba24eb367822dced7ae956e76a06cb0b2300e4"
+    },
+    {
+      "name": "cycle5-repair-chat-131-independent-dexie.log",
+      "bytes": 614,
+      "sha256": "6d1566655fb0b911cd6b6947abf70e1fc5ae4fa65b8f370191c9278226cb7cac"
+    },
+    {
+      "name": "cycle5-repair-chat-131-independent-review.md",
+      "bytes": 1580,
+      "sha256": "078ec15d2f44118f76450f7b0cf106f6a8b3b2b38525701c7ae22746dda2d778"
+    },
+    {
+      "name": "cycle5-repair-chat-131-independent-tests.log",
+      "bytes": 22393,
+      "sha256": "3d32adcfd8e53f265f3b2267ba3b32dd59c2ee660cc9a1716ad3dce995260dcd"
+    },
+    {
+      "name": "cycle5-repair-chat-131-interleaving.log",
+      "bytes": 11329,
+      "sha256": "6cda18184e9b49d9637b803cc5ca2c1649a3e90082d569980619684cfb24c738"
+    },
+    {
+      "name": "cycle5-repair-chat-131-lint-compare.log",
+      "bytes": 261,
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "name": "cycle5-repair-chat-131-lint-compare.mjs",
+      "bytes": 1862,
+      "sha256": "68e3e7332b9da11c6b5e027192c75b889be06e63fbdaad5dee4ddb26de873caa"
+    },
+    {
+      "name": "cycle5-repair-chat-131-manifest.json",
+      "bytes": 2002,
+      "sha256": "2d05fbf7e25faf419895c4cf35cbb455710c301664fd3a4509c63ed36c4a3402"
+    },
+    {
+      "name": "cycle5-repair-chat-131-owned-green.log",
+      "bytes": 1485,
+      "sha256": "5878c24b306ae2d3814c0af8ecfe195b30d2438a4de4afa8705885527fcb14ce"
+    },
+    {
+      "name": "cycle5-repair-chat-131-production-freeze.json",
+      "bytes": 1112,
+      "sha256": "6d59c2b984e42c9510dc83b732314727c9b19478ed2449c4eeb145f26bbf5656"
+    },
+    {
+      "name": "cycle5-repair-chat-131-real-dexie.config.mts.txt",
+      "bytes": 333,
+      "sha256": "713b60863b59a5e20581d9b025f35aef531a5783536a3edf283a815b73fae758"
+    },
+    {
+      "name": "cycle5-repair-chat-131-real-dexie.log",
+      "bytes": 433,
+      "sha256": "fab1ba61cd7f372122a04a9d956411c00856537e27e1a28617c311bd64aa7a78"
+    },
+    {
+      "name": "cycle5-repair-chat-131-real-dexie.test.ts.txt",
+      "bytes": 3109,
+      "sha256": "1e211dfe1c1317cbc64ce989d81e9f4bc7391fa11bba0f2aee43fe32c63377ce"
+    },
+    {
+      "name": "cycle5-repair-chat-131-red.log",
+      "bytes": 14736,
+      "sha256": "e54c59dcc8442588cfdbd5dde4b0d9fe462b415196ae1447f9a613c8bce73791"
+    },
+    {
+      "name": "cycle5-repair-chat-131-report.md",
+      "bytes": 7747,
+      "sha256": "83bf00e658d19acea1cfa9423ace0331392bf6a121abd6663b0f195b2e88ba0d"
+    },
+    {
+      "name": "cycle5-repair-chat-131-task-review.log",
+      "bytes": 27,
+      "sha256": "febd688d61982048c6fcb5a18492a15773efc9ca284b9261c5aae430f3f46c56"
+    },
+    {
+      "name": "cycle5-repair-chat-131-waiters-final-green.log",
+      "bytes": 21390,
+      "sha256": "dd98dd0cb310d34f07749f1a5435cb9c5751628aff117233819c38cd41d04090"
+    },
+    {
+      "name": "cycle5-repair-chat-131-waiters-independent.log",
+      "bytes": 21389,
+      "sha256": "968862232e3f6daab8841e424634cead3cba8e5ff46e50fe4cfa7fad3549be62"
+    },
+    {
+      "name": "cycle5-repair-chat-131-waiters-red.log",
+      "bytes": 2498,
+      "sha256": "6916fb05c482190faa119034ef83d19828c82995ad738f414f1cd28f08f04eab"
+    }
+  ]
+}

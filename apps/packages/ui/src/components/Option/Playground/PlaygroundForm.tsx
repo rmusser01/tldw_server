@@ -3378,6 +3378,8 @@ export const PlaygroundForm = ({
     setServerChatAssistantId,
     setServerChatPersonaMemoryMode,
     history,
+    messages,
+    setMessages,
     clearChat,
     selectedCharacter,
     selectedAssistantMode,

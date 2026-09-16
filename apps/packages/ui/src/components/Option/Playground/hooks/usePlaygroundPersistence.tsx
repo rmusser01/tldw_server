@@ -1,4 +1,7 @@
 import React from "react"
+import type { Message } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { acknowledgePromotedChatMessage, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { Modal } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { usePersistenceMode } from "@/hooks/playground"
@@ -40,6 +43,8 @@ export interface UsePlaygroundPersistenceDeps {
   setServerChatPersonaMemoryMode: (
     mode: "read_only" | "read_write" | null
   ) => void
+  messages?: Message[]
+  setMessages?: (updater: (messages: Message[]) => Message[]) => void
   history: Array<{ role: string; content?: string; image?: string }>
   clearChat: () => void
   selectedCharacter: Character | null
@@ -245,6 +250,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
     const controller = new AbortController()
     activeSaveControllerRef.current = controller
     const capturedHistoryId = latestDepsRef.current.historyId
+    const capturedRestoreRevision = usePlaygroundSessionStore.getState().restoreRevision
     let createdChatId: string | null = null
     const acknowledgedIds: string[] = []
     let requestSnapshot: ServicePromptSnapshot | undefined
@@ -255,6 +261,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         !requestSnapshot?.scopeSignal.aborted &&
         !current.temporaryChat &&
         current.historyId === capturedHistoryId &&
+        usePlaygroundSessionStore.getState().restoreRevision === capturedRestoreRevision &&
         current.history.length > 0 &&
         (!current.serverChatId || current.serverChatId === createdChatId)
       )
@@ -272,6 +279,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         await retry
         return
       }
+      const capturedMessages = (latestDepsRef.current.messages || []).map(message => ({ ...message, images: [...(message.images || [])] }))
       const snapshot = historyRef.current
         .map((msg) => ({
           role: ["system", "assistant", "user"].includes(msg.role)
@@ -280,6 +288,16 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
           content: (msg.content || "").trim()
         }))
         .filter((msg) => msg.content)
+      // Pair the immutable, ordered transcript once. Never search equal text in
+      // a changing array or assign one receipt to several identical messages.
+      const visible = capturedMessages.filter(message => (message.role || (message.isBot ? "assistant" : "user")) !== "system" && message.message.trim())
+      const transcript = snapshot.filter(message => message.role !== "system")
+      const aligned = new Set(visible.map(message => message.id)).size === visible.length &&
+        visible.length === transcript.length && visible.every((message, index) =>
+        Boolean(message.id) && (message.role || (message.isBot ? "assistant" : "user")) === transcript[index].role &&
+        message.message.trim() === transcript[index].content && !message.images?.some(Boolean))
+      let visibleIndex = 0
+      const sources = snapshot.map(message => message.role === "system" ? undefined : aligned ? visible[visibleIndex++] : undefined)
       if (
         !isConnectionReady ||
         temporaryChat ||
@@ -374,6 +392,24 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
           }
 
           const cid = createdChatId
+          const acknowledge = async (index: number, saved: { id: string; version?: number }) => {
+            const source = sources[index]
+            if (!source?.id || !isCurrentSave()) return
+            await acknowledgePromotedChatMessage({
+              historyId: capturedHistoryId, chatId: cid,
+              ownerKey: serverChatMirrorOwnerKey(scopeSnapshot), source,
+              serverMessageId: String(saved.id), version: saved.version,
+              signal: scopeSnapshot.scopeSignal, isCurrent: isCurrentSave
+            })
+            if (!isCurrentSave()) return
+            latestDepsRef.current.setMessages?.(current => current.map(message => {
+              if (message.id !== source.id) return message
+              if (message.serverMessageId && message.serverMessageId !== String(saved.id))
+                throw new Error("The local saved message identity changed. Keep this chat and resolve its history before retrying.")
+              return { ...message, serverMessageId: String(saved.id),
+                serverMessageVersion: message.serverMessageVersion ?? (message.message === source.message ? saved.version : undefined) }
+            }))
+          }
           if (reconcileExistingChat) {
             const stored = []
             for (let offset = 0; ; offset += 200) {
@@ -402,6 +438,10 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
               throw new Error(
                 "Saved messages changed during recovery. Keep this local chat and resolve the server history before retrying."
               )
+            for (let index = 0; index < stored.length; index++) {
+              await acknowledge(index, stored[index])
+              if (!isCurrentSave()) return
+            }
             acknowledgedIds.splice(
               0,
               acknowledgedIds.length,
@@ -421,7 +461,9 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
               throw new Error(
                 "The server did not confirm the saved message identity."
               )
+            const index = acknowledgedIds.length
             acknowledgedIds.push(String(saved.id))
+            await acknowledge(index, saved)
           }
 
           if (!isCurrentSave()) return
