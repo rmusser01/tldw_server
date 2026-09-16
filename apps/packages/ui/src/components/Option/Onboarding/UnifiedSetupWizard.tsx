@@ -12,7 +12,6 @@ import {
 import { useStoreMessageOption } from "@/store/option";
 import { createSafeStorage } from "@/utils/safe-storage";
 import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient";
-import { tldwModels } from "@/services/tldw";
 import { normalizeProviderAvailabilityKey } from "@/services/tldw/model-provider-availability";
 import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider";
 import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error";
@@ -66,6 +65,10 @@ const setupPathToBackend = (path: SoloSetupPath) =>
 
 const modelStorage = createSafeStorage();
 const configStorage = createSafeStorage({ area: "local" });
+const setupChatProviderAliases: Record<string, string> = {
+  koboldcpp: "kobold",
+  custom_openai_api2: "custom-openai-api-2",
+};
 type SetupModelHandoff = {
   generation: number;
   config: TldwConfig;
@@ -506,45 +509,30 @@ export function UnifiedSetupWizard({
         handoff.selectionRevision === selectionRevision.current
       ) {
         const verified = handoff.verified;
-        const models = await tldwModels.getChatModels(true);
-        await assertHandoffCurrent(handoff);
-        if (handoff.selectionRevision === selectionRevision.current) {
-          const matches = models.filter((model) => {
-            const parsed = parseProviderQualifiedModelSelection(model.id);
-            return (
-              normalizeProviderAvailabilityKey(
-                parsed.provider || model.provider,
-              ) === normalizeProviderAvailabilityKey(verified.provider) &&
-              parsed.modelId.replace(/^tldw:/, "").trim() ===
-                verified.model.trim()
-            );
-          });
-          if (matches.length !== 1)
-            throw new Error(
-              "The verified model is missing or ambiguous in the model list. Check the provider, then finish setup again.",
-            );
-          const match = matches[0];
-          const parsed = parseProviderQualifiedModelSelection(match.id);
-          let qualified = parseProviderQualifiedModelSelection(
-            `${parsed.provider || match.provider}:${verified.model.trim()}`,
+        // First-run verification precedes browser authentication. Its matching
+        // ready response is authoritative even while the protected catalog is
+        // unavailable; do not make finishing setup depend on that catalog.
+        let qualified = parseProviderQualifiedModelSelection(
+          `${verified.provider}:${verified.model.trim()}`,
+        );
+        if (!qualified.provider) {
+          const provider =
+            normalizeProviderAvailabilityKey(verified.provider) || "";
+          qualified = parseProviderQualifiedModelSelection(
+            `${setupChatProviderAliases[provider] || provider}:${verified.model.trim()}`,
           );
-          if (!qualified.provider) {
-            qualified = parseProviderQualifiedModelSelection(
-              `${normalizeProviderAvailabilityKey(match.provider)}:${verified.model.trim()}`,
-            );
-          }
-          if (!qualified.provider)
-            throw new Error(
-              "The verified model provider could not be selected. Check the provider settings.",
-            );
-          const write = setSelectedModel(
-            `tldw:${qualified.provider}:${qualified.modelId}`,
-          );
-          // Our own publication may be retried after a rejected device write.
-          // Any later user operation still advances beyond this revision.
-          handoff.selectionRevision = selectionRevision.current;
-          await write;
         }
+        if (!qualified.provider || qualified.modelId !== verified.model.trim())
+          throw new Error(
+            "The verified model provider could not be selected. Check the provider settings.",
+          );
+        const write = setSelectedModel(
+          `tldw:${qualified.provider}:${qualified.modelId}`,
+        );
+        // Our own publication may be retried after a rejected device write.
+        // Any later user operation still advances beyond this revision.
+        handoff.selectionRevision = selectionRevision.current;
+        await write;
       }
       await assertHandoffCurrent(handoff);
       await refreshParentState(() => assertHandoffCurrent(handoff));

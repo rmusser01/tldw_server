@@ -1,0 +1,12 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:29040) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx (38 tests | 36 skipped) 218ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 36 skipped (38)
+   Start at  20:48:59
+   Duration  1.38s (transform 456ms, setup 138ms, import 558ms, tests 218ms, environment 373ms)
+

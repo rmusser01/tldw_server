@@ -1,0 +1,22 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:28651) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/services/tldw/__tests__/TldwModels.test.ts (31 tests) 867ms
+(node:28654) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx (36 tests) 1430ms
+     ✓ finishes with the verified model before a browser key permits the protected catalog  316ms
+(node:28668) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.extension-authority.test.tsx (1 test) 139ms
+(node:28673) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/utils/__tests__/resolve-api-provider.test.ts (17 tests) 3ms
+
+ Test Files  4 passed (4)
+      Tests  85 passed (85)
+   Start at  20:47:43
+   Duration  4.49s (transform 601ms, setup 302ms, import 439ms, tests 2.44s, environment 972ms)
+

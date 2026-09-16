@@ -12,6 +12,8 @@ import { UnifiedSetupWizard } from "../UnifiedSetupWizard";
 import { useSelectedModel } from "@/hooks/chat/useSelectedModel";
 import { useStoreMessageOption } from "@/store/option";
 import type { FirstRunState } from "@/types/setup-onboarding";
+import { TldwModelsService } from "@/services/tldw/TldwModels";
+import { clearRuntimeAuthOverride } from "@/services/tldw/runtime-auth-override";
 vi.mock(
   "@plasmohq/storage",
   () =>
@@ -33,6 +35,8 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   models: vi.fn(),
   getConfig: vi.fn(),
+  initialize: vi.fn(),
+  getModels: vi.fn(),
 }));
 vi.mock("react-router-dom", () => ({ useNavigate: () => vi.fn() }));
 vi.mock("@/hooks/useConnectionState", () => ({
@@ -42,7 +46,11 @@ vi.mock("@/hooks/useHomeMilestoneScope", () => ({
   useHomeMilestoneScope: () => "synthetic-owner",
 }));
 vi.mock("@/services/tldw/TldwApiClient", () => ({
-  tldwClient: { getConfig: mocks.getConfig },
+  tldwClient: {
+    getConfig: mocks.getConfig,
+    initialize: mocks.initialize,
+    getModels: mocks.getModels,
+  },
 }));
 vi.mock("@/services/tldw", () => ({
   tldwModels: { getChatModels: mocks.models },
@@ -125,7 +133,13 @@ function SharedOwner() {
     </output>
   );
 }
-function Parent({ publish }: { publish?: () => void }) {
+function Parent({
+  publish,
+  setupState = initial,
+}: {
+  publish?: () => void;
+  setupState?: FirstRunState;
+}) {
   const [done, setDone] = React.useState(false);
   return (
     <>
@@ -134,7 +148,7 @@ function Parent({ publish }: { publish?: () => void }) {
         <p>Workspace ready</p>
       ) : (
         <UnifiedSetupWizard
-          initialState={initial}
+          initialState={setupState}
           onStateChange={(state) => {
             if (state.status === "completed") {
               publish?.();
@@ -172,6 +186,44 @@ describe("verified setup model handoff through the real WebUI owner", () => {
     ]);
   });
   afterEach(() => vi.restoreAllMocks());
+  it("finishes with the verified model before a browser key permits the protected catalog", async () => {
+    const { TldwApiClient } = await vi.importActual<
+      typeof import("@/services/tldw/TldwApiClient")
+    >("@/services/tldw/TldwApiClient");
+    clearRuntimeAuthOverride();
+    window.sessionStorage.clear();
+    await new Storage({ area: "local" }).set("tldwConfig", {
+      serverUrl: "http://setup.test",
+      authMode: "single-user",
+      apiKey: "",
+    });
+    const client = new TldwApiClient();
+    mocks.getConfig.mockImplementation(() => client.getConfig());
+    mocks.initialize.mockImplementation(() => client.initialize());
+    mocks.getModels.mockImplementation(() => client.getModels());
+    const models = new TldwModelsService();
+    mocks.models.mockImplementation(() => models.getChatModels(true));
+    const network = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(
+        new Error(
+          "No protected network calls are expected during setup handoff",
+        ),
+      );
+    expect((await client.getConfig())?.apiKey || "").toBe("");
+    expect(await models.getChatModels(true)).toEqual([]);
+    expect(mocks.getModels).not.toHaveBeenCalled();
+
+    render(<Parent />);
+    send();
+    await screen.findByText("Workspace ready");
+    expect(await new Storage().get("selectedModel")).toBe(
+      "tldw:custom-openai-api:gemma-tested",
+    );
+    expect(network).not.toHaveBeenCalled();
+    expect(mocks.getModels).not.toHaveBeenCalled();
+    expect(mocks.models).not.toHaveBeenCalled();
+  });
   it("persists the verified provider-qualified choice before the parent unmounts setup", async () => {
     let atPublication: string | null = null;
     render(
@@ -230,7 +282,7 @@ describe("verified setup model handoff through the real WebUI owner", () => {
     expect(useStoreMessageOption.getState().selectedModel).toBeNull();
   });
   it.each(["missing", "ambiguous"])(
-    "keeps completion actionable for a %s catalog target",
+    "uses the verified pair despite a %s protected catalog target",
     async (kind) => {
       mocks.models.mockResolvedValue(
         kind === "missing"
@@ -242,11 +294,10 @@ describe("verified setup model handoff through the real WebUI owner", () => {
       );
       render(<Parent />);
       send();
-      expect(await screen.findByRole("alert")).toHaveTextContent(
-        /model|selection/i,
+      await screen.findByText("Workspace ready");
+      expect(await new Storage().get("selectedModel")).toBe(
+        "tldw:custom-openai-api:gemma-tested",
       );
-      expect(screen.queryByText("Workspace ready")).not.toBeInTheDocument();
-      expect(useStoreMessageOption.getState().selectedModel).toBeNull();
     },
   );
   it("retries rejected storage without repeating inference or acknowledged completion", async () => {
@@ -362,15 +413,15 @@ describe("verified setup model handoff through the real WebUI owner", () => {
     expect(mocks.complete).toHaveBeenCalledTimes(2);
   });
 
-  it("does not replace a choice made while catalog resolution is pending", async () => {
-    const pending = deferred<Array<{ id: string; provider: string }>>();
-    mocks.models.mockReturnValueOnce(pending.promise);
+  it("does not replace a choice made while setup completion is pending", async () => {
+    const pending = deferred<typeof completed>();
+    mocks.complete.mockReturnValueOnce(pending.promise);
     render(<Parent />);
     send();
-    await waitFor(() => expect(mocks.models).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.complete).toHaveBeenCalled());
     await act(async () => {
       await selectModel("tldw:later-choice");
-      pending.resolve([{ id: "gemma-tested", provider: "custom-openai-api" }]);
+      pending.resolve(completed);
     });
     await screen.findByText("Workspace ready");
     expect(await new Storage().get("selectedModel")).toBe("tldw:later-choice");
@@ -399,6 +450,92 @@ describe("verified setup model handoff through the real WebUI owner", () => {
     expect(await new Storage().get("selectedModel")).toBe(
       "tldw:custom-openai-api:gemma-tested",
     );
+  });
+
+  it.each([
+    ["custom_openai", "custom-openai-api"],
+    ["custom_openai_api", "custom-openai-api"],
+    ["custom_openai2", "custom-openai-api-2"],
+    ["custom_openai_api2", "custom-openai-api-2"],
+    ["llamacpp", "llama.cpp"],
+    ["koboldcpp", "kobold"],
+    ["oobabooga", "ooba"],
+    ["tabbyapi", "tabbyapi"],
+  ])(
+    "publishes the exact verified %s slot as %s without a catalog",
+    async (provider, canonical) => {
+      mocks.models.mockResolvedValue([]);
+      mocks.verify.mockResolvedValue({
+        ...ready,
+        provider,
+        model: "org/gemma:Q4",
+      });
+      render(
+        <Parent
+          setupState={{
+            ...initial,
+            step_data: {
+              ...initial.step_data,
+              providers: {
+                default_provider: provider,
+                default_model: "org/gemma:Q4",
+              },
+            },
+          }}
+        />,
+      );
+      send();
+      await screen.findByText("Workspace ready");
+      expect(await new Storage().get("selectedModel")).toBe(
+        `tldw:${canonical}:org/gemma:Q4`,
+      );
+    },
+  );
+
+  it.each([
+    { provider: "ollama", model: "gemma-tested" },
+    { provider: "custom-openai-api-2", model: "gemma-tested" },
+    { provider: "custom_openai", model: "another-model" },
+  ])(
+    "rejects a ready response that differs from the requested pair: %j",
+    async (pair) => {
+      mocks.verify.mockResolvedValue({ ...ready, ...pair });
+      render(<Parent />);
+      send();
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "did not match",
+      );
+      expect(mocks.complete).not.toHaveBeenCalled();
+      expect(await new Storage().get("selectedModel")).toBeFalsy();
+    },
+  );
+
+  it("keeps an unknown verified provider actionable without guessing a Chat route", async () => {
+    mocks.verify.mockResolvedValue({
+      ...ready,
+      provider: "unrecognized-provider",
+    });
+    render(
+      <Parent
+        setupState={{
+          ...initial,
+          step_data: {
+            ...initial.step_data,
+            providers: {
+              default_provider: "unrecognized-provider",
+              default_model: ready.model,
+            },
+          },
+        }}
+      />,
+    );
+    send();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /provider|model/i,
+    );
+    expect(screen.getByRole("button", { name: "Finish setup" })).toBeEnabled();
+    expect(screen.queryByText("Workspace ready")).not.toBeInTheDocument();
+    expect(await new Storage().get("selectedModel")).toBeFalsy();
   });
 
   it("refuses verification with unknown connection authority", async () => {

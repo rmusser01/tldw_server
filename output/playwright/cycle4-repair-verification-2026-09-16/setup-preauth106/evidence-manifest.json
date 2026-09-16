@@ -1,0 +1,116 @@
+{
+  "unit": "setup-preauth106",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-setup-preauth-code-freeze.json",
+      "bytes": 703,
+      "sha256": "d1f52399f1874c37d9bba1d227cf9c82341b2cd80502895c4c08588fabc45f80"
+    },
+    {
+      "file": "cycle4-setup-preauth-final-green.log",
+      "bytes": 1964,
+      "sha256": "5a9ce12c3f13302b534d597a1f43895bef24b6f8c010a8709fdff3f402d6260f"
+    },
+    {
+      "file": "cycle4-setup-preauth-final.diff",
+      "bytes": 14057,
+      "sha256": "f94df16d2a209a4762f78aadd776a52068dca6ae0678d27ca6b4c9203b643537"
+    },
+    {
+      "file": "cycle4-setup-preauth-frontend-paths.json",
+      "bytes": 188,
+      "sha256": "cd6e33e9bf589c3f06212d3ba22305c95f6d30f06fca790a95ef4ee3d1a189e8"
+    },
+    {
+      "file": "cycle4-setup-preauth-green.log",
+      "bytes": 1385,
+      "sha256": "b69fd99ec0948241db3ec90629e721ff158432013f4821a1db3d6d0d3611ea5b"
+    },
+    {
+      "file": "cycle4-setup-preauth-implementation.md",
+      "bytes": 6489,
+      "sha256": "25ebf655425058747dfb41104fa3bcec906062f9821621e0792c45f2561b0823"
+    },
+    {
+      "file": "cycle4-setup-preauth-lint-baseline.json",
+      "bytes": 748,
+      "sha256": "c42dcc1cc82aff913b8e46670e39b32e638aa6bf8f642678bfb62e4318cd4dce"
+    },
+    {
+      "file": "cycle4-setup-preauth-lint-comparison.json",
+      "bytes": 121,
+      "sha256": "95c04de63ddb15ed3bb03a4d45e80333967f2f61f0e75fba34d93d0708c245c2"
+    },
+    {
+      "file": "cycle4-setup-preauth-lint-current.json",
+      "bytes": 748,
+      "sha256": "c42dcc1cc82aff913b8e46670e39b32e638aa6bf8f642678bfb62e4318cd4dce"
+    },
+    {
+      "file": "cycle4-setup-preauth-owned-manifest.json",
+      "bytes": 905,
+      "sha256": "3b374daad1d8fccd7f5233bc8da119b377a6de3c2282418c858711a54dc85aae"
+    },
+    {
+      "file": "cycle4-setup-preauth-paths.json",
+      "bytes": 188,
+      "sha256": "cd6e33e9bf589c3f06212d3ba22305c95f6d30f06fca790a95ef4ee3d1a189e8"
+    },
+    {
+      "file": "cycle4-setup-preauth-production-freeze.json",
+      "bytes": 398,
+      "sha256": "1e7da4ff79aaf77c4a2afaaa9c77b88dd2d0e68f7ffb2733c349854e869ef0a3"
+    },
+    {
+      "file": "cycle4-setup-preauth-red.log",
+      "bytes": 172711,
+      "sha256": "90426d3454087ef36fb6d5943836b43cd6932ff446c989fa72a6b11e2c5833dc"
+    },
+    {
+      "file": "cycle4-setup-preauth-static-check.mjs",
+      "bytes": 1946,
+      "sha256": "ac87d7f75353ca41983879733c65fdfb96ba2dc3b89cf19c9b1e2d6ca8481175"
+    },
+    {
+      "file": "cycle4-setup-preauth-static.log",
+      "bytes": 121,
+      "sha256": "95c04de63ddb15ed3bb03a4d45e80333967f2f61f0e75fba34d93d0708c245c2"
+    },
+    {
+      "file": "cycle4-setup-preauth-typecheck-comparison.json",
+      "bytes": 341,
+      "sha256": "ce183c13a44dc93a96300ba683c1f88dc0f28d17d1a19436dfb9572ebd5277e9"
+    },
+    {
+      "file": "cycle4-setup-preauth-typecheck.log",
+      "bytes": 24922,
+      "sha256": "e5b7d174f6dbb6166279ca6583ca8a047ea545c536ff8b33d515d9b51383b345"
+    },
+    {
+      "file": "cycle4-uat106-preauth-independent-green.log",
+      "bytes": 1503,
+      "sha256": "7505dfeab638d1c68fe8d3129468f4c253c8d8b4627bca37b81b33fe7c33a5b7"
+    },
+    {
+      "file": "cycle4-uat106-preauth-independent-review.md",
+      "bytes": 5076,
+      "sha256": "f1bb1388dcb65d2f092a46b5dda039164e72a7ec99221c84792e3a7891b3ec17"
+    },
+    {
+      "file": "cycle4-uat106-preauth-private-probes.log",
+      "bytes": 587,
+      "sha256": "f101ade01c129ad7f2b3b69e298f55290bb736ee5358ce2ed644e85b2d9f95ad"
+    },
+    {
+      "file": "cycle4-uat106-preauth-review-probes.txt",
+      "bytes": 2332,
+      "sha256": "ccebc2d82de62b91aedb0d52676a2ada5f3d59fbfe9ef0d60ff1965f0d88c106"
+    },
+    {
+      "file": "cycle4-uat106-preauth-review.config.mjs",
+      "bytes": 760,
+      "sha256": "591bc866c89ecc77d770df3e4e842b656dfdd6506c7f6736a486a5c0c3293509"
+    }
+  ]
+}

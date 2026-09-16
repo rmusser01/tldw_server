@@ -1,0 +1,21 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:27828) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx (36 tests) 1474ms
+(node:27835) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx (32 tests) 1678ms
+(node:27846) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx (20 tests) 400ms
+(node:27851) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.extension-authority.test.tsx (1 test) 133ms
+
+ Test Files  4 passed (4)
+      Tests  89 passed (89)
+   Start at  20:44:22
+   Duration  5.92s (transform 572ms, setup 264ms, import 670ms, tests 3.69s, environment 949ms)
+
