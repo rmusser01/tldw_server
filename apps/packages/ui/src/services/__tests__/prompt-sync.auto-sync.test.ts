@@ -417,7 +417,7 @@ describe("prompt-sync auto-sync defaults", () => {
     }
   )
 
-  it("keeps the legacy pending result when an unlinked server create is empty", async () => {
+  it("persists pending without inventing linkage when an unlinked server create is empty", async () => {
     state.prompts.set("local-empty-create", {
       id: "local-empty-create",
       title: "Pending prompt",
@@ -438,7 +438,10 @@ describe("prompt-sync auto-sync defaults", () => {
 
     expect(result.success).toBe(false)
     expect(result.syncStatus).toBe("pending")
-    expect(mocks.promptUpdate).not.toHaveBeenCalled()
+    expect(state.prompts.get("local-empty-create")).toMatchObject({
+      content: "test", syncStatus: "pending"
+    })
+    expect(state.prompts.get("local-empty-create").serverId).toBeUndefined()
   })
 
   it.each(invalidAutoSyncCases)(
@@ -530,6 +533,63 @@ describe("prompt-sync auto-sync defaults", () => {
   )
 
   it.each(["create", "update"] as const)(
+    "persists standard %s pending state for normalized failures in auto and direct sync",
+    async (operation) => {
+      const { autoSyncPrompt, pushToStudio } = await importPromptSync()
+      for (const sync of [autoSyncPrompt, pushToStudio]) {
+        for (const response of [
+          { ok: false, status: 0, error: "Failed to fetch" },
+          { ok: false, status: 503, error: "Service unavailable" },
+          { ok: true, status: 200, data: { success: true, data: null } }
+        ]) {
+          const local = {
+            id: "standard-failure", title: "Prompt", content: "Unsynced local text",
+            user_prompt: "Unsynced local text", is_system: false, createdAt: 1,
+            studioProjectId: 17, lastSyncedAt: 10, versionNumber: 1,
+            syncStatus: operation === "create" ? "local" : "synced",
+            ...(operation === "update" ? { serverId: 702, studioPromptId: 702 } : {})
+          }
+          state.prompts.set(local.id, structuredClone(local))
+          const transport = operation === "create" ? mocks.createPrompt : mocks.updatePrompt
+          transport.mockResolvedValueOnce({
+            ...response,
+            recipePersistence: { state: "dispatched", actualOwnerId: owner }
+          })
+
+          const result = await sync(local.id, 17, input)
+
+          expect(result).toMatchObject({ success: false, syncStatus: "pending" })
+          expect(state.prompts.get(local.id)).toMatchObject({ ...local, syncStatus: "pending" })
+        }
+      }
+    }
+  )
+
+  it.each([
+    { status: 401, detail: "Not authenticated" },
+    { status: 403, detail: "Access denied to this prompt" },
+    { status: 409, detail: "Prompt with this name already exists in the project" },
+    { status: 422, detail: [{ loc: ["body", "name"], msg: "Required", type: "missing" }] }
+  ])("preserves known $status validation rejection handling", async (response) => {
+    const local = {
+      id: "known-rejection", title: "Prompt", content: "Local text", user_prompt: "Local text",
+      is_system: false, createdAt: 1, serverId: 702, studioProjectId: 17,
+      syncStatus: "conflict", lastSyncedAt: 10
+    }
+    state.prompts.set(local.id, structuredClone(local))
+    mocks.updatePrompt.mockResolvedValueOnce({
+      ok: false, status: response.status, data: { detail: response.detail }, error: "Rejected",
+      recipePersistence: { state: "dispatched", actualOwnerId: owner }
+    })
+    const { autoSyncPrompt } = await importPromptSync()
+
+    expect(await autoSyncPrompt(local.id, 17, input)).toMatchObject({
+      success: false, failureKind: "validation", syncStatus: "conflict"
+    })
+    expect(state.prompts.get(local.id)).toEqual(local)
+  })
+
+  it.each(["create", "update"] as const)(
     "retains pending-state behavior for transient $operation failures",
     async (operation) => {
       const original = {
@@ -568,7 +628,6 @@ describe("prompt-sync auto-sync defaults", () => {
           updatedAt: expect.any(Number)
         })
       )
-      expect(mocks.promptUpdate).toHaveBeenCalledTimes(1)
     }
   )
 

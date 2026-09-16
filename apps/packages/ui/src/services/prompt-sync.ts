@@ -646,6 +646,10 @@ async function persistServerPrompt(
       } catch {
         /* Preserve dispatch evidence. */
       }
+    } else if (!isRecipe && failureKind !== "validation") {
+      // The transport also resolves failures as response envelopes. Persist
+      // the returned status so query refreshes cannot label local edits synced.
+      await db.prompts.update(localId, { syncStatus: "pending" })
     }
     return {
       success: false,

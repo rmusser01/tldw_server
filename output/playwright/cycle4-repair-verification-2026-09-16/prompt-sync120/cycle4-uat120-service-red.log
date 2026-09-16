@@ -1,0 +1,122 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:45747) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/services/__tests__/prompt-sync.auto-sync.test.ts (49 tests | 2 failed) 135ms
+     ✓ enables auto-sync by default and can be disabled 114ms
+     ✓ uses configured default project when available 0ms
+     ✓ chooses and persists first available project when default is missing 1ms
+     ✓ auto-creates a sync project and syncs prompt when none exists 1ms
+     ✓ marks prompt pending when project resolution fails 0ms
+     ✓ rejects 'runtime-bearing recipe' before auto-sync project resolution ('would-create-project') 1ms
+     ✓ rejects 'malformed recipe' before auto-sync project resolution ('would-create-project') 0ms
+     ✓ rejects 'future recipe' before auto-sync project resolution ('would-create-project') 0ms
+     ✓ rejects 'outer and inner mismatch' before auto-sync project resolution ('would-create-project') 0ms
+     ✓ rejects 'runtime-bearing recipe' before auto-sync project resolution ('no-resolvable-project') 0ms
+     ✓ rejects 'malformed recipe' before auto-sync project resolution ('no-resolvable-project') 0ms
+     ✓ rejects 'future recipe' before auto-sync project resolution ('no-resolvable-project') 0ms
+     ✓ rejects 'outer and inner mismatch' before auto-sync project resolution ('no-resolvable-project') 0ms
+     ✓ keeps the legacy pending result when an unlinked server create is empty 0ms
+     ✓ quarantines invalid 'create' response identity: 'runtime map' 1ms
+     ✓ quarantines invalid 'create' response identity: 'malformed block' 0ms
+     ✓ quarantines invalid 'create' response identity: 'future version' 0ms
+     ✓ quarantines invalid 'create' response identity: 'outer mismatch' 0ms
+     ✓ quarantines invalid 'update' response identity: 'runtime map' 1ms
+     ✓ quarantines invalid 'update' response identity: 'malformed block' 0ms
+     ✓ quarantines invalid 'update' response identity: 'future version' 0ms
+     ✓ quarantines invalid 'update' response identity: 'outer mismatch' 0ms
+     × persists standard $operation pending state for normalized failures in auto and direct sync 4ms
+     × persists standard $operation pending state for normalized failures in auto and direct sync 1ms
+     ✓ preserves known 401 validation rejection handling 0ms
+     ✓ preserves known 403 validation rejection handling 0ms
+     ✓ preserves known 409 validation rejection handling 0ms
+     ✓ preserves known 422 validation rejection handling 0ms
+     ✓ retains pending-state behavior for transient $operation failures 0ms
+     ✓ retains pending-state behavior for transient $operation failures 0ms
+     ✓ returns conflict details with both local and server prompts 0ms
+     ✓ resolveConflict keep_local pushes the local version to server 0ms
+     ✓ resolveConflict keep_server pulls server version into local 0ms
+     ✓ resolveConflict keep_both creates the server copy before one atomic local update 0ms
+     ✓ resolveConflict keep_both fails without mutation for an missing project id 0ms
+     ✓ resolveConflict keep_both fails without mutation for an null project id 0ms
+     ✓ resolveConflict keep_both fails without mutation for an zero project id 0ms
+     ✓ resolveConflict keep_both fails without mutation for an negative project id 0ms
+     ✓ resolveConflict keep_both fails without mutation for an fractional project id 0ms
+     ✓ resolveConflict keep_both fails without mutation for an non-finite project id 0ms
+     ✓ resolveConflict keep_both fails without mutation for an string project id 0ms
+     ✓ resolveConflict keep_both preserves recipe identity in the new server copy 0ms
+     ✓ resolveConflict keep_both is failure-atomic on validation failure 0ms
+     ✓ resolveConflict keep_both is failure-atomic on network failure 0ms
+     ✓ resolveConflict keep_both is failure-atomic on empty response failure 0ms
+     ✓ resolveConflict keep_both is failure-atomic on malicious response failure 0ms
+     ✓ getSyncStatus does not flag metadata-only server updates as conflicts 5ms
+     ✓ getSyncStatus flags conflict when both timestamp and content differ 0ms
+     ✓ getSyncStatus supports legacy content-only local prompts 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/services/__tests__/prompt-sync.auto-sync.test.ts > prompt-sync auto-sync defaults > persists standard $operation pending state for normalized failures in auto and direct sync
+AssertionError: expected { id: 'standard-failure', …(9) } to match object { id: 'standard-failure', …(9) }
+
+- Expected
++ Received
+
+@@ -3,10 +3,10 @@
+    "createdAt": 1,
+    "id": "standard-failure",
+    "is_system": false,
+    "lastSyncedAt": 10,
+    "studioProjectId": 17,
+-   "syncStatus": "pending",
++   "syncStatus": "local",
+    "title": "Prompt",
+    "user_prompt": "Unsynced local text",
+    "versionNumber": 1,
+  }
+
+ ❯ ../packages/ui/src/services/__tests__/prompt-sync.auto-sync.test.ts:559:47
+    557| 
+    558|           expect(result).toMatchObject({ success: false, syncStatus: "…
+    559|           expect(state.prompts.get(local.id)).toMatchObject({ ...local…
+       |                                               ^
+    560|         }
+    561|       }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  ../packages/ui/src/services/__tests__/prompt-sync.auto-sync.test.ts > prompt-sync auto-sync defaults > persists standard $operation pending state for normalized failures in auto and direct sync
+AssertionError: expected { id: 'standard-failure', …(11) } to match object { id: 'standard-failure', …(11) }
+
+- Expected
++ Received
+
+@@ -5,10 +5,10 @@
+    "is_system": false,
+    "lastSyncedAt": 10,
+    "serverId": 702,
+    "studioProjectId": 17,
+    "studioPromptId": 702,
+-   "syncStatus": "pending",
++   "syncStatus": "synced",
+    "title": "Prompt",
+    "user_prompt": "Unsynced local text",
+    "versionNumber": 1,
+  }
+
+ ❯ ../packages/ui/src/services/__tests__/prompt-sync.auto-sync.test.ts:559:47
+    557| 
+    558|           expect(result).toMatchObject({ success: false, syncStatus: "…
+    559|           expect(state.prompts.get(local.id)).toMatchObject({ ...local…
+       |                                               ^
+    560|         }
+    561|       }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 47 passed (49)
+   Start at  22:51:17
+   Duration  555ms (transform 144ms, setup 88ms, import 24ms, tests 135ms, environment 215ms)
+

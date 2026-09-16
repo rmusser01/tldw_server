@@ -1,0 +1,37 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:46586) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46584) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46587) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46583) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46588) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46590) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46582) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46589) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46585) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/Prompt/__tests__/usePromptEditor.save-state.test.tsx (6 tests) 27ms
+ ✓ ../packages/ui/src/services/__tests__/api-send.test.ts (13 tests) 163ms
+ ✓ ../packages/ui/src/services/__tests__/prompt-sync.auto-sync.test.ts (49 tests) 169ms
+ ✓ ../packages/ui/src/services/__tests__/prompt-sync.uncertainty.test.ts (62 tests) 72ms
+ ✓ ../packages/ui/src/services/__tests__/prompt-sync.structured-prompts.test.ts (1011 tests) 263ms
+ ✓ ../packages/ui/src/components/Option/Prompt/__tests__/SyncStatusBadge.test.tsx (12 tests) 146ms
+ ✓ ../packages/ui/src/components/Option/Prompt/__tests__/usePromptEditor.transport-sync.test.tsx (1 test) 300ms
+ ✓ ../packages/ui/src/components/Option/Prompt/__tests__/prompt-sync.owner-callers.test.tsx (10 tests) 500ms
+ ✓ ../packages/ui/src/services/__tests__/recipe-persistence-owner.contract.test.ts (33 tests) 971ms
+     ✓ extension same-owner Pull cannot release an existing PUT during transport settlement  700ms
+
+ Test Files  9 passed (9)
+      Tests  1197 passed (1197)
+   Start at  22:53:01
+   Duration  1.83s (transform 2.09s, setup 1.25s, import 2.52s, tests 2.61s, environment 3.13s)
+

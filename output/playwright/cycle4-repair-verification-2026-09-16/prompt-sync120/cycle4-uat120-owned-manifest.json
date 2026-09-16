@@ -1,0 +1,26 @@
+{
+  "task": "TASK-13260.60",
+  "issue": "UAT120",
+  "base": "a8e5430d7692bf44669971a0187056b1fe7fb442",
+  "frozenAt": "2026-09-16T05:54:22.171Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/services/prompt-sync.ts",
+      "sha256": "6d07f107abb63f1526fee7228db97ddd5f7a93e787ad07730b24ddc762c2186e"
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/prompt-sync.auto-sync.test.ts",
+      "sha256": "0959730c4fb1e4fd1270ceeb29870e2190d122d2990c55af4b4beec0f30337bf"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Prompt/__tests__/usePromptEditor.transport-sync.test.tsx",
+      "sha256": "12331b49c9801f610a93892be07056fdf13bd256f486abb0e461c2c483b6031d"
+    },
+    {
+      "path": "backlog/tasks/task-13260.60 - Keep-standard-Prompt-sync-state-pending-after-transport-failure.md",
+      "sha256": "784e7ec50aeb6e0c598a111ac9f3bb227298c3c1633c73c1338726c1cb5f0be9"
+    }
+  ],
+  "report": "/private/tmp/cycle4-uat120-implementation.md",
+  "taskRecordedAt": "2026-09-16T05:56:15.391Z"
+}

@@ -1,0 +1,81 @@
+{
+  "unit": "prompt-sync120",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-uat111-120-independent-green.log",
+      "bytes": 1586,
+      "sha256": "a23775906cb1c7f980255a44cf8165515df2ce8ed71655b4e14543c61374691b"
+    },
+    {
+      "file": "cycle4-uat111-120-independent-review.md",
+      "bytes": 1732,
+      "sha256": "c1264e43c9dce879830c9793401c91163519e5b3e9d7ee82b6baa77f8d306d70"
+    },
+    {
+      "file": "cycle4-uat120-code-freeze.json",
+      "bytes": 714,
+      "sha256": "b6e1163f75cd224b14cc3f5d568a8731119a21a2a21f1eb176db216d2f0dad78"
+    },
+    {
+      "file": "cycle4-uat120-focused-green.log",
+      "bytes": 5830,
+      "sha256": "25e7312699b6fbe77fec1d0f6b55efe0eec4ec0609a808b8bab544d51069063f"
+    },
+    {
+      "file": "cycle4-uat120-implementation.md",
+      "bytes": 6502,
+      "sha256": "301db2132bfbcb1278a7ac33bb386fdbf67d480caea8c47829df91230b205b79"
+    },
+    {
+      "file": "cycle4-uat120-lint-after.json",
+      "bytes": 38816,
+      "sha256": "484e0499aaab5a8c1365181ff8af831adc10e004cfadfd6adea12b63e7ae16c4"
+    },
+    {
+      "file": "cycle4-uat120-lint-comparison.json",
+      "bytes": 110,
+      "sha256": "f3fe37c7de970a8d368f7656ed700d1f7178ae5de74d8fbc28abb803a3e0e6e4"
+    },
+    {
+      "file": "cycle4-uat120-mounted-red.log",
+      "bytes": 1923,
+      "sha256": "38f4e2a5954765529c7d6649090aaaab300cc7dbbb4a38153b9258fc931accd5"
+    },
+    {
+      "file": "cycle4-uat120-owned-manifest.json",
+      "bytes": 1032,
+      "sha256": "17d23a7c234d417dad873b33802dbe3885e95b7428bcaa2437ccb5b33c7e5aa8"
+    },
+    {
+      "file": "cycle4-uat120-production-lint-before.json",
+      "bytes": 272,
+      "sha256": "80d1f96db4d2538df1a894b70ae37a895854c7b6e014c06e70646b869dd496b1"
+    },
+    {
+      "file": "cycle4-uat120-related-green.log",
+      "bytes": 2898,
+      "sha256": "88ab0828b320ba65b4acab0acad6671ff3cd9e5323b083c95ffa84e0dabdc187"
+    },
+    {
+      "file": "cycle4-uat120-service-red.log",
+      "bytes": 6810,
+      "sha256": "92e3fb9b8d669d2313b4cbda159e763a3e578f8fd2bc561567269706d29c43b3"
+    },
+    {
+      "file": "cycle4-uat120-test-lint-before.json",
+      "bytes": 35278,
+      "sha256": "8392aeac80a3f622ded3850ae9c3cb83f22c3492654cf4303285fa11ca17a2ad"
+    },
+    {
+      "file": "cycle4-uat120-typecheck-comparison.json",
+      "bytes": 304,
+      "sha256": "1fd00797401267c7ebf4689f87f7d0e4e5efd46a71aca3c006ba2b4617944778"
+    },
+    {
+      "file": "cycle4-uat120-typecheck.log",
+      "bytes": 24428,
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e"
+    }
+  ]
+}
