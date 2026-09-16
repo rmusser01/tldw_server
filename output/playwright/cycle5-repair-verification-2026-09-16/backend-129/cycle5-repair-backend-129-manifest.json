@@ -1,0 +1,14 @@
+[
+  {
+    "path": "tldw_Server_API/app/api/v1/endpoints/prompts.py",
+    "sha256": "4bdbff16523531ea8a39db8b49e4f8b118720a8109068f84df4a42f7d4c88ace"
+  },
+  {
+    "path": "tldw_Server_API/tests/AuthNZ_Unit/test_prompts_canonical_auth_mode.py",
+    "sha256": "3b2b0146255a99609a8148fe62ee9b968d9dd306493b659de6016010dea8887d"
+  },
+  {
+    "path": "backlog/tasks/task-13260.69 - Honor-canonical-multi-user-authentication-for-Prompt-collections.md",
+    "sha256": "7e492297fd5da04da2de66e8ae1577ae6e66be0951631663167fcf563bef6f73"
+  }
+]

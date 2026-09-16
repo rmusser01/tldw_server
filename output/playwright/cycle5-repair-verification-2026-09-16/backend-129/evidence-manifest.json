@@ -1,0 +1,68 @@
+{
+  "unit": "backend-129",
+  "retainedAt": "2026-09-16T14:01:09.441Z",
+  "knownCredentialMatches": 0,
+  "jwtPrivateKeyPatternMatches": 0,
+  "files": [
+    {
+      "name": "cycle5-repair-backend-129-bandit.json",
+      "bytes": 766,
+      "sha256": "55097aea8feb711a49da8ffd789d78ed7a15e9e8fa943eea2292a67c93db6fb9"
+    },
+    {
+      "name": "cycle5-repair-backend-129-bandit.log",
+      "bytes": 244,
+      "sha256": "f79308c70384c05c7dccf7c907105bc9c42dbb952beaa4fc2037ddf2abc47293"
+    },
+    {
+      "name": "cycle5-repair-backend-129-final-focused.log",
+      "bytes": 7327,
+      "sha256": "701024a525de4c8ac9aab9a09f4341b4e5717d1b7536545baa5d42cfdb4ba3ef"
+    },
+    {
+      "name": "cycle5-repair-backend-129-green.log",
+      "bytes": 5287,
+      "sha256": "90983e5411e80e565d7d5418864819d55c23b444759dbc5defd4dc65762da51a"
+    },
+    {
+      "name": "cycle5-repair-backend-129-independent-review.md",
+      "bytes": 1399,
+      "sha256": "c015dbee010189978eb4c4e8519f08e2b702cd77f0fccf8e240114ad485fe419"
+    },
+    {
+      "name": "cycle5-repair-backend-129-independent-tests.log",
+      "bytes": 7461,
+      "sha256": "a138bd8c0f45f193ae7078360ed51e3bdc4020910cd9f13abbe236c72b0b6708"
+    },
+    {
+      "name": "cycle5-repair-backend-129-manifest.json",
+      "bytes": 533,
+      "sha256": "f9ed4093a009df4dc39f4510236cdefa84eef6262eed00d931bb9591fac44502"
+    },
+    {
+      "name": "cycle5-repair-backend-129-red.log",
+      "bytes": 40839,
+      "sha256": "a121e6b977b75b9d51cba5fe1b4f94b013ad58b6907eb53e053c917237628549"
+    },
+    {
+      "name": "cycle5-repair-backend-129-report.md",
+      "bytes": 2481,
+      "sha256": "a1d3b5a00b979721ed6ab397fb68067cf18b7914f2e1f8b8a53a7dba56f68e07"
+    },
+    {
+      "name": "cycle5-repair-backend-129-ruff-after.json",
+      "bytes": 2,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "name": "cycle5-repair-backend-129-ruff-before.json",
+      "bytes": 2,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "name": "cycle5-repair-backend-129-task-review.log",
+      "bytes": 27,
+      "sha256": "95d2df16ab0a7727de64247bc1d44d72bd246d9baaedcb0784389b22cfafff75"
+    }
+  ]
+}
