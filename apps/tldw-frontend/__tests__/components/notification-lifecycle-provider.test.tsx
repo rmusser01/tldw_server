@@ -734,10 +734,10 @@ describe("NotificationLifecycleProvider", () => {
     mocks.connection = { ...mocks.connection, isConnected: false, phase: "unconfigured" }
     const requestInbox = vi.fn()
     function InboxConsumer() {
-      const { state } = useNotificationLifecycle()
+      const { state, connectionVerified } = useNotificationLifecycle()
       useEffect(() => {
-        if (state !== "auth-required" && state !== "unavailable") requestInbox()
-      }, [state])
+        if (connectionVerified && state !== "auth-required" && state !== "unavailable") requestInbox()
+      }, [connectionVerified, state])
       return null
     }
     render(<NotificationLifecycleProvider><InboxConsumer /></NotificationLifecycleProvider>)

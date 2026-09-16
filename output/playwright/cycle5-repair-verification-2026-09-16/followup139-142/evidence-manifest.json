@@ -1,0 +1,280 @@
+{
+  "retainedAt": "2026-09-16T15:59:59.246Z",
+  "sourceManifest": "cycle5-uat142-batched-owned-manifest.json",
+  "sourceHashesVerified": true,
+  "normalization": "Logs only: trailing horizontal whitespace and terminal blank lines normalized; original and retained SHA256 are recorded separately.",
+  "secretScan": {
+    "knownRuntimeValues": 14,
+    "jwtPattern": true,
+    "credentialUrl": true,
+    "findings": 0
+  },
+  "files": [
+    {
+      "file": "cycle5-uat139-final-green.log",
+      "source": "/private/tmp/cycle5-uat139-final-green.log",
+      "bytes": 1865,
+      "original_sha256": "7358fe891877e082a7b952d654318764760b5e8e43d26b8588b0af40e80d28fd",
+      "sha256": "b0542d7005db3af702257fe641c819a665e872212bd025dc5897eea2f8d23263"
+    },
+    {
+      "file": "cycle5-uat139-green.log",
+      "source": "/private/tmp/cycle5-uat139-green.log",
+      "bytes": 1307,
+      "original_sha256": "aa1be76441b85aeba448982b843447dc4446a12286a5562f89dbad66d42fa2d2",
+      "sha256": "fa2627dda4bc430b9e2b6acac2b7e9be5d017ad8e511c8e6da4bb57f06684889"
+    },
+    {
+      "file": "cycle5-uat139-implementation.md",
+      "source": "/private/tmp/cycle5-uat139-implementation.md",
+      "bytes": 3883,
+      "original_sha256": "f7ba13c188d6f85a3ccbea5e119d61f876df04dc1b221d46a5977044fad4e330",
+      "sha256": "f7ba13c188d6f85a3ccbea5e119d61f876df04dc1b221d46a5977044fad4e330"
+    },
+    {
+      "file": "cycle5-uat139-independent-hashes.json",
+      "source": "/private/tmp/cycle5-uat139-independent-hashes.json",
+      "bytes": 1583,
+      "original_sha256": "e90cf221197a28ca3f4c0e3febfbe476ada6dc4200b668f6a0bbf1617ce7245e",
+      "sha256": "e90cf221197a28ca3f4c0e3febfbe476ada6dc4200b668f6a0bbf1617ce7245e"
+    },
+    {
+      "file": "cycle5-uat139-independent-probes.log",
+      "source": "/private/tmp/cycle5-uat139-independent-probes.log",
+      "bytes": 2692,
+      "original_sha256": "32708c18b473c968baf1e46b738c810ce618558e18f41389a6fad2ab003ecac0",
+      "sha256": "de812061ac7b96687a2b7b3f63801fd1323b124a66a46b946fc7f6d6afdb7cec"
+    },
+    {
+      "file": "cycle5-uat139-independent-review.md",
+      "source": "/private/tmp/cycle5-uat139-independent-review.md",
+      "bytes": 5441,
+      "original_sha256": "14aad0bccba054e1f63080d66ead945b86400b732dc0ba342b46eec07df38454",
+      "sha256": "14aad0bccba054e1f63080d66ead945b86400b732dc0ba342b46eec07df38454"
+    },
+    {
+      "file": "cycle5-uat139-independent-tests.log",
+      "source": "/private/tmp/cycle5-uat139-independent-tests.log",
+      "bytes": 1865,
+      "original_sha256": "ba7dd13ad0aa92b4080e9189099ce0d7ec8255e46c9d38a52c71d98e03909f34",
+      "sha256": "63633fb9186e7510555d5993e3ee2747934bb6d9d010bfda36d5a3dc36225471"
+    },
+    {
+      "file": "cycle5-uat139-lint.log",
+      "source": "/private/tmp/cycle5-uat139-lint.log",
+      "bytes": 1,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "file": "cycle5-uat139-owned-manifest.json",
+      "source": "/private/tmp/cycle5-uat139-owned-manifest.json",
+      "bytes": 1252,
+      "original_sha256": "1cc0fb9c27d8d497570774ca163d357fd0567a682e68387d81e9a52dafbaf158",
+      "sha256": "1cc0fb9c27d8d497570774ca163d357fd0567a682e68387d81e9a52dafbaf158"
+    },
+    {
+      "file": "cycle5-uat139-private-tests.txt",
+      "source": "/private/tmp/cycle5-uat139-private-tests.txt",
+      "bytes": 1809,
+      "original_sha256": "3352f1d90c38523aaf9236afd30a72e500c959e160d862aaea6aa953a2ede590",
+      "sha256": "3352f1d90c38523aaf9236afd30a72e500c959e160d862aaea6aa953a2ede590"
+    },
+    {
+      "file": "cycle5-uat139-private.config.ts",
+      "source": "/private/tmp/cycle5-uat139-private.config.ts",
+      "bytes": 712,
+      "original_sha256": "d03acda63f41ac48b9fdf251f074a26eab371f79902220b9f67a40dac4e0d5e0",
+      "sha256": "d03acda63f41ac48b9fdf251f074a26eab371f79902220b9f67a40dac4e0d5e0"
+    },
+    {
+      "file": "cycle5-uat139-readonly-design-hashes.json",
+      "source": "/private/tmp/cycle5-uat139-readonly-design-hashes.json",
+      "bytes": 867,
+      "original_sha256": "636561a2a664d859916aa84ad592e149b411a92bcb30880443b1a6ee97c1198e",
+      "sha256": "636561a2a664d859916aa84ad592e149b411a92bcb30880443b1a6ee97c1198e"
+    },
+    {
+      "file": "cycle5-uat139-readonly-design.md",
+      "source": "/private/tmp/cycle5-uat139-readonly-design.md",
+      "bytes": 6347,
+      "original_sha256": "05988bdd39f6965275f397b1be0b2b4251345438ccb8124a38576982e60adce5",
+      "sha256": "05988bdd39f6965275f397b1be0b2b4251345438ccb8124a38576982e60adce5"
+    },
+    {
+      "file": "cycle5-uat139-red.log",
+      "source": "/private/tmp/cycle5-uat139-red.log",
+      "bytes": 8352,
+      "original_sha256": "bb4bddc4a2002958c91b634fac15daafa95a4fc562cbc9c874699891dd53f6c5",
+      "sha256": "5c879493f1af3d97b8a246f447317886d68623d023fe2aebfb729c18bf0a74ec"
+    },
+    {
+      "file": "cycle5-uat141-142-green.log",
+      "source": "/private/tmp/cycle5-uat141-142-green.log",
+      "bytes": 1866,
+      "original_sha256": "db7c376882e513d7e89f2ed5c40521486016d1991a3c35a2da5231a03533ee1a",
+      "sha256": "656c6fe7a50a33fa867282f8a7e4810cf00292cf7e9759829dcb464b4088397c"
+    },
+    {
+      "file": "cycle5-uat141-142-implementation.md",
+      "source": "/private/tmp/cycle5-uat141-142-implementation.md",
+      "bytes": 3926,
+      "original_sha256": "923442eef6fb0c26fcaf41825da865a86087514607796544f116e1fb8253c1c7",
+      "sha256": "923442eef6fb0c26fcaf41825da865a86087514607796544f116e1fb8253c1c7"
+    },
+    {
+      "file": "cycle5-uat141-142-independent-hashes.json",
+      "source": "/private/tmp/cycle5-uat141-142-independent-hashes.json",
+      "bytes": 2312,
+      "original_sha256": "a93a99e1c9e1d50136c2c46ed17db3769d8768047a06bd1695b82c2f79334aa4",
+      "sha256": "a93a99e1c9e1d50136c2c46ed17db3769d8768047a06bd1695b82c2f79334aa4"
+    },
+    {
+      "file": "cycle5-uat141-142-independent-original-probes.log",
+      "source": "/private/tmp/cycle5-uat141-142-independent-original-probes.log",
+      "bytes": 554,
+      "original_sha256": "a51f51c049c1a812169a143ac099826e408f0914287290c59c3d38f8dc60657f",
+      "sha256": "c06bd583355729845fb37f9a9db13edc0d991182fdd106f16da3cd8d9dcadadc"
+    },
+    {
+      "file": "cycle5-uat141-142-independent-review.md",
+      "source": "/private/tmp/cycle5-uat141-142-independent-review.md",
+      "bytes": 5515,
+      "original_sha256": "3d08b43eef1b2442a520ec0e66ff9b2bd46b6dd57edd6b8c4001617f6b06b931",
+      "sha256": "3d08b43eef1b2442a520ec0e66ff9b2bd46b6dd57edd6b8c4001617f6b06b931"
+    },
+    {
+      "file": "cycle5-uat141-142-independent-tests.log",
+      "source": "/private/tmp/cycle5-uat141-142-independent-tests.log",
+      "bytes": 1866,
+      "original_sha256": "423ca8df36b3b7d99279c2c3a556b98b9ed5fa884202e786129eba4c316533cb",
+      "sha256": "da5872516689240353f3e4e41d61203c563b4643245ac2cd563e67a1a284effa"
+    },
+    {
+      "file": "cycle5-uat141-142-lint.log",
+      "source": "/private/tmp/cycle5-uat141-142-lint.log",
+      "bytes": 1,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "file": "cycle5-uat141-142-owned-manifest.json",
+      "source": "/private/tmp/cycle5-uat141-142-owned-manifest.json",
+      "bytes": 1858,
+      "original_sha256": "b0b8518d0d041101441e575da1b6f134d272af6cd482cd4f8b6f2bbccbbb58a9",
+      "sha256": "b0b8518d0d041101441e575da1b6f134d272af6cd482cd4f8b6f2bbccbbb58a9"
+    },
+    {
+      "file": "cycle5-uat141-green.log",
+      "source": "/private/tmp/cycle5-uat141-green.log",
+      "bytes": 772,
+      "original_sha256": "c14aca9e51e95a87f14cf3579aba583db8739179e6087293a2f51555f5967d5f",
+      "sha256": "6f14c26a4fc44ce41c2bf6205b031c17b312a41a812d2b0d6eefa4bbcd3c589a"
+    },
+    {
+      "file": "cycle5-uat141-red.log",
+      "source": "/private/tmp/cycle5-uat141-red.log",
+      "bytes": 3064,
+      "original_sha256": "8e3fe50f4bc6eb7473ef9f8976fff308a103f8749a5f810704558b98591a2daf",
+      "sha256": "7e10a28d7652f1a60afe036f9c997644a1856676acf1de875deb2c674ccc4a42"
+    },
+    {
+      "file": "cycle5-uat142-batched-final-independent-hashes.json",
+      "source": "/private/tmp/cycle5-uat142-batched-final-independent-hashes.json",
+      "bytes": 2382,
+      "original_sha256": "bff5ae2e2c8577a89984809934356cd49802045bff14ce35edf93db7e7afd563",
+      "sha256": "bff5ae2e2c8577a89984809934356cd49802045bff14ce35edf93db7e7afd563"
+    },
+    {
+      "file": "cycle5-uat142-batched-final-independent-review.md",
+      "source": "/private/tmp/cycle5-uat142-batched-final-independent-review.md",
+      "bytes": 4847,
+      "original_sha256": "a98b1f23f2d608ba87f2d42a1c48949dbef4ef867f58e77ea101cf76e39d305f",
+      "sha256": "a98b1f23f2d608ba87f2d42a1c48949dbef4ef867f58e77ea101cf76e39d305f"
+    },
+    {
+      "file": "cycle5-uat142-batched-final-independent-tests.log",
+      "source": "/private/tmp/cycle5-uat142-batched-final-independent-tests.log",
+      "bytes": 1866,
+      "original_sha256": "f9d216ceb9e57179a95d18e97421de5d3f6aa9d6e1a724155f5a4fed60da30e2",
+      "sha256": "996d41f79149542200be3da9610382a4593cc557c455963a25bc0ba353307d07"
+    },
+    {
+      "file": "cycle5-uat142-batched-final-original-probes.log",
+      "source": "/private/tmp/cycle5-uat142-batched-final-original-probes.log",
+      "bytes": 554,
+      "original_sha256": "f068b82ce50005b730319be5d464aa431f03571f6d6a9a11f2d95485764ae6c2",
+      "sha256": "57142ff8fe0777ebe6b945293975367c5aa90643fccb0a2d11879f343c447a72"
+    },
+    {
+      "file": "cycle5-uat142-batched-green.log",
+      "source": "/private/tmp/cycle5-uat142-batched-green.log",
+      "bytes": 1866,
+      "original_sha256": "6760af58e94b570188a0621c303ce8f400f2bbf697e42b32a5c2a2f774ab5de3",
+      "sha256": "227a0eef89b7d0ef3399083205be08b24b36e9a95403eb87d37de17771589442"
+    },
+    {
+      "file": "cycle5-uat142-batched-implementation.md",
+      "source": "/private/tmp/cycle5-uat142-batched-implementation.md",
+      "bytes": 4127,
+      "original_sha256": "b75c775e7324fdf5b1fea41fe879e5ca527b6efd4e42241c7e2e5fc27007947d",
+      "sha256": "b75c775e7324fdf5b1fea41fe879e5ca527b6efd4e42241c7e2e5fc27007947d"
+    },
+    {
+      "file": "cycle5-uat142-batched-independent-probes.log",
+      "source": "/private/tmp/cycle5-uat142-batched-independent-probes.log",
+      "bytes": 2402,
+      "original_sha256": "f06cb6967117f91fd87d804e1565423028a0634f7aa5bf95f34ef0fec30e003f",
+      "sha256": "8a31c94575ae65f6ea2325828ffdd791dc3549df1a442efd0514b369614094da"
+    },
+    {
+      "file": "cycle5-uat142-batched-lint.log",
+      "source": "/private/tmp/cycle5-uat142-batched-lint.log",
+      "bytes": 1,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "file": "cycle5-uat142-batched-owned-manifest.json",
+      "source": "/private/tmp/cycle5-uat142-batched-owned-manifest.json",
+      "bytes": 1805,
+      "original_sha256": "c11b15850f8f48e2209ebadfcff9d50cc7b5db9054f449964d77b5ccd427f9a9",
+      "sha256": "c11b15850f8f48e2209ebadfcff9d50cc7b5db9054f449964d77b5ccd427f9a9"
+    },
+    {
+      "file": "cycle5-uat142-batched-private-tests.txt",
+      "source": "/private/tmp/cycle5-uat142-batched-private-tests.txt",
+      "bytes": 1379,
+      "original_sha256": "0420da4a393421883eb17c1f29e4e189394750683ab2b3ca1aa680a4ef9b88bf",
+      "sha256": "0420da4a393421883eb17c1f29e4e189394750683ab2b3ca1aa680a4ef9b88bf"
+    },
+    {
+      "file": "cycle5-uat142-batched-private.config.ts",
+      "source": "/private/tmp/cycle5-uat142-batched-private.config.ts",
+      "bytes": 728,
+      "original_sha256": "26e4393e4047eb10b42ad257db2224539367e85ddccd888988c63a22d4bd5c70",
+      "sha256": "26e4393e4047eb10b42ad257db2224539367e85ddccd888988c63a22d4bd5c70"
+    },
+    {
+      "file": "cycle5-uat142-batched-red.log",
+      "source": "/private/tmp/cycle5-uat142-batched-red.log",
+      "bytes": 3073,
+      "original_sha256": "3f2380ca79e41f868629408de0bb94405e5acfdb37f2108e3951c9a33183d89f",
+      "sha256": "ed9b27b234a64479d296e8aa58db9c1e5a1373f29d2af2e85e2ba00820f35e9e"
+    },
+    {
+      "file": "cycle5-uat142-final-original-139-probes.log",
+      "source": "/private/tmp/cycle5-uat142-final-original-139-probes.log",
+      "bytes": 554,
+      "original_sha256": "1de28ff355798e06ccd553491d27996f0791ceab4d23a3fff6d074a654bca1df",
+      "sha256": "e6382ab74174dcafdee55c43de53d611aa09eab2997b6a73d9aa183508555516"
+    },
+    {
+      "file": "cycle5-uat142-red.log",
+      "source": "/private/tmp/cycle5-uat142-red.log",
+      "bytes": 3229,
+      "original_sha256": "9df6ae7004f2fbbb0eef989e601482b6cf785b0e15298e4f4e2f22b599b857d4",
+      "sha256": "c839267f417e5fb66fe977dbc1585d8dec0d0e746be75632f2218e6ed5c071d9"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "path": "apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx",
+    "sha256": "95a4e338cc16af9f481912a9814eaa2dcd7fb5f75a09e48be368ff9208db6246",
+    "actual": "95a4e338cc16af9f481912a9814eaa2dcd7fb5f75a09e48be368ff9208db6246"
+  },
+  {
+    "path": "apps/tldw-frontend/components/notifications/NotificationsRoute.tsx",
+    "sha256": "b77ad712d981c7b4e6f2d4481139162e5813bb841fab101c80d7879a5b926be3",
+    "actual": "b77ad712d981c7b4e6f2d4481139162e5813bb841fab101c80d7879a5b926be3"
+  },
+  {
+    "path": "apps/tldw-frontend/__tests__/components/notification-connectivity.integration.test.tsx",
+    "sha256": "5370a68a1a1e60ff66183dd83334073ca184539e02baaef31f4e44ea59e3703a",
+    "actual": "5370a68a1a1e60ff66183dd83334073ca184539e02baaef31f4e44ea59e3703a"
+  },
+  {
+    "path": "apps/tldw-frontend/__tests__/components/notification-lifecycle-provider.test.tsx",
+    "sha256": "45d17393e1a4e56f6ec3e108a554cfcbea63e6f6703bed5f6f2fbe0a6643bdfc",
+    "actual": "45d17393e1a4e56f6ec3e108a554cfcbea63e6f6703bed5f6f2fbe0a6643bdfc"
+  },
+  {
+    "path": "apps/tldw-frontend/__tests__/pages/notifications.test.tsx",
+    "sha256": "042df1b765a1759aa9536f020dcdbcadedb5b49b20373ec8254eef077c3735f5",
+    "actual": "042df1b765a1759aa9536f020dcdbcadedb5b49b20373ec8254eef077c3735f5"
+  },
+  {
+    "path": "backlog/tasks/task-13260.78 - Use-connection-outage-wording-for-notification-status.md",
+    "sha256": "e1b6c6ef1d8ddadd7caee53f8dbfc5a7530d1510436ba8192dc64018a5691aba",
+    "actual": "e1b6c6ef1d8ddadd7caee53f8dbfc5a7530d1510436ba8192dc64018a5691aba"
+  }
+]

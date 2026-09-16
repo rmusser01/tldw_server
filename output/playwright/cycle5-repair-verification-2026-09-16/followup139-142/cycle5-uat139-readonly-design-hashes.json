@@ -1,0 +1,22 @@
+[
+  {
+    "path": "apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx",
+    "sha256": "b3cd2575bf06d848d69e47514024f6ba07ceda940c402ed115f19ac00ef971c8"
+  },
+  {
+    "path": "apps/tldw-frontend/components/notifications/NotificationsRoute.tsx",
+    "sha256": "d585cfbe3390287d3cca6829e49a9e27fce6bef6801bec52d92ff2d2444bf7aa"
+  },
+  {
+    "path": "apps/tldw-frontend/__tests__/components/notification-lifecycle-provider.test.tsx",
+    "sha256": "fe6e9e62e8a7f8246d3346af4459f401e7e303535b807e9b96e502cf711f0a09"
+  },
+  {
+    "path": "apps/tldw-frontend/__tests__/pages/notifications.test.tsx",
+    "sha256": "3d2288d8ce1e0b7e737eaee8a1683f7d6c0af31b5d56aeba96e912a618bd176e"
+  },
+  {
+    "path": "apps/packages/ui/src/services/notification-lifecycle.ts",
+    "sha256": "c17e1c45001143c62d46ddb3b2e13a3268344c77510469e01d47676a2ee039e9"
+  }
+]

@@ -1,0 +1,26 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:90832) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:90833) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ __tests__/components/notification-connectivity.integration.test.tsx (17 tests) 502ms
+(node:90884) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ __tests__/pages/notifications.test.tsx (34 tests) 1102ms
+ ✓ ../packages/ui/src/components/Layouts/__tests__/ChatHeader.notifications.test.tsx (10 tests) 354ms
+(node:90891) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:90893) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ __tests__/components/notification-lifecycle-provider.test.tsx (42 tests) 257ms
+ ✓ __tests__/components/notification-rotation.integration.test.tsx (32 tests) 233ms
+(node:90915) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/services/__tests__/notification-lifecycle.test.ts (15 tests) 4ms
+
+ Test Files  6 passed (6)
+      Tests  150 passed (150)
+   Start at  08:34:54
+   Duration  2.81s (transform 330ms, setup 463ms, import 437ms, tests 2.45s, environment 1.53s)

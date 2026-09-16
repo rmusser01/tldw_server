@@ -1,0 +1,51 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:88962) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ __tests__/components/notification-connectivity.integration.test.tsx (14 tests | 1 failed | 12 skipped) 144ms
+     ↓ shows reconnecting on the first network-unverified render without dispatching private inbox work
+     ↓ resumes the real inbox and stream when the same configured key becomes verified
+     ↓ updates network to genuine auth failure while verification stays false
+     ↓ gates the first child effect when configured multi-user credentials are missing
+     ↓ does not claim a last successful inbox update when verified-core notification reads all fail
+     ↓ keeps the successful inbox time through failures and clears it when ownership changes
+     ↓ checks View authority after marking read: none
+     ↓ checks View authority after marking read: outage
+     ↓ checks View authority after marking read: owner
+     ↓ checks View authority after marking read: unmount
+     ↓ checks View authority after marking read: outage-recovered
+     ↓ checks View authority after marking read: owner-returned
+     ✓ independent-batched: pending View after same-batch config events, authorityChanged=false 110ms
+     × independent-batched: pending View after same-batch config events, authorityChanged=true 33ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/components/notification-connectivity.integration.test.tsx > actual notification provider and inbox connection boundary > independent-batched: pending View after same-batch config events, authorityChanged=true
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "/media/71",
+    ]
+
+
+Number of calls: 1
+
+ ❯ __tests__/components/notification-connectivity.integration.test.tsx:190:50
+    169|     }
+    170|   )
+    171| })
+       |   ^
+    172|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 12 skipped (14)
+   Start at  08:30:15
+   Duration  683ms (transform 107ms, setup 90ms, import 101ms, tests 144ms, environment 250ms)

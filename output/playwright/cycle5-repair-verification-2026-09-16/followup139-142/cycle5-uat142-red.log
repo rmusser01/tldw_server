@@ -1,0 +1,54 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:87333) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ __tests__/components/notification-connectivity.integration.test.tsx (12 tests | 5 failed | 6 skipped) 324ms
+     ↓ shows reconnecting on the first network-unverified render without dispatching private inbox work
+     ↓ resumes the real inbox and stream when the same configured key becomes verified
+     ↓ updates network to genuine auth failure while verification stays false
+     ↓ gates the first child effect when configured multi-user credentials are missing
+     ↓ does not claim a last successful inbox update when verified-core notification reads all fail
+     ↓ keeps the successful inbox time through failures and clears it when ownership changes
+     ✓ checks View authority after marking read: none 134ms
+     × checks View authority after marking read: outage 58ms
+     × checks View authority after marking read: owner 32ms
+     × checks View authority after marking read: unmount 28ms
+     × checks View authority after marking read: outage-recovered 45ms
+     × checks View authority after marking read: owner-returned 25ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/components/notification-connectivity.integration.test.tsx > actual notification provider and inbox connection boundary > checks View authority after marking read: outage
+ FAIL  __tests__/components/notification-connectivity.integration.test.tsx > actual notification provider and inbox connection boundary > checks View authority after marking read: owner
+ FAIL  __tests__/components/notification-connectivity.integration.test.tsx > actual notification provider and inbox connection boundary > checks View authority after marking read: unmount
+ FAIL  __tests__/components/notification-connectivity.integration.test.tsx > actual notification provider and inbox connection boundary > checks View authority after marking read: outage-recovered
+ FAIL  __tests__/components/notification-connectivity.integration.test.tsx > actual notification provider and inbox connection boundary > checks View authority after marking read: owner-returned
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "/media/71",
+    ]
+
+
+Number of calls: 1
+
+ ❯ __tests__/components/notification-connectivity.integration.test.tsx:167:35
+    165|       await act(async () => finish({ updated: 1 }))
+    166|       if (transition === "none") expect(mocks.push).toHaveBeenCalledWi…
+    167|       else expect(mocks.push).not.toHaveBeenCalled()
+       |                                   ^
+    168|       expect(mocks.markNotificationsRead).toHaveBeenCalledTimes(1)
+    169|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 1 passed | 6 skipped (12)
+   Start at  08:26:16
+   Duration  1.08s (transform 130ms, setup 157ms, import 116ms, tests 324ms, environment 371ms)

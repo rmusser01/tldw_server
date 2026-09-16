@@ -40,6 +40,7 @@ export type SequencedNotificationEvent = {
 }
 
 export type NotificationLifecycleContextValue = {
+  connectionVerified: boolean
   scopeKey: string
   lifecycleEpoch: number
   state: ExposedNotificationState
@@ -49,6 +50,7 @@ export type NotificationLifecycleContextValue = {
   eventSequence: number
   events: SequencedNotificationEvent[]
   mutationError: unknown | null
+  captureAuthority: () => () => boolean
   tryAgain: () => Promise<void>
   refreshPermissions: () => Promise<void>
   reportRequestError: (error: unknown) => void
@@ -57,7 +59,7 @@ export type NotificationLifecycleContextValue = {
 
 type NotificationRuntimeSnapshot = Omit<
   NotificationLifecycleContextValue,
-  "tryAgain" | "refreshPermissions" | "reportRequestError" | "reportMutationError"
+  "connectionVerified" | "captureAuthority" | "tryAgain" | "refreshPermissions" | "reportRequestError" | "reportMutationError"
 >
 
 type NotificationLifecycleProviderProps = {
@@ -140,6 +142,10 @@ export function NotificationLifecycleProvider({
   const connectionVerified = connection.isConnected &&
     connection.phase === ConnectionPhase.CONNECTED &&
     connection.mode !== "demo" && !connection.offlineBypass
+  const missingConfiguredAuth = hasMissingConfiguredAuth()
+  const unverifiedState: ExposedNotificationState = connection.errorKind === "unreachable"
+    ? "degraded"
+    : "auth-required"
   const [liveScopeKey, setLiveScopeKey] = React.useState(() =>
     suppliedScopeKey ?? buildWebNotificationScopeKey()
   )
@@ -149,6 +155,7 @@ export function NotificationLifecycleProvider({
   )
   const lifecycleEpochRef = React.useRef(0)
   const generationRef = React.useRef(0)
+  const authorityRevisionRef = React.useRef(0)
   const streamOpenRef = React.useRef(false)
   const unreadCurrentRef = React.useRef(false)
   const cursorCurrentRef = React.useRef(false)
@@ -163,6 +170,10 @@ export function NotificationLifecycleProvider({
     apiKey: getApiKey(),
     scope: buildWebNotificationScopeKey()
   })
+  const captureAuthority = React.useCallback(() => {
+    const revision = authorityRevisionRef.current
+    return () => authorityRevisionRef.current === revision
+  }, [])
 
   const stopWork = React.useCallback(() => {
     streamOpenRef.current = false
@@ -230,7 +241,9 @@ export function NotificationLifecycleProvider({
     const missingCredentials = hasMissingConfiguredAuth()
     setSnapshot({
       ...initialSnapshot(scopeKey, lifecycleEpoch),
-      ...(!connectionVerified || missingCredentials ? { state: "auth-required" as const } : {})
+      ...(missingCredentials
+        ? { state: "auth-required" as const }
+        : !connectionVerified ? { state: unverifiedState } : {})
     })
     if (!enabled || !connectionVerified || missingCredentials ||
       (typeof document !== "undefined" && document.visibilityState === "hidden")) return
@@ -378,7 +391,7 @@ export function NotificationLifecycleProvider({
     if (terminalGenerationRef.current !== generation) {
       pollTimerRef.current = setInterval(() => void pollNotificationState(), pollIntervalMs)
     }
-  }, [applyFailure, connectionVerified, enabled, pollIntervalMs, scopeKey, stopWork, updateCurrent])
+  }, [applyFailure, connectionVerified, enabled, pollIntervalMs, scopeKey, stopWork, unverifiedState, updateCurrent])
 
   React.useEffect(() => {
     let cancelled = false
@@ -416,6 +429,7 @@ export function NotificationLifecycleProvider({
     if (typeof window === "undefined") return
 
     const stopForRemovedCredentials = () => {
+      authorityRevisionRef.current += 1
       generationRef.current += 1
       stopWork()
       terminalGenerationRef.current = generationRef.current
@@ -430,6 +444,10 @@ export function NotificationLifecycleProvider({
     const resetForChangedScope = (): boolean => {
       if (suppliedScopeKey !== undefined) return false
       const nextScopeKey = buildWebNotificationScopeKey()
+      if (nextScopeKey !== observedCredentialsRef.current.scope) {
+        authorityRevisionRef.current += 1
+        observedCredentialsRef.current.scope = nextScopeKey
+      }
       // Replace pending scope changes even when storage returns to the rendered scope.
       setLiveScopeKey(nextScopeKey)
       if (nextScopeKey === scopeKey) return false
@@ -478,6 +496,9 @@ export function NotificationLifecycleProvider({
         scope: buildWebNotificationScopeKey()
       }
       const previous = observedCredentialsRef.current
+      // Observe every authority transition synchronously, including A→B→A
+      // events React may batch into one rendered scope. Same-owner refresh is valid.
+      if (next.scope !== previous.scope) authorityRevisionRef.current += 1
       observedCredentialsRef.current = next
       if (hasMissingConfiguredAuth()) {
         stopForRemovedCredentials()
@@ -530,12 +551,13 @@ export function NotificationLifecycleProvider({
 
   const value = React.useMemo<NotificationLifecycleContextValue>(
     () => {
-      const projected = !connectionVerified
-        ? { ...initialSnapshot(scopeKey, lifecycleEpochRef.current), state: "auth-required" as const }
+      const projected = !connectionVerified || missingConfiguredAuth
+        ? { ...initialSnapshot(scopeKey, lifecycleEpochRef.current), state: missingConfiguredAuth ? "auth-required" as const : unverifiedState }
         : snapshot.scopeKey === scopeKey
           ? snapshot
           : initialSnapshot(scopeKey, lifecycleEpochRef.current)
       return {
+        connectionVerified,
         scopeKey: projected.scopeKey,
         lifecycleEpoch: projected.lifecycleEpoch,
         state: projected.state,
@@ -545,13 +567,14 @@ export function NotificationLifecycleProvider({
         eventSequence: projected.eventSequence,
         events: projected.events,
         mutationError: projected.mutationError,
+        captureAuthority,
         tryAgain: startWork,
         refreshPermissions: startWork,
         reportRequestError,
         reportMutationError
       }
     },
-    [connectionVerified, scopeKey, snapshot, reportMutationError, reportRequestError, startWork]
+    [captureAuthority, connectionVerified, missingConfiguredAuth, scopeKey, snapshot, reportMutationError, reportRequestError, startWork, unverifiedState]
   )
 
   return (

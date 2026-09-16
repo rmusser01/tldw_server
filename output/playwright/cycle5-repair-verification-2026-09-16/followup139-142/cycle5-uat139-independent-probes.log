@@ -1,0 +1,63 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:83461) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ __tests__/components/notification-connectivity.integration.test.tsx (7 tests | 2 failed | 4 skipped) 149ms
+     ↓ shows reconnecting on the first network-unverified render without dispatching private inbox work
+     ↓ resumes the real inbox and stream when the same configured key becomes verified
+     ↓ updates network to genuine auth failure while verification stays false
+     ↓ gates the first child effect when configured multi-user credentials are missing
+     × independent: cold verified connection with failed notification reads has no last-success claim 25ms
+     ✓ independent: View respects verification loss while marking read, outage=false 80ms
+     × independent: View respects verification loss while marking read, outage=true 43ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/components/notification-connectivity.integration.test.tsx > actual notification provider and inbox connection boundary > independent: cold verified connection with failed notification reads has no last-success claim
+Error: expect(element).not.toBeInTheDocument()
+
+expected document not to contain element, found <p
+  class="mt-1 text-xs text-muted-foreground"
+>
+  Last updated before the connection was lost (
+  Just now
+  ).
+</p> instead
+ ❯ __tests__/components/notification-connectivity.integration.test.tsx:107:83
+     99|     expect(mocks.getUnreadCount).not.toHaveBeenCalled()
+    100|   })
+    101| })
+       |   ^
+    102|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/components/notification-connectivity.integration.test.tsx > actual notification provider and inbox connection boundary > independent: View respects verification loss while marking read, outage=true
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "/media/71",
+    ]
+
+
+Number of calls: 1
+
+ ❯ __tests__/components/notification-connectivity.integration.test.tsx:127:40
+     99|     expect(mocks.getUnreadCount).not.toHaveBeenCalled()
+    100|   })
+    101| })
+       |   ^
+    102|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed | 4 skipped (7)
+   Start at  08:21:39
+   Duration  635ms (transform 99ms, setup 81ms, import 89ms, tests 149ms, environment 222ms)

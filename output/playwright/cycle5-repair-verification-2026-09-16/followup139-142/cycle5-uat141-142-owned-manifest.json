@@ -1,0 +1,39 @@
+{
+  "frozenAt": "2026-09-16T15:27:45.836Z",
+  "base": "3c30685611a26d0495dafabd38f594fee93a1655",
+  "notes": "Current combined139+141+142 scope; original139 manifest remains historical and unchanged. 141/142 delta is NotificationsRoute, actual integration test and task80/81 only.",
+  "files": [
+    {
+      "path": "apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx",
+      "sha256": "95a4e338cc16af9f481912a9814eaa2dcd7fb5f75a09e48be368ff9208db6246"
+    },
+    {
+      "path": "apps/tldw-frontend/components/notifications/NotificationsRoute.tsx",
+      "sha256": "17a1af9bc7ef9bf67c6740773d962881189a9d7f7b33124b1ec6d39a1a0da4e7"
+    },
+    {
+      "path": "apps/tldw-frontend/__tests__/components/notification-connectivity.integration.test.tsx",
+      "sha256": "40744f32056a104fa5afd5c70d9e293715334043e733853d0052718aa6c2233d"
+    },
+    {
+      "path": "apps/tldw-frontend/__tests__/components/notification-lifecycle-provider.test.tsx",
+      "sha256": "45d17393e1a4e56f6ec3e108a554cfcbea63e6f6703bed5f6f2fbe0a6643bdfc"
+    },
+    {
+      "path": "apps/tldw-frontend/__tests__/pages/notifications.test.tsx",
+      "sha256": "042df1b765a1759aa9536f020dcdbcadedb5b49b20373ec8254eef077c3735f5"
+    },
+    {
+      "path": "backlog/tasks/task-13260.78 - Use-connection-outage-wording-for-notification-status.md",
+      "sha256": "e1b6c6ef1d8ddadd7caee53f8dbfc5a7530d1510436ba8192dc64018a5691aba"
+    },
+    {
+      "path": "backlog/tasks/task-13260.80 - Report-notification-freshness-only-after-a-successful-inbox-read.md",
+      "sha256": "e5c9275d35056d077aa9753fe18695d10e9b9f1832018829266f7fa0c9452725"
+    },
+    {
+      "path": "backlog/tasks/task-13260.81 - Cancel-notification-View-navigation-after-its-authority-changes.md",
+      "sha256": "0648a84e7acf2bdd0e8fa4c56a6bc11462d884bd7f870653ec310d9d68a4bc78"
+    }
+  ]
+}

@@ -1,0 +1,191 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:79663) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ __tests__/components/notification-connectivity.integration.test.tsx (4 tests | 4 failed) 1028ms
+     × shows reconnecting on the first network-unverified render without dispatching private inbox work 16ms
+     × resumes the real inbox and stream when the same configured key becomes verified 1006ms
+     × updates network to genuine auth failure while verification stays false 1ms
+     × gates the first child effect when configured multi-user credentials are missing 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/components/notification-connectivity.integration.test.tsx > actual notification provider and inbox connection boundary > shows reconnecting on the first network-unverified render without dispatching private inbox work
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  degraded:false
+Received:
+  auth-required:undefined
+ ❯ __tests__/components/notification-connectivity.integration.test.tsx:56:52
+     54|     vi.useFakeTimers()
+     55|     render(tree())
+     56|     expect(screen.getByTestId("connection-state")).toHaveTextContent("…
+       |                                                    ^
+     57|     expect(screen.getByText("Notifications are reconnecting")).toBeInT…
+     58|     expect(screen.queryByText("Sign in again to view notifications")).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  __tests__/components/notification-connectivity.integration.test.tsx > actual notification provider and inbox connection boundary > resumes the real inbox and stream when the same configured key becomes verified
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  active:true
+Received:
+  active:undefined
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<output[39m
+        [33mdata-testid[39m=[32m"connection-state"[39m
+      [36m>[39m
+        [0mactive[0m
+        [0m:[0m
+        [0mundefined[0m
+      [36m</output>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 lg:px-8"[39m
+      [36m>[39m
+        [36m<section[39m
+          [33mclass[39m=[32m"rounded-lg border border-border bg-card p-4 shadow-sm"[39m
+        [36m>[39m
+          [36m<header[39m
+            [33mclass[39m=[32m"mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"[39m
+          [36m>[39m
+            [36m<div>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"text-2xl font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mNotifications[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"mt-1 text-sm text-muted-foreground"[39m
+              [36m>[39m
+                [0mUnread: 1[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex gap-2"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"rounded border border-border px-3 py-2 text-sm font-medium hover:bg-muted"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mRefresh[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-expanded[39m=[32m"false"[39m
+                [33mclass[39m=[32m"rounded border border-border px-3 py-2 text-sm font-medium hover:bg-muted"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mPreferences[0m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</header>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"py-8 text-center text-sm text-muted-foreground"[39m
+          [36m>[39m
+            [0mNo notifications yet.[0m
+          [36m</div>[39m
+        [36m</section>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+ ❯ __tests__/components/notification-connectivity.integration.test.tsx:76:72
+     74|     mocks.connection = { ...mocks.connection, phase: "connected", isCo…
+     75|     view.rerender(tree())
+     76|     await waitFor(() => expect(screen.getByTestId("connection-state"))…
+       |                                                                        ^
+     77|     expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1)
+     78|     expect(mocks.listNotifications).toHaveBeenCalledTimes(3)
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  __tests__/components/notification-connectivity.integration.test.tsx > actual notification provider and inbox connection boundary > updates network to genuine auth failure while verification stays false
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  degraded:false
+Received:
+  auth-required:undefined
+ ❯ __tests__/components/notification-connectivity.integration.test.tsx:84:52
+     82|   it("updates network to genuine auth failure while verification stays…
+     83|     const view = render(tree())
+     84|     expect(screen.getByTestId("connection-state")).toHaveTextContent("…
+       |                                                    ^
+     85|     mocks.connection = { ...mocks.connection, errorKind: "auth" }
+     86|     view.rerender(tree())
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  __tests__/components/notification-connectivity.integration.test.tsx > actual notification provider and inbox connection boundary > gates the first child effect when configured multi-user credentials are missing
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 2 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "include_archived": false,
+        "limit": 100,
+        "offset": 0,
+        "signal": AbortSignal {
+          Symbol(kEvents): Map {},
+          Symbol(events.maxEventTargetListeners): 0,
+          Symbol(events.maxEventTargetListenersWarned): false,
+          Symbol(kHandlers): Map {},
+          Symbol(kAborted): true,
+          Symbol(kReason): [AbortError: This operation was aborted],
+          Symbol(kComposite): false,
+        },
+      },
+    ]
+
+  2nd vi.fn() call:
+
+    Array [
+      Object {
+        "include_archived": true,
+        "limit": 100,
+        "offset": 0,
+        "only_snoozed": true,
+        "signal": AbortSignal {
+          Symbol(kEvents): Map {},
+          Symbol(events.maxEventTargetListeners): 0,
+          Symbol(events.maxEventTargetListenersWarned): false,
+          Symbol(kHandlers): Map {},
+          Symbol(kAborted): true,
+          Symbol(kReason): [AbortError: This operation was aborted],
+          Symbol(kComposite): false,
+        },
+      },
+    ]
+
+
+Number of calls: 2
+
+ ❯ __tests__/components/notification-connectivity.integration.test.tsx:98:41
+     96|     await act(async () => { await Promise.resolve() })
+     97|     expect(screen.getByText("Sign in again to view notifications")).to…
+     98|     expect(mocks.listNotifications).not.toHaveBeenCalled()
+       |                                         ^
+     99|     expect(mocks.getUnreadCount).not.toHaveBeenCalled()
+    100|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  08:14:53
+   Duration  1.72s (transform 107ms, setup 128ms, import 92ms, tests 1.03s, environment 363ms)
