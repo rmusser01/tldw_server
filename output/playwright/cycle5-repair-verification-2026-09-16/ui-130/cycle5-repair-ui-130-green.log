@@ -1,0 +1,31 @@
+$ vitest run src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx "src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx" "src/components/Media/__tests__/AnalysisModal.stage1.cancel.test.tsx" src/utils/__tests__/resolve-api-provider.test.ts src/services/tldw/__tests__/TldwModels.test.ts "--maxWorkers=1" --no-file-parallelism
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:78339) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/tldw/__tests__/TldwModels.test.ts (31 tests) 879ms
+(node:78355) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx > AnalysisModal stage 3 regression coverage > shows provider recovery copy when generation fails without a provider
+Analysis generation failed: provider_failure
+
+ ✓ src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx (12 tests) 398ms
+(node:78358) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx (11 tests) 314ms
+(node:78361) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Media/__tests__/AnalysisModal.stage1.cancel.test.tsx > AnalysisModal stage 1 cancel plumbing > treats cancellation differently from real generation failures
+Analysis generation failed: provider_failure
+
+ ✓ src/components/Media/__tests__/AnalysisModal.stage1.cancel.test.tsx (3 tests) 255ms
+(node:78381) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/utils/__tests__/resolve-api-provider.test.ts (17 tests) 3ms
+
+ Test Files  5 passed (5)
+      Tests  74 passed (74)
+   Start at  02:47:57
+   Duration  5.64s (transform 399ms, setup 376ms, import 1.68s, tests 1.85s, environment 1.23s)
+

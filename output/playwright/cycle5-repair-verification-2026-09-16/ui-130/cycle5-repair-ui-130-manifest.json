@@ -1,0 +1,26 @@
+{
+  "frozenAt": "2026-09-16T09:49:10.374Z",
+  "base": "ba5233a5a99cf1559fbc01e127e721b39102a948",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Media/AnalysisModal.tsx",
+      "sha256": "01e61da2ba7ad5df6397d269e5da83d1a559e26c79e44a8c13f05cd2666110ca"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx",
+      "sha256": "06537b22b7c85eb25b8ec9ab9deb09e61093acf46f2bb508c5f1a396d1e7156c"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/__tests__/AnalysisModal.stage1.cancel.test.tsx",
+      "sha256": "d1a6744254c8998a700f0b73fbda9474fb3172229b009582514ff5689731cb03"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx",
+      "sha256": "56bbd92b2f2e42d0f1b5cdf1bde21350e41b1b342b5b361655a2aab929cc4131"
+    },
+    {
+      "path": "backlog/tasks/task-13260.70 - Preserve-configured-model-identity-when-Media-analysis-loads-its-catalog.md",
+      "sha256": "8908879831b6ab36e8304cb3783c6ce3a72990ed0a44c0f4bd6fd4303a0b2357"
+    }
+  ]
+}

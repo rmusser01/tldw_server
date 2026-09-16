@@ -1,0 +1,63 @@
+{
+  "unit": "ui-130",
+  "retainedAt": "2026-09-16T13:40:59.737Z",
+  "knownCredentialMatches": 0,
+  "jwtPrivateKeyPatternMatches": 0,
+  "files": [
+    {
+      "name": "cycle5-repair-ui-130-conflict-red.log",
+      "bytes": 2789,
+      "sha256": "fb6907b63a4c800f2246cd3ff0d51b9077bd54438ac87706f0e546aa78f5508e"
+    },
+    {
+      "name": "cycle5-repair-ui-130-green.log",
+      "bytes": 2403,
+      "sha256": "f659db9b3eee85c279e11453860cd28f92eee8c2350f1da0aa9c277417f842e7"
+    },
+    {
+      "name": "cycle5-repair-ui-130-implementation.md",
+      "bytes": 2756,
+      "sha256": "f89d766eced8fe1e2750ae490d42cfa3fa5ae24d3b84cf8ac32842b6ae3e9b84"
+    },
+    {
+      "name": "cycle5-repair-ui-130-independent-review.md",
+      "bytes": 963,
+      "sha256": "9610490d5185d63a7c86b797e9e43d1580d12b27c8125ec2b7ef86aa31561252"
+    },
+    {
+      "name": "cycle5-repair-ui-130-independent-tests.log",
+      "bytes": 2403,
+      "sha256": "377c7e955a62d7a5da0c106400d6ad24721e5274f34399f3304abce68c0fb535"
+    },
+    {
+      "name": "cycle5-repair-ui-130-lint-baseline.json",
+      "bytes": 74093,
+      "sha256": "4b6bb308d254c214a8d65f41a9b55bdbc28d20340cb43a104e9a249d79d5f045"
+    },
+    {
+      "name": "cycle5-repair-ui-130-lint-comparison.json",
+      "bytes": 105,
+      "sha256": "b0847bdb6d34c6823896e786bdfe5a5f8fb48565c4d74fe7dacfa28e54acaccb"
+    },
+    {
+      "name": "cycle5-repair-ui-130-lint.json",
+      "bytes": 75802,
+      "sha256": "d4416ab57a7ac5a7a7dd1d358920345ec6140b543dbc5a3af7d7daab7e65b5ea"
+    },
+    {
+      "name": "cycle5-repair-ui-130-manifest.json",
+      "bytes": 1100,
+      "sha256": "95db63322576e97702d24957a57df65173fd1ec410152f65059a37a53bb6de0e"
+    },
+    {
+      "name": "cycle5-repair-ui-130-red.log",
+      "bytes": 7681,
+      "sha256": "7e0a1033603b55e273a215567ce0648df4333aff391cb165e63cc5c84a3af985"
+    },
+    {
+      "name": "cycle5-repair-ui-130-task-review.log",
+      "bytes": 27,
+      "sha256": "dfe354584feb871a98c45e55ee70aa582ffd219e9b4488dad7d4d60c38f1dec1"
+    }
+  ]
+}

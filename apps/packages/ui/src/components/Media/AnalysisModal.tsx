@@ -7,7 +7,7 @@ import { tldwModels } from '@/services/tldw'
 import { ANALYSIS_PRESETS } from "@/components/Media/analysisPresets"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { createSafeStorage } from "@/utils/safe-storage"
-import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
+import { parseProviderQualifiedModelSelection, resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import { DEFAULT_ANALYSIS_SUMMARY_PROMPT } from "@/utils/default-prompts"
 import {
   extractMediaDetailAnalysis,
@@ -84,7 +84,9 @@ export function AnalysisModal({
   const { t } = useTranslation(['review', 'common'])
   const messageApi = useAntdMessage()
   const { selectedModel, setSelectedModel } = useSelectedModel()
-  const [models, setModels] = useState<Array<{ id: string; name?: string }>>([])
+  const [models, setModels] = useState<Array<{
+    id: string; name?: string; modelId: string; requestModel: string; provider?: string; providerConflict: boolean
+  }>>([])
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_ANALYSIS_SUMMARY_PROMPT)
   const [userPrefix, setUserPrefix] = useState('')
   const [generating, setGenerating] = useState(false)
@@ -152,9 +154,19 @@ export function AnalysisModal({
   }, [normalizedSelectedModel])
   const effectiveModelKey = useMemo(() => {
     if (models.length === 0) return selectedModelKey
-    return models.some((model) => model.id === selectedModelKey)
-      ? selectedModelKey
-      : models[0]?.id
+    const selection = parseProviderQualifiedModelSelection(selectedModelKey)
+    const modelId = selection.modelId.replace(/^tldw:/, "")
+    const matches = models.filter((model) =>
+      !model.providerConflict && model.modelId === modelId &&
+      (!selection.provider || model.provider === selection.provider)
+    )
+    if (matches.length === 1) return matches[0].id
+    if (matches.length > 1 || selection.provider) return undefined
+    // Preserve removed unqualified-model recovery without choosing an ambiguous ID.
+    const first = models[0]
+    return !first.providerConflict && models.filter((model) => model.modelId === first.modelId).length === 1
+      ? first.id
+      : undefined
   }, [models, selectedModelKey])
   const effectiveMediaContent = mediaContent.trim()
     ? mediaContent
@@ -262,10 +274,23 @@ export function AnalysisModal({
     ;(async () => {
       try {
         const chatModels = await tldwModels.getChatModels()
-        const allModels = chatModels.map((m) => ({
-          id: m.id.startsWith("tldw:") ? m.id : `tldw:${m.id}`,
-          name: m.name || m.id
-        }))
+        const allModels = chatModels.map((m) => {
+          const parsed = parseProviderQualifiedModelSelection(m.id)
+          const metadataProvider = parseProviderQualifiedModelSelection(
+            `${m.chatProvider || m.provider || ""}:model`
+          ).provider
+          const providerConflict = Boolean(parsed.provider && metadataProvider && parsed.provider !== metadataProvider)
+          const provider = parsed.provider || metadataProvider
+          const modelId = parsed.modelId.replace(/^tldw:/, "")
+          return {
+            id: `tldw:${provider ? `${provider}:` : ""}${modelId}`,
+            name: m.name || m.id,
+            modelId,
+            requestModel: m.id.replace(/^tldw:/, ""),
+            provider,
+            providerConflict,
+          }
+        })
         if (!cancelled) {
           setModels(allModels || [])
         }
@@ -332,7 +357,8 @@ export function AnalysisModal({
       return
     }
     if (generating) return
-    const normalizedModel = effectiveModel.replace(/^tldw:/, "").trim()
+    const catalogModel = models.find((model) => model.id === effectiveModel)
+    const normalizedModel = catalogModel?.requestModel || effectiveModel.replace(/^tldw:/, "").trim()
     const resolvedApiProvider = await resolveApiProviderForModel({
       modelId: effectiveModel
     })
@@ -580,7 +606,7 @@ export function AnalysisModal({
             }
           >
             {models.map((model) => (
-              <Select.Option key={model.id} value={model.id}>
+              <Select.Option key={model.id} value={model.id} disabled={model.providerConflict}>
                 {model.name || model.id}
               </Select.Option>
             ))}

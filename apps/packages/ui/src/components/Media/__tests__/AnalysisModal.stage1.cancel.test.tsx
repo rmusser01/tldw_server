@@ -113,7 +113,8 @@ vi.mock('@/services/tldw', () => ({
   }
 }))
 
-vi.mock('@/utils/resolve-api-provider', () => ({
+vi.mock('@/utils/resolve-api-provider', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/utils/resolve-api-provider')>(),
   resolveApiProviderForModel: mocks.resolveApiProviderForModel
 }))
 

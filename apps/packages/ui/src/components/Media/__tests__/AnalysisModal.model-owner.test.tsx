@@ -155,6 +155,7 @@ vi.mock("@/services/background-proxy", () => ({
 vi.mock("@/services/tldw", () => ({
   tldwModels: {
     getChatModels: mocks.getChatModels,
+    getModels: mocks.getChatModels,
   },
 }));
 
@@ -237,5 +238,98 @@ describe("AnalysisModal explicit model with the mounted shared owner", () => {
     } finally {
       view.unmount();
     }
+  });
+
+  it.each([
+    ["bare", "../../../Working/Language_Models/Gemma/exact-model.gguf", "custom-openai-api"],
+    ["qualified", "../../../Working/Language_Models/Gemma/exact-model.gguf", "custom-openai-api"],
+    ["bare", "gemma3:1b", "custom_openai_api"],
+    ["bare", "vendor:exact-model", "custom-openai-api"],
+  ])("preserves a configured selection through delayed %s catalog hydration (%s, %s)", async (shape, model, provider) => {
+    const selected = `tldw:custom-openai-api:${model}`;
+    await new Storage().set("selectedModel", selected);
+    useStoreMessageOption.setState({ selectedModel: selected });
+    type Catalog = Array<{ id: string; name: string; provider: string }>;
+    let resolveCatalog!: (models: Catalog) => void;
+    const pending = new Promise<Catalog>((resolve) => { resolveCatalog = resolve; });
+    mocks.getChatModels.mockReturnValue(pending);
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" />);
+    const select = screen.getByRole("combobox", { name: "Model" });
+    expect(select).toHaveAttribute("data-selected-value", selected);
+    await act(async () => {
+      resolveCatalog([
+        { id: "ollama:other-model", name: "Ollama first", provider: "ollama" },
+        { id: shape === "qualified" ? `custom-openai-api:${model}` : model, name: "Configured Gemma", provider },
+      ]);
+      await pending;
+    });
+    expect((select as HTMLSelectElement).selectedOptions[0]?.textContent).toBe("Configured Gemma");
+    expect(useStoreMessageOption.getState().selectedModel).toBe(selected);
+    expect(await new Storage().get("selectedModel")).toBe(selected);
+    fireEvent.click(screen.getByRole("button", { name: "Generate Analysis" }));
+    await waitFor(() => expect(mocks.bgStream).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({
+        model: shape === "qualified" ? `custom-openai-api:${model}` : model,
+        api_provider: "custom-openai-api",
+      }),
+    })));
+    await waitFor(() => expect(mocks.messageSuccess).toHaveBeenCalled());
+  });
+
+  it.each([
+    ["ambiguous bare selection", "tldw:shared-model", ["ollama", "custom-openai-api"]],
+    ["foreign provider", "tldw:custom-openai-api:shared-model", ["ollama"]],
+    ["unknown provider", "tldw:custom-openai-api:shared-model", ["unknown-vendor"]],
+    ["providerless catalog", "tldw:custom-openai-api:shared-model", [undefined]],
+  ])("requires a deliberate choice for %s", async (_name, selected, providers) => {
+    useStoreMessageOption.setState({ selectedModel: selected });
+    mocks.getChatModels.mockResolvedValue(providers.map((provider, index) => ({
+      id: "shared-model", name: `Candidate ${index}`, provider,
+    })));
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" />);
+    await screen.findByRole("option", { name: "Candidate 0" });
+    expect(screen.getByRole("button", { name: "Generate Analysis" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Model" })).toHaveAttribute("data-selected-value", "");
+    expect(mocks.bgStream).not.toHaveBeenCalled();
+    expect(useStoreMessageOption.getState().selectedModel).toBe(selected);
+    if (_name === "ambiguous bare selection") {
+      fireEvent.change(screen.getByRole("combobox", { name: "Model" }), {
+        target: { value: "tldw:custom-openai-api:shared-model" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Generate Analysis" }));
+      await waitFor(() => expect(mocks.bgStream).toHaveBeenCalledWith(expect.objectContaining({
+        body: expect.objectContaining({ model: "shared-model", api_provider: "custom-openai-api" }),
+      })));
+      await waitFor(() => expect(mocks.messageSuccess).toHaveBeenCalled());
+    }
+  });
+
+  it("does not use a catalog descriptor whose qualified ID conflicts with its provider", async () => {
+    useStoreMessageOption.setState({ selectedModel: "tldw:custom-openai-api:shared-model" });
+    mocks.getChatModels.mockResolvedValue([
+      { id: "custom-openai-api:shared-model", name: "Conflicting model", provider: "ollama" },
+    ]);
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole("button", { name: "Generate Analysis" })).toBeDisabled();
+    expect(mocks.bgStream).not.toHaveBeenCalled();
+  });
+
+  it("keeps a newer explicit choice when a delayed catalog resolves", async () => {
+    let resolveCatalog!: (models: Array<{ id: string; provider: string }>) => void;
+    const pending = new Promise<Array<{ id: string; provider: string }>>((resolve) => { resolveCatalog = resolve; });
+    mocks.getChatModels.mockReturnValue(pending);
+    function ExistingOwner() {
+      const { setSelectedModel } = useSelectedModel();
+      return <button onClick={() => void setSelectedModel("tldw:custom-openai-api:new-choice")}>Choose newer</button>;
+    }
+    render(<><ExistingOwner /><AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" /></>);
+    fireEvent.click(screen.getByRole("button", { name: "Choose newer" }));
+    await act(async () => {
+      resolveCatalog([{ id: "gemma3:1b", provider: "ollama" }, { id: "new-choice", provider: "custom-openai-api" }]);
+      await pending;
+    });
+    expect(screen.getByRole("combobox", { name: "Model" })).toHaveValue("tldw:custom-openai-api:new-choice");
+    expect(await new Storage().get("selectedModel")).toBe("tldw:custom-openai-api:new-choice");
   });
 });

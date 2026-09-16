@@ -1,0 +1,46 @@
+$ vitest run src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx -t "conflicts with its provider|newer explicit" "--maxWorkers=1" --no-file-parallelism
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:77976) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx (11 tests | 1 failed | 9 skipped) 103ms
+     ↓ keeps the explicit choice in store and storage and sends its model and provider
+     ↓ preserves a configured selection through delayed bare catalog hydration (../../../Working/Language_Models/Gemma/exact-model.gguf, custom-openai-api)
+     ↓ preserves a configured selection through delayed qualified catalog hydration (../../../Working/Language_Models/Gemma/exact-model.gguf, custom-openai-api)
+     ↓ preserves a configured selection through delayed bare catalog hydration (gemma3:1b, custom_openai_api)
+     ↓ preserves a configured selection through delayed bare catalog hydration (vendor:exact-model, custom-openai-api)
+     ↓ requires a deliberate choice for ambiguous bare selection
+     ↓ requires a deliberate choice for foreign provider
+     ↓ requires a deliberate choice for unknown provider
+     ↓ requires a deliberate choice for providerless catalog
+     × does not use a catalog descriptor whose qualified ID conflicts with its provider 74ms
+     ✓ keeps a newer explicit choice when a delayed catalog resolves 28ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx > AnalysisModal explicit model with the mounted shared owner > does not use a catalog descriptor whose qualified ID conflicts with its provider
+Error: expect(element).toBeDisabled()
+
+Received element is not disabled:
+  <button
+  data-loading="false"
+  type="button"
+/>
+ ❯ src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx:304:71
+    302|     render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaCon…
+    303|     await act(async () => { await Promise.resolve(); });
+    304|     expect(screen.getByRole("button", { name: "Generate Analysis" })).…
+       |                                                                       ^
+    305|     expect(mocks.bgStream).not.toHaveBeenCalled();
+    306|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 9 skipped (11)
+   Start at  02:46:59
+   Duration  1.09s (transform 232ms, setup 71ms, import 624ms, tests 103ms, environment 203ms)
+
+error: script "test" exited with code 1
