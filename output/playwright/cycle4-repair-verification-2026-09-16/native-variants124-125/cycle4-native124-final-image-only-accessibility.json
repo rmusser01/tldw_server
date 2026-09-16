@@ -1,0 +1,11 @@
+### Result
+{"elapsedMs":688,"ariaLive":["Image support is not confirmed for this model.Choose a model that supports images, or start a new text-only conversation.Show technical detailsRecommended next actions: Retry same model, Switch model, Try provider fallback, Continue from partialRetry same modelSwitch modelTry provider fallbackContinue from partial"],"errors":["Image support is not confirmed for this model.Choose a model that supports images, or start a new text-only conversation.Show technical detailsRecommended next actions: Retry same model, Switch model, Try provider fallback, Continue from partialRetry same modelSwitch modelTry provider fallbackContinue from partial"],"messageIds":[{"id":"pa_9a55-2a7a-e53-ac66","role":"user"},{"id":"pa_01d2-8a63-de7-eaa4","role":"assistant"}]}
+### Ran Playwright code
+```js
+await (async (page) => { const started=Date.now(); await page.getByRole("button",{name:"Send message",exact:true}).click(); await page.getByRole("heading",{name:"Image support is not confirmed for this model.",exact:true}).waitFor({state:"visible"}); await page.getByRole("button",{name:"Send message",exact:true}).waitFor({state:"visible"}); return {elapsedMs:Date.now()-started,ariaLive:await page.locator("article [aria-live]").allTextContents(),errors:await page.locator("article [role=alert]").allTextContents(),messageIds:await page.locator("article").evaluateAll(nodes=>nodes.map(n=>({id:n.getAttribute("data-message-id"),role:n.getAttribute("data-role")})))}; })(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18482/chat
+- Page Title: Chat (20260916_075612) | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T07-24-53-124Z.log#L61-L63

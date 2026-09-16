@@ -1,0 +1,181 @@
+### Page
+- Page URL: http://127.0.0.1:18482/chat
+- Page Title: Keep one error group after retry and reload. WILLOW VARIANT 0748. | tldw
+### Snapshot
+```yaml
+- generic [ref=f5e11]:
+  - generic [ref=f5e14]:
+    - link "Skip to main content" [ref=f5e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f5e16]:
+      - button "Expand sidebar" [ref=f5e17] [cursor=pointer]
+      - button "New Chat" [ref=f5e21] [cursor=pointer]
+      - generic [ref=f5e24]:
+        - button "Quick Ingest" [ref=f5e25] [cursor=pointer]
+        - button "Chat" [ref=f5e29] [cursor=pointer]
+        - button "Prompts" [ref=f5e32] [cursor=pointer]
+        - button "Characters" [ref=f5e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f5e41] [cursor=pointer]
+        - button "World Books" [ref=f5e45] [cursor=pointer]
+        - button "Notes" [ref=f5e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f5e52] [cursor=pointer]
+        - button "Media" [ref=f5e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f5e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f5e69] [cursor=pointer]
+        - button "Kanban" [ref=f5e75] [cursor=pointer]
+        - button "Watchlists" [ref=f5e77] [cursor=pointer]
+      - generic [ref=f5e82]:
+        - button "Open Notes Dock" [ref=f5e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f5e88] [cursor=pointer]
+        - button "Settings" [ref=f5e91] [cursor=pointer]
+    - main [ref=f5e95]:
+      - generic [ref=f5e96]:
+        - generic [ref=f5e99]:
+          - generic [ref=f5e100]:
+            - button "Expand sidebar" [ref=f5e101] [cursor=pointer]
+            - generic [ref=f5e103]:
+              - img "tldw Assistant" [ref=f5e104]
+              - generic [ref=f5e105]: tldw Assistant
+              - button "Companion Home" [ref=f5e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f5e110] [cursor=pointer]
+            - button "Keep one error group after retry and reload. WILLOW VARIANT 0748." [ref=f5e114] [cursor=pointer]
+            - generic "Saved chat. History is persisted." [ref=f5e116]: Saved
+          - generic [ref=f5e117]:
+            - button "Search - Open command palette" [ref=f5e118] [cursor=pointer]:
+              - generic [ref=f5e122]: Search
+              - generic [ref=f5e123]: ⌘K
+            - button "New saved chat" [ref=f5e124] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f5e128] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f5e129] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f5e130] [cursor=pointer]
+            - button "Open settings" [ref=f5e137] [cursor=pointer]
+            - generic [ref=f5e149]:
+              - button "Notifications, 0 unread" [ref=f5e150] [cursor=pointer]
+              - status [ref=f5e154]: Notifications are active
+            - button "Switch to light theme" [ref=f5e155] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f5e162] [cursor=pointer]:
+              - generic [ref=f5e163]: "?"
+        - generic [ref=f5e164]:
+          - heading "Chat" [level=1] [ref=f5e165]
+          - generic [ref=f5e168]:
+            - paragraph [ref=f5e169]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f5e170]:
+              - main [ref=f5e171]:
+                - generic [ref=f5e172]:
+                  - generic [ref=f5e174]:
+                    - generic [ref=f5e175]:
+                      - generic [ref=f5e176]: Standard chat
+                      - generic [ref=f5e177]: Conversation timeline
+                    - generic [ref=f5e178]:
+                      - button "Switch to light theme" [ref=f5e179] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f5e186] [cursor=pointer]:
+                        - generic [ref=f5e192]: Focus
+                      - button "Shortcuts" [ref=f5e193] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f5e197]
+                  - log "Chat messages" [ref=f5e199]:
+                    - generic [ref=f5e201]:
+                      - article "User message 1 of 2" [ref=f5e202]:
+                        - generic [ref=f5e205]:
+                          - generic [ref=f5e207]:
+                            - generic [ref=f5e208]: You
+                            - generic [ref=f5e209]: • 12:49 AM
+                          - paragraph [ref=f5e211]: Keep one error group after retry and reload. WILLOW VARIANT 0748.
+                          - generic [ref=f5e213]:
+                            - generic [ref=f5e214]:
+                              - img "Uploaded Image" [ref=f5e215]
+                              - generic [ref=f5e216] [cursor=pointer]
+                            - button "Delete image" [ref=f5e217] [cursor=pointer]
+                          - button "More actions" [ref=f5e223] [cursor=pointer]: •••
+                      - article "Assistant message 2 of 2" [ref=f5e227]:
+                        - generic [ref=f5e233]:
+                          - generic [ref=f5e235]:
+                            - generic [ref=f5e236]: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                            - generic [ref=f5e237]: • 12:49 AM
+                          - alert [ref=f5e239]:
+                            - paragraph [ref=f5e240]: Image support is not confirmed for this model.
+                            - paragraph [ref=f5e241]: Choose a model that supports images, or start a new text-only conversation.
+                            - button "Show technical details" [ref=f5e242] [cursor=pointer]
+                            - generic [ref=f5e243]:
+                              - generic [ref=f5e244]: "Recommended next actions: Retry same model, Switch model, Try provider fallback, Continue from partial"
+                              - button "Retry same model" [ref=f5e245] [cursor=pointer]
+                              - button "Switch model" [ref=f5e246] [cursor=pointer]
+                              - button "Try provider fallback" [ref=f5e247] [cursor=pointer]
+                              - button "Continue from partial" [ref=f5e248] [cursor=pointer]
+                          - generic [ref=f5e250]:
+                            - generic [ref=f5e251]:
+                              - button "Previous response" [ref=f5e252] [cursor=pointer]
+                              - generic [ref=f5e255]: 3 of 3
+                              - button "Next response" [disabled] [ref=f5e256]
+                            - button "More actions" [ref=f5e259] [cursor=pointer]: •••
+                  - generic [ref=f5e260]:
+                    - generic [ref=f5e261]: Composer
+                    - generic [ref=f5e269]:
+                      - button [aria-hidden] [ref=f5e270]
+                      - button [aria-hidden] [ref=f5e271]
+                      - generic [ref=f5e272]:
+                        - alert [ref=f5e273]:
+                          - generic [ref=f5e274]:
+                            - generic [ref=f5e275]:
+                              - generic [ref=f5e276]: Error
+                              - generic [ref=f5e277]:
+                                - heading "Image support is not confirmed for this model." [level=2] [ref=f5e278]
+                                - generic [ref=f5e279]: Choose a model that supports images, or start a new text-only conversation.
+                            - generic [ref=f5e280]:
+                              - button "Retry chat" [ref=f5e281] [cursor=pointer]
+                              - button "Edit provider" [ref=f5e282] [cursor=pointer]
+                              - button "Switch provider" [ref=f5e283] [cursor=pointer]
+                              - button "View in Health & Diagnostics" [ref=f5e284] [cursor=pointer]
+                              - button "Close" [ref=f5e285] [cursor=pointer]
+                        - generic [ref=f5e287]:
+                          - button "Hide composer options" [expanded] [ref=f5e288] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f5e293]
+                          - generic [ref=f5e294]:
+                            - button "Improve prompt" [ref=f5e297] [cursor=pointer]
+                            - generic [ref=f5e302]:
+                              - button "Send message" [ref=f5e303] [cursor=pointer]:
+                                - generic [ref=f5e304]: Send
+                              - button "Open message delivery options" [ref=f5e309] [cursor=pointer]
+                        - generic [ref=f5e314]:
+                          - generic [ref=f5e316]:
+                            - group "Mode and context controls" [ref=f5e317]:
+                              - button "Modes" [ref=f5e318] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f5e325] [cursor=pointer]':
+                                - generic [ref=f5e326]:
+                                  - generic [ref=f5e327]: MCP
+                                  - generic [ref=f5e328]: None
+                              - button "Search & Context" [ref=f5e331] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f5e336] [cursor=pointer]:
+                                - generic [ref=f5e339]: Prompt
+                              - button "Select character or persona" [ref=f5e340] [cursor=pointer]
+                              - button "Role-play setup" [ref=f5e345] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f5e352] [cursor=pointer]
+                            - group "Run input controls" [ref=f5e358]:
+                              - button "OpenUI" [ref=f5e359] [cursor=pointer]
+                              - button "Start dictation" [ref=f5e365] [cursor=pointer]
+                              - generic [ref=f5e369]:
+                                - button "Attach image" [ref=f5e371] [cursor=pointer]
+                                - button "More attachments" [ref=f5e375] [cursor=pointer]
+                              - button "More tools" [ref=f5e378] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f5e381] [cursor=pointer]:
+                                - generic [ref=f5e385]: Chat Settings
+                          - generic "Active context" [ref=f5e386]:
+                            - button "Custom OpenAI API / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f5e388] [cursor=pointer]:
+                              - generic "Provider status" [ref=f5e393]: Healthy
+                            - button "Chat 2 messages" [ref=f5e394] [cursor=pointer]:
+                              - generic [ref=f5e395]: Chat
+                              - generic [ref=f5e396]: 2 messages
+                            - button "Configure context window size" [ref=f5e398] [cursor=pointer]:
+                              - generic [ref=f5e399]: 98 + ~0 = 98 tokens
+                            - button "Saved" [ref=f5e401] [cursor=pointer]
+                            - button "Advanced controls" [ref=f5e403] [cursor=pointer]
+              - generic [ref=f5e407]:
+                - button "Restore context sidechannel" [ref=f5e408] [cursor=pointer]:
+                  - generic [ref=f5e412]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f5e413]:
+                - button "Restore runtime sidechannel" [ref=f5e414] [cursor=pointer]:
+                  - generic [ref=f5e415]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f5e424] [cursor=pointer]
+  - alert [ref=f5e10]
+```

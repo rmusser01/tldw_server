@@ -1,0 +1,146 @@
+{
+  "unit": "native-variants124-125",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-native124-final-canonical.json",
+      "bytes": 185,
+      "sha256": "53e986c573b9c1a84acb50bc03913a7a80fdd8aa96349877c94f7ad0fb2afe7f"
+    },
+    {
+      "file": "cycle4-native124-final-console-errors.txt",
+      "bytes": 94,
+      "sha256": "b32b7a6e4b878c8c03f77188bcfb75953c3dffa18999c7975e76902f91348fc6"
+    },
+    {
+      "file": "cycle4-native124-final-first-accessibility.json",
+      "bytes": 1715,
+      "sha256": "59df907dea0149b6c1b6faba0cbed42d1b0fbef8aa0c6446bc3a357bc8170745"
+    },
+    {
+      "file": "cycle4-native124-final-first-identity.json",
+      "bytes": 1778,
+      "sha256": "28396a38406ab64625278cac1c8e694b1adcda8a53855f41b04d661c2c7b8e47"
+    },
+    {
+      "file": "cycle4-native124-final-first-requests.txt",
+      "bytes": 52269,
+      "sha256": "e2dea01b8708e13c34841f9a7458ebe7844f17c38c04cb20962fdf2cb8df0d0e"
+    },
+    {
+      "file": "cycle4-native124-final-first-snapshot.txt",
+      "bytes": 11572,
+      "sha256": "bd6f166a3d14ce326cc39840d165a0f301c8ddc50d26993e3ed2b511ca712d7f"
+    },
+    {
+      "file": "cycle4-native124-final-first.png",
+      "bytes": 290021,
+      "sha256": "6ec918e6c397c41761174744b3f1bc5aa53047a715ecbf1072f928baba4b8636"
+    },
+    {
+      "file": "cycle4-native124-final-image-only-accessibility.json",
+      "bytes": 1699,
+      "sha256": "c2e8ef9084b04402e292bce79eed0fd8a2fa025a82e8cb0da64e966489d83b8a"
+    },
+    {
+      "file": "cycle4-native124-final-image-only-canonical.json",
+      "bytes": 185,
+      "sha256": "53e986c573b9c1a84acb50bc03913a7a80fdd8aa96349877c94f7ad0fb2afe7f"
+    },
+    {
+      "file": "cycle4-native124-final-image-only-identity.json",
+      "bytes": 1714,
+      "sha256": "d444c3da35ea7ad823597429db0f5fefa6dd38cbc28ef954816996b55e019c03"
+    },
+    {
+      "file": "cycle4-native124-final-image-only-requests.txt",
+      "bytes": 77221,
+      "sha256": "766d3fe87f52479dd95d2db305afc9e1f258f834af64768e5945d0f71cb5d9dd"
+    },
+    {
+      "file": "cycle4-native124-final-image-only-snapshot.txt",
+      "bytes": 11445,
+      "sha256": "53bc0390b1b778774d692fb78cbc2ae7817561f86de464020dc753507b632ca1"
+    },
+    {
+      "file": "cycle4-native124-final-image-only-start.txt",
+      "bytes": 9477,
+      "sha256": "a32ce2c4814cd1668b95dfe6da604f8fa34d700e548d3ff90f413b8f39b4996f"
+    },
+    {
+      "file": "cycle4-native124-final-image-only.png",
+      "bytes": 289956,
+      "sha256": "30e4c24c7842a15f8faeec5d05506a17f32a65c5fd41c7749a5543d63af2d48f"
+    },
+    {
+      "file": "cycle4-native124-final-independent-audit.md",
+      "bytes": 5101,
+      "sha256": "b23046dc1662043df769aeb9231aaca438f4867b8a7f13526c2daa7a7b5618dd"
+    },
+    {
+      "file": "cycle4-native124-final-new-chat.txt",
+      "bytes": 9477,
+      "sha256": "bb8e5d24359bffaf33f60bf1fe7d789161edea34b90709a2fd476458bd8d1f8a"
+    },
+    {
+      "file": "cycle4-native124-final-observe.mjs",
+      "bytes": 1387,
+      "sha256": "c4e557f4c5a41b64f16df5ae189d4f6cc491c2455c3534c9b5ed09485c136189"
+    },
+    {
+      "file": "cycle4-native124-final-reload-identity.json",
+      "bytes": 1787,
+      "sha256": "7cb5e018ad41783727b54fdaac8c20af6162b02ec886d0fb21c4be5af163a145"
+    },
+    {
+      "file": "cycle4-native124-final-reload-requests.txt",
+      "bytes": 59816,
+      "sha256": "df1a8099789ff2b868bd71fcbb8c488dd4ea34c1aa7d882429a9010570e74fb7"
+    },
+    {
+      "file": "cycle4-native124-final-reload-snapshot.txt",
+      "bytes": 11905,
+      "sha256": "18af1637e33a44721d47b0dc8cc5e27b1998418a94bf3627fd6a4eddb3a32112"
+    },
+    {
+      "file": "cycle4-native124-final-reload.png",
+      "bytes": 291882,
+      "sha256": "214a4d01441e0aec6aa6bcda57d5cb3acc814fe4a8bdbb775f60d329abbbfa5e"
+    },
+    {
+      "file": "cycle4-native124-final-repeated-identity.json",
+      "bytes": 1778,
+      "sha256": "862efc6ac93e8b27bad3b93da3f7d9a24dcacd6f4711477ee0e705e758b98149"
+    },
+    {
+      "file": "cycle4-native124-final-repeated-requests.txt",
+      "bytes": 54389,
+      "sha256": "23b56468bf8de411931b87f086d948768b0a27c987f631dae013c2732ede7135"
+    },
+    {
+      "file": "cycle4-native124-final-repeated-snapshot.txt",
+      "bytes": 12369,
+      "sha256": "d776e10c092075fdc52baa6c5e49ad4aba5af28efd699a9aee8cdabc4ad9d7cd"
+    },
+    {
+      "file": "cycle4-native124-final-repeated.png",
+      "bytes": 304226,
+      "sha256": "c798764d3021f43c3de66fde11cb006d9ac6a2272467c36e1d160c10318dfd93"
+    },
+    {
+      "file": "cycle4-native124-final-report.md",
+      "bytes": 3282,
+      "sha256": "5a06fe4639976da540318d149d42058c77059f05ba473018eef4f60fb2d956f0"
+    },
+    {
+      "file": "cycle4-native124-final-retries-accessibility.json",
+      "bytes": 3347,
+      "sha256": "5d1f4d60b53a0bc825fd7574eaaad1ac645fcb30f854b6923c1be132fc86d180"
+    },
+    {
+      "file": "cycle4-native124-final-start.txt",
+      "bytes": 11822,
+      "sha256": "e0ca25341e54ef1c03387fdadc496f71e817fd8455b72a1bbcb55651f860051a"
+    }
+  ]
+}

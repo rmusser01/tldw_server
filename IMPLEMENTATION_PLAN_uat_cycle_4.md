@@ -188,7 +188,7 @@ Actual History/Note navigation loads an ordinary canonical chat while persisted 
 
 1. Reproduce/design — Complete: native122 image omission and123 stale canonical mode; approved122 design in Docs/Design/2026-09-16-uat-image-input-validation.md,123 bounded derivation recorded above. Task62/63 own disjoint code.
 2. Implement/regress — Complete: frozen122 three production files plus tests/test alias; frozen123 one production file plus existing coordinator/Notes tests. Author and independent12293tests pass; root12374tests pass. Owner, Retry provenance, unsaved-work and fresh Character controls retained.
-3. Review/targeted — In Progress: independent source reviews clear; scoped lint no new findings; full compiler exactly90 baseline diagnostics. Broader affected frontend run passed2593tests/95files. Commit and native no-loss refusal/History/Note mode checks follow.
+3. Review/targeted — Complete: independent source reviews clear; scoped lint no new findings; full compiler exactly90 baseline diagnostics. Broader affected frontend run passed2593tests/95files. Committed122/123 native no-loss refusal/History/Note mode checks pass; two presentation follow-ups below also resolved.
 4. Full fresh cycle5 — Not Started: only after these repairs and preserved evidence, use prepared fresh protocol. Existing vision/Postgres/hidden-tab limitations remain explicit.
 
 122 independent review refinement: actual backend proof requires distinct local failed-user identity and server failed-turn reuse. Approved narrow chatModePipeline provenance flag (thirdproductionpath), no backend relaxation. Current OCR remains intentional text; old historical OCR context was already lost, and its unproven image history will now fail visibly rather than be stripped. No re-OCR or global history exemption. Approved test-only Vitest alias to existing installed pa-tesseract, no dependency change.
@@ -199,5 +199,5 @@ Targeted122 attachment refusal and123 saved workflow pass on53ef4bf4d5, with vis
 
 1. Reproduce and design — Complete: native before/reload identities and accessible text retained; source causes identified.
 2. Correct and regress — Complete:124 one resolved-parent argument plus actual persistence controls;125 completion predicate plus active/failure/success rendering controls. Scoped lint unchanged. Both Next frontends stopped.
-3. Review and native verification — In Progress:125 independent review clear,124 pending. Full compilerexact90baseline,97file affected frontend run in progress. Commit and native repeated Retry/reload/immediate announcement checks follow.
-4. Full fresh cycle5 — Not Started: refresh dev and freeze source after repairs.
+3. Review and native verification — Complete:124/125 independently reviewed and committed8cfef4912f/ab527eb3b4. Combined2604tests/97files pass; compilerexact90baseline with0added/removed. Native repeated Retry/reload preserves one user/one assistant at3of3 and exactPNG; terminal image-only/Retry error announcements contain no Response complete. Evidence in native-variants124-125. Legacy records preserved; successful vision remains unavailable.
+4. Full fresh cycle5 — Not Started at07:58UTC: fresh dev59049e094e contained with0missing commits. Source ab527eb3b4 frozen; prepare fresh profiles and execute twelve rows in both modes, with documented external/tool limits.

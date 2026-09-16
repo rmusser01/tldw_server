@@ -1,0 +1,15 @@
+### Result
+[{"label":"User message 1 of 2","id":"pa_6cb9-e289-ba6-c557","role":"user","text":"You\n• 12:49 AM\n\nKeep one error group after retry and reload. WILLOW VARIANT 0748.\n\n•••","images":[{"alt":"Uploaded Image","mime":"data:image/png","bytes":386,"sha256":"314f71d711b39db674e4679f96307ef75f4da2ab93c3c8947d6e5c3ec1d0f1f7"}]},{"label":"Assistant message 2 of 2","id":"pa_865b-7a93-e0a-cf1e","role":"assistant","text":"../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf\n• 12:49 AM\n\nImage support is not confirmed for this model.\n\nChoose a model that supports images, or start a new text-only conversation.\n\nShow technical details\nRecommended next actions: Retry same model, Switch model, Try provider fallback, Continue from partial\nRetry same model\nSwitch model\nTry provider fallback\nContinue from partial\n3 of 3\n•••","images":[]}]
+### Ran Playwright code
+```js
+await (async (page) => {
+  await page.screenshot({path: "/private/tmp/cycle4-native124-final-reload.png",fullPage:true});
+  return await page.locator('article').evaluateAll(async nodes => Promise.all(nodes.map(async node => ({
+    label:node.getAttribute('aria-label'),id:node.getAttribute('data-message-id'),role:node.getAttribute('data-role'),text:node.innerText,
+    images:await Promise.all([...node.querySelectorAll('img')].map(async image=>{
+      const src=image.getAttribute('src')||'';const bytes=src.startsWith('data:')?Uint8Array.from(atob(src.split(',')[1]),c=>c.charCodeAt(0)):new Uint8Array();
+      return {alt:image.alt,mime:src.split(';')[0],bytes:bytes.length,sha256:[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(v=>v.toString(16).padStart(2,'0')).join('')};
+    }))
+  }))));
+})(page);
+```
