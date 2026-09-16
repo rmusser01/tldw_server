@@ -1,0 +1,70 @@
+{
+  "baselineRef": "12b683dc49e853ee1731134c11ba36c0ecbe87c3",
+  "baseline": {
+    "errors": 0,
+    "warnings": 26,
+    "files": 12
+  },
+  "current": {
+    "errors": 0,
+    "warnings": 18,
+    "files": 13
+  },
+  "added": [],
+  "removed": [
+    {
+      "diagnostic": [
+        "apps/packages/ui/src/components/Flashcards/tabs/ImageOcclusionTransferPanel.tsx",
+        "react-hooks/exhaustive-deps",
+        1,
+        "The 'decks' logical expression could make the dependencies of useMemo Hook (at line <n>) change on every render. To fix this, wrap the initialization of 'decks' in its own useMemo() Hook."
+      ],
+      "count": 2
+    },
+    {
+      "diagnostic": [
+        "apps/packages/ui/src/components/Flashcards/tabs/ImageOcclusionTransferPanel.tsx",
+        "react-hooks/exhaustive-deps",
+        1,
+        "The 'decks' logical expression could make the dependencies of useEffect Hook (at line <n>) change on every render. To fix this, wrap the initialization of 'decks' in its own useMemo() Hook."
+      ],
+      "count": 1
+    },
+    {
+      "diagnostic": [
+        "apps/packages/ui/src/components/Flashcards/tabs/ImageOcclusionTransferPanel.tsx",
+        "react-hooks/exhaustive-deps",
+        1,
+        "The 'decks' logical expression could make the dependencies of useCallback Hook (at line <n>) change on every render. To fix this, wrap the initialization of 'decks' in its own useMemo() Hook."
+      ],
+      "count": 1
+    },
+    {
+      "diagnostic": [
+        "apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx",
+        "react-hooks/exhaustive-deps",
+        1,
+        "The 'decks' logical expression could make the dependencies of useMemo Hook (at line <n>) change on every render. To fix this, wrap the initialization of 'decks' in its own useMemo() Hook."
+      ],
+      "count": 2
+    },
+    {
+      "diagnostic": [
+        "apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx",
+        "react-hooks/exhaustive-deps",
+        1,
+        "The 'decks' logical expression could make the dependencies of useEffect Hook (at line <n>) change on every render. To fix this, wrap the initialization of 'decks' in its own useMemo() Hook."
+      ],
+      "count": 1
+    },
+    {
+      "diagnostic": [
+        "apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx",
+        "react-hooks/exhaustive-deps",
+        1,
+        "The 'decks' logical expression could make the dependencies of useCallback Hook (at line <n>) change on every render. To fix this, wrap the initialization of 'decks' in its own useMemo() Hook."
+      ],
+      "count": 1
+    }
+  ]
+}

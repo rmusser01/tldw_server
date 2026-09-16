@@ -1,0 +1,141 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:86091) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+ ✓ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx (18 tests) 8475ms
+     ✓ delivers through the actual router after its source unmounts  834ms
+     ✓ keeps accepted tab routes on reload without losing the private editor or adding history  1291ms
+     ✓ tab-only navigation preserves a live deck choice while a new external deck still applies  1746ms
+     ✓ changes a dirty Scheduler route only after discard is accepted  451ms
+     ✓ finishes a pending private handoff without replacing the newly selected tab  606ms
+     ✓ restores the accepted Manage tab on remount  505ms
+     ✓ restores the accepted Templates tab on remount  531ms
+     ✓ restores the accepted Scheduler tab on remount  520ms
+     ✓ uses the real extension HashRouter for the accepted tab and reload  563ms
+     ✓ cleans an old private history entry when Bob goes Back  442ms
+(node:86133) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+ ✓ src/components/Flashcards/__tests__/FlashcardsManager.deck-authority.integration.test.tsx (9 tests) 7606ms
+     ✓ does not restore Alice's deck label after Settings logout, Bob login and Back  1801ms
+     ✓ uses Bob's current label for a colliding numeric deck ID  1405ms
+     ✓ isolates the same user ID on another server  835ms
+     ✓ keeps scoped Bob data when an older unscoped deck mutation settles  1324ms
+     ✓ preserves a selected deck and draft on a benign same-owner config rotation  895ms
+     ✓ drops a removed numeric selection after a successful same-owner empty catalogue  914ms
+(node:86176) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/tabs/__tests__/ImportExportTab.deck-creation.test.tsx (5 tests) 4256ms
+     ✓ creates a new structured-import deck with scheduler settings from the selector flow  1711ms
+     ✓ creates a new generated-cards deck with scheduler settings from the selector flow  846ms
+     ✓ requires a successful scoped deck list before new-deck save (error)  454ms
+     ✓ requires a successful scoped deck list before new-deck save (ready)  1020ms
+(node:86204) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/tabs/__tests__/ImageOcclusionTransferPanel.test.tsx (17 tests) 1922ms
+     ✓ handles a delayed new-deck acknowledgment for its current owner  309ms
+     ✓ creates a new occlusion deck with scheduler settings from the selector flow  430ms
+(node:86231) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/tabs/__tests__/ImportExportTab.llm-gating.test.tsx (9 tests) 1147ms
+     ✓ shows useful grounding guidance and retains the source after rejected generation  493ms
+(node:86248) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/tabs/__tests__/ImportExportTab.decomposition.test.tsx (13 tests) 489ms
+(node:86265) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/hooks/__tests__/useFlashcardQueries.deck-reference.test.tsx (12 tests) 237ms
+(node:86272) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/flashcards.private-scope.test.ts (42 tests) 18ms
+(node:86276) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/hooks/__tests__/useFlashcardQueries.generate.test.tsx (1 test) 9ms
+(node:86283) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/flashcards-private-transfer.test.ts (12 tests) 7ms
+(node:86288) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/flashcards.test.ts (10 tests) 4ms
+(node:86294) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/flashcard-assets.test.ts (3 tests) 5ms
+(node:86298) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/tldw/__tests__/service-prompt-scope-error.test.ts (48 tests) 6ms
+(node:86305) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/flashcards.decks.test.ts (1 test) 3ms
+
+ Test Files  14 passed (14)
+      Tests  200 passed (200)
+   Start at  11:14:11
+   Duration  36.18s (transform 1.36s, setup 970ms, import 5.72s, tests 24.18s, environment 3.81s)

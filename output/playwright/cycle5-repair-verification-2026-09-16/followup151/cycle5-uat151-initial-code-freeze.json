@@ -1,0 +1,107 @@
+{
+  "task": "TASK-13260.90",
+  "uat": "UAT151",
+  "frozenAt": "2026-09-16T18:05:49.805Z",
+  "baselineRef": "12b683dc49e853ee1731134c11ba36c0ecbe87c3",
+  "root": "/Users/macbook-dev/Documents/GitHub/tldw_server2",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts",
+      "kind": "production",
+      "bytes": 39335,
+      "sha256": "95e471285bfd456f743cbb6145c0e61f18972c66ed105afd4b9b9d24dd1015e6",
+      "baselineSha256": "f4bf57f5a2b1c2ecefec989b4cca974dcc23f7453b649b8c4c22d2cc63316678"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/ImportExportTab.tsx",
+      "kind": "production",
+      "bytes": 15047,
+      "sha256": "0c110aa13d5e8c0aa93a601622831f3dfb823a6d13c47ef128812774c632b4cb",
+      "baselineSha256": "3aefd9a80dad8ea551b17b77fd0e7b3a482292d59a52678e92f70389a30fcccc"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx",
+      "kind": "production",
+      "bytes": 33902,
+      "sha256": "ead5a2808498f97053017a1f185731e280c4d7f7438b8231c96f80085f072a49",
+      "baselineSha256": "7dfa7afd3a18680725fe1b77da46bc7c14e0b4ce642e0dc16fc22e540d2c97bd"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/ImageOcclusionTransferPanel.tsx",
+      "kind": "production",
+      "bytes": 23974,
+      "sha256": "1b13524f1a38cc9ba7cb3bf18bb823a1f826d0218937454c96dab6c13b022860",
+      "baselineSha256": "95d11d89d3f65685f4e58d08813cbd244590a8c11b3ac269a6bceabab3e3636f"
+    },
+    {
+      "path": "apps/packages/ui/src/services/flashcards.ts",
+      "kind": "production",
+      "bytes": 39121,
+      "sha256": "f9e950da8a1720768604a5b3c5b70de88631cea4499d1cc39c7ffe6a85c1d774",
+      "baselineSha256": "ea82964724af8ead118391f90287859142f188c8635a9a311759af35c5222326"
+    },
+    {
+      "path": "apps/packages/ui/src/services/flashcard-assets.ts",
+      "kind": "production",
+      "bytes": 4688,
+      "sha256": "2a6fb0d6f89a33fafd53ff01a07fc72936bcef505311078f9607e7280ddcd805",
+      "baselineSha256": "d50b19228fb0fc5965f2aa2dc41ec4d635163f75aa9c9e82776d94e21e4effc6"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts",
+      "kind": "production",
+      "bytes": 7615,
+      "sha256": "c2b2afa38128c327bf19e3de6837ccb6e31623c38a9bdb3a223e305945a3f081",
+      "baselineSha256": "8adf47a6f86c4dd324a9956dd5a4d9e465488ee43f6a82847e48cb00c917cfa5"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/__tests__/FlashcardsManager.deck-authority.integration.test.tsx",
+      "kind": "test",
+      "bytes": 13015,
+      "sha256": "698c4b80377e040cb9f5af3c582b67518bbb98295bced4a55aec7916b472d87b",
+      "baselineSha256": null
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx",
+      "kind": "test",
+      "bytes": 21264,
+      "sha256": "4b129c1ac312ecd2dbf8a21f9c51c821038eb7370632c4ab55a37454ac7b3f1a",
+      "baselineSha256": "9b6a1c2a3371d19b33acff7d82334d74b030ae73b7edeb87b042bc277af2ead1"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImageOcclusionTransferPanel.test.tsx",
+      "kind": "test",
+      "bytes": 20189,
+      "sha256": "9944c425f476d0aaa72850675434bd7d4c591a2ea939eda1cf5b5b1e332ef11f",
+      "baselineSha256": "9e9542fb201049c4919943122768b8d2e59265c4e10d01054105b30664caccbb"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.deck-creation.test.tsx",
+      "kind": "test",
+      "bytes": 13452,
+      "sha256": "c0bd73f1118065ada0253780c7e232c88affb718b7182961b4846ad85b03bc56",
+      "baselineSha256": "2052f8b72279530ef89ad1e920c6d1546ebd486db7f8ddc15142536d5a3b9f19"
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/flashcards.private-scope.test.ts",
+      "kind": "test",
+      "bytes": 7004,
+      "sha256": "f6894531677e8daf28aa80bd0fee915504ac4cc59081181c1f1288ac724039dc",
+      "baselineSha256": "7ad51d2fec43396f00355bd2ce3f310390f153175876e98ffccf2ccfb6cba255"
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/flashcard-assets.test.ts",
+      "kind": "test",
+      "bytes": 3084,
+      "sha256": "329250d4143bed6f148d71f2720eec010b8199fea340076dc771f97f2934300e",
+      "baselineSha256": "9bacfa2d5cef074977146e6a4e5d025f9ce9f9d17e294b403f3e98ae8dcc83ad"
+    },
+    {
+      "path": "backlog/tasks/task-13260.90 - Clear-private-Flashcards-deck-selections-across-account-changes.md",
+      "kind": "task",
+      "bytes": 4623,
+      "sha256": "5072557fce9184be4691601b003cfda0ee7c2a1656517c5972bbe4749b39c8b5",
+      "baselineSha256": "7ac793ea043dbc8f47641156e71d9518153e13e2d0cecf43adc36a7d0cbd8f64"
+    }
+  ]
+}

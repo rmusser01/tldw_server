@@ -1,0 +1,27 @@
+  it("independent fresh catalogue removes a previously acknowledged created deck", async () => {
+    mocks.decks = []
+    const original = mocks.request.getMockImplementation()!
+    mocks.request.mockImplementation(async input => {
+      const path = input.path.split("?")[0]
+      if (path === "/api/v1/flashcards/generate") return { flashcards: [{ front: "Question", back: "Answer", model_type: "basic" }], count: 1 }
+      if (path === "/api/v1/flashcards/decks" && input.method === "POST") {
+        const deck = { id: 12, name: "Generated Flashcards", version: 1 }
+        mocks.decks = [deck]
+        return deck
+      }
+      if (path === "/api/v1/flashcards" && input.method === "POST") return { uuid: "00000000-0000-0000-0000-000000000001", version: 1 }
+      return original(input)
+    })
+    const client = mount()
+    fireEvent.change(screen.getByTestId("flashcards-generate-text"), { target: { value: "Current owner source" } })
+    await waitFor(() => expect(screen.getByTestId("flashcards-generate-button")).toBeEnabled())
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+    fireEvent.click(await screen.findByTestId("flashcards-generate-save-button"))
+    await waitFor(() => expect(mocks.messages.success).toHaveBeenCalled())
+    expect(screen.getByTestId("flashcards-generate-deck")).toHaveTextContent("Generated Flashcards")
+    await act(async () => {
+      mocks.decks = []
+      await client.invalidateQueries({ predicate: query => String(query.queryKey[0]).startsWith("flashcards:decks") })
+    })
+    await waitFor(() => expect(screen.getByTestId("flashcards-generate-deck")).not.toHaveTextContent("Generated Flashcards"))
+  })

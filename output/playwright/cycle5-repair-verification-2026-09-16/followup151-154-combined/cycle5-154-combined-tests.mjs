@@ -1,0 +1,18 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {spawn} from 'node:child_process';
+const root=process.cwd();
+const spec=JSON.parse(fs.readFileSync('/private/tmp/cycle5-followup-combined-command.json'));
+const log=fs.readFileSync('/private/tmp/cycle5-uat151-final-green.log','utf8').replace(/\x1b\[[0-9;]*m/g,'');
+const flashcardFiles=[...log.matchAll(/✓ (src\/\S+\.(?:test|spec)\.tsx?) \(/g)].map(x=>x[1]);
+if(flashcardFiles.length!==14)throw Error('Unexpected151suiteinventory '+flashcardFiles.length);
+const settings=['src/components/Option/Settings/__tests__/tldw.timeouts.form.test.tsx','src/components/Option/Settings/__tests__/tldw-settings-tabs.test.tsx','src/services/tldw/__tests__/request-core.refresh-timeout.test.ts','src/services/__tests__/tldw-settings-storage.test.ts','src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx','src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx','src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx'];
+spec.ui.files=[...new Set([...spec.ui.files,...flashcardFiles,...settings])].sort();
+fs.writeFileSync('/private/tmp/cycle5-154-combined-command.json',JSON.stringify(spec,null,2)+'\n');
+const target=process.argv[2];if(!['ui','web'].includes(target))throw Error('ui|web required');
+const run=spec[target];for(const file of run.files)if(!fs.existsSync(path.join(root,run.cwd,file)))throw Error('Missing '+file);
+const output='/private/tmp/cycle5-154-combined-'+target+'.log';const fd=fs.openSync(output,'w');
+const args=['run',...run.files,'--maxWorkers=4'];
+console.log(JSON.stringify({target,files:run.files.length,output,started:new Date().toISOString()}));
+const child=spawn(path.join(root,run.cwd,'node_modules/.bin/vitest'),args,{cwd:path.join(root,run.cwd),stdio:['ignore',fd,fd],env:process.env});
+child.on('exit',code=>{console.log(JSON.stringify({target,code,finished:new Date().toISOString()}));process.exitCode=code??1});

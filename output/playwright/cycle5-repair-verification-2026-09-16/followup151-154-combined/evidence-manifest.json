@@ -1,0 +1,95 @@
+{
+  "at": "2026-09-16T18:16:26.705Z",
+  "codeHashesVerified": true,
+  "secretScan": {
+    "knownValues": 62,
+    "findings": 0,
+    "jwtPattern": true,
+    "credentialUrls": true
+  },
+  "normalization": "Trailing horizontal whitespace and terminal blank lines only; private originals unchanged.",
+  "files": [
+    {
+      "name": "cycle5-154-combined-command.json",
+      "source": "/private/tmp/cycle5-154-combined-command.json",
+      "original_sha256": "5a0a22eaf45a4a85a9d7bb71ec20872b28787254c40f1ee1dc2d2ce4ab415f37",
+      "sha256": "5a0a22eaf45a4a85a9d7bb71ec20872b28787254c40f1ee1dc2d2ce4ab415f37",
+      "bytes": 14686
+    },
+    {
+      "name": "cycle5-154-combined-tests.mjs",
+      "source": "/private/tmp/cycle5-154-combined-tests.mjs",
+      "original_sha256": "249395af30f7a0d4a71b95bb79c4f922a238be96e40c6e7fba48c6fd4d087c27",
+      "sha256": "249395af30f7a0d4a71b95bb79c4f922a238be96e40c6e7fba48c6fd4d087c27",
+      "bytes": 1949
+    },
+    {
+      "name": "cycle5-154-combined-ui.log",
+      "source": "/private/tmp/cycle5-154-combined-ui.log",
+      "original_sha256": "d616875d7f0ac635dd1bd93e7cc09ca1ee097392f31c5fcf6f52fa0aa07078db",
+      "sha256": "7417d68beace9b801db1e09dd28b07a1071dcd1ea9f8f4b8d4f20529c2d3ec7b",
+      "bytes": 129101
+    },
+    {
+      "name": "cycle5-154-combined-web.log",
+      "source": "/private/tmp/cycle5-154-combined-web.log",
+      "original_sha256": "9ac08514d6fc0685691fc11d9cd7989592e048e11a41cf63eaa3d2ffa86b997a",
+      "sha256": "181300a8e0ee369090fd9b56e8e09fc7eb2771284001e0802361d7bce760dfcc",
+      "bytes": 5141
+    },
+    {
+      "name": "cycle5-154-combined-typecheck.log",
+      "source": "/private/tmp/cycle5-154-combined-typecheck.log",
+      "original_sha256": "5c10e97ea53b6db3e97f631e53886fc87c693a61a74f63836a357bffb96fb712",
+      "sha256": "5c10e97ea53b6db3e97f631e53886fc87c693a61a74f63836a357bffb96fb712",
+      "bytes": 26778
+    },
+    {
+      "name": "cycle5-154-combined-typecheck-comparison.json",
+      "source": "/private/tmp/cycle5-154-combined-typecheck-comparison.json",
+      "original_sha256": "565b22e629afea8f04bdcd46a5898cfd361c8fc66db241b667c227e4cea6906e",
+      "sha256": "565b22e629afea8f04bdcd46a5898cfd361c8fc66db241b667c227e4cea6906e",
+      "bytes": 2551
+    },
+    {
+      "name": "cycle5-154-final-typecheck.log",
+      "source": "/private/tmp/cycle5-154-final-typecheck.log",
+      "original_sha256": "5c10e97ea53b6db3e97f631e53886fc87c693a61a74f63836a357bffb96fb712",
+      "sha256": "5c10e97ea53b6db3e97f631e53886fc87c693a61a74f63836a357bffb96fb712",
+      "bytes": 26778
+    },
+    {
+      "name": "cycle5-154-final-typecheck-comparison.json",
+      "source": "/private/tmp/cycle5-154-final-typecheck-comparison.json",
+      "original_sha256": "8a3a7e7e91e01f1b2371ad97451aac9045d925d1cb81511d63f645e5edc782d4",
+      "sha256": "8a3a7e7e91e01f1b2371ad97451aac9045d925d1cb81511d63f645e5edc782d4",
+      "bytes": 2548
+    },
+    {
+      "name": "cycle5-154-verified-typecheck.log",
+      "source": "/private/tmp/cycle5-154-verified-typecheck.log",
+      "original_sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "bytes": 24428
+    },
+    {
+      "name": "cycle5-154-verified-typecheck-comparison.json",
+      "source": "/private/tmp/cycle5-154-verified-typecheck-comparison.json",
+      "original_sha256": "97c16bb6c810ba863419776ec5fd7ef9eed267d7054d0198866b66e1f7599a7a",
+      "sha256": "97c16bb6c810ba863419776ec5fd7ef9eed267d7054d0198866b66e1f7599a7a",
+      "bytes": 327
+    },
+    {
+      "name": "cycle5-154-dev-ancestry.json",
+      "source": "/private/tmp/cycle5-154-dev-ancestry.json",
+      "original_sha256": "1ccc6614a72df07d97de0af6d53f799aca4df6c132c7196caabbe6d1bfcf18f7",
+      "sha256": "1ccc6614a72df07d97de0af6d53f799aca4df6c132c7196caabbe6d1bfcf18f7",
+      "bytes": 356
+    },
+    {
+      "name": "README.md",
+      "sha256": "bbe4371ec3668dddaab2760c2d523d0406a4fcf17ae6b3ebb79bcb365eba2019",
+      "bytes": 998
+    }
+  ]
+}

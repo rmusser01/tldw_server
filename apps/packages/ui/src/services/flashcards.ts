@@ -682,7 +682,15 @@ export type FlashcardAnalyticsSummary = {
 }
 
 // Decks
-export async function listDecks(options?: DeckListParams): Promise<Deck[]> {
+export async function listDecks(options?: DeckListParams, requestOptions?: FlashcardsRequestOptions): Promise<Deck[]> {
+  if (requestOptions?.requestScope) {
+    return bgRequest<Deck[], AllowedPath, "GET">({
+      path: `/api/v1/flashcards/decks${buildQuery({ workspace_id: options?.workspace_id, include_workspace_items: options?.include_workspace_items ?? false })}` as AllowedPath,
+      method: "GET",
+      ...requestScopeFields(requestOptions.requestScope),
+      abortSignal: requestOptions.signal ?? options?.signal
+    })
+  }
   return await decksClient.list<Deck[]>({
     workspace_id: options?.workspace_id,
     include_workspace_items: options?.include_workspace_items ?? false
@@ -828,12 +836,14 @@ export async function createFlashcard(
 
 export async function createFlashcardsBulk(
   input: FlashcardCreate[],
-  options?: { signal?: AbortSignal }
+  options?: FlashcardsRequestOptions
 ): Promise<FlashcardListResponse> {
+  const scope = requestScopeFields(options?.requestScope)
   return await bgRequest<FlashcardListResponse, AllowedPath, "POST">({
     path: "/api/v1/flashcards/bulk",
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    ...scope,
+    headers: { "Content-Type": "application/json", ...scope.headers },
     body: input,
     abortSignal: options?.signal
   })
@@ -850,8 +860,16 @@ export async function updateFlashcardsBulk(
   })
 }
 
-export async function getFlashcard(card_uuid: string): Promise<Flashcard> {
-  return await flashcardsClient.get<Flashcard>(card_uuid)
+export async function getFlashcard(card_uuid: string, options?: FlashcardsRequestOptions): Promise<Flashcard> {
+  if (options?.requestScope) {
+    return bgRequest<Flashcard, AllowedPath, "GET">({
+      path: `/api/v1/flashcards/${encodeURIComponent(card_uuid)}` as AllowedPath,
+      method: "GET",
+      ...requestScopeFields(options.requestScope),
+      abortSignal: options.signal
+    })
+  }
+  return await flashcardsClient.get<Flashcard>(card_uuid, undefined, { abortSignal: options?.signal })
 }
 
 export async function getFlashcardAssistant(
@@ -883,7 +901,15 @@ export async function updateFlashcard(card_uuid: string, input: FlashcardUpdate)
   await flashcardsClient.update<void>(card_uuid, input)
 }
 
-export async function deleteFlashcard(card_uuid: string, expected_version: number): Promise<void> {
+export async function deleteFlashcard(card_uuid: string, expected_version: number, options?: FlashcardsRequestOptions): Promise<void> {
+  if (options?.requestScope) {
+    return bgRequest<void, AllowedPath, "DELETE">({
+      path: `/api/v1/flashcards/${encodeURIComponent(card_uuid)}${buildQuery({ expected_version })}` as AllowedPath,
+      method: "DELETE",
+      ...requestScopeFields(options.requestScope),
+      abortSignal: options.signal
+    })
+  }
   await flashcardsClient.remove<void>(card_uuid, {
     expected_version
   })

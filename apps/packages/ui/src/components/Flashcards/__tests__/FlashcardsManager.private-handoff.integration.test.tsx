@@ -26,7 +26,7 @@ vi.mock("@/services/prompt-studio", () => ({ getLlmProviders: async () => ({ pro
 vi.mock("@/hooks/useAntdMessage", () => ({ useAntdMessage: () => mocks.messages }))
 vi.mock("../hooks", async (original) => ({
   ...await original<typeof import("../hooks")>(),
-  useDecksQuery: () => ({ data: [{ id: 7, name: "Owned deck" }] }),
+  useDecksQuery: () => ({ data: [{ id: 7, name: "Owned deck" }], isSuccess: true }),
   useImportLimitsQuery: () => ({ data: null })
 }))
 vi.mock("../tabs", async () => ({

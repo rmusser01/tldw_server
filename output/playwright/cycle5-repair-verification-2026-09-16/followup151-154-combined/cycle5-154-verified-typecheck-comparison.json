@@ -1,0 +1,9 @@
+{
+  "baselineFile": "/private/tmp/cycle5-followup-final-typecheck.log",
+  "currentFile": "/private/tmp/cycle5-154-verified-typecheck.log",
+  "baselineDiagnostics": 90,
+  "currentDiagnostics": 90,
+  "added": [],
+  "removed": [],
+  "note": "Nonzero compiler exit retains existing diagnostic baseline; not a passing typecheck."
+}

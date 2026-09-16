@@ -51,6 +51,17 @@ describe("flashcard asset service", () => {
     )
   })
 
+  it("does not upload after cancellation while file bytes are being read", async () => {
+    const controller = new AbortController()
+    let resolve!: (value: ArrayBuffer) => void
+    const file = { name: "diagram.png", type: "image/png", arrayBuffer: () => new Promise<ArrayBuffer>(done => { resolve = done }) } as File
+    const pending = uploadFlashcardAsset(file, { signal: controller.signal })
+    controller.abort()
+    resolve(new Uint8Array([1]).buffer)
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    expect(mockBgUpload).not.toHaveBeenCalled()
+  })
+
   it("caches managed asset object URLs and revokes them after the last release", async () => {
     mockBgRequest.mockResolvedValue({
       ok: true,

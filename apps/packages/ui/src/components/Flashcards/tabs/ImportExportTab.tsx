@@ -317,7 +317,7 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
               defaultValue: "Image Occlusion"
             })}
           >
-            <ImageOcclusionTransferPanel onTransferAction={handleTransferAction} />
+            <ImageOcclusionTransferPanel generationScope={generationScope} onTransferAction={handleTransferAction} />
           </Card>
         </section>
       </section>

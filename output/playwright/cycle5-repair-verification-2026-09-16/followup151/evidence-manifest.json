@@ -1,0 +1,200 @@
+{
+  "at": "2026-09-16T18:16:26.699Z",
+  "codeHashesVerified": true,
+  "secretScan": {
+    "knownValues": 62,
+    "findings": 0,
+    "jwtPattern": true,
+    "credentialUrls": true
+  },
+  "normalization": "Trailing horizontal whitespace and terminal blank lines only; private originals unchanged.",
+  "files": [
+    {
+      "name": "cycle5-uat151-code-freeze.json",
+      "source": "/private/tmp/cycle5-uat151-code-freeze.json",
+      "original_sha256": "732eb9d96a67b44aef36d0c9499749c77e2097732c940ebe1d240afe0dfac17b",
+      "sha256": "732eb9d96a67b44aef36d0c9499749c77e2097732c940ebe1d240afe0dfac17b",
+      "bytes": 4792
+    },
+    {
+      "name": "cycle5-uat151-production-freeze.json",
+      "source": "/private/tmp/cycle5-uat151-production-freeze.json",
+      "original_sha256": "3b444ca7feba4726f97f5bd7dd0c44fd6521d11c253d445931aa164300e08593",
+      "sha256": "3b444ca7feba4726f97f5bd7dd0c44fd6521d11c253d445931aa164300e08593",
+      "bytes": 2472
+    },
+    {
+      "name": "cycle5-uat151-implementation.md",
+      "source": "/private/tmp/cycle5-uat151-implementation.md",
+      "original_sha256": "ae06a0d04a5fb933d9e643892fba2f57427b65f342b316e88b7d54816ca760fe",
+      "sha256": "ae06a0d04a5fb933d9e643892fba2f57427b65f342b316e88b7d54816ca760fe",
+      "bytes": 8869
+    },
+    {
+      "name": "cycle5-uat151-test-command.txt",
+      "source": "/private/tmp/cycle5-uat151-test-command.txt",
+      "original_sha256": "5fcf81aa1b7edd53008a370b9421223c6a8a51553091aa40ff68e27dd82295f2",
+      "sha256": "5fcf81aa1b7edd53008a370b9421223c6a8a51553091aa40ff68e27dd82295f2",
+      "bytes": 1078
+    },
+    {
+      "name": "cycle5-uat151-test-paths.json",
+      "source": "/private/tmp/cycle5-uat151-test-paths.json",
+      "original_sha256": "d010d6306708f1342bfd7b91034bb40ad1b7c096e4ca751d4fae8342aa26db89",
+      "sha256": "d010d6306708f1342bfd7b91034bb40ad1b7c096e4ca751d4fae8342aa26db89",
+      "bytes": 1289
+    },
+    {
+      "name": "cycle5-uat151-valid-red.log",
+      "source": "/private/tmp/cycle5-uat151-valid-red.log",
+      "original_sha256": "7f59dcf0e070587d3a2d144aedcd76b290b97b9968fa963e193814ebbc964497",
+      "sha256": "68ae126824cdad06b53aaa2529acfdb89120989afc17b8b8985a672cc7671916",
+      "bytes": 10273
+    },
+    {
+      "name": "cycle5-uat151-transport-red.log",
+      "source": "/private/tmp/cycle5-uat151-transport-red.log",
+      "original_sha256": "df49aead435413810dba99a1dc524f65a45fa7a2334813b564efee98a7da1dcc",
+      "sha256": "96e7c777544345b2f61dc55b3cd9d1712303975a30e67e6e72dae29dc16fe3c9",
+      "bytes": 10921
+    },
+    {
+      "name": "cycle5-uat151-occlusion-red.log",
+      "source": "/private/tmp/cycle5-uat151-occlusion-red.log",
+      "original_sha256": "352cb8a5ea6876084a430b12b2445194cd7a534f101afdff88cc1ba58ff22486",
+      "sha256": "341ce9d03d062729e665a92acc92ccd83d44c72eee9ea2bbff624b2f09243d2b",
+      "bytes": 6515
+    },
+    {
+      "name": "cycle5-uat151-created-proof-red.log",
+      "source": "/private/tmp/cycle5-uat151-created-proof-red.log",
+      "original_sha256": "214b314df6852d2817833982059e6be5e829cbf483767fd5324ce7f461bd740c",
+      "sha256": "69c2b662ce664e33bc772af0452835bb9a89d7172f2a35de4b352e3b07727dde",
+      "bytes": 19711
+    },
+    {
+      "name": "cycle5-uat151-created-deck-removal.log",
+      "source": "/private/tmp/cycle5-uat151-created-deck-removal.log",
+      "original_sha256": "92bbd56f912531e6760bb7d662292e0deba7e3c51f51a9e357b40b55753fda45",
+      "sha256": "2c07b6befe2af8341d5cf986d287aabe3448fa7870dffc4f52c95273725f7cd4",
+      "bytes": 9594
+    },
+    {
+      "name": "cycle5-uat151-created-deck-removal-final.log",
+      "source": "/private/tmp/cycle5-uat151-created-deck-removal-final.log",
+      "original_sha256": "5c59f516fdcce64474246df20e348c675d67776872269d09ebf08e332dbb6a7c",
+      "sha256": "dc5028f3c02c539300cf863798824ffed9d77d8fa4941ce5ff41296ab785e3d8",
+      "bytes": 724
+    },
+    {
+      "name": "cycle5-uat151-created-deck-removal-probe.txt",
+      "source": "/private/tmp/cycle5-uat151-created-deck-removal-probe.txt",
+      "original_sha256": "7a8264c85ec040e535a082e1d6673ab8ad857f941fe70dc6851e8a201f0d1379",
+      "sha256": "7a8264c85ec040e535a082e1d6673ab8ad857f941fe70dc6851e8a201f0d1379",
+      "bytes": 1674
+    },
+    {
+      "name": "cycle5-uat151-created-deck-removal.config.mts",
+      "source": "/private/tmp/cycle5-uat151-created-deck-removal.config.mts",
+      "original_sha256": "eefbb86f857101cf5a2447377c7b76f7feb136b1163bcb0b16c5206f0562875b",
+      "sha256": "eefbb86f857101cf5a2447377c7b76f7feb136b1163bcb0b16c5206f0562875b",
+      "bytes": 510
+    },
+    {
+      "name": "cycle5-uat151-final-typed-green.log",
+      "source": "/private/tmp/cycle5-uat151-final-typed-green.log",
+      "original_sha256": "814c626667713c6d64510634515992e61453aec68c999f1049ccba0c0478d20f",
+      "sha256": "9918899e5ec37b396de9082a038b904fcca60aae58c161cb1a4d1b14c0e6f1d9",
+      "bytes": 7954
+    },
+    {
+      "name": "cycle5-uat151-independent-final-green.log",
+      "source": "/private/tmp/cycle5-uat151-independent-final-green.log",
+      "original_sha256": "2a82493f96344ccd3e90b8681852112b56d1896858ad4ff8fac3b5cc82e203c3",
+      "sha256": "c7597d910738c623b92298f1e4141c74b9c5df5c4a387aab4b5d78d99378dfa8",
+      "bytes": 8123
+    },
+    {
+      "name": "cycle5-uat151-independent-final-hashes.json",
+      "source": "/private/tmp/cycle5-uat151-independent-final-hashes.json",
+      "original_sha256": "46cb85b7db9491f5d1032ffd52778d8d7b3c9a7c2e4c50e3d101e13a78ae901a",
+      "sha256": "46cb85b7db9491f5d1032ffd52778d8d7b3c9a7c2e4c50e3d101e13a78ae901a",
+      "bytes": 5738
+    },
+    {
+      "name": "cycle5-uat151-independent-initial-review.md",
+      "source": "/private/tmp/cycle5-uat151-independent-initial-review.md",
+      "original_sha256": "335ed3912998e524d291368083fc7196460483a34f689d047fb21c1cb9dee7c7",
+      "sha256": "335ed3912998e524d291368083fc7196460483a34f689d047fb21c1cb9dee7c7",
+      "bytes": 6590
+    },
+    {
+      "name": "cycle5-uat151-independent-review.md",
+      "source": "/private/tmp/cycle5-uat151-independent-review.md",
+      "original_sha256": "bf19d90fae5ef3cb93cd9e0c3a45d64a721869ec75312a402abab829e6900381",
+      "sha256": "bf19d90fae5ef3cb93cd9e0c3a45d64a721869ec75312a402abab829e6900381",
+      "bytes": 7076
+    },
+    {
+      "name": "cycle5-uat151-initial-code-freeze.json",
+      "source": "/private/tmp/cycle5-uat151-initial-code-freeze.json",
+      "original_sha256": "54b133731f9878fc08b78578dadc470f700fa29f64fe6c7c26c1b50b47ca9ca8",
+      "sha256": "54b133731f9878fc08b78578dadc470f700fa29f64fe6c7c26c1b50b47ca9ca8",
+      "bytes": 4792
+    },
+    {
+      "name": "cycle5-uat151-initial-production-freeze.json",
+      "source": "/private/tmp/cycle5-uat151-initial-production-freeze.json",
+      "original_sha256": "d50a3d8f03402e88fd452042b3a8db88e0fc4d6f3e4239735253f1be0f6a9c86",
+      "sha256": "d50a3d8f03402e88fd452042b3a8db88e0fc4d6f3e4239735253f1be0f6a9c86",
+      "bytes": 2472
+    },
+    {
+      "name": "cycle5-uat151-eslint-baseline.json",
+      "source": "/private/tmp/cycle5-uat151-eslint-baseline.json",
+      "original_sha256": "cecc87528c17945ad43175eab257790eadffdc0e13cf5afd5bfea49d0bf20504",
+      "sha256": "cecc87528c17945ad43175eab257790eadffdc0e13cf5afd5bfea49d0bf20504",
+      "bytes": 133970
+    },
+    {
+      "name": "cycle5-uat151-eslint-final.json",
+      "source": "/private/tmp/cycle5-uat151-eslint-final.json",
+      "original_sha256": "f35f4a53bfde092df882d57afcbae0fb03fbe4d689b70c902f8303baacbf9cdc",
+      "sha256": "f35f4a53bfde092df882d57afcbae0fb03fbe4d689b70c902f8303baacbf9cdc",
+      "bytes": 105965
+    },
+    {
+      "name": "cycle5-uat151-eslint-comparison.json",
+      "source": "/private/tmp/cycle5-uat151-eslint-comparison.json",
+      "original_sha256": "5dde47e29fa3ad9d55fcb3a3a3bf79f8f255f95a2d5e27c9d4a99bb676fc2abd",
+      "sha256": "5dde47e29fa3ad9d55fcb3a3a3bf79f8f255f95a2d5e27c9d4a99bb676fc2abd",
+      "bytes": 2654
+    },
+    {
+      "name": "cycle5-uat151-query-types-before.log",
+      "source": "/private/tmp/cycle5-uat151-query-types-before.log",
+      "original_sha256": "33c5aecdb5598b5756e6ac147ed911bb555a457e3c69e7c7a1b8edf558138365",
+      "sha256": "33c5aecdb5598b5756e6ac147ed911bb555a457e3c69e7c7a1b8edf558138365",
+      "bytes": 3364
+    },
+    {
+      "name": "cycle5-uat151-query-types-after.log",
+      "source": "/private/tmp/cycle5-uat151-query-types-after.log",
+      "original_sha256": "15fb449022cc464e2fd405b95d298f1f5225efce823fc49274bbbc347e3baeed",
+      "sha256": "15fb449022cc464e2fd405b95d298f1f5225efce823fc49274bbbc347e3baeed",
+      "bytes": 3773
+    },
+    {
+      "name": "cycle5-uat151-query-types.mjs",
+      "source": "/private/tmp/cycle5-uat151-query-types.mjs",
+      "original_sha256": "7c1f4107867304dc9671e926c9c7b204953f21094a707a2b6cea52c5e46323d4",
+      "sha256": "7c1f4107867304dc9671e926c9c7b204953f21094a707a2b6cea52c5e46323d4",
+      "bytes": 1152
+    },
+    {
+      "name": "README.md",
+      "sha256": "2f22c7a425bd16d229c3ec093ebd0abee23bfe863a6f5622b4fa1ae71d260c86",
+      "bytes": 778
+    }
+  ]
+}

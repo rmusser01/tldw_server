@@ -1,3 +1,4 @@
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   listDecks,
@@ -170,15 +171,28 @@ async function fetchDueCounts(
 /**
  * Hook for fetching flashcard decks
  */
-export function useDecksQuery(options?: UseFlashcardQueriesOptions) {
+export function useDecksQuery(options?: UseFlashcardQueriesOptions & { scope?: ServicePromptSnapshot | null }) {
   const { flashcardsEnabled } = useFlashcardsEnabled()
   const visibilityParams = buildWorkspaceVisibilityParams(options)
 
-  return useQuery({
-    queryKey: ["flashcards:decks", visibilityParams],
-    queryFn: () => listDecks(visibilityParams),
-    enabled: options?.enabled ?? flashcardsEnabled
+  const scoped = options?.scope !== undefined
+  const scope = options?.scope
+  const current = !scoped || Boolean(scope && !scope.scopeSignal.aborted)
+  const query = useQuery<Deck[]>({
+    queryKey: scoped ? ["flashcards:decks:scoped", scope?.scopeKey ?? null, visibilityParams] : ["flashcards:decks", visibilityParams],
+    queryFn: async ({ signal }) => {
+      if (!scoped) return listDecks(visibilityParams)
+      if (!scope) throw new DOMException("The deck account is unresolved.", "AbortError")
+      const combinedSignal = AbortSignal.any([signal, scope.scopeSignal])
+      combinedSignal.throwIfAborted()
+      const decks = await listDecks(visibilityParams, { requestScope: scope.requestScope, signal: combinedSignal })
+      combinedSignal.throwIfAborted()
+      return decks
+    },
+    enabled: current && (options?.enabled ?? flashcardsEnabled)
   })
+  const data: Deck[] | undefined = current ? query.data : undefined
+  return { ...query, data, isSuccess: current && query.isSuccess }
 }
 
 /**
@@ -704,7 +718,8 @@ export function useCreateFlashcardsBulkMutation() {
 
   return useMutation({
     mutationKey: ["flashcards:create:bulk"],
-    mutationFn: (payload: FlashcardCreate[]) => createFlashcardsBulk(payload),
+    mutationFn: (payload: FlashcardCreate[] | { cards: FlashcardCreate[]; requestOptions?: FlashcardsRequestOptions }) =>
+      Array.isArray(payload) ? createFlashcardsBulk(payload) : createFlashcardsBulk(payload.cards, payload.requestOptions),
     onSuccess: () => {
       invalidateFlashcardsQueries(qc)
     },

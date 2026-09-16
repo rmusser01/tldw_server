@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next"
 import { Alert, type AlertVariant } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { getLlmProviders } from "@/services/prompt-studio"
-import type { DeckReviewPromptSide, FlashcardPlanItem } from "@/services/flashcards"
+import type { Deck, DeckReviewPromptSide, FlashcardPlanItem } from "@/services/flashcards"
 
 import { NewDeckConfigurationFields } from "../../components/NewDeckConfigurationFields"
 import {
@@ -76,11 +76,23 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   const { t } = useTranslation(["option", "common"])
   const message = useAntdMessage()
   const qc = useQueryClient()
-  const decksQuery = useDecksQuery()
+  const decksQuery = useDecksQuery(generationScope === undefined ? undefined : { scope: generationScope })
   const generateMutation = useGenerateFlashcardsMutation()
   const createMutation = useCreateFlashcardMutation()
   const createDeckMutation = useCreateDeckMutation()
-  const decks = decksQuery.data || []
+  const [createdDeck, setCreatedDeck] = React.useState<{ scope: typeof generationScope; deck: Deck; listUpdatedAt: number } | null>(null)
+  const decks = React.useMemo(() => {
+    const listed = decksQuery.data || []
+    const created = createdDeck && createdDeck.scope === generationScope && createdDeck.listUpdatedAt === decksQuery.dataUpdatedAt ? createdDeck.deck : null
+    return created && !listed.some(deck => deck.id === created.id) ? [...listed, created] : listed
+  }, [decksQuery.data, decksQuery.dataUpdatedAt, createdDeck, generationScope])
+  const deckListReady = generationScope === undefined
+    ? !decksQuery.isLoading && !decksQuery.isError
+    : decksQuery.isSuccess
+  // The create acknowledgment bridges only the current list revision. A later
+  // successful catalogue is authoritative, including an empty one.
+  const latestListUpdatedAt = React.useRef(decksQuery.dataUpdatedAt)
+  latestListUpdatedAt.current = decksQuery.dataUpdatedAt
   const mounted = React.useRef(false)
   const currentScope = React.useRef(generationScope)
   currentScope.current = generationScope
@@ -225,13 +237,14 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   }, [sourceReviewIntent])
 
   React.useEffect(() => {
-    if (targetDeckId != null) return
+    if (!deckListReady || targetDeckId === NEW_DECK_OPTION_VALUE) return
+    if (typeof targetDeckId === "number" && decks.some(deck => deck.id === targetDeckId)) return
     if (decks.length > 0) {
       setTargetDeckId(decks[0].id)
       return
     }
     setTargetDeckId(NEW_DECK_OPTION_VALUE)
-  }, [decks, targetDeckId])
+  }, [deckListReady, decks, targetDeckId])
 
   const clearRetryableSaveStatus = React.useCallback(() => {
     setSaveStatus((current) => (current?.retryable ? null : current))
@@ -350,7 +363,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
 
   const resolveTargetDeckId = React.useCallback(async (): Promise<number> => {
     assertCurrentScope()
-    if (typeof targetDeckId === "number") return targetDeckId
+    if (!deckListReady) throw new Error("Wait for the current account's decks to load before saving.")
+    if (typeof targetDeckId === "number") {
+      if (decks.some(deck => deck.id === targetDeckId)) return targetDeckId
+      throw new Error("Choose a deck from the current account before saving.")
+    }
     if (targetDeckId === undefined && decks.length > 0) return decks[0].id
     if (targetDeckId === NEW_DECK_OPTION_VALUE || (targetDeckId == null && decks.length === 0)) {
       const name = newDeckName.trim()
@@ -377,6 +394,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         scheduler_settings: schedulerSettings.scheduler_settings
       })
       assertCurrentScope()
+      setCreatedDeck({ scope: generationScope, deck: createdDeck, listUpdatedAt: latestListUpdatedAt.current })
       setTargetDeckId(createdDeck.id)
       return createdDeck.id
     }
@@ -386,7 +404,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         defaultValue: "Enter a deck name."
       })
     )
-  }, [assertCurrentScope, requestOptions, createDeckMutation, decks, generatedDeckSchedulerDraft, newDeckName, reviewPromptSide, t, targetDeckId])
+  }, [assertCurrentScope, generationScope, deckListReady, requestOptions, createDeckMutation, decks, generatedDeckSchedulerDraft, newDeckName, reviewPromptSide, t, targetDeckId])
 
   const handleSaveGeneratedCards = React.useCallback(async () => {
     if (generatedCards.length === 0) return
