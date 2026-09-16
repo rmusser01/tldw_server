@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 19:36'
+updated_date: '2026-09-16 19:49'
 labels:
   - uat
   - testing
@@ -172,6 +172,8 @@ User correction from side conversation, 2026-09-16: do not start another full UA
 2026-09-16 19:10 UTC recovery: HEAD remains 2d5ad06c86. Prior temporary UAT profiles, launchers, native captures and agent sessions are unavailable; direct process/listener inventory confirms the six named UAT PIDs and ports18500-18503/18580-18583/9099/55475 are stopped. Cause is not established. Preserve committed evidence and record recent transcript-only findings without recreating artifacts or closing acceptance. Latest native observations reopen013 (wrong source answer, extra out-of-order rows after reload) and031 (failed character Retry creates a new conversation, then greeting Save Notes400). New155 already tracked. Native151 and timeout152/153 looked correct but need retained recapture. End source freeze, repair confirmed issues, and rebuild isolated runtime through repository fixtures before further targeted acceptance. No new full UAT is authorized by this checkpoint.
 
 19:35UTC checkpoint on c415ac44c3: reviewed155sidebar/031failedRetry/156chronology committed with exact author+independent24/5,53/5,128/7 evidence. Full compiler90existing signatures0added/removed; fresh mandatoryPG32backend+2AuthNZ pass0skips. Reopened103local retrieval notice promotion and013wrongfinalanswer remain unresolved.156row ledger140verified12awaiting2blocked2unresolved. Missingnative151/152/153 captures require recapture; no fullUAT begun. DirectHTTPcorrectsprocess-onlymodelinventory:9099responds,alleightAPI/UIportsunavailable. Newownedvisionmodelon19099loadedmatchingprojector in separateprocess; nativeapplicationcapability andimageRetry unverified. Recoveryprofilelauncher being prepared privately under ignoredrepo .tmp; no newapplicationruntime started.
+
+19:50 UTC recovery: real vision provider correctly describes existing PNG200/5807ms; app118 remains pending. Headed two-tab visibility still both visible,114 tool gap retained. Fresh SQLite init0; private harness Python/Next path errors being corrected without product changes. Official fixtures hold separate fresh PG single/multi Auth/content DBs. No full UAT restarted.103 bounded local diagnostic policy approved under.44; design selection recorded.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

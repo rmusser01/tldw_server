@@ -1,0 +1,31 @@
+{
+  "capturedAt": "2026-09-16T19:43:38.228Z",
+  "endpoint": "http://127.0.0.1:19099",
+  "modelId": "gemma-4-26B-A4B-it",
+  "modelsStatus": 200,
+  "propsStatus": 200,
+  "advertisedCapabilities": [
+    "completion",
+    "multimodal"
+  ],
+  "modalities": {
+    "vision": true,
+    "video": true,
+    "audio": false
+  },
+  "build": "b10430-4c1a0af40",
+  "modelPath": "/Users/macbook-dev/Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+  "modelAlias": "gemma-4-26B-A4B-it",
+  "contextWindow": 16384,
+  "sourceResponses": [
+    {
+      "path": "/private/tmp/uat118-vision-models.json",
+      "sha256": "dd9ca4c1670579873d52638f3c5928baf29bb3cfc0f6f538f67d12e644a65695"
+    },
+    {
+      "path": "/private/tmp/uat118-vision-props.json",
+      "sha256": "a0979620fff6541674eb597c45b65c40ad5aa9fa42b9aaac1e9fa4b7bf94c514"
+    }
+  ],
+  "inferencePerformedByReviewer": false
+}
