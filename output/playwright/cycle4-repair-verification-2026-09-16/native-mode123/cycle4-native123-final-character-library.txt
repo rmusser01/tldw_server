@@ -1,0 +1,220 @@
+### Open tabs
+- 0: [127.0.0.1](chrome-error://chromewebdata/)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: [127.0.0.1](chrome-error://chromewebdata/)
+- 3: [127.0.0.1](chrome-error://chromewebdata/)
+- 4: [127.0.0.1](chrome-error://chromewebdata/)
+- 5: (current) [Characters | tldw](http://127.0.0.1:18381/characters)
+### Page
+- Page URL: http://127.0.0.1:18381/characters
+- Page Title: Characters | tldw
+- Console: 1 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [ref=f21e11]:
+  - generic [ref=f21e12]:
+    - generic [ref=f21e14]:
+      - link "Skip to main content" [ref=f21e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f21e16]:
+        - button "Expand sidebar" [ref=f21e1073] [cursor=pointer]
+        - button "New Chat" [ref=f21e1076] [cursor=pointer]
+        - generic [ref=f21e1079]:
+          - button "Quick Ingest" [ref=f21e1080] [cursor=pointer]
+          - button "Chat" [ref=f21e1084] [cursor=pointer]
+          - button "Prompts" [ref=f21e1087] [cursor=pointer]
+          - button "Characters" [active] [ref=f21e1091] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f21e1096] [cursor=pointer]
+          - button "World Books" [ref=f21e1100] [cursor=pointer]
+          - button "Notes" [ref=f21e1103] [cursor=pointer]
+          - button "Knowledge QA" [ref=f21e1107] [cursor=pointer]
+          - button "Media" [ref=f21e1115] [cursor=pointer]
+          - button "Document Workspace" [ref=f21e1118] [cursor=pointer]
+          - button "Research Workspace" [ref=f21e1124] [cursor=pointer]
+          - button "Kanban" [ref=f21e1130] [cursor=pointer]
+          - button "Watchlists" [ref=f21e1132] [cursor=pointer]
+        - generic [ref=f21e1137]:
+          - button "Open Notes Dock" [ref=f21e1138] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f21e1143] [cursor=pointer]
+          - button "Settings" [ref=f21e1146] [cursor=pointer]
+      - main [ref=f21e95]:
+        - generic [ref=f21e96]:
+          - generic [ref=f21e99]:
+            - generic [ref=f21e100]:
+              - button "Expand sidebar" [ref=f21e1150] [cursor=pointer]
+              - generic [ref=f21e103]:
+                - img "tldw Assistant" [ref=f21e104]
+                - generic [ref=f21e105]: tldw Assistant
+                - button "Companion Home" [ref=f21e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=f21e110] [cursor=pointer]
+            - generic [ref=f21e117]:
+              - button "Search - Open command palette" [ref=f21e118] [cursor=pointer]:
+                - generic [ref=f21e122]: Search
+                - generic [ref=f21e123]: ⌘K
+              - button "Open settings" [ref=f21e137] [cursor=pointer]
+              - generic [ref=f21e149]:
+                - button "Notifications, 0 unread" [ref=f21e475] [cursor=pointer]
+                - status [ref=f21e153]: Notifications are active
+              - button "Switch to light theme" [ref=f21e154] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f21e161] [cursor=pointer]:
+                - generic [ref=f21e162]: "?"
+          - generic [ref=f21e1929]:
+            - generic [ref=f21e1930]:
+              - heading "Characters" [level=1] [ref=f21e1931]
+              - paragraph [ref=f21e1932]: Create reusable characters you can pick from the chat header and reuse across conversations.
+            - generic [ref=f21e1933]:
+              - link "Skip to characters content" [ref=f21e1934] [cursor=pointer]:
+                - /url: "#characters-main-content"
+              - main [ref=f21e1935]:
+                - button [aria-hidden] [ref=f21e1940] [cursor=pointer]: Upload character
+                - generic [ref=f21e1941]: "Keyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal"
+                - generic [ref=f21e1943]:
+                  - button "New character" [ref=f21e1944] [cursor=pointer]
+                  - button "Import character" [ref=f21e1946] [cursor=pointer]
+                  - generic [ref=f21e1951]:
+                    - textbox "Search characters" [ref=f21e1952]
+                    - generic [ref=f21e1953]: /
+                  - radiogroup "View mode" [ref=f21e1955]:
+                    - generic [ref=f21e1956]:
+                      - generic [ref=f21e1957] [cursor=pointer]:
+                        - radio [checked]
+                        - generic "Table view" [ref=f21e1958]
+                      - generic [ref=f21e1961] [cursor=pointer]:
+                        - radio
+                        - generic "Gallery view" [ref=f21e1962]
+                  - radiogroup "Character list view" [ref=f21e1969]:
+                    - generic [ref=f21e1970]:
+                      - generic [ref=f21e1971] [cursor=pointer]:
+                        - radio "Active" [checked]
+                        - generic "Active characters" [ref=f21e1972]: Active
+                      - generic [ref=f21e1973] [cursor=pointer]:
+                        - radio "Trash"
+                        - generic "Recently deleted characters" [ref=f21e1974]: Trash
+                  - button "Filters" [ref=f21e1975] [cursor=pointer]
+                  - button "Display options" [ref=f21e1980] [cursor=pointer]:
+                    - generic [ref=f21e1981]: Display
+                - status [ref=f21e1984]: 4 characters found
+                - generic [ref=f21e1989]:
+                  - table [ref=f21e1993]:
+                    - rowgroup [ref=f21e2001]:
+                      - row [ref=f21e2002]:
+                        - columnheader "Select all on page" [ref=f21e2003]:
+                          - checkbox "Select all on page" [ref=f21e2006] [cursor=pointer]
+                        - columnheader "Name" [ref=f21e2008] [cursor=pointer]
+                        - columnheader "Tags" [ref=f21e2019]
+                        - columnheader "Creator" [ref=f21e2020] [cursor=pointer]
+                        - columnheader "Activity" [ref=f21e2031] [cursor=pointer]
+                        - columnheader "Actions" [ref=f21e2042]
+                    - rowgroup [ref=f21e2043]:
+                      - row [ref=f21e2044]:
+                        - cell "Select Cycle4 Cedar Guide" [ref=f21e2045]:
+                          - checkbox "Select Cycle4 Cedar Guide" [ref=f21e2048] [cursor=pointer]
+                        - cell [ref=f21e2050]:
+                          - generic [ref=f21e2058]:
+                            - button "Edit name inline for Cycle4 Cedar Guide" [ref=f21e2060]: Cycle4 Cedar Guide
+                            - generic [ref=f21e2063]: "4"
+                        - cell [ref=f21e2066]
+                        - cell [ref=f21e2067]
+                        - cell "6h ago Updated 6h ago" [ref=f21e2068]:
+                          - generic [ref=f21e2069]:
+                            - generic [ref=f21e2070]: 6h ago
+                            - generic [ref=f21e2071]: Updated 6h ago
+                        - cell [ref=f21e2072]:
+                          - generic [ref=f21e2073]:
+                            - button "Chat as Cycle4 Cedar Guide" [ref=f21e2074] [cursor=pointer]
+                            - button "Edit character Cycle4 Cedar Guide" [ref=f21e2077] [cursor=pointer]
+                            - button "Delete character Cycle4 Cedar Guide" [ref=f21e2080] [cursor=pointer]
+                            - button "Add Cycle4 Cedar Guide to favorites" [ref=f21e2084] [cursor=pointer]
+                            - button "More actions for Cycle4 Cedar Guide" [ref=f21e2087] [cursor=pointer]
+                      - row [ref=f21e2092]:
+                        - cell "Select Helpful AI Assistant" [ref=f21e2093]:
+                          - checkbox "Select Helpful AI Assistant" [ref=f21e2096] [cursor=pointer]
+                        - cell [ref=f21e2098]:
+                          - generic [ref=f21e2105]:
+                            - generic [ref=f21e2106]:
+                              - button "Edit name inline for Helpful AI Assistant" [ref=f21e2108]: Helpful AI Assistant
+                              - generic [ref=f21e2111]: "2"
+                            - button "Edit description inline for Helpful AI Assistant" [ref=f21e2115]: A default, friendly assistant created automatically by the system.
+                        - cell [ref=f21e2118]:
+                          - generic [ref=f21e2119]:
+                            - button "default" [ref=f21e2120] [cursor=pointer]
+                            - button "neutral" [ref=f21e2122] [cursor=pointer]
+                            - button "Show and filter +1 hidden tags" [ref=f21e2124]: "+1"
+                        - cell "System" [ref=f21e2125]
+                        - cell "7h ago Updated 7h ago" [ref=f21e2127]:
+                          - generic [ref=f21e2128]:
+                            - generic [ref=f21e2129]: 7h ago
+                            - generic [ref=f21e2130]: Updated 7h ago
+                        - cell [ref=f21e2131]:
+                          - generic [ref=f21e2132]:
+                            - button "Chat as Helpful AI Assistant" [ref=f21e2133] [cursor=pointer]
+                            - button "Edit character Helpful AI Assistant" [ref=f21e2136] [cursor=pointer]
+                            - button "Delete character Helpful AI Assistant" [ref=f21e2139] [cursor=pointer]
+                            - button "Add Helpful AI Assistant to favorites" [ref=f21e2143] [cursor=pointer]
+                            - button "More actions for Helpful AI Assistant" [ref=f21e2146] [cursor=pointer]
+                      - row [ref=f21e2151]:
+                        - cell "Select pixel-migu" [ref=f21e2152]:
+                          - checkbox "Select pixel-migu" [ref=f21e2155] [cursor=pointer]
+                        - cell [ref=f21e2157]:
+                          - generic [ref=f21e2158]:
+                            - img "Avatar of pixel-migu" [ref=f21e2160]
+                            - generic [ref=f21e2161]:
+                              - button "Edit name inline for pixel-migu" [ref=f21e2164]: pixel-migu
+                              - button "Edit description inline for pixel-migu" [ref=f21e2168]: A tiny turquoise pixel-art robot with a rectangular face, chunky black outlines, and long twin tails. A companion for chatting, re...
+                        - cell [ref=f21e2171]:
+                          - generic [ref=f21e2172]:
+                            - button "pixel-art" [ref=f21e2173] [cursor=pointer]
+                            - button "robot" [ref=f21e2175] [cursor=pointer]
+                            - button "Show and filter +2 hidden tags" [ref=f21e2177]: "+2"
+                        - cell "User-directed pixel-migu adaptation" [ref=f21e2178]
+                        - cell "7h ago Updated 7h ago" [ref=f21e2180]:
+                          - generic [ref=f21e2181]:
+                            - generic [ref=f21e2182]: 7h ago
+                            - generic [ref=f21e2183]: Updated 7h ago
+                        - cell [ref=f21e2184]:
+                          - generic [ref=f21e2185]:
+                            - button "Chat as pixel-migu" [ref=f21e2186] [cursor=pointer]
+                            - button "Edit character pixel-migu" [ref=f21e2189] [cursor=pointer]
+                            - button "Delete character pixel-migu" [ref=f21e2192] [cursor=pointer]
+                            - button "Add pixel-migu to favorites" [ref=f21e2196] [cursor=pointer]
+                            - button "More actions for pixel-migu" [ref=f21e2199] [cursor=pointer]
+                      - row [ref=f21e2204]:
+                        - cell "Select Default Assistant" [ref=f21e2205]:
+                          - checkbox "Select Default Assistant" [ref=f21e2208] [cursor=pointer]
+                        - cell [ref=f21e2210]:
+                          - generic [ref=f21e2217]:
+                            - button "Edit name inline for Default Assistant" [ref=f21e2220]: Default Assistant
+                            - button "Edit description inline for Default Assistant" [ref=f21e2224]: A general-purpose assistant.
+                        - cell [ref=f21e2227]
+                        - cell "System" [ref=f21e2228]
+                        - cell "10m ago Updated 10m ago" [ref=f21e2230]:
+                          - generic [ref=f21e2231]:
+                            - generic [ref=f21e2232]: 10m ago
+                            - generic [ref=f21e2233]: Updated 10m ago
+                        - cell [ref=f21e2234]:
+                          - generic [ref=f21e2235]:
+                            - button "Chat as Default Assistant" [ref=f21e2236] [cursor=pointer]
+                            - button "Edit character Default Assistant" [ref=f21e2239] [cursor=pointer]
+                            - button "Delete character Default Assistant" [ref=f21e2242] [cursor=pointer]
+                            - button "Add Default Assistant to favorites" [ref=f21e2246] [cursor=pointer]
+                            - button "More actions for Default Assistant" [ref=f21e2249] [cursor=pointer]
+                  - list [ref=f21e2254]:
+                    - listitem "Previous Page" [ref=f21e2255]:
+                      - button [disabled] [ref=f21e2256]:
+                        - img "left" [ref=f21e2257]
+                    - listitem "1" [ref=f21e2260] [cursor=pointer]
+                    - listitem "Next Page" [ref=f21e2262]:
+                      - button [disabled] [ref=f21e2263]:
+                        - img "right" [ref=f21e2264]
+                    - listitem [ref=f21e2267]:
+                      - generic [ref=f21e2268]:
+                        - generic [ref=f21e2269]:
+                          - generic "10 / page" [ref=f21e2270]
+                          - combobox "Page Size" [ref=f21e2271]
+                        - img "down" [ref=f21e2273]
+    - tooltip "Characters" [ref=f21e2277]
+  - button "Open Next.js Dev Tools" [ref=f21e471] [cursor=pointer]
+  - alert [ref=f21e10]: Characters | tldw
+```
+### Events
+- New console entries: ../../../../../private/tmp/.playwright-cli/console-2026-09-16T06-56-09-511Z.log#L27

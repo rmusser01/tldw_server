@@ -192,3 +192,12 @@ Actual History/Note navigation loads an ordinary canonical chat while persisted 
 4. Full fresh cycle5 — Not Started: only after these repairs and preserved evidence, use prepared fresh protocol. Existing vision/Postgres/hidden-tab limitations remain explicit.
 
 122 independent review refinement: actual backend proof requires distinct local failed-user identity and server failed-turn reuse. Approved narrow chatModePipeline provenance flag (thirdproductionpath), no backend relaxation. Current OCR remains intentional text; old historical OCR context was already lost, and its unproven image history will now fail visibly rather than be stripped. No re-OCR or global history exemption. Approved test-only Vitest alias to existing installed pa-tesseract, no dependency change.
+
+## Retry presentation follow-up — TASK13260.64/UAT124 and TASK13260.65/UAT125
+
+Targeted122 attachment refusal and123 saved workflow pass on53ef4bf4d5, with vision limitations retained. Native reload discovered124: retry error variants lose their grouping. Native image-only refusal also exposed125: a contradictory screen-reader Response complete announcement. No cycle5 profile has been prepared. Design: Docs/Design/2026-09-16-uat-chat-retry-presentation.md.
+
+1. Reproduce and design — Complete: native before/reload identities and accessible text retained; source causes identified.
+2. Correct and regress — Complete:124 one resolved-parent argument plus actual persistence controls;125 completion predicate plus active/failure/success rendering controls. Scoped lint unchanged. Both Next frontends stopped.
+3. Review and native verification — In Progress:125 independent review clear,124 pending. Full compilerexact90baseline,97file affected frontend run in progress. Commit and native repeated Retry/reload/immediate announcement checks follow.
+4. Full fresh cycle5 — Not Started: refresh dev and freeze source after repairs.

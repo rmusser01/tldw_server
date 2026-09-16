@@ -1,0 +1,248 @@
+### Open tabs
+- 0: [127.0.0.1](chrome-error://chromewebdata/)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: [127.0.0.1](chrome-error://chromewebdata/)
+- 3: [127.0.0.1](chrome-error://chromewebdata/)
+- 4: [127.0.0.1](chrome-error://chromewebdata/)
+- 5: (current) [Notes | tldw](http://127.0.0.1:18381/notes)
+### Page
+- Page URL: http://127.0.0.1:18381/notes
+- Page Title: Notes | tldw
+- Console: 1 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f21e11]:
+  - generic [ref=f21e14]:
+    - link "Skip to main content" [ref=f21e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f21e16]:
+      - button "Expand sidebar" [ref=f21e1073] [cursor=pointer]
+      - button "New Chat" [ref=f21e1076] [cursor=pointer]
+      - generic [ref=f21e1079]:
+        - button "Quick Ingest" [ref=f21e1080] [cursor=pointer]
+        - button "Chat" [ref=f21e1084] [cursor=pointer]
+        - button "Prompts" [ref=f21e1087] [cursor=pointer]
+        - button "Characters" [ref=f21e1091] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f21e1096] [cursor=pointer]
+        - button "World Books" [ref=f21e1100] [cursor=pointer]
+        - button "Notes" [ref=f21e1103] [cursor=pointer]
+        - button "Knowledge QA" [ref=f21e1107] [cursor=pointer]
+        - button "Media" [ref=f21e1115] [cursor=pointer]
+        - button "Document Workspace" [ref=f21e1118] [cursor=pointer]
+        - button "Research Workspace" [ref=f21e1124] [cursor=pointer]
+        - button "Kanban" [ref=f21e1130] [cursor=pointer]
+        - button "Watchlists" [ref=f21e1132] [cursor=pointer]
+      - generic [ref=f21e1137]:
+        - button "Open Notes Dock" [ref=f21e1138] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f21e1143] [cursor=pointer]
+        - button "Settings" [ref=f21e1146] [cursor=pointer]
+    - main [ref=f21e95]:
+      - generic [ref=f21e96]:
+        - generic [ref=f21e99]:
+          - generic [ref=f21e100]:
+            - button "Expand sidebar" [ref=f21e1150] [cursor=pointer]
+            - generic [ref=f21e103]:
+              - img "tldw Assistant" [ref=f21e104]
+              - generic [ref=f21e105]: tldw Assistant
+              - button "Companion Home" [ref=f21e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f21e110] [cursor=pointer]
+          - generic [ref=f21e117]:
+            - button "Search - Open command palette" [ref=f21e118] [cursor=pointer]:
+              - generic [ref=f21e122]: Search
+              - generic [ref=f21e123]: ⌘K
+            - button "Open settings" [ref=f21e137] [cursor=pointer]
+            - generic [ref=f21e149]:
+              - button "Notifications, 0 unread" [ref=f21e475] [cursor=pointer]
+              - status [ref=f21e153]: Notifications are active
+            - button "Switch to light theme" [ref=f21e154] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f21e161] [cursor=pointer]:
+              - generic [ref=f21e162]: "?"
+        - generic [ref=f21e1151]:
+          - link "Skip to notes list" [ref=f21e1152] [cursor=pointer]:
+            - /url: "#notes-list-region"
+          - link "Skip to editor" [ref=f21e1153] [cursor=pointer]:
+            - /url: "#notes-editor-region"
+          - paragraph [ref=f21e1154]: "Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs."
+          - region "Notes list" [ref=f21e1155]:
+            - generic [ref=f21e1156]:
+              - generic [ref=f21e1157]:
+                - generic [ref=f21e1158]:
+                  - generic [ref=f21e1159]:
+                    - generic [ref=f21e1160]: Notes
+                    - generic [ref=f21e1161]: 4 total
+                  - button "New note" [ref=f21e1162] [cursor=pointer]
+                - generic [ref=f21e1165]:
+                  - generic [ref=f21e1166]:
+                    - button "Views" [expanded] [ref=f21e1168] [cursor=pointer]
+                    - generic [ref=f21e1173]:
+                      - generic [ref=f21e1174]:
+                        - button "Notes" [ref=f21e1175] [cursor=pointer]
+                        - button "Trash" [ref=f21e1177] [cursor=pointer]
+                      - generic [ref=f21e1179]:
+                        - button "List" [ref=f21e1180] [cursor=pointer]
+                        - button "Timeline" [ref=f21e1182] [cursor=pointer]
+                        - button "Inbox" [ref=f21e1184] [cursor=pointer]
+                        - button "Collection" [ref=f21e1186] [cursor=pointer]
+                        - button "Graph" [ref=f21e1188] [cursor=pointer]
+                      - generic [ref=f21e1197]:
+                        - button "Organize" [ref=f21e1198] [cursor=pointer]
+                        - button "Organize help" [ref=f21e1204] [cursor=pointer]:
+                          - img "question-circle" [ref=f21e1205]
+                  - generic [ref=f21e1209]:
+                    - textbox "Search notes" [ref=f21e1216]:
+                      - /placeholder: Search titles and contents
+                    - generic [ref=f21e1218] [cursor=pointer]:
+                      - generic [ref=f21e1219]:
+                        - generic "Date modified (newest first)" [ref=f21e1220]
+                        - combobox "Sort notes" [ref=f21e1221]
+                      - img "down" [ref=f21e1223]
+                  - generic [ref=f21e1226]:
+                    - button "Filters" [expanded] [ref=f21e1228] [cursor=pointer]
+                    - generic [ref=f21e1233]:
+                      - generic [ref=f21e1234]:
+                        - button "Captured" [ref=f21e1235] [cursor=pointer]
+                        - button "Search tips" [ref=f21e1237] [cursor=pointer]
+                      - generic [ref=f21e1239]:
+                        - generic [ref=f21e1240]:
+                          - generic: Filter by tag
+                          - combobox "Filter by tag" [ref=f21e1242]
+                        - img "down" [ref=f21e1244]
+                      - generic [ref=f21e1247]:
+                        - generic [ref=f21e1248]:
+                          - button "Browse tags" [ref=f21e1249] [cursor=pointer]
+                          - button "Tags help" [ref=f21e1251] [cursor=pointer]:
+                            - img "question-circle" [ref=f21e1252]
+                        - generic [ref=f21e1256]: 26 available
+                      - generic [ref=f21e1257]: For in-note search, use browser Ctrl/Cmd+F.
+                  - generic [ref=f21e1258]:
+                    - generic [ref=f21e1259]: Recent notes
+                    - generic [ref=f21e1260]:
+                      - 'button "Snippet: Cycle4 correlated Retry108 20260916_0526: reply exactly CEDAR RECOVERED." [ref=f21e1261] [cursor=pointer]'
+                      - button "Cycle4 Alice Biology Study" [ref=f21e1262] [cursor=pointer]
+                      - 'button "Snippet: Remember this public cycle4 phrase: CEDAR-41. Reply with only CEDAR-41." [ref=f21e1263] [cursor=pointer]'
+              - generic [ref=f21e1265]:
+                - generic [ref=f21e1267]:
+                  - generic [ref=f21e1268]: Results
+                  - generic [ref=f21e1269]:
+                    - button "Import" [ref=f21e1270] [cursor=pointer]
+                    - button "Sync folder" [disabled] [ref=f21e1272]
+                    - button "Export" [ref=f21e1274] [cursor=pointer]
+                - list "Notes" [ref=f21e1277]:
+                  - listitem [ref=f21e1278]:
+                    - generic [ref=f21e1279]:
+                      - 'checkbox "Select note Snippet: Cycle4 correlated Retry108 20260916_0526: reply exactly CEDAR RECOVERED. for bulk actions" [ref=f21e1280]'
+                      - 'button "Pin note Snippet: Cycle4 correlated Retry108 20260916_0526: reply exactly CEDAR RECOVERED." [ref=f21e1281] [cursor=pointer]'
+                      - 'button "Open note Snippet: Cycle4 correlated Retry108 20260916_0526: reply exactly CEDAR RECOVERED." [ref=f21e1284] [cursor=pointer]':
+                        - generic [ref=f21e1285]:
+                          - generic [ref=f21e1286]: "Snippet: Cycle4 correlated Retry108 20260916_0526: reply exactly CEDAR RECOVERED..."
+                          - generic [ref=f21e1295]: CEDAR RECOVERED
+                          - generic [ref=f21e1296]: "Linked to conversation: c244a779-afcd-4f3d-8d89-a63065971a9b · msg 1b4b6005-f5fb-439a-9a2b-2bf3e5b826f5"
+                          - generic [ref=f21e1297]: 9/15/2026, 10:31:15 PM
+                  - listitem [ref=f21e1298]:
+                    - generic [ref=f21e1299]:
+                      - 'checkbox "Select note Snippet: Cycle4 Cedar Guide Chat (20260916_010755) for bulk actions" [ref=f21e1300]'
+                      - 'button "Pin note Snippet: Cycle4 Cedar Guide Chat (20260916_010755)" [ref=f21e1301] [cursor=pointer]'
+                      - 'button "Open note Snippet: Cycle4 Cedar Guide Chat (20260916_010755)" [ref=f21e1304] [cursor=pointer]':
+                        - generic [ref=f21e1305]:
+                          - generic [ref=f21e1306]: "Snippet: Cycle4 Cedar Guide Chat (20260916_010755)"
+                          - generic [ref=f21e1315]: "CEDAR GUIDE: I am Cycle4 Cedar Guide. Project Cedar opens on 24 January 2027 and is coordinated by Priya Shah."
+                          - generic [ref=f21e1316]: "Linked to conversation: bd564030-70fe-41bc-9c91-4b661408f8e3 · msg pa_6438-7568-2bc-da24"
+                          - generic [ref=f21e1317]: 9/15/2026, 6:10:32 PM
+                  - listitem [ref=f21e1318]:
+                    - generic [ref=f21e1319]:
+                      - 'checkbox "Select note Snippet: Remember this public cycle4 phrase: CEDAR-41. Reply with only CEDAR-41. for bulk actions" [ref=f21e1320]'
+                      - 'button "Pin note Snippet: Remember this public cycle4 phrase: CEDAR-41. Reply with only CEDAR-41." [ref=f21e1321] [cursor=pointer]'
+                      - 'button "Open note Snippet: Remember this public cycle4 phrase: CEDAR-41. Reply with only CEDAR-41." [ref=f21e1324] [cursor=pointer]':
+                        - generic [ref=f21e1325]:
+                          - generic [ref=f21e1326]: "Snippet: Remember this public cycle4 phrase: CEDAR-41. Reply with only CEDAR-41."
+                          - generic [ref=f21e1335]: Arrr, photosynthesis converts light energy into chemical energy, matey!
+                          - generic [ref=f21e1336]: "Linked to conversation: a9feabc7-38aa-4b06-b08d-0b673b069819 · msg 22c2476d-06f7-4262-991b-3d177cbd9e4d"
+                          - generic [ref=f21e1337]: 9/15/2026, 6:00:56 PM
+                  - listitem [ref=f21e1338]:
+                    - generic [ref=f21e1339]:
+                      - checkbox "Select note Cycle4 Alice Biology Study for bulk actions" [ref=f21e1340]
+                      - button "Pin note Cycle4 Alice Biology Study" [ref=f21e1341] [cursor=pointer]
+                      - button "Open note Cycle4 Alice Biology Study" [ref=f21e1344] [cursor=pointer]:
+                        - generic [ref=f21e1345]:
+                          - generic [ref=f21e1346]: Cycle4 Alice Biology Study
+                          - generic [ref=f21e1352]: The mitochondria is the powerhouse of the cell.
+                          - generic [ref=f21e1353]: 9/15/2026, 5:42:16 PM
+                - generic [ref=f21e1355]:
+                  - generic [ref=f21e1356]: Showing 1-4 of 4
+                  - list [ref=f21e1357]:
+                    - listitem "Previous Page" [ref=f21e1358]:
+                      - button [disabled] [ref=f21e1359]:
+                        - img "left" [ref=f21e1360]
+                    - listitem "1" [ref=f21e1363] [cursor=pointer]
+                    - listitem "Next Page" [ref=f21e1365]:
+                      - button [disabled] [ref=f21e1366]:
+                        - img "right" [ref=f21e1367]
+                    - listitem [ref=f21e1370]:
+                      - generic [ref=f21e1371]:
+                        - generic [ref=f21e1372]:
+                          - generic "20 / page" [ref=f21e1373]
+                          - combobox "Page Size" [ref=f21e1374]
+                        - img "down" [ref=f21e1376]
+          - button "Collapse sidebar" [ref=f21e1379] [cursor=pointer]
+          - region "Note editor" [ref=f21e1383]:
+            - generic [ref=f21e1384]:
+              - generic [ref=f21e1386]:
+                - heading "New note" [level=5] [ref=f21e1387]
+                - status [ref=f21e1388]: No server save status yet
+              - generic [ref=f21e1389]:
+                - button "Save note" [disabled] [ref=f21e1390]:
+                  - generic: Save
+                - button "Save and start another note" [disabled] [ref=f21e1391]:
+                  - generic: Save & new
+                - group "Editor mode" [ref=f21e1392]:
+                  - button "Edit" [pressed] [ref=f21e1393] [cursor=pointer]
+                  - button "Split" [ref=f21e1398] [cursor=pointer]
+                  - button "Preview" [ref=f21e1403] [cursor=pointer]
+                - button "Create study pack" [disabled] [ref=f21e1409]
+                - button "More actions" [ref=f21e1410] [cursor=pointer]
+            - generic [ref=f21e1416]:
+              - generic [ref=f21e1417]:
+                - generic [ref=f21e1418]: Select or create a note
+                - generic [ref=f21e1419]: Choose a note from the list to start editing, or create a new one.
+                - button "Create note" [ref=f21e1420] [cursor=pointer]
+                - generic [ref=f21e1422]: "Tip: Type [[ in a note to link to another note."
+              - generic [ref=f21e1423]:
+                - textbox "Note title" [ref=f21e1424]:
+                  - /placeholder: Title
+                - button "Generate title from content" [disabled] [ref=f21e1425]:
+                  - generic: Generate title
+                - button "Keyboard shortcuts" [ref=f21e1426] [cursor=pointer]
+              - generic [ref=f21e1429]:
+                - generic [ref=f21e1430]:
+                  - generic: Tags
+                  - combobox "Note tags" [ref=f21e1432]
+                - img "down" [ref=f21e1434]
+              - generic [ref=f21e1437]:
+                - group "Input mode" [ref=f21e1438]:
+                  - button "Markdown" [ref=f21e1439] [cursor=pointer]
+                  - button "WYSIWYG" [ref=f21e1441] [cursor=pointer]
+                - generic [ref=f21e1443]: Formatting
+                - button "Bold" [ref=f21e1444] [cursor=pointer]
+                - button "Italic" [ref=f21e1448] [cursor=pointer]
+                - button "Heading" [ref=f21e1452] [cursor=pointer]
+                - button "List" [ref=f21e1456] [cursor=pointer]
+                - button "Link" [ref=f21e1459] [cursor=pointer]
+                - button "Attachment" [ref=f21e1464] [cursor=pointer]
+                - button "Code" [ref=f21e1468] [cursor=pointer]
+                - generic [ref=f21e1475]: Assist
+                - button "Summarize" [disabled] [ref=f21e1476]
+                - button "Expand outline" [disabled] [ref=f21e1477]
+                - button "Suggest tags" [disabled] [ref=f21e1478]
+              - generic [ref=f21e1480]:
+                - textbox "Note content" [ref=f21e1481]:
+                  - /placeholder: Write your note here... (Markdown supported)
+                - generic [ref=f21e1482]: Markdown + LaTeX supported
+              - generic [ref=f21e1483]:
+                - text: 0 words · 0 chars · 0 mins read
+                - generic [ref=f21e1484]: Version pending · Not saved yet
+                - generic [ref=f21e1485]: "Origin: Typed manually"
+  - button "Open Next.js Dev Tools" [ref=f21e471] [cursor=pointer]
+  - alert [ref=f21e10]: Notes | tldw
+```
+### Events
+- New console entries: ../../../../../private/tmp/.playwright-cli/console-2026-09-16T06-56-09-511Z.log#L23

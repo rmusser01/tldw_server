@@ -1,0 +1,208 @@
+### Open tabs
+- 0: [127.0.0.1](chrome-error://chromewebdata/)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: [127.0.0.1](chrome-error://chromewebdata/)
+- 3: [127.0.0.1](chrome-error://chromewebdata/)
+- 4: [127.0.0.1](chrome-error://chromewebdata/)
+- 5: (current) [Cycle4 correlated Retry108 20260916_0526: reply exactly CEDAR RECOVERED. | tldw](http://127.0.0.1:18381/chat)
+### Page
+- Page URL: http://127.0.0.1:18381/chat
+- Page Title: Cycle4 correlated Retry108 20260916_0526: reply exactly CEDAR RECOVERED. | tldw
+- Console: 1 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [ref=f21e11]:
+  - generic [ref=f21e14]:
+    - link "Skip to main content" [ref=f21e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f21e16]:
+      - button "Expand sidebar" [ref=f21e17] [cursor=pointer]
+      - button "New Chat" [ref=f21e21] [cursor=pointer]
+      - generic [ref=f21e24]:
+        - button "Quick Ingest" [ref=f21e25] [cursor=pointer]
+        - button "Chat" [ref=f21e29] [cursor=pointer]
+        - button "Prompts" [ref=f21e32] [cursor=pointer]
+        - button "Characters" [ref=f21e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f21e41] [cursor=pointer]
+        - button "World Books" [ref=f21e45] [cursor=pointer]
+        - button "Notes" [ref=f21e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f21e52] [cursor=pointer]
+        - button "Media" [ref=f21e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f21e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f21e69] [cursor=pointer]
+        - button "Kanban" [ref=f21e75] [cursor=pointer]
+        - button "Watchlists" [ref=f21e77] [cursor=pointer]
+      - generic [ref=f21e82]:
+        - button "Open Notes Dock" [ref=f21e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f21e88] [cursor=pointer]
+        - button "Settings" [ref=f21e91] [cursor=pointer]
+    - main [ref=f21e95]:
+      - generic [ref=f21e96]:
+        - generic [ref=f21e99]:
+          - generic [ref=f21e100]:
+            - button "Expand sidebar" [ref=f21e101] [cursor=pointer]
+            - generic [ref=f21e103]:
+              - img "tldw Assistant" [ref=f21e104]
+              - generic [ref=f21e105]: tldw Assistant
+              - button "Companion Home" [ref=f21e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f21e110] [cursor=pointer]
+            - 'button "Cycle4 correlated Retry108 20260916_0526: reply exactly CEDAR RECOVERED." [ref=f21e114] [cursor=pointer]'
+            - generic "Saved chat. History is persisted." [ref=f21e116]: Saved
+          - generic [ref=f21e117]:
+            - button "Search - Open command palette" [ref=f21e118] [cursor=pointer]:
+              - generic [ref=f21e122]: Search
+              - generic [ref=f21e123]: ⌘K
+            - button "New saved chat" [ref=f21e124] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f21e128] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f21e129] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f21e130] [cursor=pointer]
+            - button "Open settings" [ref=f21e137] [cursor=pointer]
+            - generic [ref=f21e149]:
+              - button "Notifications, sign-in required" [ref=f21e150] [cursor=pointer]
+              - status [ref=f21e153]: Notifications require sign in
+            - button "Switch to light theme" [ref=f21e154] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f21e161] [cursor=pointer]:
+              - generic [ref=f21e162]: "?"
+        - generic [ref=f21e163]:
+          - heading "Chat" [level=1] [ref=f21e164]
+          - generic [ref=f21e167]:
+            - paragraph [ref=f21e168]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f21e169]:
+              - main [ref=f21e170]:
+                - generic [ref=f21e171]:
+                  - generic [ref=f21e172]:
+                    - generic [ref=f21e173]:
+                      - generic [ref=f21e174]:
+                        - generic [ref=f21e175]: Character Chat
+                        - generic [ref=f21e176]: Conversation timeline
+                      - generic [ref=f21e177]:
+                        - button "Switch to light theme" [ref=f21e178] [cursor=pointer]
+                        - button "Enter focus chat" [ref=f21e185] [cursor=pointer]:
+                          - generic [ref=f21e191]: Focus
+                        - button "Shortcuts" [ref=f21e192] [cursor=pointer]
+                        - button "Artifacts panel closed" [disabled] [ref=f21e196]
+                    - status "Character Chat setup status" [ref=f21e198]:
+                      - generic [ref=f21e202]:
+                        - paragraph [ref=f21e203]: Choose a character to start character chat
+                        - paragraph [ref=f21e204]: Character chat starts with the character, then checks model readiness before the first message.
+                      - button "Choose character" [ref=f21e205] [cursor=pointer]
+                  - log "Chat messages" [ref=f21e210]:
+                    - generic [ref=f21e212]:
+                      - article "System message 1 of 4" [ref=f21e213]:
+                        - generic [ref=f21e219]:
+                          - generic [ref=f21e221]:
+                            - generic [ref=f21e222]: System prompt
+                            - generic [ref=f21e223]: • 10:26 PM
+                          - paragraph [ref=f21e225]: You are a helpful AI assistant.
+                          - generic [ref=f21e226]:
+                            - generic [ref=f21e227]:
+                              - generic [ref=f21e228]: Was this helpful?
+                              - generic [ref=f21e229]:
+                                - button "Helpful" [disabled] [ref=f21e230]
+                                - button "Not helpful" [disabled] [ref=f21e233]
+                                - button "More feedback" [disabled] [ref=f21e236]
+                            - button "More actions" [ref=f21e242] [cursor=pointer]: •••
+                      - article "User message 2 of 4" [ref=f21e243]:
+                        - generic [ref=f21e246]:
+                          - generic [ref=f21e248]:
+                            - generic [ref=f21e249]: You
+                            - generic [ref=f21e250]: • 10:26 PM
+                          - paragraph [ref=f21e252]: "Cycle4 correlated Retry108 20260916_0526: reply exactly CEDAR RECOVERED."
+                          - button "More actions" [ref=f21e255] [cursor=pointer]: •••
+                      - article "Assistant message 3 of 4" [ref=f21e259]:
+                        - generic [ref=f21e265]:
+                          - generic [ref=f21e267]:
+                            - generic [ref=f21e268]: gemma3:1b
+                            - generic [ref=f21e269]: • 10:26 PM
+                          - alert [ref=f21e271]:
+                            - paragraph [ref=f21e272]: Something went wrong while talking to your tldw server.
+                            - paragraph [ref=f21e273]: Try again in a moment, or open Health & diagnostics to inspect server health.
+                            - button "Show technical details" [ref=f21e274] [cursor=pointer]
+                            - generic [ref=f21e275]:
+                              - generic [ref=f21e276]: "Recommended next actions: Retry same model, Switch model, Try provider fallback, Continue from partial"
+                              - button "Retry same model" [ref=f21e277] [cursor=pointer]
+                              - button "Switch model" [ref=f21e278] [cursor=pointer]
+                              - button "Try provider fallback" [ref=f21e279] [cursor=pointer]
+                              - button "Continue from partial" [ref=f21e280] [cursor=pointer]
+                          - button "More actions" [ref=f21e283] [cursor=pointer]: •••
+                      - article "Assistant message 4 of 4" [ref=f21e284]:
+                        - generic [ref=f21e290]:
+                          - generic [ref=f21e292]:
+                            - generic [ref=f21e293]: assistant
+                            - generic [ref=f21e294]: • 10:28 PM
+                          - paragraph [ref=f21e296]: Loading content…
+                          - generic [ref=f21e297]:
+                            - generic [ref=f21e298]:
+                              - generic [ref=f21e299]: Was this helpful?
+                              - generic [ref=f21e300]:
+                                - button "Helpful" [disabled] [ref=f21e301]
+                                - button "Not helpful" [disabled] [ref=f21e304]
+                                - button "More feedback" [disabled] [ref=f21e307]
+                            - button "More actions" [ref=f21e313] [cursor=pointer]: •••
+                  - generic [ref=f21e314]:
+                    - generic [ref=f21e315]: Composer
+                    - generic [ref=f21e323]:
+                      - button [aria-hidden] [ref=f21e324]
+                      - button [aria-hidden] [ref=f21e325]
+                      - generic [ref=f21e326]:
+                        - generic [ref=f21e328]:
+                          - button "Hide composer options" [expanded] [ref=f21e329] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f21e334]
+                          - generic [ref=f21e335]:
+                            - button "Improve prompt" [ref=f21e338] [cursor=pointer]
+                            - generic [ref=f21e343]:
+                              - button "Queue request" [ref=f21e344] [cursor=pointer]:
+                                - generic [ref=f21e345]: Queue
+                              - button "Open message delivery options" [ref=f21e347] [cursor=pointer]
+                        - generic [ref=f21e352]:
+                          - generic [ref=f21e354]:
+                            - group "Mode and context controls" [ref=f21e355]:
+                              - button "Modes" [ref=f21e356] [cursor=pointer]
+                              - button "MCP tools unavailable" [disabled] [ref=f21e363]:
+                                - generic [ref=f21e364]:
+                                  - generic [ref=f21e365]: MCP
+                                  - generic [ref=f21e366]: None
+                              - button "Search & Context" [ref=f21e369] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f21e374] [cursor=pointer]:
+                                - generic [ref=f21e377]: Prompt
+                              - button "Select character or persona" [ref=f21e378] [cursor=pointer]
+                              - button "Role-play setup" [ref=f21e383] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f21e390] [cursor=pointer]
+                            - group "Run input controls" [ref=f21e396]:
+                              - button "OpenUI" [ref=f21e397] [cursor=pointer]
+                              - button "Dictation unavailable" [disabled] [ref=f21e403]
+                              - generic [ref=f21e407]:
+                                - button "Attach image" [ref=f21e409] [cursor=pointer]
+                                - button "More attachments" [ref=f21e413] [cursor=pointer]
+                              - button "More tools" [ref=f21e416] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f21e419] [cursor=pointer]:
+                                - generic [ref=f21e423]: Chat Settings
+                          - generic "Active context" [ref=f21e424]:
+                            - button "Checking model readiness" [ref=f21e426] [cursor=pointer]:
+                              - generic [ref=f21e430]: Custom / llama:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                              - generic "Provider status" [ref=f21e431]: Checking model readiness
+                            - button "Chat 4 messages" [ref=f21e432] [cursor=pointer]:
+                              - generic [ref=f21e433]: Chat
+                              - generic [ref=f21e434]: 4 messages
+                            - button "Configure context window size" [ref=f21e436] [cursor=pointer]:
+                              - generic [ref=f21e437]: 82 + ~0 = 82 tokens
+                            - button "Saved" [ref=f21e439] [cursor=pointer]
+                            - button "Advanced controls" [ref=f21e441] [cursor=pointer]
+                        - status [ref=f21e445]:
+                          - generic [ref=f21e451]:
+                            - generic [ref=f21e452]: You're offline — connect to a tldw server to start chatting.
+                            - link "Open settings" [ref=f21e453] [cursor=pointer]:
+                              - /url: /settings/tldw
+              - generic [ref=f21e454]:
+                - button "Restore context sidechannel" [ref=f21e455] [cursor=pointer]:
+                  - generic [ref=f21e459]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f21e460]:
+                - button "Restore runtime sidechannel" [ref=f21e461] [cursor=pointer]:
+                  - generic [ref=f21e462]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f21e471] [cursor=pointer]
+  - alert [ref=f21e10]
+```
+### Events
+- New console entries: ../../../../../private/tmp/.playwright-cli/console-2026-09-16T06-56-09-511Z.log#L17-L19
