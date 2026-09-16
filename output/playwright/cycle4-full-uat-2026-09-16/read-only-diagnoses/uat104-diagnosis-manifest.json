@@ -1,0 +1,58 @@
+{
+  "checkedAt": "2026-09-16T00:52:14.571Z",
+  "functionalFreeze": "7c9409fad2",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx",
+      "sha256": "339af01091bc90f2fc576834ce1f54c6ad1b19f56df44cbfd9727fe2154a05be",
+      "bytes": 59332,
+      "matchesCycle4Freeze": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/QuickIngest/ProcessingStep.tsx",
+      "sha256": "4d1b477ce93cfd2723427b868c318e142d5c62c286c8956a743b6f5206bab7d9",
+      "bytes": 22753,
+      "matchesCycle4Freeze": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/QuickIngest/IngestWizardContext.tsx",
+      "sha256": "b05bb1ed3f3e7c21a2ffaa2dda06a28e345f06a53f9b810c3c5e72c05a60d973",
+      "bytes": 18893,
+      "matchesCycle4Freeze": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/QuickIngest/FloatingProgressWidget.tsx",
+      "sha256": "351173878bd1f43c8d107fcfc28daf196ddab73abaecb54e8c022712a0ac3951",
+      "bytes": 11487,
+      "matchesCycle4Freeze": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Layouts/QuickIngestButton.tsx",
+      "sha256": "a1969541ba22cf3e7b1cc1eb6b6b29b60f8bf86fe43f84a2efea8694e77412d7",
+      "bytes": 19224,
+      "matchesCycle4Freeze": true
+    },
+    {
+      "path": "apps/packages/ui/src/store/quick-ingest-session.ts",
+      "sha256": "55372402ff15752a19b200f32eae500af1459d76a97165e322f540c9eae1ba76",
+      "bytes": 26055,
+      "matchesCycle4Freeze": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx",
+      "sha256": "994539262e1e251408d5d79bdae0d6adde51a14b1162b770d2c76454a53e0a8a",
+      "bytes": 73635,
+      "matchesCycle4Freeze": true
+    }
+  ],
+  "privateArtifacts": [
+    {
+      "path": "/private/tmp/uat104-minimize-readonly.config.ts",
+      "sha256": "a759ec19dae3a6ef22daf8fba28fa332122b9808bc581538682b827c911aa0ff"
+    },
+    {
+      "path": "/private/tmp/uat104-minimize-readonly.log",
+      "sha256": "2d8f93cfd9e005ccced0dd76b09affc092bf54be476032c772e2d64c96cfe4b3"
+    }
+  ]
+}

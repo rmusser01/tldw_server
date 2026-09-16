@@ -1,0 +1,167 @@
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18381/knowledge)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: (current) [Flashcards | tldw](http://127.0.0.1:18381/flashcards?tab=importExport)
+### Page
+- Page URL: http://127.0.0.1:18381/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+### Snapshot
+```yaml
+- generic [ref=f2e20]:
+  - generic [ref=f2e23]:
+    - link "Skip to main content" [ref=f2e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f2e25]:
+      - button "Expand sidebar" [ref=f2e26] [cursor=pointer]
+      - button "New Chat" [ref=f2e30] [cursor=pointer]
+      - generic [ref=f2e33]:
+        - button "Quick Ingest" [ref=f2e34] [cursor=pointer]
+        - button "Chat" [ref=f2e38] [cursor=pointer]
+        - button "Prompts" [ref=f2e41] [cursor=pointer]
+        - button "Characters" [ref=f2e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f2e50] [cursor=pointer]
+        - button "World Books" [ref=f2e54] [cursor=pointer]
+        - button "Notes" [ref=f2e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f2e61] [cursor=pointer]
+        - button "Media" [ref=f2e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f2e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f2e78] [cursor=pointer]
+        - button "Kanban" [ref=f2e84] [cursor=pointer]
+        - button "Watchlists" [ref=f2e86] [cursor=pointer]
+      - generic [ref=f2e91]:
+        - button "Open Notes Dock" [ref=f2e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f2e97] [cursor=pointer]
+        - button "Settings" [ref=f2e100] [cursor=pointer]
+    - main [ref=f2e104]:
+      - generic [ref=f2e105]:
+        - generic [ref=f2e108]:
+          - generic [ref=f2e109]:
+            - button "Expand sidebar" [ref=f2e110] [cursor=pointer]
+            - generic [ref=f2e112]:
+              - img "tldw Assistant" [ref=f2e113]
+              - generic [ref=f2e114]: tldw Assistant
+              - button "Companion Home" [ref=f2e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f2e119] [cursor=pointer]
+          - generic [ref=f2e122]:
+            - button "Search - Open command palette" [ref=f2e123] [cursor=pointer]:
+              - generic [ref=f2e127]: Search
+              - generic [ref=f2e128]: ⌘K
+            - button "Open settings" [ref=f2e129] [cursor=pointer]
+            - generic [ref=f2e141]:
+              - button "Notifications, 0 unread" [ref=f2e142] [cursor=pointer]
+              - status [ref=f2e146]: Notifications are active
+            - button "Switch to light theme" [ref=f2e147] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f2e154] [cursor=pointer]:
+              - generic [ref=f2e155]: "?"
+        - generic [ref=f2e157]:
+          - generic [ref=f2e159]:
+            - generic [ref=f2e161]:
+              - generic [ref=f2e162]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f2e163]
+            - navigation "Flashcards modes" [ref=f2e164]:
+              - generic [ref=f2e165]: Study
+              - generic [ref=f2e166]: Manage
+              - generic [ref=f2e167]: Import / Export
+              - generic [ref=f2e168]: Templates
+              - generic [ref=f2e169]: Scheduler
+          - generic [ref=f2e172]:
+            - tablist [ref=f2e173]:
+              - generic [ref=f2e175]:
+                - tab "Study" [active] [selected] [ref=f2e177] [cursor=pointer]
+                - tab "Manage" [ref=f2e179] [cursor=pointer]
+                - tab "Import / Export" [ref=f2e181] [cursor=pointer]
+                - tab "Templates" [ref=f2e183] [cursor=pointer]
+                - tab "Scheduler" [ref=f2e185] [cursor=pointer]
+              - generic [ref=f2e187]:
+                - button "Test with Quiz" [disabled] [ref=f2e189]
+                - button "Keyboard Shortcuts" [ref=f2e190] [cursor=pointer]
+            - generic [ref=f2e196]:
+              - tabpanel "Study" [ref=f2e475]:
+                - generic [ref=f2e476]:
+                  - generic [ref=f2e477]:
+                    - generic [ref=f2e478] [cursor=pointer]:
+                      - generic [ref=f2e479]:
+                        - generic: Select deck
+                        - combobox [ref=f2e480]
+                      - img "down" [ref=f2e482]
+                    - radiogroup "segmented control" [ref=f2e485]:
+                      - generic [ref=f2e486]:
+                        - generic [ref=f2e487] [cursor=pointer]:
+                          - radio "Due only" [checked]
+                          - generic "Due only" [ref=f2e488]
+                        - generic [ref=f2e489] [cursor=pointer]:
+                          - radio "Cram"
+                          - generic "Cram" [ref=f2e490]
+                    - radiogroup "segmented control" [ref=f2e491]:
+                      - generic [ref=f2e492]:
+                        - generic [ref=f2e493] [cursor=pointer]:
+                          - radio "Front first" [checked]
+                          - generic "Front first" [ref=f2e494]
+                        - generic [ref=f2e495] [cursor=pointer]:
+                          - radio "Back first"
+                          - generic "Back first" [ref=f2e496]
+                  - region [ref=f2e497]:
+                    - generic [ref=f2e498]:
+                      - generic [ref=f2e504]:
+                        - strong [ref=f2e506]: Source reviews
+                        - generic [ref=f2e507]: No source reviews due
+                      - button "Schedule" [ref=f2e508] [cursor=pointer]
+                  - generic [ref=f2e513]:
+                    - generic [ref=f2e514]:
+                      - generic [ref=f2e515]:
+                        - generic [ref=f2e516]: Reviewed today
+                        - strong [ref=f2e518]: "7"
+                      - generic [ref=f2e519]:
+                        - generic [ref=f2e520]: Retention rate
+                        - strong [ref=f2e522]: 100.0%
+                      - generic [ref=f2e523]:
+                        - generic [ref=f2e524]: Lapse rate
+                        - strong [ref=f2e526]: 0.0%
+                      - generic [ref=f2e527]:
+                        - generic [ref=f2e528]: Avg answer time
+                        - strong [ref=f2e530]: 7.1s
+                      - generic [ref=f2e531]:
+                        - generic [ref=f2e532]: Study streak
+                        - strong [ref=f2e534]: 1 days
+                    - generic [ref=f2e535]:
+                      - strong [ref=f2e537]: Deck progress
+                      - generic [ref=f2e538]:
+                        - generic [ref=f2e539]:
+                          - strong [ref=f2e541]: Cycle4 Alice Biology
+                          - generic [ref=f2e542]:
+                            - generic [ref=f2e543]: "Total: 5"
+                            - generic [ref=f2e544]: "New: 0"
+                            - generic [ref=f2e545]: "Learning: 3"
+                            - generic [ref=f2e546]: "Due: 0"
+                            - generic [ref=f2e547]: "Mature: 0"
+                        - progressbar [ref=f2e548]
+                  - generic [ref=f2e554]:
+                    - img "No data" [ref=f2e556]
+                    - generic [ref=f2e568]: You're all caught up!
+                    - generic [ref=f2e570]:
+                      - generic [ref=f2e571]: No cards are due for review. Great job!
+                      - generic [ref=f2e573]:
+                        - strong [ref=f2e578]: "Next review: in 7 minutes"
+                        - generic [ref=f2e579]: Tuesday, September 15 at 6:02 PM · 3 cards due within the following hour
+                      - generic [ref=f2e581]:
+                        - button "Practice again" [ref=f2e583] [cursor=pointer]
+                        - button "Create more cards" [ref=f2e586] [cursor=pointer]
+                  - generic [ref=f2e589]:
+                    - generic [ref=f2e590]: Recent study sessions
+                    - list "Recent study sessions" [ref=f2e594]:
+                      - listitem [ref=f2e595]:
+                        - generic [ref=f2e596]:
+                          - generic [ref=f2e597]:
+                            - strong [ref=f2e599]: Cycle4 Alice Biology
+                            - button "View completed session" [ref=f2e600] [cursor=pointer]
+                          - generic [ref=f2e602]:
+                            - generic [ref=f2e603]: Completed
+                            - generic [ref=f2e604]: Due review
+                            - generic [ref=f2e605]: 7 cards reviewed
+                          - generic [ref=f2e606]: Completed 2026-09-15 17:52
+              - text: ": : : : : : : : : : : : : : :"
+  - button "Open Next.js Dev Tools" [ref=f2e15] [cursor=pointer]
+  - alert [ref=f2e19]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T00-41-07-796Z.log#L57-L58

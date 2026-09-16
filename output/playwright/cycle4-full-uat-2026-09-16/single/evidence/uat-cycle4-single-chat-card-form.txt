@@ -1,0 +1,289 @@
+### Open tabs
+- 0: [Remember this public cycle4 phrase: ASTER-42. Reply with only ASTER-42. | tldw](http://127.0.0.1:18380/chat)
+- 1: [Media | tldw](http://127.0.0.1:18380/media?id=1)
+- 2: (current) [Cycle4 Aster Guide Chat (20260916_014450) | tldw](http://127.0.0.1:18380/chat)
+### Page
+- Page URL: http://127.0.0.1:18380/chat
+- Page Title: Cycle4 Aster Guide Chat (20260916_014450) | tldw
+### Snapshot
+```yaml
+- generic [ref=f1e11]:
+  - generic [ref=f1e12]:
+    - generic [ref=f1e14]:
+      - link "Skip to main content" [ref=f1e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f1e16]:
+        - generic [ref=f1e17]:
+          - heading "Chats" [level=2] [ref=f1e18]
+          - generic [ref=f1e19]:
+            - button "New Chat" [ref=f1e20] [cursor=pointer]
+            - button "Select chats" [ref=f1e462] [cursor=pointer]
+            - button "Collapse sidebar" [ref=f1e22] [cursor=pointer]
+        - generic [ref=f1e25]:
+          - button "Shortcuts" [expanded] [ref=f1e26] [cursor=pointer]
+          - generic [ref=f1e30]:
+            - button "Quick Ingest" [ref=f1e31] [cursor=pointer]
+            - button "Chat" [ref=f1e36] [cursor=pointer]
+            - button "Prompts" [ref=f1e40] [cursor=pointer]
+            - button "Characters" [ref=f1e45] [cursor=pointer]
+            - button "Chat Dictionaries" [ref=f1e51] [cursor=pointer]
+            - button "World Books" [ref=f1e56] [cursor=pointer]
+            - button "Notes" [ref=f1e60] [cursor=pointer]
+            - button "Knowledge QA" [ref=f1e65] [cursor=pointer]
+            - button "Media" [ref=f1e74] [cursor=pointer]
+            - button "Document Workspace" [ref=f1e78] [cursor=pointer]
+            - button "Research Workspace" [ref=f1e85] [cursor=pointer]
+            - button "Kanban" [ref=f1e92] [cursor=pointer]
+            - button "Watchlists" [ref=f1e95] [cursor=pointer]
+          - button "Recent conversations" [expanded] [ref=f1e102] [cursor=pointer]
+          - generic [ref=f1e466]:
+            - textbox "Search chats..." [ref=f1e473]
+            - generic [ref=f1e475]:
+              - generic [ref=f1e476]: Chat view
+              - radiogroup "Chat view" [ref=f1e477]:
+                - generic [ref=f1e478]:
+                  - generic [ref=f1e479] [cursor=pointer]:
+                    - radio "Server (4)" [checked]
+                    - generic "Server (4)" [ref=f1e480]
+                  - generic [ref=f1e481] [cursor=pointer]:
+                    - radio "Folders"
+                    - generic "Folders" [ref=f1e482]
+            - generic [ref=f1e484]:
+              - generic [ref=f1e485]:
+                - generic [ref=f1e486]: Chat type filter
+                - generic [ref=f1e487] [cursor=pointer]:
+                  - generic [ref=f1e488]:
+                    - generic "All Chats" [ref=f1e489]
+                    - combobox "Chat type filter" [ref=f1e490]
+                  - img "down" [ref=f1e492]
+              - generic [ref=f1e495]:
+                - generic [ref=f1e496]:
+                  - 'button "Remember this public cycle4 phrase: ASTER-42. Reply with only ASTER-42. in-progress Updated 3 minutes ago Server" [ref=f1e662] [cursor=pointer]':
+                    - 'generic "Remember this public cycle4 phrase: ASTER-42. Reply with only ASTER-42." [ref=f1e498]'
+                    - generic [ref=f1e499]:
+                      - generic [ref=f1e500]: in-progress
+                      - generic "9/15/2026, 6:45:00 PM" [ref=f1e501]: Updated 3 minutes ago
+                    - generic [ref=f1e502]: Server
+                  - generic [ref=f1e504]:
+                    - button "Pin" [ref=f1e505] [cursor=pointer]
+                    - 'button "More actions: Remember this public cycle4 phrase: ASTER-42. Reply with only ASTER-42." [ref=f1e508] [cursor=pointer]'
+                - generic [ref=f1e513]:
+                  - 'button "Remember this public cycle4 phrase: ASTER-42. Reply with only ASTER-42. in-progress Updated 3 minutes ago Server" [ref=f1e663] [cursor=pointer]':
+                    - 'generic "Remember this public cycle4 phrase: ASTER-42. Reply with only ASTER-42." [ref=f1e515]'
+                    - generic [ref=f1e516]:
+                      - generic [ref=f1e517]: in-progress
+                      - generic "9/15/2026, 6:45:00 PM" [ref=f1e518]: Updated 3 minutes ago
+                    - generic [ref=f1e519]: Server
+                  - generic [ref=f1e521]:
+                    - button "Pin" [ref=f1e522] [cursor=pointer]
+                    - 'button "More actions: Remember this public cycle4 phrase: ASTER-42. Reply with only ASTER-42." [ref=f1e525] [cursor=pointer]'
+                - generic [ref=f1e530]:
+                  - button "According to Project Aster, who coordinates the garden and when does it open? Cite the source. in-progress Updated 3 minutes ago Server" [ref=f1e664] [cursor=pointer]:
+                    - generic "According to Project Aster, who coordinates the garden and when does it open? Cite the source." [ref=f1e532]
+                    - generic [ref=f1e533]:
+                      - generic [ref=f1e534]: in-progress
+                      - generic "9/15/2026, 6:45:00 PM" [ref=f1e535]: Updated 3 minutes ago
+                    - generic [ref=f1e536]: Server
+                  - generic [ref=f1e538]:
+                    - button "Pin" [ref=f1e539] [cursor=pointer]
+                    - 'button "More actions: According to Project Aster, who coordinates the garden and when does it open? Cite the source." [ref=f1e542] [cursor=pointer]'
+                - generic [ref=f1e547]:
+                  - button "Cycle4 Aster Guide Chat (20260916_014450) in-progress Updated 3 minutes ago Cycle4 Aster Guide Chat (20260916_014450) Server" [ref=f1e665] [cursor=pointer]:
+                    - generic "Cycle4 Aster Guide Chat (20260916_014450)" [ref=f1e549]
+                    - generic [ref=f1e550]:
+                      - generic [ref=f1e551]: in-progress
+                      - generic "9/15/2026, 6:45:00 PM" [ref=f1e552]: Updated 3 minutes ago
+                      - generic "Cycle4 Aster Guide Chat (20260916_014450)" [ref=f1e553]
+                    - generic [ref=f1e554]: Server
+                  - generic [ref=f1e556]:
+                    - button "Pin" [ref=f1e557] [cursor=pointer]
+                    - 'button "More actions: Cycle4 Aster Guide Chat (20260916_014450)" [ref=f1e560] [cursor=pointer]'
+        - generic [ref=f1e106]:
+          - button "Settings" [ref=f1e107] [cursor=pointer]
+          - generic [ref=f1e113]:
+            - generic [ref=f1e115]:
+              - generic [ref=f1e116]: Mode
+              - group "Mode" [ref=f1e117]:
+                - button "Casual" [pressed] [ref=f1e118] [cursor=pointer]
+                - button "Pro" [ref=f1e119] [cursor=pointer]
+            - generic [ref=f1e120]:
+              - button "Open Notes Dock" [ref=f1e121] [cursor=pointer]
+              - button "Open Quick Chat Helper (sidebar)" [ref=f1e126] [cursor=pointer]
+      - main [ref=f1e129]:
+        - generic [ref=f1e130]:
+          - generic [ref=f1e133]:
+            - generic [ref=f1e134]:
+              - button "Collapse sidebar" [ref=f1e135] [cursor=pointer]
+              - generic [ref=f1e137]:
+                - img "tldw Assistant" [ref=f1e138]
+                - generic [ref=f1e139]: tldw Assistant
+                - button "Companion Home" [ref=f1e140] [cursor=pointer]
+                - button "Show shortcuts" [ref=f1e144] [cursor=pointer]
+              - button "Cycle4 Aster Guide Chat (20260916_014450)" [ref=f1e567] [cursor=pointer]
+              - generic [ref=f1e147]:
+                - generic "Saved chat. History is persisted." [ref=f1e148]: Saved
+                - generic "Character mode is active." [ref=f1e149]: "Character: Cycle4 Aster Guide"
+            - generic [ref=f1e155]:
+              - button "Search - Open command palette" [ref=f1e156] [cursor=pointer]:
+                - generic [ref=f1e160]: Search
+                - generic [ref=f1e161]: ⌘K
+              - button "New saved chat" [ref=f1e162] [cursor=pointer]
+              - button "Temporary chat (not saved)" [ref=f1e166] [cursor=pointer]: Temp
+              - button "Character chat" [ref=f1e167] [cursor=pointer]: Character
+              - button "Share conversation" [ref=f1e168] [cursor=pointer]
+              - button "Open settings" [ref=f1e175] [cursor=pointer]
+              - generic [ref=f1e187]:
+                - button "Notifications, 0 unread" [ref=f1e188] [cursor=pointer]
+                - status [ref=f1e192]: Notifications are active
+              - button "Switch to light theme" [ref=f1e193] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f1e200] [cursor=pointer]:
+                - generic [ref=f1e201]: "?"
+          - generic [ref=f1e202]:
+            - heading "Chat" [level=1] [ref=f1e203]
+            - generic [ref=f1e206]:
+              - paragraph [ref=f1e207]: Cockpit rails hidden. Chat and composer remain active.
+              - generic [ref=f1e208]:
+                - main [ref=f1e209]:
+                  - generic [ref=f1e210]:
+                    - generic [ref=f1e212]:
+                      - generic [ref=f1e213]:
+                        - generic [ref=f1e214]:
+                          - text: Character Chat
+                          - generic [ref=f1e215]: Cycle4 Aster Guide
+                        - generic [ref=f1e216]: Conversation timeline
+                      - generic [ref=f1e217]:
+                        - button "Switch to light theme" [ref=f1e218] [cursor=pointer]
+                        - button "Enter focus chat" [ref=f1e225] [cursor=pointer]:
+                          - generic [ref=f1e231]: Focus
+                        - button "Shortcuts" [ref=f1e232] [cursor=pointer]
+                        - button "Artifacts panel closed" [disabled] [ref=f1e236]
+                    - log "Chat messages" [ref=f1e238]:
+                      - generic [ref=f1e240]:
+                        - article "Assistant message 1 of 3" [ref=f1e568]:
+                          - generic [ref=f1e574]:
+                            - generic [ref=f1e576]:
+                              - generic [ref=f1e577]: Cycle4 Aster Guide
+                              - generic [ref=f1e578]: • 6:44 PM
+                              - generic [ref=f1e579]: greeting
+                            - paragraph [ref=f1e666]: Welcome to Project Aster.
+                            - generic [ref=f1e583]:
+                              - generic [ref=f1e584]:
+                                - generic [ref=f1e585]: Was this helpful?
+                                - generic [ref=f1e586]:
+                                  - button "Helpful" [ref=f1e587] [cursor=pointer]
+                                  - button "Not helpful" [ref=f1e590] [cursor=pointer]
+                                  - button "More feedback" [ref=f1e593] [cursor=pointer]
+                              - button "More actions" [ref=f1e599] [cursor=pointer]: •••
+                        - article "User message 2 of 3" [ref=f1e600]:
+                          - generic [ref=f1e603]:
+                            - generic [ref=f1e605]:
+                              - generic [ref=f1e606]: You
+                              - generic [ref=f1e607]: • 6:44 PM
+                            - paragraph [ref=f1e609]: Who coordinates Project Aster, and when does it open? Answer in one sentence.
+                            - button "More actions" [ref=f1e612] [cursor=pointer]: •••
+                        - article "Assistant message 3 of 3" [ref=f1e616]:
+                          - generic [ref=f1e622]:
+                            - generic [ref=f1e624]:
+                              - generic [ref=f1e625]: Cycle4 Aster Guide
+                              - generic [ref=f1e626]: • 6:45 PM
+                            - generic [ref=f1e627]:
+                              - button "collapsed Model’s reasoning (optional)" [ref=f1e630] [cursor=pointer]:
+                                - img "collapsed" [ref=f1e632]
+                                - generic [ref=f1e635]: Model’s reasoning (optional)
+                              - paragraph [ref=f1e667]: Mira Chen coordinates Project Aster, which opens on 18 December 2026.
+                            - generic [ref=f1e640]:
+                              - generic [ref=f1e641]:
+                                - generic [ref=f1e642]: Was this helpful?
+                                - generic [ref=f1e643]:
+                                  - button "Helpful" [ref=f1e644] [cursor=pointer]
+                                  - button "Not helpful" [ref=f1e647] [cursor=pointer]
+                                  - button "More feedback" [ref=f1e650] [cursor=pointer]
+                              - button "More actions" [ref=f1e656] [cursor=pointer]: •••
+                    - generic [ref=f1e293]:
+                      - generic [ref=f1e294]: Composer
+                      - generic [ref=f1e305]:
+                        - button [aria-hidden] [ref=f1e306]
+                        - button [aria-hidden] [ref=f1e307]
+                        - generic [ref=f1e308]:
+                          - generic [ref=f1e310]:
+                            - button "Hide composer options" [expanded] [ref=f1e311] [cursor=pointer]
+                            - textbox "Type a message... (/ commands, @ mentions)" [ref=f1e316]
+                            - generic [ref=f1e317]:
+                              - button "Improve prompt" [ref=f1e320] [cursor=pointer]
+                              - generic [ref=f1e325]:
+                                - button "Send message" [ref=f1e326] [cursor=pointer]:
+                                  - generic [ref=f1e327]: Send
+                                - button "Open message delivery options" [ref=f1e332] [cursor=pointer]
+                          - generic [ref=f1e337]:
+                            - generic [ref=f1e339]:
+                              - group "Mode and context controls" [ref=f1e340]:
+                                - button "Modes" [ref=f1e341] [cursor=pointer]
+                                - 'button "MCP tools: None, Not checked yet" [ref=f1e348] [cursor=pointer]':
+                                  - generic [ref=f1e349]:
+                                    - generic [ref=f1e350]: MCP
+                                    - generic [ref=f1e351]: None
+                                - button "Search & Context" [ref=f1e354] [cursor=pointer]
+                                - button "Select a Prompt" [ref=f1e359] [cursor=pointer]:
+                                  - generic [ref=f1e362]: Prompt
+                                - button "Cycle4 Aster Guide" [ref=f1e363] [cursor=pointer]
+                                - button "Role-play setup" [ref=f1e368] [cursor=pointer]
+                                - button "Buddy & Persona" [ref=f1e375] [cursor=pointer]
+                              - group "Run input controls" [ref=f1e381]:
+                                - button "OpenUI" [ref=f1e382] [cursor=pointer]
+                                - button "Start dictation" [ref=f1e388] [cursor=pointer]
+                                - generic [ref=f1e392]:
+                                  - button "Attach image" [ref=f1e394] [cursor=pointer]
+                                  - button "More attachments" [ref=f1e398] [cursor=pointer]
+                                - button "More tools" [ref=f1e401] [cursor=pointer]
+                                - button "Current Chat Model Settings" [ref=f1e404] [cursor=pointer]:
+                                  - generic [ref=f1e408]: Chat Settings
+                            - generic "Active context" [ref=f1e409]:
+                              - button "Custom OpenAI API / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f1e411] [cursor=pointer]:
+                                - generic "Provider status" [ref=f1e416]: Healthy
+                              - button "Character Cycle4 Aster Guide" [ref=f1e417] [cursor=pointer]:
+                                - generic [ref=f1e418]: Character
+                                - generic [ref=f1e419]: Cycle4 Aster Guide
+                              - 'generic "Character context: Included" [ref=f1e420]':
+                                - generic [ref=f1e421]: Character context
+                                - generic [ref=f1e422]: Included
+                              - button "Chat 3 messages" [ref=f1e657] [cursor=pointer]:
+                                - generic [ref=f1e658]: Chat
+                                - generic [ref=f1e659]: 3 messages
+                              - button "Configure context window size" [ref=f1e427] [cursor=pointer]:
+                                - generic [ref=f1e428]: 743 + ~0 = 743 tokens
+                              - button "Saved" [ref=f1e430] [cursor=pointer]
+                              - button "Advanced controls" [ref=f1e432] [cursor=pointer]
+                          - status [ref=f1e436]:
+                            - generic [ref=f1e437]: Add expression images for Cycle4 Aster Guide.
+                            - generic [ref=f1e438]:
+                              - link "Edit expressions" [ref=f1e439] [cursor=pointer]:
+                                - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=4
+                              - button "Dismiss expression image setup" [ref=f1e440] [cursor=pointer]: Dismiss
+                - generic [ref=f1e441]:
+                  - button "Restore context sidechannel" [ref=f1e442] [cursor=pointer]:
+                    - generic [ref=f1e446]: Context rail
+                  - tooltip "Restore context sidechannel"
+                - generic [ref=f1e447]:
+                  - button "Restore runtime sidechannel" [ref=f1e448] [cursor=pointer]:
+                    - generic [ref=f1e449]: Runtime rail
+                  - tooltip "Restore runtime sidechannel"
+    - generic [ref=f1e668]:
+      - dialog "Review flashcard":
+        - generic [ref=f1e669]:
+          - button "Close" [active] [ref=f1e670] [cursor=pointer]:
+            - generic "Close" [ref=f1e671]:
+              - img "close" [ref=f1e672]
+          - generic [ref=f1e675]: Review flashcard
+          - generic [ref=f1e678]:
+            - generic [ref=f1e679]:
+              - text: Question
+              - textbox "Question" [ref=f1e680]
+            - generic [ref=f1e681]:
+              - text: Answer
+              - textbox "Answer" [ref=f1e682]: Mira Chen coordinates Project Aster, which opens on 18 December 2026.
+          - generic [ref=f1e683]:
+            - button "Cancel" [ref=f1e684] [cursor=pointer]
+            - button "Save flashcard" [disabled] [ref=f1e686]
+  - button "Open Next.js Dev Tools" [ref=f1e458] [cursor=pointer]
+  - alert [ref=f1e10]: Cycle4 Aster Guide Chat (20260916_014450) | tldw
+```

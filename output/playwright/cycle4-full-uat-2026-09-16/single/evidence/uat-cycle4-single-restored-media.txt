@@ -1,0 +1,295 @@
+### Open tabs
+- 0: [Remember this public cycle4 phrase: ASTER-42. Reply with only ASTER-42. | tldw](http://127.0.0.1:18380/chat)
+- 1: [Cycle4 Aster Guide Chat (20260916_014450) | tldw](http://127.0.0.1:18380/chat)
+- 2: (current) [Media | tldw](http://127.0.0.1:18380/media?id=1)
+### Page
+- Page URL: http://127.0.0.1:18380/media?id=1
+- Page Title: Media | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f8e1]:
+  - generic [ref=f8e24]:
+    - link "Skip to main content" [ref=f8e25] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f8e26]:
+      - button "Expand sidebar" [ref=f8e27] [cursor=pointer]
+      - button "New Chat" [ref=f8e31] [cursor=pointer]
+      - generic [ref=f8e34]:
+        - button "Quick Ingest" [ref=f8e35] [cursor=pointer]
+        - button "Chat" [ref=f8e39] [cursor=pointer]
+        - button "Prompts" [ref=f8e42] [cursor=pointer]
+        - button "Characters" [ref=f8e46] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f8e51] [cursor=pointer]
+        - button "World Books" [ref=f8e55] [cursor=pointer]
+        - button "Notes" [ref=f8e58] [cursor=pointer]
+        - button "Knowledge QA" [ref=f8e62] [cursor=pointer]
+        - button "Media" [ref=f8e70] [cursor=pointer]
+        - button "Document Workspace" [ref=f8e73] [cursor=pointer]
+        - button "Research Workspace" [ref=f8e79] [cursor=pointer]
+        - button "Kanban" [ref=f8e85] [cursor=pointer]
+        - button "Watchlists" [ref=f8e87] [cursor=pointer]
+      - generic [ref=f8e92]:
+        - button "Open Notes Dock" [ref=f8e93] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f8e98] [cursor=pointer]
+        - button "Settings" [ref=f8e101] [cursor=pointer]
+    - main [ref=f8e105]:
+      - generic [ref=f8e106]:
+        - generic [ref=f8e109]:
+          - generic [ref=f8e110]:
+            - button "Expand sidebar" [ref=f8e111] [cursor=pointer]
+            - generic [ref=f8e113]:
+              - img "tldw Assistant" [ref=f8e114]
+              - generic [ref=f8e115]: tldw Assistant
+              - button "Companion Home" [ref=f8e116] [cursor=pointer]
+              - button "Show shortcuts" [ref=f8e120] [cursor=pointer]
+          - generic [ref=f8e123]:
+            - button "Search - Open command palette" [ref=f8e124] [cursor=pointer]:
+              - generic [ref=f8e128]: Search
+              - generic [ref=f8e129]: ⌘K
+            - button "Open settings" [ref=f8e130] [cursor=pointer]
+            - generic [ref=f8e142]:
+              - button "Notifications, 0 unread" [ref=f8e143] [cursor=pointer]
+              - status [ref=f8e147]: Notifications are active
+            - button "Switch to light theme" [ref=f8e148] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f8e155] [cursor=pointer]:
+              - generic [ref=f8e156]: "?"
+        - generic [ref=f8e158]:
+          - generic [ref=f8e160]:
+            - generic [ref=f8e161]:
+              - generic [ref=f8e162]:
+                - heading "Media Inspector" [level=1] [ref=f8e163]
+                - generic [ref=f8e164]:
+                  - generic [ref=f8e165]: 1 / 1
+                  - button "Trash" [ref=f8e166] [cursor=pointer]
+                  - button "Bulk" [ref=f8e170] [cursor=pointer]
+              - generic [ref=f8e173]:
+                - button "Show media only" [pressed] [ref=f8e174] [cursor=pointer]:
+                  - generic [ref=f8e175]: Media
+                  - generic [ref=f8e176]: "1"
+                - button "Show notes only" [ref=f8e177] [cursor=pointer]:
+                  - generic [ref=f8e178]: Notes
+                  - generic [ref=f8e179]: "0"
+            - generic [ref=f8e181]:
+              - generic [ref=f8e182]:
+                - generic [ref=f8e183]: Find media
+                - button "Collapse find media panel" [expanded] [ref=f8e185] [cursor=pointer]
+              - generic [ref=f8e188]:
+                - generic [ref=f8e189]:
+                  - textbox "Search media (title/content)" [ref=f8e194]
+                  - button "Search syntax help" [ref=f8e196] [cursor=pointer]: "?"
+                - button "Search" [ref=f8e197] [cursor=pointer]
+                - generic [ref=f8e198]:
+                  - generic [ref=f8e199]:
+                    - generic [ref=f8e200]: Filters
+                    - button "Clear all" [ref=f8e204] [cursor=pointer]
+                  - generic [ref=f8e205]:
+                    - generic [ref=f8e206]: Search mode
+                    - generic [ref=f8e207]:
+                      - button "Full-text search" [pressed] [ref=f8e208] [cursor=pointer]: Full-text
+                      - button "Metadata search" [ref=f8e209] [cursor=pointer]: Metadata
+                  - generic [ref=f8e210]:
+                    - generic [ref=f8e211]: Sort by
+                    - generic [ref=f8e212] [cursor=pointer]:
+                      - generic [ref=f8e213]:
+                        - generic "Relevance" [ref=f8e214]
+                        - combobox [ref=f8e215]
+                      - img "down" [ref=f8e217]
+                  - generic [ref=f8e220]:
+                    - generic [ref=f8e221]: Date range
+                    - generic [ref=f8e222]:
+                      - generic [ref=f8e223]:
+                        - text: Start date
+                        - textbox "Start date" [ref=f8e224]
+                      - generic [ref=f8e225]:
+                        - text: End date
+                        - textbox "End date" [ref=f8e226]
+                  - button "Advanced search" [ref=f8e228] [cursor=pointer]
+                  - generic [ref=f8e232] [cursor=pointer]:
+                    - checkbox "Favorites only" [ref=f8e233]
+                    - generic [ref=f8e236]: Favorites only
+                  - generic [ref=f8e237]:
+                    - button "Media types" [ref=f8e238] [cursor=pointer]
+                    - generic [ref=f8e244] [cursor=pointer]:
+                      - checkbox "Filter by Document" [ref=f8e245]
+                      - generic [ref=f8e246]: Document
+                  - button "Keywords" [ref=f8e248] [cursor=pointer]
+                  - generic [ref=f8e253]:
+                    - generic [ref=f8e254]: Exclude keywords
+                    - generic [ref=f8e256]:
+                      - generic [ref=f8e257]:
+                        - generic: Exclude keyword
+                        - combobox "Exclude keyword" [ref=f8e259]
+                      - img "down" [ref=f8e261]
+                    - generic [ref=f8e264]: Use excluded keywords to remove items containing those terms.
+                    - generic [ref=f8e265]: 0 exclude keyword suggestions available
+                - generic [ref=f8e266]:
+                  - generic [ref=f8e267]:
+                    - generic [ref=f8e268]: Collection
+                    - combobox "Collection" [ref=f8e269]:
+                      - option "All items" [selected]
+                  - paragraph [ref=f8e270]: Create collections from bulk selection to organize related items.
+            - generic [ref=f8e271]:
+              - generic [ref=f8e273]:
+                - generic [ref=f8e274]:
+                  - generic [ref=f8e275]:
+                    - generic [ref=f8e276]: Results
+                    - generic [ref=f8e277]: 1 / 1
+                  - generic [ref=f8e278]:
+                    - button "Standard view" [pressed] [ref=f8e279] [cursor=pointer]
+                    - button "Compact view" [ref=f8e285] [cursor=pointer]
+                - 'button "Select media: cycle4-aster" [ref=f8e288] [cursor=pointer]':
+                  - generic [ref=f8e289]:
+                    - button "Add to favorites" [ref=f8e294]
+                    - generic [ref=f8e297]:
+                      - generic [ref=f8e298]:
+                        - generic [ref=f8e299]: MEDIA
+                        - generic [ref=f8e300]: document
+                        - generic [ref=f8e301]: 1h ago
+                      - generic [ref=f8e306]: cycle4-aster
+              - generic [ref=f8e307]:
+                - generic [ref=f8e308]:
+                  - generic [ref=f8e309]: 1 of 1 results
+                  - generic [ref=f8e310]:
+                    - generic [ref=f8e311]: "Per page:"
+                    - combobox "Per page:" [ref=f8e312]:
+                      - option "20" [selected]
+                      - option "50"
+                      - option "100"
+                - button "? for shortcuts" [ref=f8e314] [cursor=pointer]:
+                  - generic [ref=f8e315]: "?"
+                  - generic [ref=f8e316]: for shortcuts
+            - button "Library tools" [ref=f8e318] [cursor=pointer]
+          - button "Collapse sidebar" [ref=f8e323] [cursor=pointer]
+          - generic [ref=f8e327]:
+            - generic [ref=f8e329]:
+              - generic [ref=f8e330] [cursor=pointer]:
+                - checkbox "Show chapters/sections panel" [checked] [ref=f8e331]
+                - generic [ref=f8e332]: Show chapters/sections panel
+              - generic [ref=f8e333] [cursor=pointer]:
+                - checkbox "Allow generated fallback structure" [checked] [ref=f8e334]
+                - generic [ref=f8e335]: Allow generated fallback structure
+              - generic [ref=f8e336]: "Generated sections: 1"
+            - generic [ref=f8e337]:
+              - complementary "Chapters and sections" [ref=f8e338]:
+                - generic [ref=f8e339]:
+                  - generic [ref=f8e340]: Chapters/Sections
+                  - textbox "Jump to 12.5 or title" [ref=f8e345]
+                  - generic [ref=f8e346]: Project Aster is a fictional community garden used for acceptance testing. The garden opens on 1...
+                - tree [ref=f8e347]:
+                  - button "1 Project Aster is a fictional community garden used for acceptance testing. The garden opens on 1..." [ref=f8e351] [cursor=pointer]:
+                    - generic [ref=f8e352]: "1"
+                    - generic [ref=f8e353]: Project Aster is a fictional community garden used for acceptance testing. The garden opens on 1...
+              - generic [ref=f8e354]:
+                - button "Create study pack" [ref=f8e356] [cursor=pointer]
+                - generic [ref=f8e357]:
+                  - generic [ref=f8e358]: Showing cycle4-aster
+                  - generic [ref=f8e360]:
+                    - generic [ref=f8e361]:
+                      - button "Previous" [disabled] [ref=f8e362]
+                      - generic [ref=f8e365]: 1/1
+                      - button "Next" [disabled] [ref=f8e366]
+                    - heading "cycle4-aster" [level=3] [ref=f8e369]
+                    - generic [ref=f8e370]:
+                      - button "Chat with this media" [ref=f8e371] [cursor=pointer]
+                      - button "Analyze" [ref=f8e374] [cursor=pointer]
+                      - button "Actions" [ref=f8e378] [cursor=pointer]
+                  - generic [ref=f8e384]:
+                    - generic [ref=f8e385]:
+                      - generic [ref=f8e386]: 43 Words
+                      - generic [ref=f8e390]: 1 min read
+                      - generic "Reading progress" [ref=f8e391]: 63% read
+                      - generic [ref=f8e392]: "Chunking: Completed"
+                      - generic [ref=f8e393]: "Vector: Pending"
+                    - button "Metadata details Show" [ref=f8e395] [cursor=pointer]:
+                      - generic [ref=f8e396]: Metadata details
+                      - generic [ref=f8e397]: Show
+                    - generic [ref=f8e399]:
+                      - generic [ref=f8e400]:
+                        - generic: Add keywords...
+                        - combobox [ref=f8e402]
+                      - img "down" [ref=f8e404]
+                    - generic [ref=f8e407]:
+                      - generic [ref=f8e408]:
+                        - button "Content" [ref=f8e409] [cursor=pointer]
+                        - generic [ref=f8e413]:
+                          - generic [ref=f8e414] [cursor=pointer]:
+                            - generic [ref=f8e415]:
+                              - generic "Auto" [ref=f8e416]
+                              - combobox "Display mode" [ref=f8e417]
+                            - img "down" [ref=f8e419]
+                          - group "Text size" [ref=f8e422]:
+                            - button "Text size S" [ref=f8e423] [cursor=pointer]: S
+                            - button "Text size M" [pressed] [ref=f8e424] [cursor=pointer]: M
+                            - button "Text size L" [ref=f8e425] [cursor=pointer]: L
+                          - button "Edit content" [ref=f8e426] [cursor=pointer]
+                          - button "Find in content" [ref=f8e429] [cursor=pointer]
+                      - region "Media content" [ref=f8e436]:
+                        - paragraph [ref=f8e438]: Project Aster is a fictional community garden used for acceptance testing. The garden opens on 18 December 2026. Mira Chen coordinates the garden. The garden has seven raised beds. Volunteers meet every Saturday at 09:30. The tool shed is beside the east gate.
+                    - generic [ref=f8e439]:
+                      - generic [ref=f8e440]:
+                        - button "Analysis" [ref=f8e441] [cursor=pointer]
+                        - generic [ref=f8e445]:
+                          - button "Generate" [ref=f8e446] [cursor=pointer]
+                          - button "Send analysis to chat" [ref=f8e450] [cursor=pointer]
+                          - button "Copy analysis" [ref=f8e454] [cursor=pointer]
+                          - button "Edit analysis" [ref=f8e458] [cursor=pointer]
+                      - generic [ref=f8e462]:
+                        - generic [ref=f8e463]:
+                          - generic [ref=f8e464]: Analysis
+                          - generic [ref=f8e465] [cursor=pointer]:
+                            - generic [ref=f8e466]:
+                              - generic "Analysis" [ref=f8e467]
+                              - combobox "Analysis" [ref=f8e468]
+                            - img "down" [ref=f8e470]
+                        - generic [ref=f8e473]:
+                          - generic [ref=f8e474]:
+                            - generic [ref=f8e475]: Analysis
+                            - button "Copy analysis to clipboard" [ref=f8e477] [cursor=pointer]
+                          - generic [ref=f8e482]:
+                            - paragraph [ref=f8e483]:
+                              - strong [ref=f8e484]: Project Aster Details
+                            - list [ref=f8e485]:
+                              - listitem [ref=f8e486]:
+                                - strong [ref=f8e487]: "Description:"
+                                - strong [ref=f8e488]: fictional community garden
+                                - text: used for
+                                - strong [ref=f8e489]: acceptance testing
+                              - listitem [ref=f8e490]:
+                                - strong [ref=f8e491]: "Opening Date:"
+                                - strong [ref=f8e492]: 18 December 2026
+                              - listitem [ref=f8e493]:
+                                - strong [ref=f8e494]: "Coordinator:"
+                                - strong [ref=f8e495]: Mira Chen
+                                - strong [ref=f8e496]: Garden Layout and Schedule
+                              - listitem [ref=f8e497]:
+                                - strong [ref=f8e498]: "Raised Beds:"
+                                - strong [ref=f8e499]: seven
+                              - listitem [ref=f8e500]:
+                                - strong [ref=f8e501]: "Tool Shed Location:"
+                                - text: Beside the
+                                - strong [ref=f8e502]: east gate
+                              - listitem [ref=f8e503]:
+                                - strong [ref=f8e504]: "Volunteer Meeting Time:"
+                                - text: Every
+                                - strong [ref=f8e505]: Saturday
+                                - text: at
+                                - strong [ref=f8e506]: 09:30
+                    - generic [ref=f8e507]:
+                      - button "Statistics" [ref=f8e508] [cursor=pointer]
+                      - generic [ref=f8e513]:
+                        - generic [ref=f8e514]:
+                          - generic [ref=f8e515]: Words
+                          - generic [ref=f8e516]: "43"
+                        - generic [ref=f8e517]:
+                          - generic [ref=f8e518]: Characters
+                          - generic [ref=f8e519]: "260"
+                        - generic [ref=f8e520]:
+                          - generic [ref=f8e521]: Paragraphs
+                          - generic [ref=f8e522]: "1"
+                    - button "Metadata" [ref=f8e524] [cursor=pointer]
+                    - button "Document Intelligence" [ref=f8e529] [cursor=pointer]
+                    - button "Version History" [ref=f8e535] [cursor=pointer]
+                    - button "Delete item" [ref=f8e545] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f8e19] [cursor=pointer]
+  - alert [ref=f8e23]: Media | tldw
+```

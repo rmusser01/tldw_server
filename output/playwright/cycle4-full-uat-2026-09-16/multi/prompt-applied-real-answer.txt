@@ -1,0 +1,234 @@
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18381/knowledge)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: (current) [Remember this public cycle4 phrase: CEDAR-41. Reply with only CEDAR-41. | tldw](http://127.0.0.1:18381/chat)
+### Page
+- Page URL: http://127.0.0.1:18381/chat
+- Page Title: Remember this public cycle4 phrase: CEDAR-41. Reply with only CEDAR-41. | tldw
+- Console: 2 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [ref=f2e20]:
+  - generic [ref=f2e23]:
+    - link "Skip to main content" [ref=f2e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f2e25]:
+      - button "Expand sidebar" [ref=f2e26] [cursor=pointer]
+      - button "New Chat" [ref=f2e30] [cursor=pointer]
+      - generic [ref=f2e33]:
+        - button "Quick Ingest" [ref=f2e34] [cursor=pointer]
+        - button "Chat" [ref=f2e38] [cursor=pointer]
+        - button "Prompts" [ref=f2e41] [cursor=pointer]
+        - button "Characters" [ref=f2e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f2e50] [cursor=pointer]
+        - button "World Books" [ref=f2e54] [cursor=pointer]
+        - button "Notes" [ref=f2e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f2e61] [cursor=pointer]
+        - button "Media" [ref=f2e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f2e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f2e78] [cursor=pointer]
+        - button "Kanban" [ref=f2e84] [cursor=pointer]
+        - button "Watchlists" [ref=f2e86] [cursor=pointer]
+      - generic [ref=f2e91]:
+        - button "Open Notes Dock" [ref=f2e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f2e97] [cursor=pointer]
+        - button "Settings" [ref=f2e100] [cursor=pointer]
+    - main [ref=f2e104]:
+      - generic [ref=f2e105]:
+        - generic [ref=f2e108]:
+          - generic [ref=f2e109]:
+            - button "Expand sidebar" [ref=f2e110] [cursor=pointer]
+            - generic [ref=f2e112]:
+              - img "tldw Assistant" [ref=f2e113]
+              - generic [ref=f2e114]: tldw Assistant
+              - button "Companion Home" [ref=f2e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f2e119] [cursor=pointer]
+            - 'button "Remember this public cycle4 phrase: CEDAR-41. Reply with only CEDAR-41." [ref=f2e1191] [cursor=pointer]'
+            - generic "Saved chat. History is persisted." [ref=f2e1193]: Saved
+          - generic [ref=f2e122]:
+            - button "Search - Open command palette" [ref=f2e123] [cursor=pointer]:
+              - generic [ref=f2e127]: Search
+              - generic [ref=f2e128]: ⌘K
+            - button "New saved chat" [ref=f2e1194] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f2e1198] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f2e1199] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f2e1200] [cursor=pointer]
+            - button "Open settings" [ref=f2e129] [cursor=pointer]
+            - generic [ref=f2e141]:
+              - button "Notifications, 0 unread" [ref=f2e142] [cursor=pointer]
+              - status [ref=f2e146]: Notifications are active
+            - button "Switch to light theme" [ref=f2e147] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f2e154] [cursor=pointer]:
+              - generic [ref=f2e155]: "?"
+        - generic [ref=f2e156]:
+          - heading "Chat" [level=1] [ref=f2e1207]
+          - generic [ref=f2e1210]:
+            - paragraph [ref=f2e1211]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f2e1212]:
+              - main [ref=f2e1213]:
+                - generic [ref=f2e1214]:
+                  - generic [ref=f2e1216]:
+                    - generic [ref=f2e1217]:
+                      - generic [ref=f2e1218]: Standard chat
+                      - generic [ref=f2e1219]: Conversation timeline
+                    - generic [ref=f2e1220]:
+                      - button "Switch to light theme" [ref=f2e1221] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f2e1228] [cursor=pointer]:
+                        - generic [ref=f2e1234]: Focus
+                      - button "Shortcuts" [ref=f2e1235] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f2e1239]
+                  - log "Chat messages" [ref=f2e1241]:
+                    - generic [ref=f2e1243]:
+                      - article "System message 1 of 9" [ref=f2e1589]:
+                        - generic [ref=f2e1250]:
+                          - generic [ref=f2e1252]:
+                            - generic [ref=f2e1253]: System prompt
+                            - generic [ref=f2e1254]: • 5:36 PM
+                          - paragraph [ref=f2e1256]: You are a helpful AI assistant.
+                          - generic [ref=f2e1652]:
+                            - generic [ref=f2e1653]:
+                              - generic [ref=f2e1654]: Was this helpful?
+                              - generic [ref=f2e1655]:
+                                - button "Helpful" [ref=f2e1656] [cursor=pointer]
+                                - button "Not helpful" [ref=f2e1659] [cursor=pointer]
+                                - button "More feedback" [ref=f2e1662] [cursor=pointer]
+                            - button "More actions" [ref=f2e1668] [cursor=pointer]: •••
+                      - article "User message 2 of 9" [ref=f2e1590]:
+                        - generic [ref=f2e1277]:
+                          - generic [ref=f2e1279]:
+                            - generic [ref=f2e1280]: You
+                            - generic [ref=f2e1281]: • 5:36 PM
+                          - paragraph [ref=f2e1283]: "Remember this public cycle4 phrase: CEDAR-41. Reply with only CEDAR-41."
+                          - button "More actions" [ref=f2e1671] [cursor=pointer]: •••
+                      - article "Assistant message 3 of 9" [ref=f2e1591]:
+                        - generic [ref=f2e1296]:
+                          - generic [ref=f2e1298]:
+                            - generic [ref=f2e1299]: Assistant
+                            - generic [ref=f2e1300]: • 5:36 PM
+                          - paragraph [ref=f2e1743]: CEDAR-41
+                          - generic [ref=f2e1673]:
+                            - generic [ref=f2e1674]:
+                              - generic [ref=f2e1675]: Was this helpful?
+                              - generic [ref=f2e1676]:
+                                - button "Helpful" [ref=f2e1677] [cursor=pointer]
+                                - button "Not helpful" [ref=f2e1680] [cursor=pointer]
+                                - button "More feedback" [ref=f2e1683] [cursor=pointer]
+                            - button "More actions" [ref=f2e1689] [cursor=pointer]: •••
+                      - article "User message 4 of 9" [ref=f2e1594]:
+                        - generic [ref=f2e1339]:
+                          - generic [ref=f2e1341]:
+                            - generic [ref=f2e1342]: You
+                            - generic [ref=f2e1343]: • 5:36 PM
+                          - paragraph [ref=f2e1345]: "Remember this public cycle4 phrase: CEDAR-41. Reply with only CEDAR-41."
+                          - button "More actions" [ref=f2e1692] [cursor=pointer]: •••
+                      - article "User message 5 of 9" [ref=f2e1595]:
+                        - generic [ref=f2e1358]:
+                          - generic [ref=f2e1360]:
+                            - generic [ref=f2e1361]: You
+                            - generic [ref=f2e1362]: • 5:36 PM
+                          - paragraph [ref=f2e1565]: What phrase did I ask you to remember? Reply with only the phrase.
+                          - button "More actions" [ref=f2e1695] [cursor=pointer]: •••
+                      - article "Assistant message 6 of 9" [ref=f2e1596]:
+                        - generic [ref=f2e1386]:
+                          - generic [ref=f2e1388]:
+                            - generic [ref=f2e1389]: Assistant
+                            - generic [ref=f2e1390]: • 5:36 PM
+                          - paragraph [ref=f2e1744]: CEDAR-41
+                          - generic [ref=f2e1697]:
+                            - generic [ref=f2e1698]:
+                              - generic [ref=f2e1699]: Was this helpful?
+                              - generic [ref=f2e1700]:
+                                - button "Helpful" [ref=f2e1701] [cursor=pointer]
+                                - button "Not helpful" [ref=f2e1704] [cursor=pointer]
+                                - button "More feedback" [ref=f2e1707] [cursor=pointer]
+                            - button "More actions" [ref=f2e1713] [cursor=pointer]: •••
+                      - article "User message 7 of 9" [ref=f2e1598]:
+                        - generic [ref=f2e1402]:
+                          - generic [ref=f2e1404]:
+                            - generic [ref=f2e1405]: You
+                            - generic [ref=f2e1406]: • 5:36 PM
+                          - paragraph [ref=f2e1408]: What phrase did I ask you to remember? Reply with only the phrase.
+                          - button "More actions" [ref=f2e1716] [cursor=pointer]: •••
+                      - article "User message 8 of 9" [ref=f2e1599]:
+                        - generic [ref=f2e1602]:
+                          - generic [ref=f2e1604]:
+                            - generic [ref=f2e1605]: You
+                            - generic [ref=f2e1606]: • 5:57 PM
+                          - paragraph [ref=f2e1608]: What does photosynthesis convert light energy into? Answer in one sentence.
+                          - button "More actions" [ref=f2e1719] [cursor=pointer]: •••
+                      - article "Assistant message 9 of 9" [ref=f2e1615]:
+                        - generic [ref=f2e1627]:
+                          - generic [ref=f2e1629]:
+                            - generic [ref=f2e1630]: tldw:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                            - generic [ref=f2e1631]: • 5:57 PM
+                          - paragraph [ref=f2e1745]: Arrr, photosynthesis converts light energy into chemical energy, matey!
+                          - generic [ref=f2e1722]:
+                            - generic [ref=f2e1723]:
+                              - generic [ref=f2e1724]: Was this helpful?
+                              - generic [ref=f2e1725]:
+                                - button "Helpful" [ref=f2e1726] [cursor=pointer]
+                                - button "Not helpful" [ref=f2e1729] [cursor=pointer]
+                                - button "More feedback" [ref=f2e1732] [cursor=pointer]
+                            - button "More actions" [ref=f2e1738] [cursor=pointer]: •••
+                  - generic [ref=f2e1415]:
+                    - generic [ref=f2e1416]: Composer
+                    - generic [ref=f2e1424]:
+                      - button [aria-hidden] [ref=f2e1425]
+                      - button [aria-hidden] [ref=f2e1426]
+                      - generic [ref=f2e1427]:
+                        - generic [ref=f2e1429]:
+                          - button "Hide composer options" [expanded] [ref=f2e1430] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f2e1435]
+                          - generic [ref=f2e1436]:
+                            - button "Improve prompt" [ref=f2e1439] [cursor=pointer]
+                            - generic [ref=f2e1444]:
+                              - button "Send message" [ref=f2e1739] [cursor=pointer]:
+                                - generic [ref=f2e1446]: Send
+                              - button "Open message delivery options" [ref=f2e1451] [cursor=pointer]
+                        - generic [ref=f2e1456]:
+                          - generic [ref=f2e1458]:
+                            - group "Mode and context controls" [ref=f2e1459]:
+                              - button "Modes" [ref=f2e1460] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f2e1467] [cursor=pointer]':
+                                - generic [ref=f2e1468]:
+                                  - generic [ref=f2e1469]: MCP
+                                  - generic [ref=f2e1470]: None
+                              - button "Search & Context" [ref=f2e1473] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f2e1478] [cursor=pointer]:
+                                - generic [ref=f2e1481]: Cycle4 Pirate Tutor
+                              - button "Select character or persona" [ref=f2e1482] [cursor=pointer]
+                              - button "Role-play setup" [ref=f2e1487] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f2e1494] [cursor=pointer]
+                            - group "Run input controls" [ref=f2e1500]:
+                              - button "OpenUI" [ref=f2e1501] [cursor=pointer]
+                              - button "Start dictation" [ref=f2e1507] [cursor=pointer]
+                              - generic [ref=f2e1511]:
+                                - button "Attach image" [ref=f2e1513] [cursor=pointer]
+                                - button "More attachments" [ref=f2e1517] [cursor=pointer]
+                              - button "More tools" [ref=f2e1520] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f2e1523] [cursor=pointer]:
+                                - generic [ref=f2e1527]: Chat Settings
+                          - generic "Active context" [ref=f2e1528]:
+                            - button "LLaMa.cpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f2e1530] [cursor=pointer]:
+                              - generic "Provider status" [ref=f2e1534]: Healthy
+                            - button "System prompt Custom" [ref=f2e1535] [cursor=pointer]:
+                              - generic [ref=f2e1536]: System prompt
+                              - generic [ref=f2e1537]: Custom
+                            - button "Chat 9 messages" [ref=f2e1651] [cursor=pointer]:
+                              - generic [ref=f2e1539]: Chat
+                              - generic [ref=f2e1540]: 9 messages
+                            - button "Configure context window size" [ref=f2e1542] [cursor=pointer]:
+                              - generic [ref=f2e1543]: 117 + ~0 = 117 tokens
+                            - button "Saved" [ref=f2e1545] [cursor=pointer]
+                            - button "Advanced controls" [ref=f2e1547] [cursor=pointer]
+              - generic [ref=f2e1551]:
+                - button "Restore context sidechannel" [ref=f2e1552] [cursor=pointer]:
+                  - generic [ref=f2e1556]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f2e1557]:
+                - button "Restore runtime sidechannel" [ref=f2e1558] [cursor=pointer]:
+                  - generic [ref=f2e1559]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f2e15] [cursor=pointer]
+  - alert [ref=f2e19]: Chat | tldw
+```

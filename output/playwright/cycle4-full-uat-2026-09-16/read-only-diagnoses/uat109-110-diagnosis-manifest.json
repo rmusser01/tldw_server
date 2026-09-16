@@ -1,0 +1,79 @@
+{
+  "checkedAt": "2026-09-16T01:04:58.766Z",
+  "functionalFreeze": "7c9409fad2",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/services/background-proxy.ts",
+      "sha256": "46993de9aee712d92f365e3e1d1a1cf5d868f4378bfbb14d67797c7fa0c1e74a",
+      "bytes": 80155,
+      "matchesCycle4Freeze": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/KnowledgeQA/KnowledgeQAProvider.tsx",
+      "sha256": "44353ef643732e2240ced79e067abfadd7c966db5a8169590e165d26c2b02ff6",
+      "bytes": 130597,
+      "matchesCycle4Freeze": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/AnalysisModal.tsx",
+      "sha256": "df728f2f360e29a1d37a549ccdede17105c558dcc918e68126b17a1643fcd2b0",
+      "bytes": 22135,
+      "matchesCycle4Freeze": true
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/background-proxy.test.ts",
+      "sha256": "cd1b49910a6e5143088a401980101a73ea0763902f3a71f260799e456096b941",
+      "bytes": 146844,
+      "matchesCycle4Freeze": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx",
+      "sha256": "1ba962a4ed54a87cd76184d390369280365428d4ca59f8dd19518b465579578f",
+      "bytes": 33895,
+      "matchesCycle4Freeze": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx",
+      "sha256": "6a056b90ade00884f3a3aa3ce4fdff199b9a117af302b34f82312985262c11be",
+      "bytes": 17580,
+      "matchesCycle4Freeze": true
+    }
+  ],
+  "privateArtifacts": [
+    {
+      "path": "/private/tmp/uat109-idle-cleanup-readonly.config.ts",
+      "bytes": 2479,
+      "sha256": "7b8fe1d8e58db6c885659bedb4ada2b0a4f1e1770a25b732f2f71b86d92c089e"
+    },
+    {
+      "path": "/private/tmp/uat109-idle-cleanup-readonly.log",
+      "bytes": 11519,
+      "sha256": "761046a442f483df527e29aaa009aff061556a53b2c7c4af6b41424f6b778e58"
+    },
+    {
+      "path": "/private/tmp/uat109-qa-handler-readonly.config.ts",
+      "bytes": 1924,
+      "sha256": "5f5e9332e097d6fe7e26ee27764c6a1f9ed7178c844d04ca9d8ec3232876a629"
+    },
+    {
+      "path": "/private/tmp/uat109-qa-handler-readonly.log",
+      "bytes": 3921,
+      "sha256": "bda23ee1e751c6ced976ee83a9518f77d713c0bb8bac1e0fccaa7911844f459b"
+    },
+    {
+      "path": "/private/tmp/uat110-analysis-catch-readonly.config.ts",
+      "bytes": 2757,
+      "sha256": "ce597aed284a87da7e7b9cdcf26b2e333aa82493b21a12f4f98509d911b7d19e"
+    },
+    {
+      "path": "/private/tmp/uat110-analysis-catch-readonly.log",
+      "bytes": 2928,
+      "sha256": "d25b3d6bea4a7e3d50952ca642eb1c6d1166d8387f20e0eeed742ddee0bbe374"
+    },
+    {
+      "path": "/private/tmp/uat109-110-failure-diagnosis.md",
+      "bytes": 6431,
+      "sha256": "9630839b5480edd53c076152e7e581d52a82bb56b20fda494fc181dcb670d99e"
+    }
+  ]
+}

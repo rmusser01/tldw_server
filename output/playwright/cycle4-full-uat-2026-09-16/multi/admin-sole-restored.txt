@@ -1,0 +1,255 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18381/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: (current) [Media | tldw](http://127.0.0.1:18381/media?id=1)
+- 3: [Sign in | tldw](http://127.0.0.1:18381/login)
+### Page
+- Page URL: http://127.0.0.1:18381/media?id=1
+- Page Title: Media | tldw
+- Console: 2 errors, 2 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f12e20]:
+  - generic [ref=f12e23]:
+    - link "Skip to main content" [ref=f12e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f12e25]:
+      - button "Expand sidebar" [ref=f12e26] [cursor=pointer]
+      - button "New Chat" [ref=f12e30] [cursor=pointer]
+      - generic [ref=f12e33]:
+        - button "Quick Ingest" [ref=f12e34] [cursor=pointer]
+        - button "Chat" [ref=f12e38] [cursor=pointer]
+        - button "Prompts" [ref=f12e41] [cursor=pointer]
+        - button "Characters" [ref=f12e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f12e50] [cursor=pointer]
+        - button "World Books" [ref=f12e54] [cursor=pointer]
+        - button "Notes" [ref=f12e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f12e61] [cursor=pointer]
+        - button "Media" [ref=f12e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f12e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f12e78] [cursor=pointer]
+        - button "Kanban" [ref=f12e84] [cursor=pointer]
+        - button "Watchlists" [ref=f12e86] [cursor=pointer]
+      - generic [ref=f12e91]:
+        - button "Open Notes Dock" [ref=f12e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f12e97] [cursor=pointer]
+        - button "Settings" [ref=f12e100] [cursor=pointer]
+    - main [ref=f12e104]:
+      - generic [ref=f12e105]:
+        - generic [ref=f12e108]:
+          - generic [ref=f12e109]:
+            - button "Expand sidebar" [ref=f12e110] [cursor=pointer]
+            - generic [ref=f12e112]:
+              - img "tldw Assistant" [ref=f12e113]
+              - generic [ref=f12e114]: tldw Assistant
+              - button "Companion Home" [ref=f12e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f12e119] [cursor=pointer]
+          - generic [ref=f12e122]:
+            - button "Search - Open command palette" [ref=f12e123] [cursor=pointer]:
+              - generic [ref=f12e127]: Search
+              - generic [ref=f12e128]: ⌘K
+            - button "Open settings" [ref=f12e129] [cursor=pointer]
+            - generic [ref=f12e141]:
+              - button "Notifications, 0 unread" [ref=f12e142] [cursor=pointer]
+              - status [ref=f12e146]: Notifications are active
+            - button "Switch to light theme" [ref=f12e147] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f12e154] [cursor=pointer]:
+              - generic [ref=f12e155]: "?"
+        - generic [ref=f12e157]:
+          - generic [ref=f12e159]:
+            - generic [ref=f12e160]:
+              - generic [ref=f12e161]:
+                - heading "Media Inspector" [level=1] [ref=f12e162]
+                - generic [ref=f12e163]:
+                  - generic [ref=f12e164]: 1 / 1
+                  - button "Trash" [ref=f12e165] [cursor=pointer]
+                  - button "Bulk" [ref=f12e169] [cursor=pointer]
+              - generic [ref=f12e172]:
+                - button "Show media only" [pressed] [ref=f12e173] [cursor=pointer]:
+                  - generic [ref=f12e174]: Media
+                  - generic [ref=f12e175]: "1"
+                - button "Show notes only" [ref=f12e176] [cursor=pointer]:
+                  - generic [ref=f12e177]: Notes
+                  - generic [ref=f12e178]: "0"
+            - generic [ref=f12e180]:
+              - generic [ref=f12e181]:
+                - generic [ref=f12e182]: Find media
+                - button "Collapse find media panel" [expanded] [ref=f12e184] [cursor=pointer]
+              - generic [ref=f12e187]:
+                - generic [ref=f12e188]:
+                  - textbox "Search media (title/content)" [ref=f12e193]
+                  - button "Search syntax help" [ref=f12e195] [cursor=pointer]: "?"
+                - button "Search" [ref=f12e196] [cursor=pointer]
+                - generic [ref=f12e197]:
+                  - generic [ref=f12e198]:
+                    - generic [ref=f12e199]: Filters
+                    - button "Clear all" [ref=f12e203] [cursor=pointer]
+                  - generic [ref=f12e204]:
+                    - generic [ref=f12e205]: Search mode
+                    - generic [ref=f12e206]:
+                      - button "Full-text search" [pressed] [ref=f12e207] [cursor=pointer]: Full-text
+                      - button "Metadata search" [ref=f12e208] [cursor=pointer]: Metadata
+                  - generic [ref=f12e209]:
+                    - generic [ref=f12e210]: Sort by
+                    - generic [ref=f12e211] [cursor=pointer]:
+                      - generic [ref=f12e212]:
+                        - generic "Relevance" [ref=f12e213]
+                        - combobox [ref=f12e214]
+                      - img "down" [ref=f12e216]
+                  - generic [ref=f12e219]:
+                    - generic [ref=f12e220]: Date range
+                    - generic [ref=f12e221]:
+                      - generic [ref=f12e222]:
+                        - text: Start date
+                        - textbox "Start date" [ref=f12e223]
+                      - generic [ref=f12e224]:
+                        - text: End date
+                        - textbox "End date" [ref=f12e225]
+                  - button "Advanced search" [ref=f12e227] [cursor=pointer]
+                  - generic [ref=f12e231] [cursor=pointer]:
+                    - checkbox "Favorites only" [ref=f12e232]
+                    - generic [ref=f12e235]: Favorites only
+                  - generic [ref=f12e236]:
+                    - button "Media types" [ref=f12e237] [cursor=pointer]
+                    - generic [ref=f12e243] [cursor=pointer]:
+                      - checkbox "Filter by Document" [ref=f12e244]
+                      - generic [ref=f12e245]: Document
+                  - button "Keywords" [ref=f12e247] [cursor=pointer]
+                  - generic [ref=f12e252]:
+                    - generic [ref=f12e253]: Exclude keywords
+                    - generic [ref=f12e255]:
+                      - generic [ref=f12e256]:
+                        - generic: Exclude keyword
+                        - combobox "Exclude keyword" [ref=f12e258]
+                      - img "down" [ref=f12e260]
+                    - generic [ref=f12e263]: Use excluded keywords to remove items containing those terms.
+                    - generic [ref=f12e264]: 0 exclude keyword suggestions available
+                - generic [ref=f12e265]:
+                  - generic [ref=f12e266]:
+                    - generic [ref=f12e267]: Collection
+                    - combobox "Collection" [ref=f12e268]:
+                      - option "All items" [selected]
+                  - paragraph [ref=f12e269]: Create collections from bulk selection to organize related items.
+            - generic [ref=f12e270]:
+              - generic [ref=f12e272]:
+                - generic [ref=f12e273]:
+                  - generic [ref=f12e274]:
+                    - generic [ref=f12e275]: Results
+                    - generic [ref=f12e276]: 1 / 1
+                  - generic [ref=f12e277]:
+                    - button "Standard view" [pressed] [ref=f12e278] [cursor=pointer]
+                    - button "Compact view" [ref=f12e284] [cursor=pointer]
+                - 'button "Select media: uat-cycle4-multi-admin-sole" [ref=f12e287] [cursor=pointer]':
+                  - generic [ref=f12e288]:
+                    - button "Add to favorites" [ref=f12e293]
+                    - generic [ref=f12e296]:
+                      - generic [ref=f12e297]:
+                        - generic [ref=f12e298]: MEDIA
+                        - generic [ref=f12e299]: document
+                        - generic [ref=f12e300]: 1m ago
+                      - generic [ref=f12e301]: uat-cycle4-multi-admin-sole
+              - generic [ref=f12e302]:
+                - generic [ref=f12e303]:
+                  - generic [ref=f12e304]: 1 of 1 results
+                  - generic [ref=f12e305]:
+                    - generic [ref=f12e306]: "Per page:"
+                    - combobox "Per page:" [ref=f12e307]:
+                      - option "20" [selected]
+                      - option "50"
+                      - option "100"
+                - button "? for shortcuts" [ref=f12e309] [cursor=pointer]:
+                  - generic [ref=f12e310]: "?"
+                  - generic [ref=f12e311]: for shortcuts
+            - button "Library tools" [ref=f12e313] [cursor=pointer]
+          - button "Collapse sidebar" [ref=f12e318] [cursor=pointer]
+          - generic [ref=f12e322]:
+            - generic [ref=f12e324]:
+              - generic [ref=f12e325] [cursor=pointer]:
+                - checkbox "Show chapters/sections panel" [checked] [ref=f12e326]
+                - generic [ref=f12e327]: Show chapters/sections panel
+              - generic [ref=f12e328] [cursor=pointer]:
+                - checkbox "Allow generated fallback structure" [checked] [ref=f12e329]
+                - generic [ref=f12e330]: Allow generated fallback structure
+              - generic [ref=f12e331]: "Generated sections: 1"
+            - generic [ref=f12e332]:
+              - complementary "Chapters and sections" [ref=f12e333]:
+                - generic [ref=f12e334]:
+                  - generic [ref=f12e335]: Chapters/Sections
+                  - textbox "Jump to 12.5 or title" [ref=f12e340]
+                  - generic [ref=f12e341]: Cycle4 admin sole-item restore control The museum opens at 11:45 on Fridays. The exhibit contain...
+                - tree [ref=f12e342]:
+                  - button "1 Cycle4 admin sole-item restore control The museum opens at 11:45 on Fridays. The exhibit contain..." [ref=f12e346] [cursor=pointer]:
+                    - generic [ref=f12e347]: "1"
+                    - generic [ref=f12e348]: Cycle4 admin sole-item restore control The museum opens at 11:45 on Fridays. The exhibit contain...
+              - generic [ref=f12e349]:
+                - button "Create study pack" [ref=f12e351] [cursor=pointer]
+                - generic [ref=f12e352]:
+                  - generic [ref=f12e353]: Showing uat-cycle4-multi-admin-sole
+                  - generic [ref=f12e355]:
+                    - generic [ref=f12e356]:
+                      - button "Previous" [disabled] [ref=f12e357]
+                      - generic [ref=f12e360]: 1/1
+                      - button "Next" [disabled] [ref=f12e361]
+                    - heading "uat-cycle4-multi-admin-sole" [level=3] [ref=f12e364]
+                    - generic [ref=f12e365]:
+                      - button "Chat with this media" [ref=f12e366] [cursor=pointer]
+                      - button "Analyze" [ref=f12e369] [cursor=pointer]
+                      - button "Actions" [ref=f12e373] [cursor=pointer]
+                  - generic [ref=f12e379]:
+                    - generic [ref=f12e380]:
+                      - generic [ref=f12e381]: 34 Words
+                      - generic [ref=f12e385]: 1 min read
+                      - generic "Reading progress" [ref=f12e386]: 0% read
+                      - generic [ref=f12e387]: "Chunking: Completed"
+                      - generic [ref=f12e388]: "Vector: Pending"
+                    - button "Metadata details Show" [ref=f12e390] [cursor=pointer]:
+                      - generic [ref=f12e391]: Metadata details
+                      - generic [ref=f12e392]: Show
+                    - generic [ref=f12e394]:
+                      - generic [ref=f12e395]:
+                        - generic: Add keywords...
+                        - combobox [ref=f12e397]
+                      - img "down" [ref=f12e399]
+                    - generic [ref=f12e402]:
+                      - generic [ref=f12e403]:
+                        - button "Content" [ref=f12e404] [cursor=pointer]
+                        - generic [ref=f12e408]:
+                          - generic [ref=f12e409] [cursor=pointer]:
+                            - generic [ref=f12e410]:
+                              - generic "Auto" [ref=f12e411]
+                              - combobox "Display mode" [ref=f12e412]
+                            - img "down" [ref=f12e414]
+                          - group "Text size" [ref=f12e417]:
+                            - button "Text size S" [ref=f12e418] [cursor=pointer]: S
+                            - button "Text size M" [pressed] [ref=f12e419] [cursor=pointer]: M
+                            - button "Text size L" [ref=f12e420] [cursor=pointer]: L
+                          - button "Edit content" [ref=f12e421] [cursor=pointer]
+                          - button "Find in content" [ref=f12e424] [cursor=pointer]
+                      - region "Media content" [ref=f12e431]:
+                        - paragraph [ref=f12e433]: Cycle4 admin sole-item restore control The museum opens at 11:45 on Fridays. The exhibit contains six bronze bells. This synthetic source exists only to verify delete and restore with an otherwise empty admin library.
+                    - generic [ref=f12e434]:
+                      - generic [ref=f12e435]:
+                        - button "Analysis" [ref=f12e436] [cursor=pointer]
+                        - button "Generate" [ref=f12e441] [cursor=pointer]
+                      - generic [ref=f12e445]: No analysis yet
+                    - generic [ref=f12e447]:
+                      - button "Statistics" [ref=f12e448] [cursor=pointer]
+                      - generic [ref=f12e453]:
+                        - generic [ref=f12e454]:
+                          - generic [ref=f12e455]: Words
+                          - generic [ref=f12e456]: "34"
+                        - generic [ref=f12e457]:
+                          - generic [ref=f12e458]: Characters
+                          - generic [ref=f12e459]: "217"
+                        - generic [ref=f12e460]:
+                          - generic [ref=f12e461]: Paragraphs
+                          - generic [ref=f12e462]: "1"
+                    - button "Metadata" [ref=f12e464] [cursor=pointer]
+                    - button "Document Intelligence" [ref=f12e469] [cursor=pointer]
+                    - button "Version History" [ref=f12e475] [cursor=pointer]
+                    - button "Delete item" [ref=f12e485] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f12e15] [cursor=pointer]
+  - alert [ref=f12e19]: Media | tldw
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T01-28-45-973Z.log#L3-L6

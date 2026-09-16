@@ -1,0 +1,11 @@
+{
+  "checkedAt": "2026-09-16T01:34:53.767Z",
+  "identity": "admin",
+  "verifierAuth": "reuse",
+  "method": "GET",
+  "path": "/api/v1/users/me/profile?sections=quotas",
+  "status": 403,
+  "body": {
+    "detail": "Email verification required"
+  }
+}

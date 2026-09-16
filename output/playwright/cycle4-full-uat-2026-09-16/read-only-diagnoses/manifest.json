@@ -1,0 +1,381 @@
+{
+  "recordedAt": "2026-09-16T02:07:59.178Z",
+  "productFreeze": "7c9409fad2",
+  "purpose": "Read-only diagnoses and deliberately failing private probes; not passing acceptance tests",
+  "exactRuntimeCredentialHits": 0,
+  "jwtPrivateKeyHits": 0,
+  "entries": [
+    {
+      "path": "uat-cycle4-disconnect-and-message-identity-diagnosis.md",
+      "originalPath": "/private/tmp/uat-cycle4-disconnect-and-message-identity-diagnosis.md",
+      "bytes": 6629,
+      "sha256": "0da8e08a313f63c25015bb082b47a20805ff802ae85ecd37b3e7563b5fa46873"
+    },
+    {
+      "path": "uat-cycle4-model-and-connections-diagnosis-manifest.json",
+      "originalPath": "/private/tmp/uat-cycle4-model-and-connections-diagnosis-manifest.json",
+      "bytes": 3957,
+      "sha256": "3a971b55cc59925f7c83573809c2cdf8535fcad2b44fe74bf5c15cceff6fdc92"
+    },
+    {
+      "path": "uat-cycle4-model-and-connections-diagnosis.md",
+      "originalPath": "/private/tmp/uat-cycle4-model-and-connections-diagnosis.md",
+      "bytes": 5884,
+      "sha256": "c0330e125f3b106ee7645aaca0ad5e643bb12485e57014cf3f7cc1f20cca314f"
+    },
+    {
+      "path": "uat-media-model-selection-readonly.config.ts",
+      "originalPath": "/private/tmp/uat-media-model-selection-readonly.config.ts",
+      "bytes": 3301,
+      "sha256": "37d27e88480fb6b88c7e1e4999f8532e26556c7d2238cb83983c40d93a5f73db"
+    },
+    {
+      "path": "uat-media-model-selection-readonly.log",
+      "originalPath": "/private/tmp/uat-media-model-selection-readonly.log",
+      "bytes": 3322,
+      "sha256": "cca315e691e927b8ae7f25e914a5b3bdc3a10051a2cee3a98630890d6de9b20c"
+    },
+    {
+      "path": "uat-notifications-hidden-stream-readonly.config.ts",
+      "originalPath": "/private/tmp/uat-notifications-hidden-stream-readonly.config.ts",
+      "bytes": 2090,
+      "sha256": "224f9d3874656053a61840d69625dba5356c0c3587885dfc90d4ba3a274342a9"
+    },
+    {
+      "path": "uat-notifications-hidden-stream-readonly.log",
+      "originalPath": "/private/tmp/uat-notifications-hidden-stream-readonly.log",
+      "bytes": 5480,
+      "sha256": "e07d0d67ef85705baf5b5134e098c3f4921229756f0b7d8e52d60a6134a8d2d7"
+    },
+    {
+      "path": "uat103-diagnosis-manifest.json",
+      "originalPath": "/private/tmp/uat103-diagnosis-manifest.json",
+      "bytes": 994,
+      "sha256": "9bf5ca6fe2c5b732065d45ec09c53212e5014d85d3ed44a7b86f4cc1b04933cf"
+    },
+    {
+      "path": "uat103-mirror-controls.config.ts",
+      "originalPath": "/private/tmp/uat103-mirror-controls.config.ts",
+      "bytes": 3831,
+      "sha256": "cc4b17be32ee2087008d34b0fafea6c255cdb31868f9fdd90533270eb2c5f4aa"
+    },
+    {
+      "path": "uat103-mirror-controls.log",
+      "originalPath": "/private/tmp/uat103-mirror-controls.log",
+      "bytes": 3555,
+      "sha256": "7b0693b4ad1d0182c66669ae26526bc5d4c81fdff11b598d2ec806de7d9e8a13"
+    },
+    {
+      "path": "uat103-mirror-probe-red.log",
+      "originalPath": "/private/tmp/uat103-mirror-probe-red.log",
+      "bytes": 4055,
+      "sha256": "ac6500003b1bab4e10883e86756ab86850db1ac1fc38cb1ee677ead486c04767"
+    },
+    {
+      "path": "uat103-mirror-probe.config.ts",
+      "originalPath": "/private/tmp/uat103-mirror-probe.config.ts",
+      "bytes": 3523,
+      "sha256": "9e5bedad48e6c13a1d1ce62ab40e8b8d0bf65881468928694aefff2ecb47800e"
+    },
+    {
+      "path": "uat103-mirror-probe.log",
+      "originalPath": "/private/tmp/uat103-mirror-probe.log",
+      "bytes": 2097,
+      "sha256": "631ffbb0387a6a9323b616680ce1c82d873c78618f977a08fff9d05fa394594a"
+    },
+    {
+      "path": "uat103-read-only-diagnosis.md",
+      "originalPath": "/private/tmp/uat103-read-only-diagnosis.md",
+      "bytes": 10490,
+      "sha256": "91bb8afaddcaeb56eb21f4ec5a361f668de9314939f3e9c1f363613617807e8e"
+    },
+    {
+      "path": "uat103-read-only-mirror.js",
+      "originalPath": "/private/tmp/uat103-read-only-mirror.js",
+      "bytes": 1641,
+      "sha256": "38c7d4652710c0c73aec03203c0d1dc115ca8b17928b0e39eded4b8652e16a48"
+    },
+    {
+      "path": "uat104-diagnosis-manifest.json",
+      "originalPath": "/private/tmp/uat104-diagnosis-manifest.json",
+      "bytes": 2136,
+      "sha256": "53805a87ef8c69d4e741f0e40fb950254581294f8cfde21a3d276fc21a4ecf88"
+    },
+    {
+      "path": "uat104-minimize-diagnosis.md",
+      "originalPath": "/private/tmp/uat104-minimize-diagnosis.md",
+      "bytes": 4471,
+      "sha256": "643cdd574812b9f6bcc184a6684d49e819479ab993e98fb44941134d0acdb9d2"
+    },
+    {
+      "path": "uat104-minimize-readonly.config.ts",
+      "originalPath": "/private/tmp/uat104-minimize-readonly.config.ts",
+      "bytes": 3663,
+      "sha256": "a759ec19dae3a6ef22daf8fba28fa332122b9808bc581538682b827c911aa0ff"
+    },
+    {
+      "path": "uat104-minimize-readonly.log",
+      "originalPath": "/private/tmp/uat104-minimize-readonly.log",
+      "bytes": 5652,
+      "sha256": "2d8f93cfd9e005ccced0dd76b09affc092bf54be476032c772e2d64c96cfe4b3"
+    },
+    {
+      "path": "uat105-frozen-source-comparison.json",
+      "originalPath": "/private/tmp/uat105-frozen-source-comparison.json",
+      "bytes": 1251,
+      "sha256": "849b059a4a1a24da8485777980ab0e313cfa175415e335c4c47a974cb6874e5a"
+    },
+    {
+      "path": "uat105-offline-normalization-probe.py",
+      "originalPath": "/private/tmp/uat105-offline-normalization-probe.py",
+      "bytes": 6613,
+      "sha256": "2ef3ff944276af11d260124f10746ab3a232f9dd0529f904cf3812fdc25ee352"
+    },
+    {
+      "path": "uat105-offline-normalization-red.log",
+      "originalPath": "/private/tmp/uat105-offline-normalization-red.log",
+      "bytes": 4156,
+      "sha256": "0407c784e5ddbdd1653e091bd0a102c317a5e5d396e67f7183c3cb2da5b4c0a4"
+    },
+    {
+      "path": "uat105-offline-normalization-result.json",
+      "originalPath": "/private/tmp/uat105-offline-normalization-result.json",
+      "bytes": 3651,
+      "sha256": "d56aa1e38f5e268706ec2406af54e233838ff54e7b01694880dd6fd1dbe59df9"
+    },
+    {
+      "path": "uat105-readonly-diagnosis.md",
+      "originalPath": "/private/tmp/uat105-readonly-diagnosis.md",
+      "bytes": 9295,
+      "sha256": "89c84ece25fb265a66c0c5e267df809d9b3e9f79647c6a59144ca06ed8ccb65f"
+    },
+    {
+      "path": "uat106-112-private-artifact-manifest.json",
+      "originalPath": "/private/tmp/uat106-112-private-artifact-manifest.json",
+      "bytes": 1893,
+      "sha256": "4d53d9932ece5ca5a4e2e019f36753ee932ef2e07f2a30bdac4dd9a30447ac32"
+    },
+    {
+      "path": "uat106-frozen-source-comparison.json",
+      "originalPath": "/private/tmp/uat106-frozen-source-comparison.json",
+      "bytes": 4311,
+      "sha256": "ec20e20d3b6f440746b3a1f48aa0a81d5bd09803b425b94d426a22cbbbe9661b"
+    },
+    {
+      "path": "uat106-readonly-diagnosis.md",
+      "originalPath": "/private/tmp/uat106-readonly-diagnosis.md",
+      "bytes": 8330,
+      "sha256": "e660b5a883575bc0ac38caceeff0183dcb83c97626a9090c65a0fd15143594b1"
+    },
+    {
+      "path": "uat106-setup-model-cases.txt",
+      "originalPath": "/private/tmp/uat106-setup-model-cases.txt",
+      "bytes": 3321,
+      "sha256": "89b3b1524007d043a26f9eebff5b22b182aef66162065637f9561b142182d0af"
+    },
+    {
+      "path": "uat106-setup-model-red.log",
+      "originalPath": "/private/tmp/uat106-setup-model-red.log",
+      "bytes": 4741,
+      "sha256": "e79764cd9ebc1869a80b05a9badba3430bd881a2a948d131e2d97318fb1ec027"
+    },
+    {
+      "path": "uat106-setup-model.config.ts",
+      "originalPath": "/private/tmp/uat106-setup-model.config.ts",
+      "bytes": 1110,
+      "sha256": "9c3a37f9cb77b0ee3c2d23c1d923fc4025c33c73618795166958372f1529bdbe"
+    },
+    {
+      "path": "uat107-108-diagnosis-manifest.json",
+      "originalPath": "/private/tmp/uat107-108-diagnosis-manifest.json",
+      "bytes": 2899,
+      "sha256": "cad509ca5a234f037bbeb6a8fd66be8d8f3b03c1f74f3c78c20e7bbd24ff4f0e"
+    },
+    {
+      "path": "uat107-108-read-only-diagnosis.md",
+      "originalPath": "/private/tmp/uat107-108-read-only-diagnosis.md",
+      "bytes": 8881,
+      "sha256": "92f1264e3322ba328c0db222051759a02e3d3a5e8572764b1e786d87cda61349"
+    },
+    {
+      "path": "uat107-offline-inventory-probe.json",
+      "originalPath": "/private/tmp/uat107-offline-inventory-probe.json",
+      "bytes": 724,
+      "sha256": "ad548022234c98b99061c7f24d3a1eb343f1013283340fff5aae3ef5efea5321"
+    },
+    {
+      "path": "uat107-offline-inventory-probe.py",
+      "originalPath": "/private/tmp/uat107-offline-inventory-probe.py",
+      "bytes": 4640,
+      "sha256": "c30cdf1f7301d30a71f4c4213f196b4b236b1f8881573edfa8320675753d95e1"
+    },
+    {
+      "path": "uat108-history-probe-red.log",
+      "originalPath": "/private/tmp/uat108-history-probe-red.log",
+      "bytes": 1553,
+      "sha256": "17481005958bcbdb6591f6b2cffb10ef4df3876d8112607647181e02cf9fd44a"
+    },
+    {
+      "path": "uat108-history-probe-startup-error.log",
+      "originalPath": "/private/tmp/uat108-history-probe-startup-error.log",
+      "bytes": 782,
+      "sha256": "6420eb457ff84d4cbb77f966eab7fce78dc6671d2af5a03996039c72560314e6"
+    },
+    {
+      "path": "uat108-history-probe.config.ts",
+      "originalPath": "/private/tmp/uat108-history-probe.config.ts",
+      "bytes": 2390,
+      "sha256": "d8fba20dca1543eaf40c2552e39d82c6fcb66e6c5a7f4abc25e4a86a57992057"
+    },
+    {
+      "path": "uat109-110-diagnosis-manifest.json",
+      "originalPath": "/private/tmp/uat109-110-diagnosis-manifest.json",
+      "bytes": 2862,
+      "sha256": "9cdb41c7f38cfa2765cf4f406d99310ce0bf21ec81b0953445abc44c5280b760"
+    },
+    {
+      "path": "uat109-110-failure-diagnosis.md",
+      "originalPath": "/private/tmp/uat109-110-failure-diagnosis.md",
+      "bytes": 6431,
+      "sha256": "9630839b5480edd53c076152e7e581d52a82bb56b20fda494fc181dcb670d99e"
+    },
+    {
+      "path": "uat109-idle-cleanup-harness-credential-gap.config.ts",
+      "originalPath": "/private/tmp/uat109-idle-cleanup-harness-credential-gap.config.ts",
+      "bytes": 2372,
+      "sha256": "272473d36937a645345aa918aa84fc26c21cd7c0e65663f2ebff11a80cc1964d"
+    },
+    {
+      "path": "uat109-idle-cleanup-harness-credential-gap.log",
+      "originalPath": "/private/tmp/uat109-idle-cleanup-harness-credential-gap.log",
+      "bytes": 11423,
+      "sha256": "56a8fa277be7adb4010f78f8513cb060c6f4bff8fb9d06171c31db878c59eb39"
+    },
+    {
+      "path": "uat109-idle-cleanup-readonly.config.ts",
+      "originalPath": "/private/tmp/uat109-idle-cleanup-readonly.config.ts",
+      "bytes": 2479,
+      "sha256": "7b8fe1d8e58db6c885659bedb4ada2b0a4f1e1770a25b732f2f71b86d92c089e"
+    },
+    {
+      "path": "uat109-idle-cleanup-readonly.log",
+      "originalPath": "/private/tmp/uat109-idle-cleanup-readonly.log",
+      "bytes": 11519,
+      "sha256": "761046a442f483df527e29aaa009aff061556a53b2c7c4af6b41424f6b778e58"
+    },
+    {
+      "path": "uat109-qa-handler-readonly.config.ts",
+      "originalPath": "/private/tmp/uat109-qa-handler-readonly.config.ts",
+      "bytes": 1924,
+      "sha256": "5f5e9332e097d6fe7e26ee27764c6a1f9ed7178c844d04ca9d8ec3232876a629"
+    },
+    {
+      "path": "uat109-qa-handler-readonly.log",
+      "originalPath": "/private/tmp/uat109-qa-handler-readonly.log",
+      "bytes": 3921,
+      "sha256": "bda23ee1e751c6ced976ee83a9518f77d713c0bb8bac1e0fccaa7911844f459b"
+    },
+    {
+      "path": "uat110-analysis-catch-readonly.config.ts",
+      "originalPath": "/private/tmp/uat110-analysis-catch-readonly.config.ts",
+      "bytes": 2757,
+      "sha256": "ce597aed284a87da7e7b9cdcf26b2e333aa82493b21a12f4f98509d911b7d19e"
+    },
+    {
+      "path": "uat110-analysis-catch-readonly.log",
+      "originalPath": "/private/tmp/uat110-analysis-catch-readonly.log",
+      "bytes": 2928,
+      "sha256": "d25b3d6bea4a7e3d50952ca642eb1c6d1166d8387f20e0eeed742ddee0bbe374"
+    },
+    {
+      "path": "uat111-diagnosis-manifest.json",
+      "originalPath": "/private/tmp/uat111-diagnosis-manifest.json",
+      "bytes": 1857,
+      "sha256": "843515b0ce5687efde429d11af47a14414bb5f7b44559edb380576d3d94a0d8e"
+    },
+    {
+      "path": "uat111-note-backlink-full-probe-red.log",
+      "originalPath": "/private/tmp/uat111-note-backlink-full-probe-red.log",
+      "bytes": 10315,
+      "sha256": "c6ab6ab76f7f364eb92b3c54414d1cabd56db595230f70d380de45b6ea87de0d"
+    },
+    {
+      "path": "uat111-note-backlink-probe-red.log",
+      "originalPath": "/private/tmp/uat111-note-backlink-probe-red.log",
+      "bytes": 10254,
+      "sha256": "0ebfa9cded4292ddde5ece6f3a67078f5a5fe1530adcf22088dc35bf545a484c"
+    },
+    {
+      "path": "uat111-note-backlink-probe.config.ts",
+      "originalPath": "/private/tmp/uat111-note-backlink-probe.config.ts",
+      "bytes": 3741,
+      "sha256": "816073073bf4957ec9bab7e88424af4b6936289b5db6028aad7f23660ff2ecd3"
+    },
+    {
+      "path": "uat111-read-only-diagnosis.md",
+      "originalPath": "/private/tmp/uat111-read-only-diagnosis.md",
+      "bytes": 5933,
+      "sha256": "90d1405fce0808a72560bb5a0ccf12f8018db8da09a5fa6d37f1d9f3cb62f6f3"
+    },
+    {
+      "path": "uat112-accessible-name-red.log",
+      "originalPath": "/private/tmp/uat112-accessible-name-red.log",
+      "bytes": 2207,
+      "sha256": "3337112811a4d76993092cf25faa8bb9ea39d0d55de7e3f114f4059fdf3502ee"
+    },
+    {
+      "path": "uat112-accessible-name.config.ts",
+      "originalPath": "/private/tmp/uat112-accessible-name.config.ts",
+      "bytes": 1558,
+      "sha256": "a3c6de2e75d1a7759a2ca4112adfc70850d4948178ca22e334675877019837b7"
+    },
+    {
+      "path": "uat112-frozen-source-comparison.json",
+      "originalPath": "/private/tmp/uat112-frozen-source-comparison.json",
+      "bytes": 979,
+      "sha256": "218145df2a8b409d3a0d13171d2905c690428f74940464693199d7527c77dc92"
+    },
+    {
+      "path": "uat112-readonly-diagnosis.md",
+      "originalPath": "/private/tmp/uat112-readonly-diagnosis.md",
+      "bytes": 3482,
+      "sha256": "507200667049161a72182b1fd2ab967d9e7fa21dd9d7cd5b1127fd24e10c389a"
+    },
+    {
+      "path": "uat113-frozen-source-comparison.json",
+      "originalPath": "/private/tmp/uat113-frozen-source-comparison.json",
+      "bytes": 1587,
+      "sha256": "7a57f65f3b93dd53bb0d729629ffb5a63f278c333f9c7a904fac8fa7ff68e91b"
+    },
+    {
+      "path": "uat113-readonly-diagnosis.md",
+      "originalPath": "/private/tmp/uat113-readonly-diagnosis.md",
+      "bytes": 7491,
+      "sha256": "39b9c98ee386d373a6590c9aa28254a47381883abbf6d9ab28cb5026bf835c69"
+    },
+    {
+      "path": "uat113-route-session-cases.txt",
+      "originalPath": "/private/tmp/uat113-route-session-cases.txt",
+      "bytes": 2855,
+      "sha256": "d3120ba698605749b4903c535ea3f0276d9928dbeaa7338e2be9a81e146462c1"
+    },
+    {
+      "path": "uat113-route-session-fixture-initial.log",
+      "originalPath": "/private/tmp/uat113-route-session-fixture-initial.log",
+      "bytes": 16913,
+      "sha256": "71c3ee811dde56f309498064db0b5cb1b8d3633fae2133b4823c6eea2a8429c3"
+    },
+    {
+      "path": "uat113-route-session-red.log",
+      "originalPath": "/private/tmp/uat113-route-session-red.log",
+      "bytes": 6571,
+      "sha256": "587e1c7d54428611bcc53e8388470b889971b3db20c2c78cf812e90f34b925d6"
+    },
+    {
+      "path": "uat113-route-session.config.ts",
+      "originalPath": "/private/tmp/uat113-route-session.config.ts",
+      "bytes": 1302,
+      "sha256": "82ba4572451f1b5197e78d6a378b24af63936d364eaa4fc1a08fb27dc2afe156"
+    }
+  ]
+}

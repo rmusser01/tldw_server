@@ -1,0 +1,6 @@
+### Result
+{"immediate":"Generate\nModel\ngemma3:1b\ngemma3:1b\nPrompt presets\nShow presets\nSystem prompt\nUser prompt prefix(prepended before content)\nSave as default\nCancel\nGenerate","settled":"Generate\nModel\ngemma3:1b\ngemma3:1b\nPrompt presets\nShow presets\nSystem prompt\nUser prompt prefix(prepended before content)\nSave as default\nCancel\nGenerate"}
+### Ran Playwright code
+```js
+await (async page => { await page.getByTitle("../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",{exact:true}).click({timeout:5000}); const immediate=await page.getByRole("dialog",{name:"Generate",exact:true}).innerText(); await page.waitForTimeout(1000); return {immediate,settled:await page.getByRole("dialog",{name:"Generate",exact:true}).innerText()}; })(page);
+```

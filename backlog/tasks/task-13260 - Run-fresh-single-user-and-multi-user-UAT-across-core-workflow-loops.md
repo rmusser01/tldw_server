@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 01:00'
+updated_date: '2026-09-16 02:13'
 labels:
   - uat
   - testing
@@ -125,6 +125,8 @@ Current targeted repair total is46findings (17P2/29P3), adding mobileHeader098, 
 Cycle3 repair checkpoints complete through UAT101: source7c9409fad2 includes reviewed mobileMedia correction;33/37/39/40/41/42 targeted tasks now Done. Exact finalMedia85/16 and independent56/7 overlap; compiler90baseline unchanged. Final multiCedar Note backlink/reload and singleMedia ownedprogress save/reload/mobilecontrols pass, retained dedicated bundles. New cycle4 profiles single/multi20260916 created empty, initialized via normalAuthNZ; adminCLI provisioned. Existing dependencies reused, oldcycle3data retained and only stopped generatedNextcaches cleared. API/UI18300/18380 single and18301/18381 multi started. Productfreeze7c9409fad2, no new fullworkflow passes yet; run same12namedmatrix with realinference, separate running artifacts and globalissue tracker updates.
 
 Cycle4 remains frozen at product7c9409fad2 while fresh single and multi matrices run. New observed findings UAT102-110 tracked in children43-50. Setup succeeds; single ordinary Chat blocked by failing initial selection and stale advertised-model validation (read-only diagnosis), multi reload duplicates client users. No repair source changes during this pass. Global and per-mode running trackers updated.
+
+Cycle4 frozen execution closed on product7c9409fad2. Both mode FINAL_REPORT matrices retained;16new findings102-117 map to43-57 plus scope follow-ups058/067. Independent evidence review verified203single hashes and62diagnosis hashes;28multi JSON parse; no material outcome contradictions. Correcting historical current-status/provider labels before checkpoint. Single disconnected local Chat is expected connection-only retention; no cross-account leakage claim. Full acceptance is not achieved. Next: preserve checkpoint, integrate newer dev under32, execute cycle4 repairs and focused verification before another full fresh pass.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

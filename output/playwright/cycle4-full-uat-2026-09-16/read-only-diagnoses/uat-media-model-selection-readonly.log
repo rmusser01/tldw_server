@@ -1,0 +1,49 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:65658) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx > AnalysisModal stage 3 regression coverage > read-only actual WebUI model selection with store owner=false
+MODEL_SELECTION {"withOwner":false,"selected":"tldw:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf","persisted":"\"tldw:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf\"","store":"tldw:gemma3:1b","sent":"../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"}
+
+stdout | src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx > AnalysisModal stage 3 regression coverage > read-only actual WebUI model selection with store owner=true
+MODEL_SELECTION {"withOwner":true,"selected":"tldw:gemma3:1b","persisted":"\"tldw:gemma3:1b\"","store":"tldw:gemma3:1b","sent":"gemma3:1b"}
+
+ ❯ src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx (12 tests | 1 failed | 10 skipped) 175ms
+     ✓ read-only actual WebUI model selection with store owner=false 116ms
+     × read-only actual WebUI model selection with store owner=true 59ms
+     ↓ uses the persisted selected model while the catalog is still loading
+     ↓ normalizes a JSON-serialized persisted model before generation
+     ↓ waits for the catalog when no persisted model is selected
+     ↓ falls back to the live catalog when a persisted model is no longer available
+     ↓ preserves preset/custom prompt behavior and sends expected request body
+     ↓ notifies consumers only after the generated analysis is persisted
+     ↓ does not accept a stale prior analysis as persistence evidence
+     ↓ accepts a generated analysis returned only through media versions
+     ↓ recovers missing media content from a cache-busted detail request
+     ↓ shows provider recovery copy when generation fails without a provider
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx > AnalysisModal stage 3 regression coverage > read-only actual WebUI model selection with store owner=true
+AssertionError: expected 'gemma3:1b' to be '../../../Working/Language_Models/gemm…' // Object.is equality
+
+Expected: "../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
+Received: "gemma3:1b"
+
+ ❯ src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx:146:22
+    144|     mocks.messageWarning.mockReset()
+    145|     mocks.messageInfo.mockReset()
+    146|     mocks.setSelectedModel.mockReset()
+       |                      ^
+    147|     state.selectedModel = undefined
+    148| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 10 skipped (12)
+   Start at  18:44:04
+   Duration  1.56s (transform 194ms, setup 118ms, import 797ms, tests 175ms, environment 376ms)
+

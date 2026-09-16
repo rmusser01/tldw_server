@@ -1,0 +1,116 @@
+### Open tabs
+- 0: (current) [Knowledge | tldw](http://127.0.0.1:18381/knowledge)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: [Cycle4 Cedar Guide Chat (20260916_010755) | tldw](http://127.0.0.1:18381/chat)
+- 3: [Sign in | tldw](http://127.0.0.1:18381/login)
+### Page
+- Page URL: http://127.0.0.1:18381/knowledge
+- Page Title: Knowledge | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f8e20]:
+  - generic [ref=f8e23]:
+    - link "Skip to main content" [ref=f8e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f8e25]:
+      - button "Expand sidebar" [ref=f8e26] [cursor=pointer]
+      - button "New Chat" [ref=f8e30] [cursor=pointer]
+      - generic [ref=f8e33]:
+        - button "Quick Ingest" [ref=f8e34] [cursor=pointer]
+        - button "Chat" [ref=f8e38] [cursor=pointer]
+        - button "Prompts" [ref=f8e41] [cursor=pointer]
+        - button "Characters" [ref=f8e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f8e50] [cursor=pointer]
+        - button "World Books" [ref=f8e54] [cursor=pointer]
+        - button "Notes" [ref=f8e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f8e61] [cursor=pointer]
+        - button "Media" [ref=f8e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f8e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f8e78] [cursor=pointer]
+        - button "Kanban" [ref=f8e84] [cursor=pointer]
+        - button "Watchlists" [ref=f8e86] [cursor=pointer]
+      - generic [ref=f8e91]:
+        - button "Open Notes Dock" [ref=f8e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f8e97] [cursor=pointer]
+        - button "Settings" [ref=f8e100] [cursor=pointer]
+    - main [ref=f8e104]:
+      - generic [ref=f8e105]:
+        - generic [ref=f8e108]:
+          - generic [ref=f8e109]:
+            - button "Expand sidebar" [ref=f8e110] [cursor=pointer]
+            - generic [ref=f8e112]:
+              - img "tldw Assistant" [ref=f8e113]
+              - generic [ref=f8e114]: tldw Assistant
+              - button "Companion Home" [ref=f8e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f8e119] [cursor=pointer]
+          - generic [ref=f8e122]:
+            - button "Search - Open command palette" [ref=f8e123] [cursor=pointer]:
+              - generic [ref=f8e127]: Search
+              - generic [ref=f8e128]: ⌘K
+            - button "Open settings" [ref=f8e129] [cursor=pointer]
+            - generic [ref=f8e141]:
+              - button "Notifications, 0 unread" [ref=f8e142] [cursor=pointer]
+              - status [ref=f8e146]: Notifications are active
+            - button "Switch to light theme" [ref=f8e147] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f8e154] [cursor=pointer]:
+              - generic [ref=f8e155]: "?"
+        - generic [ref=f8e159]:
+          - link "Skip to search" [ref=f8e160] [cursor=pointer]:
+            - /url: "#knowledge-search-input"
+          - main [ref=f8e161]:
+            - generic [ref=f8e162]:
+              - generic [ref=f8e164]:
+                - generic [ref=f8e165]:
+                  - 'button "Open source scope and saved profiles. Sources: 4 selected" [ref=f8e166] [cursor=pointer]': "Sources: 4 selected"
+                  - button "Fast" [ref=f8e435] [cursor=pointer]
+                  - button "Web fallback is currently disabled. Click to toggle." [ref=f8e176] [cursor=pointer]: Web
+                  - button "Choose answer model" [ref=f8e181] [cursor=pointer]:
+                    - generic [ref=f8e185]: "AI: Server default"
+                  - button "Refresh source health" [ref=f8e188] [cursor=pointer]: "Sources ready: 8 of 8"
+                  - button "Open Knowledge QA settings" [ref=f8e189] [cursor=pointer]
+                - generic [ref=f8e268]:
+                  - paragraph [ref=f8e269]: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
+                  - generic [ref=f8e270]:
+                    - textbox "Search your knowledge base" [ref=f8e271]:
+                      - /placeholder: Compare the conclusions across my PDFs
+                      - text: What is the private planning date for Project Indigo?
+                    - button "Clear search" [ref=f8e438] [cursor=pointer]
+                    - button "Ask" [ref=f8e273] [cursor=pointer]
+                  - status [ref=f8e442]: Security settings excluded all retrieved sources. Review Knowledge QA's security settings with your server operator.
+                  - generic [ref=f8e274]: Press / to focus, Cmd+K for new search
+              - generic [ref=f8e444]:
+                - generic [ref=f8e452]:
+                  - heading "No results found" [level=2] [ref=f8e453]
+                  - paragraph [ref=f8e454]: Try broader keywords, broaden the source scope, check source readiness and search diagnostics, or enable web fallback for recovery.
+                  - paragraph [ref=f8e455]: Web fallback uses your configured server default provider. Queries stay on your tldw server unless you enable web fallback.
+                  - generic [ref=f8e456]:
+                    - heading "Source readiness" [level=3] [ref=f8e457]
+                    - list [ref=f8e458]:
+                      - listitem [ref=f8e459]: "Documents & Media: ready"
+                      - listitem [ref=f8e460]: "Notes: ready"
+                      - listitem [ref=f8e461]: "Characters: ready"
+                      - listitem [ref=f8e462]: "Chats: ready"
+                  - generic [ref=f8e463]:
+                    - heading "Recovery reasons" [level=3] [ref=f8e464]
+                    - list [ref=f8e465]:
+                      - listitem [ref=f8e466]: No searchable evidence was returned.
+                  - list [ref=f8e467]:
+                    - listitem [ref=f8e468]: Try different keywords or fewer constraints.
+                    - listitem [ref=f8e469]: Broaden the question before adding details.
+                    - listitem [ref=f8e470]: Confirm your sources were ingested and indexed.
+                  - generic [ref=f8e471]:
+                    - button "Open Quick Ingest" [ref=f8e472] [cursor=pointer]
+                    - link "Open source page" [ref=f8e473] [cursor=pointer]:
+                      - /url: /sources
+                    - button "Broaden source scope" [ref=f8e474] [cursor=pointer]
+                    - button "Enable web fallback" [ref=f8e475] [cursor=pointer]
+                - generic: Security settings excluded all retrieved sources. Review Knowledge QA's security settings with your server operator.
+            - complementary "Open evidence panel" [ref=f8e478]:
+              - button "Open evidence panel (0 sources)" [ref=f8e479] [cursor=pointer]
+          - generic [ref=f8e276]:
+            - button "Switch to detailed view" [ref=f8e277] [cursor=pointer]
+            - link "Help & Documentation" [ref=f8e281] [cursor=pointer]:
+              - /url: https://github.com/rmusser01/tldw_server2#readme
+  - button "Open Next.js Dev Tools" [ref=f8e15] [cursor=pointer]
+  - alert [ref=f8e19]
+```

@@ -1,0 +1,271 @@
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18381/knowledge)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: [Chat | tldw](http://127.0.0.1:18381/chat?mode=character&characterId=4)
+- 3: (current) [Media | tldw](http://127.0.0.1:18381/media?id=1)
+### Page
+- Page URL: http://127.0.0.1:18381/media?id=1
+- Page Title: Media | tldw
+- Console: 2 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e4]:
+    - link "Skip to main content" [ref=e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e6]:
+      - button "Expand sidebar" [ref=e7] [cursor=pointer]
+      - button "New Chat" [ref=e11] [cursor=pointer]
+      - generic [ref=e14]:
+        - button "Quick Ingest" [ref=e15] [cursor=pointer]
+        - button "Chat" [ref=e19] [cursor=pointer]
+        - button "Prompts" [ref=e22] [cursor=pointer]
+        - button "Characters" [ref=e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e31] [cursor=pointer]
+        - button "World Books" [ref=e35] [cursor=pointer]
+        - button "Notes" [ref=e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=e42] [cursor=pointer]
+        - button "Media" [ref=e50] [cursor=pointer]
+        - button "Document Workspace" [ref=e53] [cursor=pointer]
+        - button "Research Workspace" [ref=e59] [cursor=pointer]
+        - button "Kanban" [ref=e65] [cursor=pointer]
+        - button "Watchlists" [ref=e67] [cursor=pointer]
+      - generic [ref=e72]:
+        - button "Open Notes Dock" [ref=e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e78] [cursor=pointer]
+        - button "Settings" [ref=e81] [cursor=pointer]
+    - main [ref=e85]:
+      - generic [ref=e86]:
+        - generic [ref=e89]:
+          - generic [ref=e90]:
+            - button "Expand sidebar" [ref=e91] [cursor=pointer]
+            - generic [ref=e93]:
+              - img "tldw Assistant" [ref=e94]
+              - generic [ref=e95]: tldw Assistant
+              - button "Companion Home" [ref=e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=e100] [cursor=pointer]
+          - generic [ref=e103]:
+            - button "Search - Open command palette" [ref=e104] [cursor=pointer]:
+              - generic [ref=e108]: Search
+              - generic [ref=e109]: ⌘K
+            - button "Open settings" [ref=e110] [cursor=pointer]
+            - generic [ref=e122]:
+              - button "Notifications, 0 unread" [ref=e123] [cursor=pointer]
+              - status [ref=e127]: Notifications are active
+            - button "Switch to light theme" [ref=e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e135] [cursor=pointer]:
+              - generic [ref=e136]: "?"
+        - generic [ref=e138]:
+          - generic [ref=e140]:
+            - generic [ref=e141]:
+              - generic [ref=e142]:
+                - heading "Media Inspector" [level=1] [ref=e143]
+                - generic [ref=e144]:
+                  - generic [ref=e145]: 1 / 1
+                  - button "Trash" [ref=e146] [cursor=pointer]
+                  - button "Bulk" [ref=e150] [cursor=pointer]
+              - generic [ref=e153]:
+                - button "Show media only" [pressed] [ref=e154] [cursor=pointer]:
+                  - generic [ref=e155]: Media
+                  - generic [ref=e156]: "1"
+                - button "Show notes only" [ref=e157] [cursor=pointer]:
+                  - generic [ref=e158]: Notes
+                  - generic [ref=e159]: "0"
+            - generic [ref=e161]:
+              - generic [ref=e162]:
+                - generic [ref=e163]: Find media
+                - button "Collapse find media panel" [expanded] [ref=e165] [cursor=pointer]
+              - generic [ref=e168]:
+                - generic [ref=e169]:
+                  - textbox "Search media (title/content)" [ref=e174]
+                  - button "Search syntax help" [ref=e176] [cursor=pointer]: "?"
+                - button "Search" [ref=e177] [cursor=pointer]
+                - generic [ref=e178]:
+                  - generic [ref=e179]:
+                    - generic [ref=e180]: Filters
+                    - button "Clear all" [ref=e184] [cursor=pointer]
+                  - generic [ref=e185]:
+                    - generic [ref=e186]: Search mode
+                    - generic [ref=e187]:
+                      - button "Full-text search" [pressed] [ref=e188] [cursor=pointer]: Full-text
+                      - button "Metadata search" [ref=e189] [cursor=pointer]: Metadata
+                  - generic [ref=e190]:
+                    - generic [ref=e191]: Sort by
+                    - generic [ref=e192] [cursor=pointer]:
+                      - generic [ref=e193]:
+                        - generic "Relevance" [ref=e194]
+                        - combobox [ref=e195]
+                      - img "down" [ref=e197]
+                  - generic [ref=e200]:
+                    - generic [ref=e201]: Date range
+                    - generic [ref=e202]:
+                      - generic [ref=e203]:
+                        - text: Start date
+                        - textbox "Start date" [ref=e204]
+                      - generic [ref=e205]:
+                        - text: End date
+                        - textbox "End date" [ref=e206]
+                  - button "Advanced search" [ref=e208] [cursor=pointer]
+                  - generic [ref=e212] [cursor=pointer]:
+                    - checkbox "Favorites only" [ref=e213]
+                    - generic [ref=e216]: Favorites only
+                  - generic [ref=e217]:
+                    - button "Media types" [ref=e218] [cursor=pointer]
+                    - generic [ref=e224] [cursor=pointer]:
+                      - checkbox "Filter by Document" [ref=e225]
+                      - generic [ref=e226]: Document
+                  - button "Keywords" [ref=e228] [cursor=pointer]
+                  - generic [ref=e233]:
+                    - generic [ref=e234]: Exclude keywords
+                    - generic [ref=e236]:
+                      - generic [ref=e237]:
+                        - generic: Exclude keyword
+                        - combobox "Exclude keyword" [ref=e239]
+                      - img "down" [ref=e241]
+                    - generic [ref=e244]: Use excluded keywords to remove items containing those terms.
+                    - generic [ref=e245]: 0 exclude keyword suggestions available
+                - generic [ref=e246]:
+                  - generic [ref=e247]:
+                    - generic [ref=e248]: Collection
+                    - combobox "Collection" [ref=e249]:
+                      - option "All items" [selected]
+                  - paragraph [ref=e250]: Create collections from bulk selection to organize related items.
+            - generic [ref=e251]:
+              - generic [ref=e253]:
+                - generic [ref=e254]:
+                  - generic [ref=e255]:
+                    - generic [ref=e256]: Results
+                    - generic [ref=e257]: 1 / 1
+                  - generic [ref=e258]:
+                    - button "Standard view" [pressed] [ref=e259] [cursor=pointer]
+                    - button "Compact view" [ref=e265] [cursor=pointer]
+                - 'button "Select media: uat-cycle4-multi-cedar" [ref=e268] [cursor=pointer]':
+                  - generic [ref=e269]:
+                    - button "Add to favorites" [ref=e274]
+                    - generic [ref=e277]:
+                      - generic [ref=e278]:
+                        - generic [ref=e279]: MEDIA
+                        - generic [ref=e280]: document
+                        - generic [ref=e281]: 27m ago
+                      - generic [ref=e282]: uat-cycle4-multi-cedar
+              - generic [ref=e283]:
+                - generic [ref=e284]:
+                  - generic [ref=e285]: 1 of 1 results
+                  - generic [ref=e286]:
+                    - generic [ref=e287]: "Per page:"
+                    - combobox "Per page:" [ref=e288]:
+                      - option "20" [selected]
+                      - option "50"
+                      - option "100"
+                - button "? for shortcuts" [ref=e290] [cursor=pointer]:
+                  - generic [ref=e291]: "?"
+                  - generic [ref=e292]: for shortcuts
+            - button "Library tools" [ref=e294] [cursor=pointer]
+          - button "Collapse sidebar" [ref=e299] [cursor=pointer]
+          - generic [ref=e303]:
+            - generic [ref=e305]:
+              - generic [ref=e306] [cursor=pointer]:
+                - checkbox "Show chapters/sections panel" [checked] [ref=e307]
+                - generic [ref=e308]: Show chapters/sections panel
+              - generic [ref=e309] [cursor=pointer]:
+                - checkbox "Allow generated fallback structure" [checked] [ref=e310]
+                - generic [ref=e311]: Allow generated fallback structure
+              - generic [ref=e312]: "Generated sections: 1"
+            - generic [ref=e313]:
+              - complementary "Chapters and sections" [ref=e314]:
+                - generic [ref=e315]:
+                  - generic [ref=e316]: Chapters/Sections
+                  - textbox "Jump to 12.5 or title" [ref=e321]
+                  - generic [ref=e322]: Cycle4 Cedar public workshop brief Project Cedar opens on 24 January 2027. Priya Shah coordinate...
+                - tree [ref=e323]:
+                  - button "1 Cycle4 Cedar public workshop brief Project Cedar opens on 24 January 2027. Priya Shah coordinate..." [ref=e327] [cursor=pointer]:
+                    - generic [ref=e328]: "1"
+                    - generic [ref=e329]: Cycle4 Cedar public workshop brief Project Cedar opens on 24 January 2027. Priya Shah coordinate...
+              - generic [ref=e330]:
+                - button "Create study pack" [ref=e332] [cursor=pointer]
+                - generic [ref=e333]:
+                  - generic [ref=e334]: Showing uat-cycle4-multi-cedar
+                  - generic [ref=e336]:
+                    - generic [ref=e337]:
+                      - button "Previous" [disabled] [ref=e338]
+                      - generic [ref=e341]: 1/1
+                      - button "Next" [disabled] [ref=e342]
+                    - heading "uat-cycle4-multi-cedar" [level=3] [ref=e345]
+                    - generic [ref=e346]:
+                      - button "Chat with this media" [ref=e347] [cursor=pointer]
+                      - button "Analyze" [ref=e350] [cursor=pointer]
+                      - button "Actions" [ref=e354] [cursor=pointer]
+                  - generic [ref=e360]:
+                    - generic [ref=e713]:
+                      - generic [ref=e714]: 44 Words
+                      - generic [ref=e718]: 1 min read
+                      - generic "Reading progress" [ref=e719]: 0% read
+                      - generic [ref=e720]: "Chunking: Completed"
+                      - generic [ref=e721]: "Vector: Pending"
+                    - button "Metadata details Show" [ref=e723] [cursor=pointer]:
+                      - generic [ref=e724]: Metadata details
+                      - generic [ref=e725]: Show
+                    - generic [ref=e727]:
+                      - generic [ref=e728]:
+                        - generic: Add keywords...
+                        - combobox [ref=e730]
+                      - img "down" [ref=e732]
+                    - generic [ref=e735]:
+                      - generic [ref=e736]:
+                        - button "Content" [ref=e737] [cursor=pointer]
+                        - generic [ref=e741]:
+                          - generic [ref=e742] [cursor=pointer]:
+                            - generic [ref=e743]:
+                              - generic "Auto" [ref=e744]
+                              - combobox "Display mode" [ref=e745]
+                            - img "down" [ref=e747]
+                          - group "Text size" [ref=e750]:
+                            - button "Text size S" [ref=e751] [cursor=pointer]: S
+                            - button "Text size M" [pressed] [ref=e752] [cursor=pointer]: M
+                            - button "Text size L" [ref=e753] [cursor=pointer]: L
+                          - button "Edit content" [ref=e754] [cursor=pointer]
+                          - button "Find in content" [ref=e757] [cursor=pointer]
+                      - region "Media content" [ref=e764]:
+                        - paragraph [ref=e855]: Cycle4 Cedar public workshop brief Project Cedar opens on 24 January 2027. Priya Shah coordinates the workshop. The workshop has nine planting tables. Volunteers meet every Tuesday at 10:15. The welcome sign is painted amber. These are public synthetic facts for cycle4 acceptance testing.
+                    - generic [ref=e767]:
+                      - generic [ref=e768]:
+                        - button "Analysis" [ref=e769] [cursor=pointer]
+                        - generic [ref=e773]:
+                          - button "Generate" [ref=e774] [cursor=pointer]
+                          - button "Send analysis to chat" [ref=e778] [cursor=pointer]
+                          - button "Copy analysis" [ref=e782] [cursor=pointer]
+                          - button "Edit analysis" [ref=e786] [cursor=pointer]
+                      - generic [ref=e790]:
+                        - generic [ref=e791]:
+                          - generic [ref=e792]: Analysis
+                          - generic [ref=e793] [cursor=pointer]:
+                            - generic [ref=e794]:
+                              - generic "Analysis" [ref=e795]
+                              - combobox "Analysis" [ref=e796]
+                            - img "down" [ref=e798]
+                        - generic [ref=e801]:
+                          - generic [ref=e802]:
+                            - generic [ref=e803]: Analysis
+                            - button "Copy analysis to clipboard" [ref=e805] [cursor=pointer]
+                          - paragraph [ref=e856]: The Project Cedar workshop, coordinated by Priya Shah, opens on 24 January 2027.
+                    - generic [ref=e812]:
+                      - button "Statistics" [ref=e813] [cursor=pointer]
+                      - generic [ref=e818]:
+                        - generic [ref=e819]:
+                          - generic [ref=e820]: Words
+                          - generic [ref=e821]: "44"
+                        - generic [ref=e822]:
+                          - generic [ref=e823]: Characters
+                          - generic [ref=e824]: "289"
+                        - generic [ref=e825]:
+                          - generic [ref=e826]: Paragraphs
+                          - generic [ref=e827]: "1"
+                    - button "Metadata" [ref=e829] [cursor=pointer]
+                    - button "Document Intelligence" [ref=e834] [cursor=pointer]
+                    - button "Version History" [ref=e840] [cursor=pointer]
+                    - generic [ref=e849]:
+                      - button "Delete item" [disabled] [ref=e850]
+                      - paragraph [ref=e854]: Your account does not have permission to delete media.
+  - button "Open Next.js Dev Tools" [ref=e548] [cursor=pointer]
+  - alert [ref=e552]: Media | tldw
+```

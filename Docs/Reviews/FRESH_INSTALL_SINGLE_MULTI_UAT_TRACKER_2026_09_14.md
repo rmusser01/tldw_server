@@ -2,9 +2,9 @@
 
 ## Run status
 
-- **Cycle4 fresh UAT is in progress on frozen product `7c9409fad2`.** All repair code identified before this run is committed and reviewed, including mobile Media101. New empty profiles use API/UI18300/18380 for single-user and18301/18381 for multi-user; setup and real inference succeed. Twelve new findings102–113 are tracked below (ten P2/two P3). Single-user Notes, five generated cards, mixed seven-card review/reload and explicit early-End controls pass; ordinary Chat reload duplicates users in both modes. The exact Wikipedia source is access-blocked with accurate failure feedback. Single-user ordinary Chat requires a documented unchanged-code API restart after onboarding to refresh model inventory. Remaining matrix rows are still running; this is not sign-off. Existing dependencies are reused, and cycle3 databases/evidence remain preserved.
-- Current status: **Cycle3 single-user and multi-user execution has ended with failures and explicit coverage limits. Repair review is underway.** Application behavior was frozen at `d40e17dc81`; a documented UAT-only development-cache configuration change addressed repeated disk exhaustion without changing application behavior. The pass records 31 new findings UAT056–086 plus reopened055 Manage scope: fourteen P2 and eighteen P3. Current coverage is in the [cycle3 matrix](#cycle-3-full-fresh-uat--started-2026-09-15t0743z), with [retained multi-user evidence](../../output/playwright/cycle3-full-uat-2026-09-15/multi/README.md). Earlier runs and repairs below remain historical evidence. This is not release sign-off.
-- **Baseline correction (2026-09-15):** this work did not start from the latest remote `dev`. The repair branch was created from the existing email-validation checkout via `cb8335cf8d`; its shared dev ancestor is `c70387f496`. The already-fetched remote tip `2e1a5e58d3` contained 32 missing commits. Merge `267c00cab1` now includes that freshly verified tip and all reviewed repairs; Git reports zero dev-only commits. [Combined validation](../../output/playwright/cycle3-repair-verification-2026-09-15/dev-integration/README.md) passes with the existing compiler baseline explicitly retained. Both isolated APIs/frontends restarted and returned HTTP200 at20:48:28UTC. Earlier results certify only their recorded checkout; targeted and full fresh acceptance remain separate.
+- **Cycle4 execution has ended on frozen product `7c9409fad2`, with failures and explicit coverage limits.** Both mode matrices account for their named workflows. Sixteen new findings102–117 are tracked below (fourteen P2/two P3); route-title058 also has a confirmed scope omission. Single-user cited QA, Notes, generated cards, exact mixed review counts, early-End, Prompt application, source-Note navigation and sole-source restore pass. Saved Chat reload/backlinks, new-character reload, ingest minimize and model selection still fail. The exact Wikipedia source is access-blocked with accurate feedback. Single-user regular Chat requires an unchanged-code API restart after setup; Media reanalysis is blocked by115. Single source Chat ends with a truthful streaming-limit interruption; multi source Chat incorrectly completes with reasoning only117. Connection tests recover; single-user disconnected local Chat retention matches the current connection-only contract, and multi browser token-expiry refresh was not separately exercised. Existing dependencies were reused. This is not sign-off.
+- Historical cycle3 status: **Single-user and multi-user execution ended with failures and explicit coverage limits.** Application behavior was frozen at `d40e17dc81`; a documented UAT-only development-cache configuration change addressed repeated disk exhaustion without changing application behavior. The pass recorded 31 new findings UAT056–086 plus reopened055 Manage scope: fourteen P2 and eighteen P3. Historical coverage is in the [cycle3 matrix](#cycle-3-full-fresh-uat--started-2026-09-15t0743z), with [retained multi-user evidence](../../output/playwright/cycle3-full-uat-2026-09-15/multi/README.md). Subsequent repairs and cycle4 results are recorded separately. This is not release sign-off.
+- **Baseline correction (2026-09-15):** this work did not start from the latest remote `dev`. The repair branch was created from the existing email-validation checkout via `cb8335cf8d`; its shared dev ancestor is `c70387f496`. The already-fetched remote tip `2e1a5e58d3` contained 32 missing commits. Merge `267c00cab1` includes that verified tip and all then-reviewed repairs; Git reported zero dev-only commits at that checkpoint. A later fetch at18:21:50 local advanced `origin/dev` to `59049e094e`, adding six dev-only commits during frozen cycle4. They are not part of cycle4's tested product; integrate after the frozen execution closes. [Combined earlier validation](../../output/playwright/cycle3-repair-verification-2026-09-15/dev-integration/README.md) retains the existing compiler baseline. Earlier results certify only their recorded checkout.
 - Requested scope: fresh single-user and multi-user setup, then core workflow loops A, B, and C; record every observed bug, failure, and UX issue.
 - Backlog record: `backlog/tasks/task-13260 - Run-fresh-single-user-and-multi-user-UAT-across-core-workflow-loops.md` (see ENV-003).
 - Initial checkout: `codex/email-offline-validation-13250`, commit `54ecc7e7735fc082b711d922a27e97ee9999e5ae`. Repairs are on `codex/fresh-install-uat-fixes`.
@@ -12,7 +12,7 @@
 - Existing backend on port 8000 was left running. Test runtimes use separate ports, configuration, databases, and browser state. Unrelated source files were not edited; a task-record collision and recovery are detailed in ENV-003.
 - Installation path: current-checkout fresh configuration/data with existing dependencies. This does **not** certify installation of dependencies into a clean machine/environment.
 - Workflow source: frontend E2E/UAT and shared integration tests, as clarified by the user. Exact named journeys and coverage limitations are recorded below; no literal A/B/C loop mapping was found.
-- AI provider: existing llama.cpp on port 9099; `/v1/models` verified with model `../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf`. No mock response counts as real model acceptance.
+- AI provider: existing llama.cpp on port 9099. Cycle4 used the advertised `../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf`; earlier cycles used `../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf`. No mock response counts as real model acceptance.
 
 ## Cycle 4 running findings — 2026-09-16 UTC
 
@@ -32,6 +32,7 @@ Separate running records: [single-user](../../output/playwright/cycle4-full-uat-
 - Evidence: [settled visible duplicates](../../output/playwright/cycle4-full-uat-2026-09-16/multi/normal-chat-settled-reload-duplicates.txt) and the runner's before/after message responses. This is distinct from the earlier extra-conversation/mode-switch finding062.
 - Status: open, TASK13260.44. Reproduce through the actual saved-message/mirror boundary after the frozen run; preserve canonical IDs and existing delayed-owner guards.
 - Single-user confirmation: after the107 restart workaround, one new neutral conversation `94a50532-cc5c-4f6e-baca-761e25ce295b` completes two real ASTER-42 turns200. Its API contains five rows; settled normal reload shows seven, duplicating both users exactly as Alice's case. [Single reload](../../output/playwright/cycle4-full-uat-2026-09-16/single/evidence/uat-cycle4-single-chat-settled-reload.txt); original unsuccessful Chat remains a separate earlier conversation, not an extra-conversation regression.
+- Later actual Prompt request includes both duplicated user turns in model context. Character source-to-Chat restoration also shows four visible rows for the three persisted rows. The defect affects subsequent context, not only presentation. The saved character card's `pa_` message ID matches an actual canonical server row and is not a separate provenance defect.
 
 ### UAT-104 — P2: Minimize to Background leaves Quick Ingest blocking navigation
 
@@ -86,6 +87,7 @@ Separate running records: [single-user](../../output/playwright/cycle4-full-uat-
 - Mode / step: Alice saves a real normal Chat answer to Notes201; content and Origin reference the owned conversation correctly. Two More actions → Open conversation clicks leave the browser on Notes with no new tab.
 - Evidence: [saved Chat Note](../../output/playwright/cycle4-full-uat-2026-09-16/multi/chat-note-save.json), [backlink outcome](../../output/playwright/cycle4-full-uat-2026-09-16/multi/chat-note-backlink-opened.txt).
 - Status: open, TASK13260.51. Read-only actual-menu reproduction using the earlier same-chat103 mirror shows the missing-user-acknowledgment rows trigger the unsaved-message guard. Canonically acknowledged normal rows navigate; genuine unsent rows correctly block. There is no contemporaneous store capture at the live click, so this source attribution remains qualified. Coordinate with103 while retaining the guard.
+- Single confirmation: Note `1420d30b-a7e9-4292-99bc-c0ac31ed050e` saves the exact real pirate response201 with canonical origin. Open conversation remains on Notes and explicitly says to finish/save the current Chat despite its Saved indicator. Evidence `single/evidence/uat-cycle4-single-note-backlink-result.txt`.
 
 ### UAT-112 — P3: Flashcard actions have missing or stale accessible names
 
@@ -96,9 +98,41 @@ Separate running records: [single-user](../../output/playwright/cycle4-full-uat-
 ### UAT-113 — P2: Reloading a newly saved character route resets to its greeting
 
 - Mode / step: multi-user explicit character4 Chat succeeds through complete-v2 with correct CEDAR GUIDE facts, then normal reload at `/chat?mode=character&characterId=4`.
-- Actual: the visible transcript resets to greeting-only despite Saved state. The owned server conversation `bd564030-70fe-41bc-9c91-4b661408f8e3` still contains its messages. History reopening is a separate pending control; no server data loss claim.
+- Actual: the visible transcript resets to greeting-only despite Saved state. The owned server conversation `bd564030-70fe-41bc-9c91-4b661408f8e3` still contains its messages. Normal Server history reopening restores them. Single-user character4 reproduces the same failure for conversation `ce67520e-883b-42ff-b565-c2872616c048`, and native history reopening restores its correct answer. No server data loss claim.
 - Evidence: [character route reload](../../output/playwright/cycle4-full-uat-2026-09-16/multi/character-cedar-reloaded.txt).
 - Status: open, TASK13260.53. Diagnose explicit-entry query replay against persisted identity while preserving deliberate replacement behavior.
+
+### UAT-114 — P2: Multiple open WebUI tabs starve ordinary browser API requests
+
+- Mode / step: six single-user tabs accumulated while independent workflows continued. Health, Media-detail and Prompt Studio requests start timing out; independent API `/docs` remains200.
+- Closing three completed tabs immediately restores ordinary requests. Visible Prompt Retry sync creates project/prompt201 and shows Synced. No server restart or source fix was needed for that recovery.
+- Read-only source/probes confirm every tab opens its own notification stream, including hidden tabs, and hiding a tab does not release it. Exact six occupied browser sockets were not directly measured; connection-pool exhaustion remains a supported inference.
+- Status: open, TASK13260.54. Evidence `single/evidence/uat-cycle4-single-prompt-network.txt`, `uat-cycle4-single-consolidated-tabs.json`, and `uat-cycle4-single-prompt-after-sync-network.txt`. Preserve notification catch-up, auth rotation and ownership while bounding hidden-tab connections.
+
+### UAT-115 — P2: Media analysis rejects an explicit model selection by reverting it
+
+- Mode / step: single-user Analyze offers configured Gemma, but clicking that exact option immediately/after1second shows gemma3:1b again. Actual streaming and fallback requests use Ollama/gemma3 and return502, including after the107 backend restart.
+- Actual component/storage/shared-hook probe isolates the competing writer: AnalysisModal writes storage, while the shared model owner restores its old selected model. Without that owner the same option works. Provider resolution is not changing an already-correct Gemma request.
+- Status: open, TASK13260.55. Evidence `single/evidence/uat-cycle4-single-analysis-selected-reverted.txt`, `uat-cycle4-single-analysis-retry-request.json`, and `uat-cycle4-single-analysis-retry-request2.json`. Reanalysis remains blocked; original source/analysis and Review/reload remain valid positive controls.
+
+### UAT-116 — P2: QA asks users to enable generation that the request already enabled
+
+- Multi final recovery request1320 includes exact media1 and `enable_generation:true`, returns200/one source, but no answer and guidance to enable generation. Citations remain false after Fast. Final stream events were unavailable, so backend/cache/model cause is unproven.
+- AnswerPanel conflates empty answers with disabled generation. The old timeout also remains in a screen-reader-only assertive region after the error clears; it is not a second visible error panel.
+- Status: open, TASK13260.56. Preserve retrieved evidence and distinguish deliberately disabled generation, requested-but-empty output, evidence insufficiency and transport failure using the completed request's settings. Multi evidence `cedar-qa-final-request.json`, `cedar-qa-fast-recovery-no-answer.txt`.
+
+### UAT-117 — P2: Character Chat presents reasoning-only completion as an ordinary answer
+
+- Multi Media→Chat correctly transfers full source text. Completion/persistence return200 but assistant content contains only `<think>…</think>`; UI shows collapsed reasoning, no final answer and no incomplete-generation notice. Finish reason was not captured; truncation is not established.
+- Status: open, TASK13260.57. Distinguish substantive answer from reasoning while retaining history/partial content. Multi evidence `media-chat-persist-request.json`, `media-chat-no-final-answer.txt/.png`.
+- Single corresponding source question instead reaches the streaming limit and explicitly reports interruption with recovery actions. This is a positive failure-feedback control, not a completed grounded-answer pass.
+
+### Cycle4 reopened/secondary observations
+
+- UAT058 / TASK13260.20: Prompts and Characters have blank browser titles in both modes. Their wrappers lack title ownership and were omitted from the earlier core-route title matrix. Single Settings reconnect also briefly adopts the old character Chat title; retain this as a separate late-title ownership boundary under the same issue.
+- Prompt sync failure emits the AntD static notification warning, covered by TASK13260.43. Task13260.54 explains the separate request-stall trigger. New character creation emits the exact disconnected `useForm` warning despite successful creation; reopened UAT067 / TASK13260.15 covers this lifecycle follow-up. The filtered single-user console evidence is retained.
+- Multi bootstrap admin storage/quota403 is explicitly `Email verification required`; this is expected policy, not a role-authorization bypass. Ordinary UI-created accounts were verified.
+- The single API restart, corrected response waiters/AntD hidden option/radio interactions, hover-action replacement, one shell URL quoting mistake and developer-tool badge interception are documented harness/environment observations. They are not silently counted as product failures or successful workflow steps.
 
 ## Cycle 3 repair checkpoints — 2026-09-15 UTC
 

@@ -1,0 +1,128 @@
+### Result
+38. [GET] http://127.0.0.1:18380/api/_tldw-webui/runtime-config => [200] OK
+39. [GET] http://127.0.0.1:18380/_next/static/development/_devMiddlewareManifest.json => [200] OK
+41. [GET] http://127.0.0.1:18380/_next/static/development/_devPagesManifest.json => [200] OK
+48. [GET] http://127.0.0.1:18300/health => [200] OK
+49. [GET] http://127.0.0.1:18300/health => [200] OK
+86. [GET] http://127.0.0.1:18300/api/v1/persona/profiles => [200] OK
+125. [GET] http://127.0.0.1:18300/api/v1/health/live => [200] OK
+131. [GET] http://127.0.0.1:18300/api/v1/media/capabilities => [200] OK
+132. [GET] http://127.0.0.1:18300/api/v1/media?page=1&results_per_page=20&include_keywords=true => [200] OK
+133. [GET] http://127.0.0.1:18300/api/v1/media?page=1&results_per_page=50 => [200] OK
+134. [GET] http://127.0.0.1:18300/api/v1/users/storage => [200] OK
+135. [GET] http://127.0.0.1:18300/api/v1/config/docs-info => [200] OK
+136. [GET] http://127.0.0.1:18300/openapi.json => [200] OK
+137. [GET] http://127.0.0.1:18300/api/v1/media/1 => [200] OK
+138. [GET] http://127.0.0.1:18300/api/v1/rag/health => [200] OK
+139. [GET] http://127.0.0.1:18300/api/v1/media/1/progress => [200] OK
+140. [GET] http://127.0.0.1:18300/api/v1/media?page=1&results_per_page=20&include_keywords=true => [200] OK
+141. [GET] http://127.0.0.1:18300/api/v1/ingestion-sources/capabilities => [200] OK
+142. [GET] http://127.0.0.1:18300/api/v1/notifications/unread-count => [200] OK
+143. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+144. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+145. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+146. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+155. [GET] http://127.0.0.1:18300/api/v1/media/1/navigation?include_generated_fallback=true => [200] OK
+156. [GET] http://127.0.0.1:18300/api/v1/notifications?limit=1&offset=0&include_archived=false => [200] OK
+166. [GET] http://127.0.0.1:18300/api/v1/notifications/stream?after=0 => [200] OK
+167. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+168. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+169. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+170. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+171. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+172. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+173. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+174. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+175. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+176. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+177. [GET] http://127.0.0.1:18300/api/v1/health/live => [200] OK
+178. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+179. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+180. [GET] http://127.0.0.1:18300/api/v1/media/1 => [200] OK
+181. [GET] http://127.0.0.1:18300/api/v1/notifications/unread-count => [200] OK
+182. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+183. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+184. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+185. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+186. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+187. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+188. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+189. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+201. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+202. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+203. [GET] http://127.0.0.1:18300/api/v1/health/live => [200] OK
+204. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+205. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+206. [GET] http://127.0.0.1:18300/api/v1/media/1 => [200] OK
+207. [GET] http://127.0.0.1:18300/api/v1/notifications/unread-count => [200] OK
+208. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+209. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+210. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+211. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+212. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+213. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+214. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+215. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+216. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+217. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+218. [GET] http://127.0.0.1:18300/api/v1/health/live => [200] OK
+219. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+220. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+221. [GET] http://127.0.0.1:18300/api/v1/media/1 => [200] OK
+222. [GET] http://127.0.0.1:18300/api/v1/notifications/unread-count => [200] OK
+223. [POST] http://127.0.0.1:18300/api/v1/chat/completions => [502] Bad Gateway
+224. [POST] http://127.0.0.1:18300/api/v1/chat/completions => [502] Bad Gateway
+226. [POST] http://127.0.0.1:18380/__nextjs_original-stack-frames => [200] OK
+228. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+229. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+230. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+231. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+232. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [FAILED] net::ERR_ABORTED
+233. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [FAILED] net::ERR_ABORTED
+234. [GET] http://127.0.0.1:18300/api/v1/health/live => [FAILED] net::ERR_ABORTED
+235. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [FAILED] net::ERR_ABORTED
+236. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [FAILED] net::ERR_ABORTED
+237. [GET] http://127.0.0.1:18300/api/v1/media/1 => [FAILED] net::ERR_ABORTED
+238. [GET] http://127.0.0.1:18300/api/v1/notifications/unread-count => [FAILED] net::ERR_ABORTED
+239. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [FAILED] net::ERR_ABORTED
+240. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [FAILED] net::ERR_ABORTED
+241. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [FAILED] net::ERR_ABORTED
+242. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [FAILED] net::ERR_ABORTED
+243. [GET] http://127.0.0.1:18300/api/v1/media/1 => [FAILED] net::ERR_ABORTED
+244. [GET] http://127.0.0.1:18300/api/v1/health/live => [200] OK
+245. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [FAILED] net::ERR_ABORTED
+246. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [FAILED] net::ERR_ABORTED
+247. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [200] OK
+248. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [200] OK
+249. [GET] http://127.0.0.1:18300/api/v1/media/1 => [200] OK
+250. [GET] http://127.0.0.1:18300/api/v1/notifications/unread-count => [200] OK
+251. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [FAILED] net::ERR_ABORTED
+252. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [FAILED] net::ERR_ABORTED
+253. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [FAILED] net::ERR_ABORTED
+254. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [FAILED] net::ERR_ABORTED
+255. [GET] http://127.0.0.1:18300/api/v1/health/live => [FAILED] net::ERR_ABORTED
+256. [GET] http://127.0.0.1:18300/api/v1/media/1 => [FAILED] net::ERR_ABORTED
+257. [GET] http://127.0.0.1:18300/api/v1/notifications/unread-count => [FAILED] net::ERR_ABORTED
+258. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [FAILED] net::ERR_ABORTED
+259. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [FAILED] net::ERR_ABORTED
+260. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0 => [FAILED] net::ERR_ABORTED
+261. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default => [FAILED] net::ERR_ABORTED
+262. [GET] http://127.0.0.1:18300/api/v1/media/1 => [FAILED] net::ERR_ABORTED
+263. [GET] http://127.0.0.1:18300/api/v1/buddies?limit=100&offset=0
+264. [GET] http://127.0.0.1:18300/api/v1/buddies/attachment?client_slot=default
+265. [GET] http://127.0.0.1:18300/api/v1/health/live
+
+Note: 153 static requests not shown, run with --static option to see them.
+### Open tabs
+- 0: [Media | tldw](http://127.0.0.1:18380/media?id=1)
+- 1: [Remember this public cycle4 phrase: ASTER-42. Reply with only ASTER-42. | tldw](http://127.0.0.1:18380/chat)
+- 2: [Flashcards | tldw](http://127.0.0.1:18380/flashcards?tab=importExport)
+- 3: [Knowledge | tldw](http://127.0.0.1:18380/knowledge)
+- 4: (current) [Media | tldw](http://127.0.0.1:18380/media?id=1)
+- 5: [](http://127.0.0.1:18380/prompts)
+### Page
+- Page URL: http://127.0.0.1:18380/media?id=1
+- Page Title: Media | tldw
+- Console: 3 errors, 23 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T01-30-36-994Z.log#L36

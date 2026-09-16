@@ -1,0 +1,11 @@
+{
+  "checkedAt": "2026-09-16T01:19:02.908Z",
+  "identity": "bob",
+  "verifierAuth": "reuse",
+  "method": "GET",
+  "path": "/api/v1/media/1",
+  "status": 404,
+  "body": {
+    "detail": "Media not found or is inactive/trashed"
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "at": "2026-09-16T01:11:23.420Z",
+  "scope": "read-only diagnosis, no product/runtime changes",
+  "entries": [
+    {
+      "path": "/private/tmp/uat111-read-only-diagnosis.md",
+      "bytes": 5933,
+      "sha256": "90d1405fce0808a72560bb5a0ccf12f8018db8da09a5fa6d37f1d9f3cb62f6f3"
+    },
+    {
+      "path": "/private/tmp/uat111-note-backlink-probe.config.ts",
+      "bytes": 3741,
+      "sha256": "816073073bf4957ec9bab7e88424af4b6936289b5db6028aad7f23660ff2ecd3"
+    },
+    {
+      "path": "/private/tmp/uat111-note-backlink-probe-red.log",
+      "bytes": 10254,
+      "sha256": "0ebfa9cded4292ddde5ece6f3a67078f5a5fe1530adcf22088dc35bf545a484c"
+    },
+    {
+      "path": "/private/tmp/uat111-note-backlink-full-probe-red.log",
+      "bytes": 10315,
+      "sha256": "c6ab6ab76f7f364eb92b3c54414d1cabd56db595230f70d380de45b6ea87de0d"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Notes/NotesManagerPage.tsx",
+      "bytes": 109469,
+      "sha256": "38b282eec6e0bc52d015213873358f4a8473a3392d67356c631b168e2e4e2de6"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Notes/NotesEditorHeader.tsx",
+      "bytes": 21912,
+      "sha256": "13ae83c85465735025d682efedaddaa8cc78460c31c82231cc41c0d65471d448"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Notes/NotesEditorPane.tsx",
+      "bytes": 73931,
+      "sha256": "2b19329f5646dcced8f1c3e8a8c232bfcca4c573e406e5d4da065993a471eed6"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useSelectServerChat.ts",
+      "bytes": 5898,
+      "sha256": "471112773d511ad955fc88d8885fdecd14db1a538742623f4e8cd3f64dbdb17e"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx",
+      "bytes": 18998,
+      "sha256": "cfc40905f12b1ed68b0d289e410a5628e5557f5656a575d67963c40b55134aa5"
+    }
+  ]
+}

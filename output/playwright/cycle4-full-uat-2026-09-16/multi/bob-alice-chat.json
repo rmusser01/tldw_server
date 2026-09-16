@@ -1,0 +1,11 @@
+{
+  "checkedAt": "2026-09-16T01:19:06.793Z",
+  "identity": "bob",
+  "verifierAuth": "reuse",
+  "method": "GET",
+  "path": "/api/v1/chats/bd564030-70fe-41bc-9c91-4b661408f8e3/messages?limit=20",
+  "status": 404,
+  "body": {
+    "detail": "Chat session bd564030-70fe-41bc-9c91-4b661408f8e3 not found"
+  }
+}

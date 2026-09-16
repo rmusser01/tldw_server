@@ -1,0 +1,58 @@
+{
+  "files": [
+    {
+      "path": "/private/tmp/uat106-readonly-diagnosis.md",
+      "sha256": "e660b5a883575bc0ac38caceeff0183dcb83c97626a9090c65a0fd15143594b1",
+      "bytes": 8330,
+      "secretPatternHits": 0
+    },
+    {
+      "path": "/private/tmp/uat106-setup-model.config.ts",
+      "sha256": "9c3a37f9cb77b0ee3c2d23c1d923fc4025c33c73618795166958372f1529bdbe",
+      "bytes": 1110,
+      "secretPatternHits": 0
+    },
+    {
+      "path": "/private/tmp/uat106-setup-model-cases.txt",
+      "sha256": "89b3b1524007d043a26f9eebff5b22b182aef66162065637f9561b142182d0af",
+      "bytes": 3321,
+      "secretPatternHits": 0
+    },
+    {
+      "path": "/private/tmp/uat106-setup-model-red.log",
+      "sha256": "e79764cd9ebc1869a80b05a9badba3430bd881a2a948d131e2d97318fb1ec027",
+      "bytes": 4741,
+      "secretPatternHits": 0
+    },
+    {
+      "path": "/private/tmp/uat106-frozen-source-comparison.json",
+      "sha256": "ec20e20d3b6f440746b3a1f48aa0a81d5bd09803b425b94d426a22cbbbe9661b",
+      "bytes": 4311,
+      "secretPatternHits": 0
+    },
+    {
+      "path": "/private/tmp/uat112-readonly-diagnosis.md",
+      "sha256": "507200667049161a72182b1fd2ab967d9e7fa21dd9d7cd5b1127fd24e10c389a",
+      "bytes": 3482,
+      "secretPatternHits": 0
+    },
+    {
+      "path": "/private/tmp/uat112-accessible-name.config.ts",
+      "sha256": "a3c6de2e75d1a7759a2ca4112adfc70850d4948178ca22e334675877019837b7",
+      "bytes": 1558,
+      "secretPatternHits": 0
+    },
+    {
+      "path": "/private/tmp/uat112-accessible-name-red.log",
+      "sha256": "3337112811a4d76993092cf25faa8bb9ea39d0d55de7e3f114f4059fdf3502ee",
+      "bytes": 2207,
+      "secretPatternHits": 0
+    },
+    {
+      "path": "/private/tmp/uat112-frozen-source-comparison.json",
+      "sha256": "218145df2a8b409d3a0d13171d2905c690428f74940464693199d7527c77dc92",
+      "bytes": 979,
+      "secretPatternHits": 0
+    }
+  ]
+}

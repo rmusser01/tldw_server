@@ -1,0 +1,69 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:23267) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > UAT109 handled timeout does not enter Next console-error overlay channel
+UAT109_QA_HANDLER {"fulfilled":true,"error":"Search timed out. Try the Fast preset or reduce sources.","query":"Own Cedar question","isSearching":false,"consoleErrors":[["Search failed:","Error"]],"fallbackCalls":0}
+
+ ❯ src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx (26 tests | 1 failed | 25 skipped) 20ms
+     × UAT109 handled timeout does not enter Next console-error overlay channel 19ms
+     ↓ sends only completed question-answer pairs as follow-up context
+     ↓ recovers from invalid RAG defaults using an explicit local provider and model
+     ↓ does not invent citations from source prose or invalid numbered references
+     ↓ distinguishes security exclusion from empty retrieval (1/+0)
+     ↓ distinguishes security exclusion from empty retrieval (1/1)
+     ↓ distinguishes security exclusion from empty retrieval (+0/+0)
+     ↓ explains security exclusion for a retrieval-only response
+     ↓ keeps the live Cedar RRF score for ranking without degrading a cited answer
+     ↓ applies streamed contexts/deltas incrementally and finalizes answer
+     ↓ invokes ragSearchStream with the client binding intact
+     ↓ falls back only for a certified pre-dispatch stream transport error
+     ↓ fails closed when a certified replay terminal is followed by a trailing delta
+     ↓ fails closed when a certified replay terminal is followed by a second terminal
+     ↓ does not replay a clean empty stream completion
+     ↓ does not replay a terminal provider credential error
+     ↓ stops after certified stream fallback and sanitized HTTP 502 failure
+     ↓ stops after certified stream fallback and sanitized HTTP 503 failure
+     ↓ sanitizes an unknown terminal stream error without replay
+     ↓ sanitizes an unknown non-stream error after certified fallback
+     ↓ does not replay after partial provider output
+     ↓ fails closed for malformed terminal events
+     ↓ normalizes whitespace-only non-stream answers to null
+     ↓ removes out-of-scope local results without remapping surviving citation indexes
+     ↓ surfaces query-length warning when a submitted query exceeds backend limits
+     ↓ merges pinned source filters into rag search options
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > UAT109 handled timeout does not enter Next console-error overlay channel
+AssertionError: expected "Mock" to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st Mock call:
+
+    Array [
+      "Search failed:",
+      "Error",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx:92:26
+     90|   it("sends only completed question-answer pairs as follow-up context"…
+     91|     ragSearchStreamMock
+     92|       .mockImplementationOnce(() => { throw new Error("Provider unavai…
+       |                          ^
+     93|       .mockImplementation(async function* () {
+     94|         yield { type: "delta", text: "Project Juniper launches on 18 O…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 25 skipped (26)
+   Start at  18:03:15
+   Duration  1.17s (transform 371ms, setup 154ms, import 402ms, tests 20ms, environment 463ms)
+

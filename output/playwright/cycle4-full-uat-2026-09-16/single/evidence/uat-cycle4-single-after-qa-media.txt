@@ -1,0 +1,205 @@
+### Open tabs
+- 0: [Media | tldw](http://127.0.0.1:18380/media?id=1)
+- 1: [Remember this public cycle4 phrase: ASTER-42. Reply with only ASTER-42. | tldw](http://127.0.0.1:18380/chat)
+- 2: [Flashcards | tldw](http://127.0.0.1:18380/flashcards?tab=importExport)
+- 3: (current) [Knowledge | tldw](http://127.0.0.1:18380/knowledge)
+- 4: [Media | tldw](http://127.0.0.1:18380/media?id=1)
+### Page
+- Page URL: http://127.0.0.1:18380/knowledge
+- Page Title: Knowledge | tldw
+- Console: 10 errors, 8 warnings
+### Snapshot
+```yaml
+- generic [ref=e11]:
+  - generic [ref=e14]:
+    - link "Skip to main content" [ref=e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e16]:
+      - button "Expand sidebar" [ref=e17] [cursor=pointer]
+      - button "New Chat" [ref=e21] [cursor=pointer]
+      - generic [ref=e24]:
+        - button "Quick Ingest" [ref=e25] [cursor=pointer]
+        - button "Chat" [ref=e29] [cursor=pointer]
+        - button "Prompts" [ref=e32] [cursor=pointer]
+        - button "Characters" [ref=e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e41] [cursor=pointer]
+        - button "World Books" [ref=e45] [cursor=pointer]
+        - button "Notes" [ref=e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=e52] [cursor=pointer]
+        - button "Media" [ref=e60] [cursor=pointer]
+        - button "Document Workspace" [ref=e63] [cursor=pointer]
+        - button "Research Workspace" [ref=e69] [cursor=pointer]
+        - button "Kanban" [ref=e75] [cursor=pointer]
+        - button "Watchlists" [ref=e77] [cursor=pointer]
+      - generic [ref=e82]:
+        - button "Open Notes Dock" [ref=e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e88] [cursor=pointer]
+        - button "Settings" [ref=e91] [cursor=pointer]
+    - main [ref=e95]:
+      - generic [ref=e96]:
+        - generic [ref=e99]:
+          - generic [ref=e100]:
+            - button "Expand sidebar" [ref=e101] [cursor=pointer]
+            - generic [ref=e103]:
+              - img "tldw Assistant" [ref=e104]
+              - generic [ref=e105]: tldw Assistant
+              - button "Companion Home" [ref=e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=e110] [cursor=pointer]
+          - generic [ref=e113]:
+            - button "Search - Open command palette" [ref=e114] [cursor=pointer]:
+              - generic [ref=e118]: Search
+              - generic [ref=e119]: ⌘K
+            - button "Open settings" [ref=e120] [cursor=pointer]
+            - generic [ref=e132]:
+              - button "Notifications, 0 unread" [ref=e133] [cursor=pointer]
+              - status [ref=e137]: Notifications are active
+            - button "Switch to light theme" [ref=e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e145] [cursor=pointer]:
+              - generic [ref=e146]: "?"
+        - generic [ref=e559]:
+          - link "Skip to search" [ref=e560] [cursor=pointer]:
+            - /url: "#knowledge-search-input"
+          - main [ref=e561]:
+            - generic [ref=e562]:
+              - generic [ref=e564]:
+                - generic [ref=e565]:
+                  - 'button "Open source scope and saved profiles. Sources: 4 selected. Specific: 1 doc" [ref=e769] [cursor=pointer]':
+                    - text: "Sources: 4 selected"
+                    - generic [ref=e770]: "• Specific: 1 doc"
+                  - button "Custom" [ref=e771] [cursor=pointer]
+                  - button "Web fallback is currently disabled. Click to toggle." [ref=e576] [cursor=pointer]: Web
+                  - button "Choose answer model" [ref=e581] [cursor=pointer]:
+                    - generic [ref=e585]: "AI: Server default"
+                  - button "Refresh source health" [ref=e588] [cursor=pointer]: "Sources ready: 7 of 8"
+                  - button "Open Knowledge QA settings" [ref=e589] [cursor=pointer]
+                - generic [ref=e635]:
+                  - paragraph [ref=e636]: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
+                  - generic [ref=e637]:
+                    - textbox "Search your knowledge base" [ref=e638]:
+                      - /placeholder: What are the key findings from the research?
+                      - text: According to Project Aster, who coordinates the garden and when does it open? Cite the source.
+                    - button "Clear search" [ref=e774] [cursor=pointer]
+                    - button "Ask" [ref=e640] [cursor=pointer]
+                  - generic [ref=e641]:
+                    - generic [ref=e642]: Press / to focus, Cmd+K for new search
+                    - button "New search" [ref=e779] [cursor=pointer]
+              - generic [ref=e781]:
+                - button "Export" [ref=e783] [cursor=pointer]
+                - generic [ref=e787]:
+                  - generic [ref=e788]: Search complete. 1 source found.
+                  - generic [ref=e790]:
+                    - generic [ref=e791]:
+                      - generic [ref=e792]:
+                        - generic [ref=e796]: AI Answer
+                        - generic [ref=e797]: "Answer status: Cited answer"
+                        - generic [ref=e798]: 1 citation
+                      - generic [ref=e799]:
+                        - generic [ref=e800]:
+                          - button "Summarize" [ref=e801] [cursor=pointer]
+                          - button "Show more" [ref=e802] [cursor=pointer]
+                        - generic [ref=e803]:
+                          - button "Copy answer" [ref=e804] [cursor=pointer]
+                          - button "Continue in editor" [ref=e805] [cursor=pointer]
+                      - note "Answer trust summary" [ref=e806]:
+                        - generic [ref=e807]: Searched Documents & Media, Notes, Characters, and Chats. 1 source returned, 1 cited.
+                        - generic [ref=e808]: Web fallback disabled.
+                        - generic [ref=e809]: "AI model: Server default."
+                        - generic [ref=e810]: Selected sources look ready.
+                        - generic [ref=e811]: "Trust: Cited answer."
+                    - generic [ref=e813]:
+                      - paragraph [ref=e814]: This answer includes inline citation buttons. Press Tab to move between citation controls and source links.
+                      - paragraph [ref=e933]:
+                        - text: Mira Chen coordinates the garden, and it opens on 18 December 2026
+                        - button "Jump to source 1" [ref=e934] [cursor=pointer]: "[1]"
+                        - text: .
+                    - generic [ref=e818]:
+                      - generic [ref=e819]:
+                        - generic [ref=e820]: "Sources:"
+                        - button "Jump to source 1" [ref=e821] [cursor=pointer]: "[1]"
+                      - generic [ref=e822]:
+                        - generic [ref=e823]: Was this answer helpful?
+                        - button "Helpful" [ref=e824] [cursor=pointer]
+                        - button "Needs work" [ref=e827] [cursor=pointer]
+                  - generic [ref=e830]:
+                    - generic [ref=e831]:
+                      - generic [ref=e832]:
+                        - textbox "Ask a follow-up question" [ref=e833]:
+                          - /placeholder: Ask a follow-up question...
+                        - button "Submit follow-up question" [disabled] [ref=e834]
+                      - button "Start new topic" [ref=e837] [cursor=pointer]:
+                        - generic [ref=e839]: New Topic
+                    - paragraph [ref=e840]: Follow-up questions maintain context. Click "New Topic" to start fresh.
+            - complementary "Evidence panel" [ref=e841]:
+              - generic [ref=e842]:
+                - generic [ref=e843]: Evidence updated. 1 source and 1 citation.
+                - generic [ref=e844]:
+                  - heading "Evidence" [level=2] [ref=e845]
+                  - generic [ref=e846]: 1 sources • 1 citations
+                  - button "Close evidence panel" [ref=e847] [cursor=pointer]
+                - generic [ref=e852]:
+                  - button "Sources" [pressed] [ref=e853] [cursor=pointer]
+                  - button "Details" [ref=e857] [cursor=pointer]
+                - generic [ref=e860]:
+                  - paragraph [ref=e861]: Use each source card to inspect excerpts, unavailable reasons, citations, and supported source links.
+                  - generic [ref=e862]:
+                    - heading "Sources (1)" [level=3] [ref=e868]
+                    - button "Show filters" [ref=e869] [cursor=pointer]
+                    - generic [ref=e870]:
+                      - generic [ref=e871]: Showing 1 of 1 sources
+                      - generic [ref=e872]:
+                        - generic [ref=e873]: "Jump: 1-9 • Tab cycles"
+                        - button "Open source keyboard shortcuts" [ref=e874] [cursor=pointer]: "?"
+                    - list "Retrieved sources" [ref=e877]:
+                      - listitem "Source 1. Cited in answer. Press Enter to jump to citation 1." [ref=e878] [cursor=pointer]:
+                        - generic [ref=e879]:
+                          - generic [ref=e880]: "1"
+                          - generic [ref=e886]:
+                            - generic [ref=e887]:
+                              - heading "cycle4-aster" [level=4] [ref=e888]
+                              - generic [ref=e889]: Relevance not measured
+                            - generic [ref=e890]: Document
+                            - button "Jump to citation 1 in answer" [ref=e893]: Cited
+                            - generic [ref=e897]:
+                              - generic [ref=e898]: "Used in answer:"
+                              - 'button "Jump to citation 1 in answer sentence 1: Mira Chen coordinates the garden, and it opens on 18 December 2026 [1]." [ref=e899]': S1
+                        - generic [ref=e900]:
+                          - paragraph [ref=e901]:
+                            - text: cycle4-
+                            - mark [ref=e902]: aster
+                            - mark [ref=e903]: Project
+                            - mark [ref=e904]: Aster
+                            - text: is a fictional community
+                            - mark [ref=e905]: garden
+                            - text: used for acceptance testing. The
+                            - mark [ref=e906]: garden
+                            - text: opens on 18 December 2026. Mira Chen
+                            - mark [ref=e907]: coordinates
+                            - text: the
+                            - mark [ref=e908]: garden
+                            - text: . The
+                            - mark [ref=e909]: garden
+                            - text: has seven...
+                          - button "Show more" [ref=e910]
+                        - generic [ref=e912]:
+                          - button "View source 1" [ref=e913]: View
+                          - button "Copy citation for source 1" [ref=e917]: Copy citation
+                          - button "More actions for source 1" [ref=e919]
+                        - generic [ref=e924]:
+                          - button "Yes" [ref=e925]
+                          - button "No" [ref=e928]
+                    - dialog [ref=e936]:
+                      - generic [ref=e937]:
+                        - generic [ref=e938]:
+                          - 'heading "Source 1: cycle4-aster" [level=3] [ref=e939]'
+                          - paragraph [ref=e940]: Document • Source ID 1 • Chunk late_chunk:1:0
+                        - generic [ref=e941]:
+                          - button "Open in Media" [active] [ref=e942] [cursor=pointer]
+                          - button "Close source preview" [ref=e947] [cursor=pointer]
+                      - generic [ref=e951]: cycle4-aster Project Aster is a fictional community garden used for acceptance testing. The garden opens on 18 December 2026. Mira Chen coordinates the garden. The garden has seven raised beds. Volunteers meet every Saturday at 09:30. The tool shed is beside the east gate.
+          - generic [ref=e643]:
+            - button "Switch to detailed view" [ref=e644] [cursor=pointer]
+            - link "Help & Documentation" [ref=e648] [cursor=pointer]:
+              - /url: https://github.com/rmusser01/tldw_server2#readme
+  - button "Open Next.js Dev Tools" [ref=e6] [cursor=pointer]
+  - alert [ref=e10]: Knowledge | tldw
+```

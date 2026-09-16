@@ -1,0 +1,91 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18381/login)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: (current) [Trash | tldw](http://127.0.0.1:18381/media-trash)
+- 3: [Sign in | tldw](http://127.0.0.1:18381/login)
+### Page
+- Page URL: http://127.0.0.1:18381/media-trash
+- Page Title: Trash | tldw
+- Console: 4 errors, 4 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f11e20]:
+  - generic [ref=f11e23]:
+    - link "Skip to main content" [ref=f11e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f11e25]:
+      - button "Expand sidebar" [ref=f11e26] [cursor=pointer]
+      - button "New Chat" [ref=f11e30] [cursor=pointer]
+      - generic [ref=f11e33]:
+        - button "Quick Ingest" [ref=f11e34] [cursor=pointer]
+        - button "Chat" [ref=f11e38] [cursor=pointer]
+        - button "Prompts" [ref=f11e41] [cursor=pointer]
+        - button "Characters" [ref=f11e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f11e50] [cursor=pointer]
+        - button "World Books" [ref=f11e54] [cursor=pointer]
+        - button "Notes" [ref=f11e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f11e61] [cursor=pointer]
+        - button "Media" [ref=f11e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f11e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f11e78] [cursor=pointer]
+        - button "Kanban" [ref=f11e84] [cursor=pointer]
+        - button "Watchlists" [ref=f11e86] [cursor=pointer]
+      - generic [ref=f11e91]:
+        - button "Open Notes Dock" [ref=f11e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f11e97] [cursor=pointer]
+        - button "Settings" [ref=f11e100] [cursor=pointer]
+    - main [ref=f11e104]:
+      - generic [ref=f11e105]:
+        - generic [ref=f11e108]:
+          - generic [ref=f11e109]:
+            - button "Expand sidebar" [ref=f11e110] [cursor=pointer]
+            - generic [ref=f11e112]:
+              - img "tldw Assistant" [ref=f11e113]
+              - generic [ref=f11e114]: tldw Assistant
+              - button "Companion Home" [ref=f11e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f11e119] [cursor=pointer]
+          - generic [ref=f11e122]:
+            - button "Search - Open command palette" [ref=f11e123] [cursor=pointer]:
+              - generic [ref=f11e127]: Search
+              - generic [ref=f11e128]: ⌘K
+            - button "Open settings" [ref=f11e129] [cursor=pointer]
+            - generic [ref=f11e141]:
+              - button "Notifications, 0 unread" [ref=f11e142] [cursor=pointer]
+              - status [ref=f11e146]: Notifications are active
+            - button "Switch to light theme" [ref=f11e147] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f11e154] [cursor=pointer]:
+              - generic [ref=f11e155]: "?"
+        - generic [ref=f11e727]:
+          - generic [ref=f11e728]:
+            - generic [ref=f11e729]:
+              - heading "Trash" [level=1] [ref=f11e730]
+              - paragraph [ref=f11e731]: Items moved to trash stay here until you restore or permanently delete them.
+              - paragraph [ref=f11e732]: Auto-purge policy is not configured or not reported by this server.
+              - searchbox "Search trash" [ref=f11e734]
+            - generic [ref=f11e735]:
+              - button "Refresh" [ref=f11e736] [cursor=pointer]
+              - button "Empty trash" [ref=f11e742] [cursor=pointer]
+          - generic [ref=f11e746]:
+            - generic [ref=f11e747]:
+              - checkbox "Select all visible" [ref=f11e748]
+              - generic [ref=f11e749]: Select all visible
+            - generic [ref=f11e750]:
+              - generic [ref=f11e751]: 0 selected
+              - button "Restore selected" [disabled] [ref=f11e752]
+              - button "Delete selected" [disabled] [ref=f11e756]
+          - generic [ref=f11e762]:
+            - generic [ref=f11e763]:
+              - checkbox "Select item 1" [ref=f11e764]
+              - generic [ref=f11e765]:
+                - generic [ref=f11e766]: uat-cycle4-multi-admin-sole
+                - generic [ref=f11e767]:
+                  - generic [ref=f11e768]: document
+                  - generic [ref=f11e769]: "#1"
+                  - generic [ref=f11e770]: "Deleted: Sep 15, 2026, 6:28 PM"
+            - generic [ref=f11e771]:
+              - button "Restore" [ref=f11e772] [cursor=pointer]
+              - button "Delete permanently" [ref=f11e776] [cursor=pointer]
+          - generic [ref=f11e780]: 1 of 1 results
+  - button "Open Next.js Dev Tools" [ref=f11e15] [cursor=pointer]
+  - alert [ref=f11e19]: Trash | tldw
+```

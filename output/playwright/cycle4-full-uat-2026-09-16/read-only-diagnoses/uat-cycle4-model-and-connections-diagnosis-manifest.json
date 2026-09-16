@@ -1,0 +1,111 @@
+{
+  "createdAt": "2026-09-16T01:46:34.289Z",
+  "frozenSource": "7c9409fad2",
+  "entries": [
+    {
+      "path": "apps/packages/ui/src/components/Media/AnalysisModal.tsx",
+      "bytes": 22135,
+      "sha256": "df728f2f360e29a1d37a549ccdede17105c558dcc918e68126b17a1643fcd2b0",
+      "matchesFrozen": true
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useSelectedModel.ts",
+      "bytes": 2616,
+      "sha256": "69617d1502ee2523a0639282c96ca280ff43b232f9cc3a2892ea5156bbaf09c9",
+      "matchesFrozen": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
+      "bytes": 71902,
+      "sha256": "b9e58148dbac0f55a4da39ea5867da0e752492006ac25e4f3aaf7969a08da734",
+      "matchesFrozen": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx",
+      "bytes": 17580,
+      "sha256": "6a056b90ade00884f3a3aa3ce4fdff199b9a117af302b34f82312985262c11be",
+      "matchesFrozen": true
+    },
+    {
+      "path": "apps/tldw-frontend/extension/shims/plasmo-storage-hook.tsx",
+      "bytes": 2892,
+      "sha256": "087d9ae088bd9a496a6b225b4285964d13b3a1f4c0b802cc498882761e8eddb1",
+      "matchesFrozen": true
+    },
+    {
+      "path": "apps/tldw-frontend/extension/shims/plasmo-storage.ts",
+      "bytes": 8311,
+      "sha256": "a4b04156ee8840c2c0d09c53f5ef259b2b0687bbc1722cc9f54b4523fb7d3d85",
+      "matchesFrozen": true
+    },
+    {
+      "path": "apps/tldw-frontend/components/layout/WebLayout.tsx",
+      "bytes": 32711,
+      "sha256": "48e209cb9f9d40fff4f1aa361a7042bb8f91203f3763e96ca5e850bd0e95dbac",
+      "matchesFrozen": true
+    },
+    {
+      "path": "apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx",
+      "bytes": 18425,
+      "sha256": "66401e693d86de88296c0c37f419ea8605f561ef6cadbddd6e7bd975c502e793",
+      "matchesFrozen": true
+    },
+    {
+      "path": "apps/tldw-frontend/lib/api/notifications.ts",
+      "bytes": 6573,
+      "sha256": "087188969437f69c558fac0c75c5c21daf2393364334e6087c4e0af07d45527d",
+      "matchesFrozen": true
+    },
+    {
+      "path": "apps/tldw-frontend/lib/sse.ts",
+      "bytes": 5405,
+      "sha256": "dcda773b9891d983041ef4079485cc3e4577004e54ffabba47e2e95b3eeb2e08",
+      "matchesFrozen": true
+    },
+    {
+      "path": "apps/packages/ui/src/services/notifications.ts",
+      "bytes": 11062,
+      "sha256": "16f91a0b05767b9ab813fac6ae74b4b186e702aa2fd7288944d196d13e26f1d1",
+      "matchesFrozen": true
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/notifications.py",
+      "bytes": 20108,
+      "sha256": "2cab0a7a34a84dd0ba8bdc6c9bddd75967d7b364ad7c55976ef1f522829dd435",
+      "matchesFrozen": true
+    },
+    {
+      "path": "apps/tldw-frontend/__tests__/components/notification-lifecycle-provider.test.tsx",
+      "bytes": 27086,
+      "sha256": "c7b7198b7cfad9fbf8b6453269ff49855bb98e3f68e102c251497f60f11e57e0",
+      "matchesFrozen": true
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "/private/tmp/uat-media-model-selection-readonly.config.ts",
+      "bytes": 3301,
+      "sha256": "37d27e88480fb6b88c7e1e4999f8532e26556c7d2238cb83983c40d93a5f73db"
+    },
+    {
+      "path": "/private/tmp/uat-media-model-selection-readonly.log",
+      "bytes": 3322,
+      "sha256": "cca315e691e927b8ae7f25e914a5b3bdc3a10051a2cee3a98630890d6de9b20c"
+    },
+    {
+      "path": "/private/tmp/uat-notifications-hidden-stream-readonly.config.ts",
+      "bytes": 2090,
+      "sha256": "224f9d3874656053a61840d69625dba5356c0c3587885dfc90d4ba3a274342a9"
+    },
+    {
+      "path": "/private/tmp/uat-notifications-hidden-stream-readonly.log",
+      "bytes": 5480,
+      "sha256": "e07d0d67ef85705baf5b5134e098c3f4921229756f0b7d8e52d60a6134a8d2d7"
+    },
+    {
+      "path": "/private/tmp/uat-cycle4-model-and-connections-diagnosis.md",
+      "bytes": 5884,
+      "sha256": "c0330e125f3b106ee7645aaca0ad5e643bb12485e57014cf3f7cc1f20cca314f"
+    }
+  ]
+}

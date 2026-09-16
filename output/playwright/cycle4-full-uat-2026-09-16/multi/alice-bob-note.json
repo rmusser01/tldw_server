@@ -1,0 +1,11 @@
+{
+  "checkedAt": "2026-09-16T01:23:10.593Z",
+  "identity": "alice",
+  "verifierAuth": "reuse",
+  "method": "GET",
+  "path": "/api/v1/notes/80f7ec16-9371-4f31-a5d2-2f1d37059288",
+  "status": 404,
+  "body": {
+    "detail": "Note not found"
+  }
+}

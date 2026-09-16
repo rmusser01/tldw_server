@@ -1,0 +1,13 @@
+### Result
+{"url":"http://127.0.0.1:18380/chat?mode=character&characterId=4","text":"Skip to main content\ntldw Assistant\nSaved\nCharacter: Cycle4 Aster Guide\nSearch\n⌘K\nTemp\nCharacter\nNotifications are active\n?\nChat\n\nCockpit rails hidden. Chat and composer remain active.\n\nCharacter Chat\nCycle4 Aster Guide\nConversation timeline\nFocus\nShortcuts\nArtifacts panel closed\nGREETING\nReroll\nSelect\nPICK FROM LIST\nWelcome to Project Aster.\nUse character default\nWelcome to Project Aster.\nInclude greeting in context\nCycle4 Aster Guide\n• 6:46 PM\ngreeting\n\nWelcome to Project Aster.\n\n•••\nComposer\nSEND\nModes\nMCP\nNone\nSearch & Context\nPrompt\nRole-play setup\nBuddy & Persona\nOpenUI\nAttach image\nMore tools\nChat Settings\nCustom OpenAI API / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf\nHealthy\nCharacter\nCycle4 Aster Guide\nCharacter context\nIncluded\nChat\n1 message\n7 + ~0 = 7 tokens\nSaved\nAdvanced controls\nAdd expression images for Cycle4 Aster Guide.\nEdit expressions\nDismiss\nContext rail\nRestore context sidechannel\nRuntime rail\nRestore runtime sidechannel"}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("textbox",{name:"Type a message... (/ commands, @ mentions)",exact:true}).waitFor({timeout:10000}); await page.waitForTimeout(2000); return {url:page.url(),text:await page.locator("body").innerText()}; })(page);
+```
+### Open tabs
+- 0: [Remember this public cycle4 phrase: ASTER-42. Reply with only ASTER-42. | tldw](http://127.0.0.1:18380/chat)
+- 1: [Media | tldw](http://127.0.0.1:18380/media?id=1)
+- 2: (current) [Chat | tldw](http://127.0.0.1:18380/chat?mode=character&characterId=4)
+### Page
+- Page URL: http://127.0.0.1:18380/chat?mode=character&characterId=4
+- Page Title: Chat | tldw

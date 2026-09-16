@@ -1,0 +1,6 @@
+### Result
+{"status":201,"body":{"note_id":"5b492a7b-c771-4720-92fe-a89773d5dc9d","flashcard_id":"7f077a43-b4ba-487e-8dd9-edf1a4c4a3dc","conversation_id":"ce67520e-883b-42ff-b565-c2872616c048","message_id":"pa_baec-8ac1-caa-6966","export_status":"not_requested","export_job_id":null}}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("textbox",{name:"Question",exact:true}).fill("Who coordinates Project Aster and when does it open?"); const response=page.waitForResponse(r=>r.request().method()==="POST"&&r.url().includes("/chat/knowledge/save"),{timeout:10000});await page.getByRole("button",{name:"Save flashcard",exact:true}).click();const r=await response;return {status:r.status(),body:await r.json()}; })(page);
+```

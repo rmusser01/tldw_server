@@ -1,0 +1,6 @@
+### Result
+{"url":"http://127.0.0.1:18380/settings/tldw","title":"Server Settings | tldw","success":true}
+### Ran Playwright code
+```js
+await (async page => {await page.getByRole("button",{name:"Test Connection",exact:true}).click({timeout:5000});await page.getByText("Server responded successfully. You can continue.",{exact:true}).waitFor({timeout:10000});return {url:page.url(),title:await page.title(),success:true};})(page);
+```

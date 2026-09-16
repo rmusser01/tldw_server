@@ -1,0 +1,51 @@
+{
+  "checkedAt": "2026-09-16T00:37:09.124Z",
+  "identity": "alice",
+  "verifierAuth": "login",
+  "method": "GET",
+  "path": "/api/v1/chats/?limit=100&offset=0",
+  "status": 200,
+  "body": {
+    "chats": [
+      {
+        "id": "a9feabc7-38aa-4b06-b08d-0b673b069819",
+        "scope_type": "global",
+        "workspace_id": null,
+        "character_id": null,
+        "character_name": null,
+        "assistant_kind": null,
+        "assistant_id": null,
+        "assistant_name": null,
+        "persona_memory_mode": null,
+        "title": "Remember this public cycle4 phrase: CEDAR-41. Reply with only CEDAR-41.",
+        "rating": null,
+        "state": "in-progress",
+        "topic_label": null,
+        "cluster_id": null,
+        "source": "webui-chat",
+        "external_ref": null,
+        "created_at": "2026-09-16T00:36:10.221000Z",
+        "last_modified": "2026-09-16T00:36:33.131000Z",
+        "message_count": 5,
+        "version": 1,
+        "parent_conversation_id": null,
+        "root_id": "a9feabc7-38aa-4b06-b08d-0b673b069819",
+        "forked_from_message_id": null,
+        "settings": null
+      }
+    ],
+    "total": 1,
+    "limit": 100,
+    "offset": 0,
+    "pagination": {
+      "mode": "offset",
+      "limit": 100,
+      "offset": 0,
+      "total": 1,
+      "has_more": false,
+      "next_offset": null
+    },
+    "has_more": false,
+    "next_offset": null
+  }
+}

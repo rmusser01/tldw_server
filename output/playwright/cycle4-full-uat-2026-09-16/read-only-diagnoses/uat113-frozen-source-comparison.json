@@ -1,0 +1,36 @@
+{
+  "frozenRef": "7c9409fad271f84d8a4165da36d89b18e6351208",
+  "head": "9f17739b4a9ce13c5dedea7677270f10e239c245",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/Playground.tsx",
+      "current": "f329cd492b85fa371c53a03340be24ecf4fef4bf86855fe2b3c123a037880873",
+      "frozen": "f329cd492b85fa371c53a03340be24ecf4fef4bf86855fe2b3c123a037880873",
+      "unchanged": true
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/usePlaygroundSessionPersistence.tsx",
+      "current": "9d2529b00d456712e86ed1c12360b2755faa889490b4ed023004d74a299ee545",
+      "frozen": "9d2529b00d456712e86ed1c12360b2755faa889490b4ed023004d74a299ee545",
+      "unchanged": true
+    },
+    {
+      "path": "apps/packages/ui/src/store/playground-session.tsx",
+      "current": "4b3f9f42bd97febd2c3f3bc1d5bb0ff7338850321735181637d45fa1afdfce13",
+      "frozen": "4b3f9f42bd97febd2c3f3bc1d5bb0ff7338850321735181637d45fa1afdfce13",
+      "unchanged": true
+    },
+    {
+      "path": "apps/packages/ui/src/utils/character-chat-mode-intent.ts",
+      "current": "edb40ba1f2224bf8212fede97e28c7a5779003ff2a93b4629172cfdc7fed8c13",
+      "frozen": "edb40ba1f2224bf8212fede97e28c7a5779003ff2a93b4629172cfdc7fed8c13",
+      "unchanged": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx",
+      "current": "db7981bdc98ee6f17942c752eced6b50c63f00a0fea47aff749716cba34b3b60",
+      "frozen": "db7981bdc98ee6f17942c752eced6b50c63f00a0fea47aff749716cba34b3b60",
+      "unchanged": true
+    }
+  ]
+}

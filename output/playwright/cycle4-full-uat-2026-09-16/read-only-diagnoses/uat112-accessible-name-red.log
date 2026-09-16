@@ -1,0 +1,52 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:77132) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Flashcards/tabs/__tests__/ManageTab.empty-state.test.tsx (5 tests | 2 failed | 3 skipped) 336ms
+     ↓ shows create, import, generate, and primary filters before expert chrome for a true first run
+     ↓ routes import and generate empty-state actions through distinct callbacks
+     ↓ treats workspace deck visibility as an active empty-result filter
+     × UAT112 actual Manage FAB has an accessible name 277ms
+     × UAT112 native retained hidden icon does not rename completed Create 59ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Flashcards/tabs/__tests__/ManageTab.empty-state.test.tsx > ManageTab no-card empty state > UAT112 actual Manage FAB has an accessible name
+Error: expect(element).toHaveAccessibleName()
+
+Expected element to have accessible name:
+  Create card
+Received:
+
+ ❯ src/components/Flashcards/tabs/__tests__/ManageTab.empty-state.test.tsx:285:60
+    281|     expect(screen.getByTestId("flashcards-density-toggle")).toBeInTheD…
+    282|   })
+    283| })
+       |   ^
+    284| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/Flashcards/tabs/__tests__/ManageTab.empty-state.test.tsx > ManageTab no-card empty state > UAT112 native retained hidden icon does not rename completed Create
+Error: expect(element).toHaveAccessibleName()
+
+Expected element to have accessible name:
+  Create
+Received:
+  loadingCreate
+ ❯ src/components/Flashcards/tabs/__tests__/ManageTab.empty-state.test.tsx:293:17
+    281|     expect(screen.getByTestId("flashcards-density-toggle")).toBeInTheD…
+    282|   })
+    283| })
+       |   ^
+    284| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 3 skipped (5)
+   Start at  18:58:50
+   Duration  1.77s (transform 228ms, setup 111ms, import 876ms, tests 336ms, environment 355ms)
+

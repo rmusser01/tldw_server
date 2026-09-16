@@ -1,5 +1,7 @@
 # Cycle4 single-user fresh UAT — running tracker
 
+**Execution closed 2026-09-16 02:03 UTC.** The [final report](FINAL_REPORT.md) supersedes pending rows below and records all actual outcomes, failures and coverage limits. Product source remained frozen at7c9409fad2. The branch includes dev2e1a5e58d3; origin/dev subsequently advanced6commits during execution.
+
 Parent: TASK13260. Product freeze: `7c9409fad2`; documentation checkpoint: `9f17739b4a`. Verified `origin/dev` tip `2e1a5e58d3` is an ancestor, with zero dev-only commits. The original task did not begin from that latest-dev tip; this fresh pass uses the corrected branch.
 
 New profile: `/private/tmp/tldw-onboarding-uat-cycle4-single-20260916`; API18300, UI18380; browser session `cycle4-single-20260916`. Normal AuthNZ initialization succeeded. Configuration/data/browser state are fresh; existing project dependencies are reused. No clean-machine dependency installation claim. No product edits during the run.

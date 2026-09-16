@@ -1,0 +1,149 @@
+### Open tabs
+- 0: (current) [Knowledge | tldw](http://127.0.0.1:18381/knowledge)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: [Notes | tldw](http://127.0.0.1:18381/notes)
+### Page
+- Page URL: http://127.0.0.1:18381/knowledge
+- Page Title: Knowledge | tldw
+- Console: 2 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f7e11]:
+  - generic [ref=f7e14]:
+    - link "Skip to main content" [ref=f7e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f7e16]:
+      - button "Expand sidebar" [ref=f7e17] [cursor=pointer]
+      - button "New Chat" [ref=f7e21] [cursor=pointer]
+      - generic [ref=f7e24]:
+        - button "Quick Ingest" [ref=f7e25] [cursor=pointer]
+        - button "Chat" [ref=f7e29] [cursor=pointer]
+        - button "Prompts" [ref=f7e32] [cursor=pointer]
+        - button "Characters" [ref=f7e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f7e41] [cursor=pointer]
+        - button "World Books" [ref=f7e45] [cursor=pointer]
+        - button "Notes" [ref=f7e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f7e52] [cursor=pointer]
+        - button "Media" [ref=f7e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f7e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f7e69] [cursor=pointer]
+        - button "Kanban" [ref=f7e75] [cursor=pointer]
+        - button "Watchlists" [ref=f7e77] [cursor=pointer]
+      - generic [ref=f7e82]:
+        - button "Open Notes Dock" [ref=f7e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f7e88] [cursor=pointer]
+        - button "Settings" [ref=f7e91] [cursor=pointer]
+    - main [ref=f7e95]:
+      - generic [ref=f7e96]:
+        - generic [ref=f7e99]:
+          - generic [ref=f7e100]:
+            - button "Expand sidebar" [ref=f7e101] [cursor=pointer]
+            - generic [ref=f7e103]:
+              - img "tldw Assistant" [ref=f7e104]
+              - generic [ref=f7e105]: tldw Assistant
+              - button "Companion Home" [ref=f7e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f7e110] [cursor=pointer]
+          - generic [ref=f7e117]:
+            - button "Search - Open command palette" [ref=f7e118] [cursor=pointer]:
+              - generic [ref=f7e122]: Search
+              - generic [ref=f7e123]: ⌘K
+            - button "Open settings" [ref=f7e137] [cursor=pointer]
+            - generic [ref=f7e149]:
+              - button "Notifications, 0 unread" [ref=f7e452] [cursor=pointer]
+              - status [ref=f7e153]: Notifications are active
+            - button "Switch to light theme" [ref=f7e154] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f7e161] [cursor=pointer]:
+              - generic [ref=f7e162]: "?"
+        - generic [ref=f7e1524]:
+          - link "Skip to search" [ref=f7e1525] [cursor=pointer]:
+            - /url: "#knowledge-search-input"
+          - main [ref=f7e1526]:
+            - generic [ref=f7e1527]:
+              - generic [ref=f7e1529]:
+                - generic [ref=f7e1530]:
+                  - 'button "Open source scope and saved profiles. Sources: 4 selected. Specific: 1 doc" [ref=f7e2367] [cursor=pointer]':
+                    - text: "Sources: 4 selected"
+                    - generic [ref=f7e2368]: "• Specific: 1 doc"
+                  - button "Custom" [ref=f7e2369] [cursor=pointer]
+                  - button "Web fallback is currently disabled. Click to toggle." [ref=f7e1541] [cursor=pointer]: Web
+                  - button "Choose answer model" [ref=f7e1546] [cursor=pointer]:
+                    - generic [ref=f7e1550]: "AI: Server default"
+                  - button "Refresh source health" [ref=f7e1553] [cursor=pointer]: "Sources ready: 6 of 8"
+                  - button "Open Knowledge QA settings" [ref=f7e1554] [cursor=pointer]
+                - generic [ref=f7e1600]:
+                  - paragraph [ref=f7e1601]: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
+                  - generic [ref=f7e1602]:
+                    - textbox "Search your knowledge base" [ref=f7e1603]:
+                      - /placeholder: When was topic X first mentioned in my sources?
+                      - text: When does Project Cedar open and who coordinates the workshop? Cite the source.
+                    - button "Clear search" [ref=f7e1739] [cursor=pointer]
+                    - button "Ask" [ref=f7e2416] [cursor=pointer]
+                  - generic [ref=f7e1606]:
+                    - generic [ref=f7e1607]: Press / to focus, Cmd+K for new search
+                    - button "New search" [ref=f7e2035] [cursor=pointer]
+              - generic [ref=f7e1751]:
+                - button "Export" [ref=f7e2040] [cursor=pointer]
+                - generic [ref=f7e1752]:
+                  - generic [ref=f7e1753]: Search complete. 1 source found.
+                  - generic [ref=f7e1754]: Search error. Search timed out. Try the Fast preset or reduce sources.
+                  - region "Conversation thread" [ref=f7e2048]:
+                    - heading "Conversation Thread (2 prior turns)" [level=2] [ref=f7e2384]
+                    - generic [ref=f7e2053]:
+                      - article [ref=f7e2054]:
+                        - generic [ref=f7e2055]:
+                          - generic [ref=f7e2056]: Question 1
+                          - generic [ref=f7e2057]: Sep 15, 5:46 PM
+                          - generic [ref=f7e2058]: 0 sources
+                        - paragraph [ref=f7e2062]: When does Project Cedar open and who coordinates the workshop? Cite the source.
+                        - paragraph [ref=f7e2063]: No answer recorded.
+                        - generic [ref=f7e2064]:
+                          - button "Reuse Question" [ref=f7e2065] [cursor=pointer]
+                          - button "Ask a different follow-up" [ref=f7e2066] [cursor=pointer]
+                      - article [ref=f7e2385]:
+                        - generic [ref=f7e2386]:
+                          - generic [ref=f7e2387]: Question 2
+                          - generic [ref=f7e2388]: Sep 15, 5:54 PM
+                          - generic [ref=f7e2389]: 0 sources
+                        - paragraph [ref=f7e2393]: When does Project Cedar open and who coordinates the workshop? Cite the source.
+                        - paragraph [ref=f7e2394]: No answer recorded.
+                        - generic [ref=f7e2395]:
+                          - button "Reuse Question" [ref=f7e2396] [cursor=pointer]
+                          - button "Ask a different follow-up" [ref=f7e2397] [cursor=pointer]
+                          - button "Compare to current answer" [ref=f7e2402] [cursor=pointer]
+                    - generic [ref=f7e2404]:
+                      - heading "Compare answers" [level=3] [ref=f7e2405]
+                      - generic [ref=f7e2406]:
+                        - button "Compare to current answer" [ref=f7e2407] [cursor=pointer]
+                        - button "Compare turns" [ref=f7e2408] [cursor=pointer]
+                  - generic [ref=f7e1763]:
+                    - paragraph [ref=f7e1764]: Found 1 relevant source. Enable answer generation in settings to get a synthesized response.
+                    - button "Enable in Settings" [ref=f7e2420] [cursor=pointer]
+                  - generic [ref=f7e2075]:
+                    - generic [ref=f7e2421]:
+                      - paragraph [ref=f7e2422]: Try a sharper follow-up
+                      - paragraph [ref=f7e2423]: Ask for the missing detail, timeframe, or source you still need.
+                    - generic [ref=f7e2076]:
+                      - generic [ref=f7e2077]:
+                        - textbox "Ask a follow-up question" [ref=f7e2078]:
+                          - /placeholder: Ask a more specific follow-up...
+                        - button "Submit follow-up question" [disabled] [ref=f7e2079]
+                      - button "Start new topic" [ref=f7e2082] [cursor=pointer]:
+                        - generic [ref=f7e2084]: New Topic
+            - complementary "Open evidence panel" [ref=f7e1778]:
+              - button "Open evidence panel (1 source)" [ref=f7e2086] [cursor=pointer]:
+                - generic [ref=f7e2087]: "1"
+          - generic [ref=f7e1608]:
+            - button "Switch to detailed view" [ref=f7e1609] [cursor=pointer]
+            - link "Help & Documentation" [ref=f7e1613] [cursor=pointer]:
+              - /url: https://github.com/rmusser01/tldw_server2#readme
+  - generic [ref=f7e447] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=f7e448]
+    - generic [ref=f7e1869]:
+      - button "Open issues overlay" [ref=f7e1870]:
+        - generic [ref=f7e1871]:
+          - generic [aria-hidden] [ref=f7e1872]: "0"
+          - generic [ref=f7e1873]: "1"
+        - generic [ref=f7e1874]: Issue
+      - button "Collapse issues badge" [ref=f7e1875]
+  - alert [ref=f7e10]: Knowledge | tldw
+```

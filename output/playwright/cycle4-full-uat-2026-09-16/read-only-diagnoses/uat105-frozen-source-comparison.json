@@ -1,0 +1,28 @@
+{
+  "checkedAt": "2026-09-16T00:56:54.665Z",
+  "frozenRevision": "7c9409",
+  "allMatched": true,
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/Chat/chat_helpers.py",
+      "probeSha": "821ef96f91aabf146c434308c5b60d142bc50ce948b2a0676adacefcac15f875",
+      "frozenSha": "821ef96f91aabf146c434308c5b60d142bc50ce948b2a0676adacefcac15f875",
+      "currentSha": "821ef96f91aabf146c434308c5b60d142bc50ce948b2a0676adacefcac15f875",
+      "unchanged": true
+    },
+    {
+      "path": "tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py",
+      "probeSha": "1765e16dbdb65aa501b0c9f0cb97389d9a59a89fde1e7b3ccc23bd6eeec396bf",
+      "frozenSha": "1765e16dbdb65aa501b0c9f0cb97389d9a59a89fde1e7b3ccc23bd6eeec396bf",
+      "currentSha": "1765e16dbdb65aa501b0c9f0cb97389d9a59a89fde1e7b3ccc23bd6eeec396bf",
+      "unchanged": true
+    },
+    {
+      "path": "tldw_Server_API/app/core/Ingestion_Media_Processing/Plaintext/Plaintext_Files.py",
+      "probeSha": "c7d64b9e47c46ed59a4f4f0f222ae9af5507e2bc15f5780bf745a1c6c85b90e8",
+      "frozenSha": "c7d64b9e47c46ed59a4f4f0f222ae9af5507e2bc15f5780bf745a1c6c85b90e8",
+      "currentSha": "c7d64b9e47c46ed59a4f4f0f222ae9af5507e2bc15f5780bf745a1c6c85b90e8",
+      "unchanged": true
+    }
+  ]
+}

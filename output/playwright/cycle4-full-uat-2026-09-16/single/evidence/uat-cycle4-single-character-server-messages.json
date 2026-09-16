@@ -1,0 +1,70 @@
+{
+  "checkedAt": "2026-09-16T01:46:59.348Z",
+  "method": "GET",
+  "path": "/api/v1/chats/ce67520e-883b-42ff-b565-c2872616c048/messages?scope_type=global&include_deleted=false&include_metadata=true&limit=200&offset=0",
+  "status": 200,
+  "body": {
+    "messages": [
+      {
+        "id": "97c646cf-2e05-48d2-9326-c4d22f3ede2f",
+        "conversation_id": "ce67520e-883b-42ff-b565-c2872616c048",
+        "parent_message_id": null,
+        "sender": "assistant",
+        "content": "Welcome to Project Aster.",
+        "timestamp": "2026-09-16T01:44:50.576000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": null
+      },
+      {
+        "id": "ca2711a6-663f-4b95-8989-632a37b4a606",
+        "conversation_id": "ce67520e-883b-42ff-b565-c2872616c048",
+        "parent_message_id": null,
+        "sender": "user",
+        "content": "Who coordinates Project Aster, and when does it open? Answer in one sentence.",
+        "timestamp": "2026-09-16T01:44:50.626000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": null
+      },
+      {
+        "id": "pa_baec-8ac1-caa-6966",
+        "conversation_id": "ce67520e-883b-42ff-b565-c2872616c048",
+        "parent_message_id": "ca2711a6-663f-4b95-8989-632a37b4a606",
+        "sender": "Cycle4 Aster Guide",
+        "content": "<think>*   Topic: Who coordinates Project Aster and when does it open?\n    *   Constraints:\n        *   Role: Cycle4 Aster Guide.\n        *   Format: One short factual sentence.\n        *   No pirate speech.\n        *   Emote rule: Use `Emote: <state>` only when character expression should change, and do not use it after every sentence.\n\n    *   Coordinator: Mira Chen.\n    *   Opening date: 18 December 2026.\n\n    *   Mira Chen coordinates Project Aster, which opens on 18 December 2026.\n\n    *   One short factual sentence? Yes.\n    *   No pirate speech? Yes.\n    *   Emote usage? The user didn't request a change in expression, but as a guide, I can add one if I feel it's appropriate, or leave it out. The instructions say \"When the character expression should change, emit a standalone line... Do not emit an emote after every sentence.\"\n\n    *   \"Mira Chen coordinates Project Aster, which opens on 18 December 2026.\"\n\n    *   Option A: Mira Chen coordinates Project Aster, which opens on 18 December 2026.\n    *   Option B: Mira Chen coordinates Project Aster, and it opens on 18 December 2026.\n\n    Let's check if I should add an emote. The prompt is a direct question. I'll stick to the facts.\n\n    \"Mira Chen coordinates Project Aster, which opens on 18 December 2026.\"\n\n    Wait, I should consider if I need an emote. If I'm being helpful, maybe `Emote: <helpful>`. But the prompt says \"When the character expression *should* change\". It's a direct response to a query. I'll provide just the sentence.\n\n    Wait, the prompt says \"Answer in one short factual sentence.\"\n\n    Let's try: Mira Chen coordinates Project Aster, which opens on 18 December 2026.\n\n    Wait, I'll add an emote just to demonstrate the capability since I'm a \"Guide\".\n\n    `Emote: <informative>`\n    Mira Chen coordinates Project Aster, which opens on 18 December 2026.\n\n    Actually, let's look at the previous turn. I didn't use an emote. I'll stick to just the sentence for this one to be safe, or use it if the context implies a change.\n\n    Actually, let's look at the user's specific question. It's a factual inquiry.\n\n    Sentence: Mira Chen coordinates Project Aster, which opens on 18 December 2026.\n\n    Wait, I'll add an emote to set the tone.\n\n    `Emote: <friendly>`\n    Mira Chen coordinates Project Aster, which opens on 18 December 2026.\n\n    Actually, the prompt says \"Do not emit an emote after every sentence.\" This implies I *can* use one.\n\n    Let's try:\n    Mira Chen coordinates Project Aster, which opens on 18 December 2026.\n\n    (Self-correction: The prompt asks for \"one short factual sentence\". If I add an emote line, it's a standalone line.)\n\n    Final check:\n    1. One short factual sentence.\n    2. No pirate speech.\n    3. Emote: <state> as a standalone line.\n\n    Let's go.</think>Mira Chen coordinates Project Aster, which opens on 18 December 2026.",
+        "timestamp": "2026-09-16T01:45:00.395000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": {
+          "speaker_character_id": 4,
+          "speaker_character_name": "Cycle4 Aster Guide",
+          "turn_taking_mode": "single",
+          "persist_validation_degraded": false,
+          "mood_label": "thinking",
+          "mood_confidence": 0.98,
+          "mood_topic": "emote"
+        }
+      }
+    ],
+    "total": 3,
+    "limit": 200,
+    "offset": 0,
+    "pagination": {
+      "mode": "offset",
+      "limit": 200,
+      "offset": 0,
+      "total": 3,
+      "has_more": false,
+      "next_offset": null
+    },
+    "has_more": false,
+    "next_offset": null
+  }
+}
