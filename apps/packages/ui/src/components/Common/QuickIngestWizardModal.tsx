@@ -1178,6 +1178,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
     return () => {
       cancelled = true
+      // A replacement effect (including StrictMode replay) must own a fresh poll.
+      if (activeReattachSignatureRef.current === persistedReattachSignature) {
+        activeReattachSignatureRef.current = ""
+      }
       if (persistedReattachTimerRef.current != null) {
         window.clearTimeout(persistedReattachTimerRef.current)
         persistedReattachTimerRef.current = null

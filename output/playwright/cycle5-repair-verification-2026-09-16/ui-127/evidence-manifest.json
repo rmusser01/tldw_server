@@ -1,0 +1,68 @@
+{
+  "unit": "ui-127",
+  "retainedAt": "2026-09-16T13:40:59.652Z",
+  "knownCredentialMatches": 0,
+  "jwtPrivateKeyPatternMatches": 0,
+  "files": [
+    {
+      "name": "cycle5-repair-ui-127-final-focused.log",
+      "bytes": 757,
+      "sha256": "0442361b460cf5ee7fdeffab36c7efd2d17152b4abbae4ed77af16445676b7ef"
+    },
+    {
+      "name": "cycle5-repair-ui-127-green.log",
+      "bytes": 1665,
+      "sha256": "4dacbdc7c204932999aaa236b8bba4d6475fec40219703cc93b92fe4aad11867"
+    },
+    {
+      "name": "cycle5-repair-ui-127-implementation.md",
+      "bytes": 2610,
+      "sha256": "0eb614021f4206280bea5c9dc05253207e9ed6a188c3a4ddc226760c4b2ef1d4"
+    },
+    {
+      "name": "cycle5-repair-ui-127-independent-review.md",
+      "bytes": 814,
+      "sha256": "5df07fe70debebb304e4136bac7a014150d949dd7b01d50500d8e766aca4811e"
+    },
+    {
+      "name": "cycle5-repair-ui-127-independent-tests.log",
+      "bytes": 1665,
+      "sha256": "41ecc55f4fe0a67a7925d0806fe0e0330911fd590499ac36e9feba85983f9a8a"
+    },
+    {
+      "name": "cycle5-repair-ui-127-lint-baseline.json",
+      "bytes": 63105,
+      "sha256": "805e4cd9bf0106afbb0be536e29e705ed43ea94e29251c3d7bbadd05f0508f30"
+    },
+    {
+      "name": "cycle5-repair-ui-127-lint-comparison.json",
+      "bytes": 82,
+      "sha256": "c11f2afe28a4076e862bb4d8756a2f2bb08462dd22f9f6c671f5d0752b97f309"
+    },
+    {
+      "name": "cycle5-repair-ui-127-lint.json",
+      "bytes": 185486,
+      "sha256": "ba26adb38c5127441b7ddfced4d0ff1921a4dd1e569864ff3d7ce0e366119cd8"
+    },
+    {
+      "name": "cycle5-repair-ui-127-manifest.json",
+      "bytes": 716,
+      "sha256": "d810f7a5d9498906c5fc124bbd1849e9094c311fb890a2c2cfc00f3d458cd0a8"
+    },
+    {
+      "name": "cycle5-repair-ui-127-red.log",
+      "bytes": 10989,
+      "sha256": "f946cd0721f450a649ecf3098cd883bdf0f64fe3eaa9433f1315f6635bb95609"
+    },
+    {
+      "name": "cycle5-repair-ui-127-task-review.log",
+      "bytes": 27,
+      "sha256": "29795b6f8947e7adf77552494c68771a800fc6141c42b3315be11f849ccae65a"
+    },
+    {
+      "name": "cycle5-repair-ui-127-test-lint-baseline.json",
+      "bytes": 119783,
+      "sha256": "3e28e16615424003a0c41ccb953724f859815b729038636ccd1587ad2bf43911"
+    }
+  ]
+}

@@ -525,7 +525,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     vi.restoreAllMocks()
   })
 
-  it.each(["direct upload", "reattach"])("keeps a saved-source Warning navigable through actual %s, session state, and results UI", async (mode) => {
+  it.each(["direct upload", "reattach", "StrictMode reattach"])("keeps a saved-source Warning navigable through actual %s, session state, and results UI", async (mode) => {
     mocks.useActualResultsStep = true
     const result = { status: "Warning", media_id: 1, error: null, warnings: ["Analysis failed for chunk 1", "Analysis failed for chunk 1"] }
     mocks.bgRequest.mockResolvedValue({ ok: true, data: { status: "completed", result, error_message: null } })
@@ -545,7 +545,8 @@ describe("QuickIngestWizardModal session runtime", () => {
         tracking: { mode: "webui-direct", batchId: "warning-batch", jobIds: [77], startedAt: Date.now() },
       })
     }
-    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    const wizard = <QuickIngestWizardModal open onClose={vi.fn()} />
+    render(mode === "StrictMode reattach" ? <React.StrictMode>{wizard}</React.StrictMode> : wizard)
     if (mode === "direct upload") fireEvent.click(screen.getByText("Queue And Process"))
     expect(await screen.findByRole("region", { name: "Items saved with warnings" })).toBeVisible()
     expect(screen.getByText("Analysis failed for chunk 1")).toBeVisible()
@@ -554,8 +555,42 @@ describe("QuickIngestWizardModal session runtime", () => {
       expect.objectContaining({ status: "ok", mediaId: 1, warning: "Analysis failed for chunk 1", data: result }),
     ])
     expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/media/ingest/jobs/77", method: "GET" }))
+    if (mode !== "direct upload") {
+      expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+      expect(mocks.bgUpload).not.toHaveBeenCalled()
+      expect(mocks.cancelQuickIngestSession).not.toHaveBeenCalled()
+    }
     fireEvent.click(screen.getByRole("button", { name: /open .* media/i }))
     expect(mocks.navigate).toHaveBeenCalledWith(expect.stringContaining("media"))
+  })
+
+  it("ignores the cancelled StrictMode poll after its replacement accepts terminal results", async () => {
+    const staleRead = deferred<{ ok: boolean; data: { status: string; error_message: string } }>()
+    const reattach = await vi.importActual<typeof import("@/services/tldw/quick-ingest-session-reattach")>("@/services/tldw/quick-ingest-session-reattach")
+    mocks.reattachQuickIngestSession.mockImplementation(reattach.reattachQuickIngestSession)
+    mocks.bgRequest.mockReturnValueOnce(staleRead.promise).mockResolvedValue({
+      ok: true, data: { status: "completed", result: { status: "Success", media_id: 77 } },
+    })
+    useQuickIngestSessionStore.getState().createDraftSession({
+      ...createEmptyQuickIngestSession(), lifecycle: "processing", currentStep: 4,
+      queueItems: [{ id: "queued-url-1", kind: "url", url: "https://source.test/source.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0, validation: { valid: true } }],
+      processingState: { status: "running", perItemProgress: [], elapsed: 1, estimatedRemaining: 0 },
+      tracking: { mode: "webui-direct", batchId: "strict-batch", jobIds: [77], startedAt: Date.now() },
+    })
+    render(<React.StrictMode><QuickIngestWizardModal open onClose={vi.fn()} /></React.StrictMode>)
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().session?.results).toEqual([
+      expect.objectContaining({ mediaId: 77, status: "ok" }),
+    ]))
+    await act(async () => {
+      staleRead.resolve({ ok: true, data: { status: "failed", error_message: "Stale first read" } })
+      await staleRead.promise
+    })
+    expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+      lifecycle: "completed", currentStep: 5,
+      results: [expect.objectContaining({ mediaId: 77, status: "ok" })],
+    })
+    expect(mocks.cancelQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
   })
 
   it.each(["processing button", "close confirmation"])(
