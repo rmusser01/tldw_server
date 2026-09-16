@@ -1,0 +1,14 @@
+[
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py",
+    "sha256": "76fbab382c9aef576efabf01818985ae454a1fd3171c8b406b8f2f2a7f89755e"
+  },
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_media_search_fts_fallback.py",
+    "sha256": "bd8dcb45cff6bfde8929a595c218ff06cdd8fa01b7589fd3e99529d5051ead1d"
+  },
+  {
+    "path": "backlog/tasks/task-13260.73 - Preserve-media-query-filtering-when-full-text-syntax-falls-back.md",
+    "sha256": "960d274be0c563fa4e200a99d52b565678699a70b34101f3fbea6b92a375ea41"
+  }
+]

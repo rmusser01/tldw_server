@@ -481,6 +481,19 @@ class MediaSearchRepository:
         join_clause = " ".join(list(dict.fromkeys(joins)))
         where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
 
+        def _literal_fts_fallback() -> tuple[list[str], list[Any], list[str]]:
+            """Replace only MATCH, preserving every other predicate and parameter."""
+            fallback_conditions = list(conditions)
+            fallback_params = list(params)
+            literal = like_search_query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            fields = [field for field in sanitized_text_search_fields if field in ("title", "content")]
+            fallback_conditions[fts_condition_index] = "(" + " OR ".join(
+                f"m.{field} LIKE ? ESCAPE '\\' COLLATE NOCASE" for field in fields
+            ) + ")"
+            fallback_params[fts_param_index:fts_param_index + 1] = [f"%{literal}%"] * len(fields)
+            fallback_joins = [join for join in joins if "media_fts fts" not in join]
+            return fallback_conditions, fallback_params, fallback_joins
+
         def _extract_total(row: Any) -> int:
             if not row:
                 return 0
@@ -513,15 +526,7 @@ class MediaSearchRepository:
                     raise
 
                 logger.warning(f"FTS MATCH error, falling back to LIKE-only search: {exc}")
-                fallback_conditions = [
-                    condition
-                    for idx, condition in enumerate(conditions)
-                    if idx != fts_condition_index
-                ]
-                fallback_params = list(params)
-                if fts_param_index is not None and 0 <= fts_param_index < len(fallback_params):
-                    fallback_params.pop(fts_param_index)
-                fallback_joins = [join for join in joins if "media_fts fts" not in join]
+                fallback_conditions, fallback_params, fallback_joins = _literal_fts_fallback()
 
                 if not fallback_conditions and not fallback_params and not fallback_joins and not search_query:
                     logger.warning("No valid search conditions after removing FTS MATCH, returning empty results")
@@ -582,15 +587,7 @@ class MediaSearchRepository:
                         raise
 
                     logger.warning(f"FTS MATCH error in results query, falling back to LIKE-only search: {exc}")
-                    fallback_conditions = [
-                        condition
-                        for idx, condition in enumerate(conditions)
-                        if idx != fts_condition_index
-                    ]
-                    fallback_params = list(params)
-                    if fts_param_index is not None and 0 <= fts_param_index < len(fallback_params):
-                        fallback_params.pop(fts_param_index)
-                    fallback_joins = [join for join in joins if "media_fts fts" not in join]
+                    fallback_conditions, fallback_params, fallback_joins = _literal_fts_fallback()
 
                     if fts_relevance_added:
                         base_select_parts[:] = [
@@ -618,6 +615,9 @@ class MediaSearchRepository:
                     paginated_params = tuple(list(params) + [results_per_page, offset])
                     logger.debug(f"Fallback Results SQL ({db.db_path_str}): {results_sql}")
                     logger.debug(f"Fallback Results Params: {paginated_params}")
+                    # The successful FTS count may differ from literal matching.
+                    count_sql = f"SELECT {count_select} {base_from} {join_clause} {where_clause}"
+                    total_matches = _extract_total(db.execute_query(count_sql, tuple(params)).fetchone())
                     results_cursor = db.execute_query(results_sql, paginated_params)
                     results_list = []
                     for row in results_cursor.fetchall():
