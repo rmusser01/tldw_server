@@ -13,11 +13,12 @@ from types import MappingProxyType
 from typing import Any
 
 
-@dataclass(frozen=True)
 class HistorySelectionError(ValueError):
     """A stable code for malformed or unavailable ancestry."""
 
-    code: str
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
 
     def __str__(self) -> str:
         return self.code

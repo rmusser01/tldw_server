@@ -1,6 +1,7 @@
 """Pure H1 history selection contract tests."""
 
 import json
+from contextlib import contextmanager
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -37,6 +38,18 @@ from tldw_Server_API.app.core.Chat.history_selection import (
 )
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "history_selection_v1.json"
+
+
+def test_history_selection_error_survives_generator_transaction_boundary() -> None:
+    @contextmanager
+    def transaction_boundary():
+        yield
+
+    with pytest.raises(HistorySelectionError) as caught:
+        with transaction_boundary():
+            raise HistorySelectionError("stale_selection")
+    assert caught.value.code == "stale_selection"
+    assert str(caught.value) == "stale_selection"
 
 
 def test_selected_branch_and_before_root_are_stable() -> None:
