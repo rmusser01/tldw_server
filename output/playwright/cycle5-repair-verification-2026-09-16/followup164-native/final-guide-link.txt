@@ -1,0 +1,17 @@
+### Result
+{"link":{"href":"https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md","target":"_blank","rel":"noopener noreferrer","text":"Provider setup guide"},"url":"http://127.0.0.1:18582/settings/model"}
+### Ran Playwright code
+```js
+await (async page => ({link:await page.getByRole("link",{name:"Provider setup guide",exact:true}).evaluate(e=>({href:e.href,target:e.target,rel:e.rel,text:e.textContent})),url:page.url()}))(page);
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [](http://127.0.0.1:18583/settings/model)
+- 5: (current) [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+### Page
+- Page URL: http://127.0.0.1:18582/settings/model
+- Console: 2 errors, 2 warnings

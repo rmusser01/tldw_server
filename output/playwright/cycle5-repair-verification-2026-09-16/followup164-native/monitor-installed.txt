@@ -1,0 +1,6 @@
+### Result
+{"installed":true}
+### Ran Playwright code
+```js
+await (async page => {page.__uat164Events=[];page.on("response",async r=>{if(!r.url().includes("/api/v1/llm/models/metadata"))return;let body;try{body=await r.text()}catch{}page.__uat164Events.push({url:r.url(),status:r.status(),body,at:Date.now()})});return {installed:true}})(page);
+```

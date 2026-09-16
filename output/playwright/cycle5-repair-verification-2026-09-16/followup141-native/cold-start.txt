@@ -1,0 +1,26 @@
+### Result
+{"phase":"cold-aborted","url":"http://127.0.0.1:18580/notifications"}
+### Ran Playwright code
+```js
+await (async page => {
+ page.__uat141Events=[];page.__uat141Phase='cold-aborted';
+ page.__uat141Route=async route=>{page.__uat141Events.push({kind:'aborted',phase:page.__uat141Phase,url:route.request().url(),at:Date.now()});await route.abort('failed')};
+ page.on('response',async r=>{if(!r.url().includes('/api/v1/notifications'))return;let body;try{if(!r.url().includes('/stream'))body=await r.text()}catch{}page.__uat141Events.push({kind:'response',phase:page.__uat141Phase,url:r.url(),status:r.status(),body,at:Date.now()})});
+ await page.route('**/api/v1/notifications**',page.__uat141Route);
+ await page.goto('http://127.0.0.1:18580/notifications');return {phase:page.__uat141Phase,url:page.url()};
+}
+)(page);
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [](http://127.0.0.1:18583/settings/model)
+- 5: [Setup | tldw](http://127.0.0.1:18582/setup)
+- 6: (current) [](http://127.0.0.1:18580/notifications)
+### Page
+- Page URL: http://127.0.0.1:18580/notifications
+- Console: 4 errors, 0 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T22-08-48-551Z.log#L1-L6

@@ -1,0 +1,138 @@
+{
+  "at": "2026-09-16T22:38:45.615Z",
+  "files": [
+    {
+      "file": "IMPLEMENTATION.md",
+      "source": ".tmp/uat165-repair-20260916/IMPLEMENTATION.md",
+      "original_sha256": "e5817a33a644aa7d176ead47ba8f369b4dbade4f652d5678ab0e171aa72b2025",
+      "retained_sha256": "e5817a33a644aa7d176ead47ba8f369b4dbade4f652d5678ab0e171aa72b2025",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-review.md",
+      "source": ".tmp/uat165-repair-20260916/independent-review.md",
+      "original_sha256": "4023ed468d2c0c715d04cd55b194cd8edc8d878020987869aeb571c880786676",
+      "retained_sha256": "4023ed468d2c0c715d04cd55b194cd8edc8d878020987869aeb571c880786676",
+      "normalization": "none"
+    },
+    {
+      "file": "owned-manifest.json",
+      "source": ".tmp/uat165-repair-20260916/owned-manifest.json",
+      "original_sha256": "c2e8254b2f6079fa76b3dda0c4e7c0ddce013d0067fab12a90d989b187510dd9",
+      "retained_sha256": "c2e8254b2f6079fa76b3dda0c4e7c0ddce013d0067fab12a90d989b187510dd9",
+      "normalization": "none"
+    },
+    {
+      "file": "owned.patch",
+      "source": ".tmp/uat165-repair-20260916/owned.patch",
+      "original_sha256": "6e3113a9c90918825dea85cee3639acd0e8123fc441776a510d1fa3e7c5f974b",
+      "retained_sha256": "6e3113a9c90918825dea85cee3639acd0e8123fc441776a510d1fa3e7c5f974b",
+      "normalization": "none"
+    },
+    {
+      "file": "index.review.tsx",
+      "source": ".tmp/uat165-repair-20260916/index.review.tsx",
+      "original_sha256": "f736239e73323ba5756f28526d4fc0229730a00511ae9b41a4c21e25bd0457c6",
+      "retained_sha256": "f736239e73323ba5756f28526d4fc0229730a00511ae9b41a4c21e25bd0457c6",
+      "normalization": "none"
+    },
+    {
+      "file": "models-tests.log",
+      "source": ".tmp/uat165-repair-20260916/models-tests.log",
+      "original_sha256": "78efd7aa98b0995f6aadf3bde401616a4706e0d771af4edf1ec7affcc27f69d7",
+      "retained_sha256": "6b76e90f1bd7a85a90cd90f7ef417b44d3dc0f8fde38a4c6d7f6af04895ad35f",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "root-models-tests.log",
+      "source": ".tmp/uat165-repair-20260916/root-models-tests.log",
+      "original_sha256": "ea0d265cf9de4b6f3f5f04b429a2c1de1653d369dfa44f35bcdc6347ba07c67a",
+      "retained_sha256": "558057db882fa96c9b14cfac7293d456a17d817cdfdb781240ec9f40114deecd",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "eslint.json",
+      "source": ".tmp/uat165-repair-20260916/eslint.json",
+      "original_sha256": "ddfc020a673fb83a6cede1bd090c3ca5bdc05a1b8b2834cf88efd13319bfc4f5",
+      "retained_sha256": "ddfc020a673fb83a6cede1bd090c3ca5bdc05a1b8b2834cf88efd13319bfc4f5",
+      "normalization": "none"
+    },
+    {
+      "file": "eslint-stderr.txt",
+      "source": ".tmp/uat165-repair-20260916/eslint-stderr.txt",
+      "original_sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "retained_sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "normalization": "none"
+    },
+    {
+      "file": "bandit.json",
+      "source": ".tmp/uat165-repair-20260916/bandit.json",
+      "original_sha256": "25dead201628498bd45e8ff13bba95b1237022c4dd953e89b18bb300b863e1f4",
+      "retained_sha256": "7c586e279515a231c860d54916f11539d0ee775e14e842c46bfc359b7a123189",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "bandit.log",
+      "source": ".tmp/uat165-repair-20260916/bandit.log",
+      "original_sha256": "71dda9e2c5b20a56afe7d1445e17ff8c9acdb7e86b06d18bb1764513e0233d69",
+      "retained_sha256": "71dda9e2c5b20a56afe7d1445e17ff8c9acdb7e86b06d18bb1764513e0233d69",
+      "normalization": "none"
+    },
+    {
+      "file": "native-geometry.js",
+      "source": ".tmp/uat165-repair-20260916/native-geometry.js",
+      "original_sha256": "cdff7afab837f440448d17d42494de3e26c4ba32f89632ac7bc203bd8912e152",
+      "retained_sha256": "cdff7afab837f440448d17d42494de3e26c4ba32f89632ac7bc203bd8912e152",
+      "normalization": "none"
+    },
+    {
+      "file": "native-desktop-geometry.txt",
+      "source": ".tmp/uat165-repair-20260916/native-desktop-geometry.txt",
+      "original_sha256": "e3607ccc6b7ff692d5f300f68c94c9308da056386b82d7862fef96160c3388ad",
+      "retained_sha256": "b85805ecbbb843deb1c07de40f969607b3da70f5ebc61d29a444cf34415e8cc6",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "native-desktop.png",
+      "source": ".tmp/uat165-repair-20260916/native-desktop.png",
+      "original_sha256": "25bed7cdb09bf650a7fb88812cc09ba1ad728a37ee9566da79469f03aca919d0",
+      "retained_sha256": "25bed7cdb09bf650a7fb88812cc09ba1ad728a37ee9566da79469f03aca919d0",
+      "normalization": "none"
+    },
+    {
+      "file": "native-narrow-geometry.txt",
+      "source": ".tmp/uat165-repair-20260916/native-narrow-geometry.txt",
+      "original_sha256": "d4385cd02ff7ffa71e82ece1d7d4654132a008092de44e3fd96d322362df923c",
+      "retained_sha256": "dc1bac4575fd0ef12d67005392cfb1488f32593b9af8ff8af36eaf7dc5be7da1",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "native-narrow.png",
+      "source": ".tmp/uat165-repair-20260916/native-narrow.png",
+      "original_sha256": "6a7449f4357d2a01726f671bff8a9aff1a9a4c755a3748c3aa8e1488305a8bdc",
+      "retained_sha256": "6a7449f4357d2a01726f671bff8a9aff1a9a4c755a3748c3aa8e1488305a8bdc",
+      "normalization": "none"
+    },
+    {
+      "file": "native-narrow-readiness.png",
+      "source": ".tmp/uat165-repair-20260916/native-narrow-readiness.png",
+      "original_sha256": "6a7449f4357d2a01726f671bff8a9aff1a9a4c755a3748c3aa8e1488305a8bdc",
+      "retained_sha256": "6a7449f4357d2a01726f671bff8a9aff1a9a4c755a3748c3aa8e1488305a8bdc",
+      "normalization": "none"
+    },
+    {
+      "file": "native-narrow.txt",
+      "source": ".tmp/uat165-repair-20260916/native-narrow.txt",
+      "original_sha256": "e7e7e56d55a5e6fb95cadf784b9bf46ed930bb03681e49bf3c47e6d5ecc2d008",
+      "retained_sha256": "8da152f7faaa185b995e1023821f93b2810b00809a782ba65f8e11126f248bd3",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "native-settled.txt",
+      "source": ".tmp/uat165-repair-20260916/native-settled.txt",
+      "original_sha256": "10fb454be289c827f8bc41ec3ba819e69e8ef105bae45743ab3e62ace15ac8fd",
+      "retained_sha256": "b2a446fa2e9aa8446d0036fd1372cf9904e8823ef0ea2437eed5d19f140bf3de",
+      "normalization": "trailing text whitespace only; final newline"
+    }
+  ]
+}

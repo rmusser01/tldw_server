@@ -1,0 +1,31 @@
+{
+  "head": "ec28c34b7c",
+  "at": "2026-09-16T21:58:31.469Z",
+  "note": "163 code is committed/reviewed.164 guidance changes are separately frozen pending verification; record these additional live source hashes rather than claim clean HEAD.",
+  "files": [
+    {
+      "file": "apps/packages/ui/src/store/playground-session.tsx",
+      "sha256": "64db2ac276ecb6358eaa8197858869f7bd99573eee1079e4c9e49f0843c5cfa4"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/usePlaygroundSessionPersistence.tsx",
+      "sha256": "f098d478bf69271fa92230a7a89f632aa5d36d89e3552808e1f42e5cc4db0bd7"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx",
+      "sha256": "a656a860faa08d8591f89b05c0fb144d748d35a86ae3c8ca08d57d26a950410a"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Models/index.tsx",
+      "sha256": "9475383624b3aaa59c5f56a3588b96c48270c2b17d1f6e6f907ae715fef20b81"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Models/AvailableModelsList.tsx",
+      "sha256": "7b063c4df566c464727893ea909b154a119c8758177eda3dca6f5546c04e96ce"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/CompanionHome/CompanionHomeShell.tsx",
+      "sha256": "195710d9363b7b11a0f5467b35bb33ec91522d5b2ac585b11dc9cfddda4d08e3"
+    }
+  ]
+}

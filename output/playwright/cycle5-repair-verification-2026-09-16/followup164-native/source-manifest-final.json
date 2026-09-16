@@ -1,0 +1,31 @@
+{
+  "task": "TASK-13260.101",
+  "issue": "UAT164",
+  "head": "ec28c34b7cf51f5e65100c0dba5f2bcd2b95711d",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Models/index.tsx",
+      "sha256": "61cfd7a665bd5a2393ba247eb7a31022b08fe18f7086827a7e058c4002cb59a1"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Models/AvailableModelsList.tsx",
+      "sha256": "7b063c4df566c464727893ea909b154a119c8758177eda3dca6f5546c04e96ce"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/CompanionHome/CompanionHomeShell.tsx",
+      "sha256": "195710d9363b7b11a0f5467b35bb33ec91522d5b2ac585b11dc9cfddda4d08e3"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Models/__tests__/ModelsBody.test.tsx",
+      "sha256": "50a5b1ce4c213ddb79c43b1a1c58101bd640fedc97c4d189c3fedd63a40b4789"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Models/__tests__/AvailableModelsList.test.tsx",
+      "sha256": "6bcf698361173e0ecd563870dd2a1f4d68651b12c262b998d5ac00367932cc2c"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/CompanionHome/__tests__/CompanionHomeShell.providers.test.tsx",
+      "sha256": "d425e5032e3f8ce95b031b92e466e98966cac066ba9d7de94cde1bbf69be8e67"
+    }
+  ]
+}

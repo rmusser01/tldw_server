@@ -1,0 +1,12 @@
+{
+  "at": "2026-09-16T22:23:32.069Z",
+  "head": "588d6c3cef7bb29ec9a4fef9f726b65f9330fb5f",
+  "restored": {
+    "profile": "sqlite-single",
+    "pid": 72891,
+    "execSession": 83022,
+    "launchedAt": "2026-09-16T22:21:05.864Z",
+    "action": "existing recovery-launcher backend sqlite-single"
+  },
+  "sources": []
+}

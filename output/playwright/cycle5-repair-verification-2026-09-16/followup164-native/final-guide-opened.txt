@@ -1,0 +1,18 @@
+### Result
+{"url":"https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md","title":"tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub","body":"Skip to content\nNavigation Menu\nPlatform\nSolutions\nResources\nOpen Source\nEnterprise\nPricing\nSign in\nSign up\nrmusser01\n/\ntldw_server\nPublic\nforked from the-crypt-keeper/tldw\nNotifications\nFork 86\n Star 1.5k\nCode\nIssues\n116\nPull requests\n31\nDiscussions\nActions\nProjects\nSecurity and quality\nInsights\nFiles\nmain\nSetting_up_a_local_LLM.md\nBreadcrumbs\ntldw_server/Docs/User_Guides/Integrations_Experiments\n/Setting_up_a_local_LLM.md\nLatest commit\n \nHistory\nHistory\nFile metadata and controls\nPreview\nCode\nBlame\n111 lines (96 loc) · 10.4 KB\nRaw\nSetting up a Local LLM\nConnect tldw_server to a local endpoint\n\nStart the model server so it listens on an address reachable from the tldw_server process. Binding a model server to 127.0.0.1 exposes it only inside that host or container; use the LAN/container interface when the API runs elsewhere, and protect the service with firewall rules and authentication"}
+### Ran Playwright code
+```js
+await (async page => {const p=page.waitForEvent("popup");await page.getByRole("link",{name:"Provider setup guide",exact:true}).click();const guide=await p;await guide.waitForLoadState("domcontentloaded");return {url:guide.url(),title:await guide.title(),body:(await guide.locator("body").innerText()).slice(0,900)}})(page);
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [](http://127.0.0.1:18583/settings/model)
+- 5: (current) [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+### Page
+- Page URL: http://127.0.0.1:18582/settings/model
+- Console: 2 errors, 2 warnings

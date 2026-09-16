@@ -1,0 +1,101 @@
+{
+  "at": "2026-09-16T22:08:18.499Z",
+  "note": "Text trailing whitespace normalized; binary screenshots unchanged. Original audit hashes refer to private originals. Source provenance includes committed163 and separately frozen164 guidance candidate.",
+  "files": [
+    {
+      "file": "answer-reload-start.txt",
+      "original_sha256": "8041d2f9bbf348a579a93e89899684eb7ec84d2293ed1068cd77211a43527f4f",
+      "retained_sha256": "8041d2f9bbf348a579a93e89899684eb7ec84d2293ed1068cd77211a43527f4f"
+    },
+    {
+      "file": "answer-reloaded.png",
+      "original_sha256": "01f7c7430b7d89008f2824bc191e62cf802816ae5d684d8c26d938aa0787cd5b",
+      "retained_sha256": "01f7c7430b7d89008f2824bc191e62cf802816ae5d684d8c26d938aa0787cd5b"
+    },
+    {
+      "file": "answer-reloaded.txt",
+      "original_sha256": "27cdab34451ddef386b7a9493ba346f6dc4bc31ec1c1e8336d3188c74ad4befc",
+      "retained_sha256": "7c930548834b6dc1c1a7713ceea065622871afd19a66aed992f72d92269a3feb"
+    },
+    {
+      "file": "answer.txt",
+      "original_sha256": "28a549d4dbaecdf6140f8dfc84474436163fbbf5a21902eb0b3d2a05b5dcd2c2",
+      "retained_sha256": "0191a496716f7a9a9ac413ebc464926f8871fec0662f4de4d6f6c351decddfed"
+    },
+    {
+      "file": "final-events.txt",
+      "original_sha256": "640bd90186366cb947b3d198d84ac03987669fe86ae6cd10e65bfeba901f7b5b",
+      "retained_sha256": "0535a94b1f35d0dd8147b2d0202b069e5bdfbe43e96a3cc6a6035679d50603b2"
+    },
+    {
+      "file": "home-ready.txt",
+      "original_sha256": "c2f74c1df77fed0fae8bc2a896d0923656602d5492cba2a364f3ee79ddff426a",
+      "retained_sha256": "325bfeb673e93b9a3d7b0e69dc304a8f7409631219a7ef820e9442bd78cbed4f"
+    },
+    {
+      "file": "home-start.txt",
+      "original_sha256": "f092cc93279c84b25cfe946606d9002c94d8af82b9365d63cebbb445ac4ff65c",
+      "retained_sha256": "f092cc93279c84b25cfe946606d9002c94d8af82b9365d63cebbb445ac4ff65c"
+    },
+    {
+      "file": "independent-review.md",
+      "original_sha256": "dfb4e7dc6efee3856a7f8f6bac9846cebef220b67b04cf5e69cbb9b35020777f",
+      "retained_sha256": "dfb4e7dc6efee3856a7f8f6bac9846cebef220b67b04cf5e69cbb9b35020777f"
+    },
+    {
+      "file": "inflight-events.txt",
+      "original_sha256": "b07010530452282d7e5905ece4f3b7ac9ac1477db1d5be24ce7a16fe05fbc628",
+      "retained_sha256": "8f02d031b825efd9c99b573de487f14af2ee9cb21c4a684b9025a6137fbdda41"
+    },
+    {
+      "file": "monitor-installed.txt",
+      "original_sha256": "01d9946367b567b36419c640fc1681390f153c04f09055df112f77d16aa4f7cf",
+      "retained_sha256": "017128fde764aec075bdc4d610bd129fda20a11add8f882bb0c5b5ce6a9c3d2a"
+    },
+    {
+      "file": "monitor.js",
+      "original_sha256": "6c2dee2739bd8eae16325d379bc3d8014fcd9a41ef0f71c369ad12d79d556f23",
+      "retained_sha256": "6c2dee2739bd8eae16325d379bc3d8014fcd9a41ef0f71c369ad12d79d556f23"
+    },
+    {
+      "file": "question-composed.txt",
+      "original_sha256": "545529ada5b31554871afd86c4ba431da8aabf119b4e49acba99f17239cd9555",
+      "retained_sha256": "b0f05d6c3e51ebc1daf20a57091f13ca49f33dce4f2a3c443a9714ff2378f0a5"
+    },
+    {
+      "file": "question-sent.txt",
+      "original_sha256": "3da3f37ee04f50f7bee5805a6bb7825af464d73a17e319f709dd7a9305bbf703",
+      "retained_sha256": "3da3f37ee04f50f7bee5805a6bb7825af464d73a17e319f709dd7a9305bbf703"
+    },
+    {
+      "file": "reload-start.txt",
+      "original_sha256": "2ca7f6e1100a8884a6a39dfb349d855ff151f5621f8a754ef982bbac44bfd25c",
+      "retained_sha256": "2ca7f6e1100a8884a6a39dfb349d855ff151f5621f8a754ef982bbac44bfd25c"
+    },
+    {
+      "file": "reloaded.txt",
+      "original_sha256": "0bc80c93926bbd3bb5c426e79d34d51ffa910ed118b69fd8775bf2a8f95a7ddf",
+      "retained_sha256": "6065dae4979c4039503957ffe83f4bb29a7ab7bab5722beb9b2ec3ebb74b946a"
+    },
+    {
+      "file": "session-before-reload.txt",
+      "original_sha256": "51ac1fd3b9d4ffacd5519c854090197c92f92beaa003396bac6fc9b018bc045a",
+      "retained_sha256": "dc281f44ca0d8a6b155ca60c420c2afaf66516524f5541d1b921ea6f135c19ad"
+    },
+    {
+      "file": "source-manifest.json",
+      "original_sha256": "c76eddf2c5e4d56487d48fd8fc561dd7a1fabcc7c434d8a08f799656f32b55a4",
+      "retained_sha256": "c76eddf2c5e4d56487d48fd8fc561dd7a1fabcc7c434d8a08f799656f32b55a4"
+    },
+    {
+      "file": "starter-selected.txt",
+      "original_sha256": "8f51f897f63576021970f468d83446157b7be9b28e9a1b1650a89079467743d7",
+      "retained_sha256": "8f51f897f63576021970f468d83446157b7be9b28e9a1b1650a89079467743d7"
+    },
+    {
+      "file": "tab-selected.txt",
+      "original_sha256": "4ab0fb18b75cf802664a61a24b340616d4cf9d3510d8442786cd31812cc13739",
+      "retained_sha256": "a5370835fc1d2c32590f160e01363d240330467e8a3e3c241d13666104e8c7bb"
+    }
+  ]
+}

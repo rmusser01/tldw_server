@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 21:20'
+updated_date: '2026-09-16 21:53'
 labels:
   - uat
   - testing
@@ -178,6 +178,8 @@ User correction from side conversation, 2026-09-16: do not start another full UA
 20:12UTC actualimagePNG attached/sent correctly; failedsecondimage turn→reload→Retry succeeds exactclientID/bytes answer3 and reloadpersists. First successful pair duplicated immediately atfallbackPOST201 (157/.95). AdminLlamaListconsoleerror158/.96also tracked. Native evidence retainednative-image118-157; nextfullUATstillblocked. Current158count140verified13awaiting1blocked4unresolved. Preauthpersona429undercharacter_chat.defaultobserved, classificationpending. Runtimeisolationauditfoundsharedinactive system_ops andoptionalrepo-relative stores; fullmatrixwillneedfrozenisolatedsourceroot; targetedimage scope disclosed.
 
 21:17UTC reconciliation162findings:150verified/10awaiting/2unresolved013and162. Final118/157 realPNG Send/failure/reload/Retry/canonicalacceptance independentlypasses; mandatoryPG32pass0skip refreshed.114genuinehidden six-tab and142actualDisconnect/route delayed200 controls accepted;155/159/160/161/153accepted.161 committed413be51cc8;162semanticlabels underrepair. Tracker/ledger are current; nofullUATrestart, nativePGmatrix stillrequired. Evidence cycle5-repair-verification/native-image118-157-final,followup114-native,followup142-native,followup152-153-native.
+
+21:52UTC checkpoint164 findings:155verified,7awaiting acceptance(024/031/137/138/139/141/151),2unresolved(163/164),0toolblocked. Independent retained final-source013/103/152/156 native acceptance passes; exact report and164-row ledger under cycle5-repair-verification. Full matrix remains gated. PostgreSQL targeted initial admin creation and real frontend login pass; local provider configuration uses documented isolated operator path.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

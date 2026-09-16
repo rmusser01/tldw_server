@@ -1,0 +1,15 @@
+### Result
+{"session":{"serverChatId":"2e94e4d9-7d1d-4572-a271-7f2c5b805cde","chatMode":"rag","ragMediaIds":[1],"fileRetrievalEnabled":true}}
+### Ran Playwright code
+```js
+await (async page => ({session:await page.evaluate(()=>{const s=JSON.parse(localStorage.getItem("tldw-playground-session")||"null")?.state;return s?{serverChatId:s.serverChatId,chatMode:s.chatMode,ragMediaIds:s.ragMediaIds,fileRetrievalEnabled:s.fileRetrievalEnabled}:null})}))(page);
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: (current) [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Server Settings | tldw](http://127.0.0.1:18583/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Page Title: For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw

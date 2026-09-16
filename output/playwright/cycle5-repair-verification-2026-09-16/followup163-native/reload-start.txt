@@ -1,0 +1,25 @@
+### Ran Playwright code
+```js
+await page.reload();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: (current) [](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Server Settings | tldw](http://127.0.0.1:18583/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T21-59-11-206Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T21-58-12-085Z.log#L7-L10
+
+- generic [active]:
+  - dialog [ref=f25e1]:
+    - generic [ref=f25e2]:
+      - progressbar [ref=f25e3]
+      - status [ref=f25e7]: Loading...
+      - paragraph [ref=f25e8]: Please wait while we get things ready.
+      - generic [ref=f25e9]: Loading...
+  - alert [ref=f25e10]

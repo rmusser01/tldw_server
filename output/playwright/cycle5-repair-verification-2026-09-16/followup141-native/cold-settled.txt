@@ -1,0 +1,79 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [](http://127.0.0.1:18583/settings/model)
+- 5: [Setup | tldw](http://127.0.0.1:18582/setup)
+- 6: (current) [](http://127.0.0.1:18580/notifications)
+### Page
+- Page URL: http://127.0.0.1:18580/notifications
+- Console: 12 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e4]:
+    - link "Skip to main content" [ref=e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e6]:
+      - button "Expand sidebar" [ref=e7] [cursor=pointer]
+      - button "New Chat" [ref=e11] [cursor=pointer]
+      - generic [ref=e14]:
+        - button "Quick Ingest" [ref=e15] [cursor=pointer]
+        - button "Chat" [ref=e19] [cursor=pointer]
+        - button "Prompts" [ref=e22] [cursor=pointer]
+        - button "Characters" [ref=e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e31] [cursor=pointer]
+        - button "World Books" [ref=e35] [cursor=pointer]
+        - button "Notes" [ref=e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=e42] [cursor=pointer]
+        - button "Media" [ref=e50] [cursor=pointer]
+        - button "Document Workspace" [ref=e53] [cursor=pointer]
+        - button "Research Workspace" [ref=e59] [cursor=pointer]
+        - button "Kanban" [ref=e65] [cursor=pointer]
+        - button "Watchlists" [ref=e67] [cursor=pointer]
+      - generic [ref=e72]:
+        - button "Open Notes Dock" [ref=e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e78] [cursor=pointer]
+        - button "Settings" [ref=e81] [cursor=pointer]
+    - main [ref=e85]:
+      - generic [ref=e86]:
+        - generic [ref=e89]:
+          - generic [ref=e90]:
+            - button "Expand sidebar" [ref=e91] [cursor=pointer]
+            - generic [ref=e93]:
+              - img "tldw Assistant" [ref=e94]
+              - generic [ref=e95]: tldw Assistant
+              - button "Companion Home" [ref=e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=e100] [cursor=pointer]
+          - generic [ref=e103]:
+            - button "Search - Open command palette" [ref=e104] [cursor=pointer]:
+              - generic [ref=e108]: Search
+              - generic [ref=e109]: ⌘K
+            - button "Open settings" [ref=e110] [cursor=pointer]
+            - generic [ref=e122]:
+              - button "Notifications, reconnecting" [ref=e123] [cursor=pointer]
+              - status [ref=e126]: Notifications are reconnecting
+            - button "Switch to light theme" [ref=e127] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e134] [cursor=pointer]:
+              - generic [ref=e135]: "?"
+        - generic [ref=e138]:
+          - generic [ref=e139]:
+            - generic [ref=e140]:
+              - heading "Notifications" [level=1] [ref=e141]
+              - paragraph [ref=e142]: "Unread: 0"
+            - generic [ref=e143]:
+              - button "Refresh" [ref=e144] [cursor=pointer]
+              - button "Preferences" [ref=e145] [cursor=pointer]
+          - status [ref=e146]:
+            - generic [ref=e147]:
+              - paragraph [ref=e148]: Notifications are reconnecting
+              - paragraph [ref=e149]: The list may be out of date while automatic recovery continues.
+            - button "Try again" [ref=e150] [cursor=pointer]
+          - generic [ref=e151]: Failed to fetch
+          - generic [ref=e152]: No notifications yet.
+  - button "Open Next.js Dev Tools" [ref=e158] [cursor=pointer]
+  - alert [ref=e162]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T22-08-48-551Z.log#L7-L14

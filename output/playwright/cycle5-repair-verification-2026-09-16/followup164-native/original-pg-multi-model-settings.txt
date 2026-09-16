@@ -1,0 +1,461 @@
+### Ran Playwright code
+```js
+await page.getByRole('link', { name: 'Open Model Settings' }).click();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: (current) [](http://127.0.0.1:18583/settings/model)
+### Page
+- Page URL: http://127.0.0.1:18583/settings/model
+- Console: 3 errors, 8 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T21-45-53-546Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T21-43-30-930Z.log#L24-L31
+
+- generic [active] [ref=e11]:
+  - generic [ref=e379]:
+    - complementary [ref=e380]:
+      - navigation "Settings navigation" [ref=e381]:
+        - button "Switch to Sidebar" [disabled] [ref=e383]
+        - generic [ref=e384]:
+          - generic [ref=e385]: Filter settings
+          - textbox "Filter settings" [ref=e386]:
+            - /placeholder: Find a setting
+        - generic [ref=e387]:
+          - generic [ref=e388]:
+            - generic [ref=e389]: Setup & Recovery
+            - list [ref=e391]:
+              - listitem [ref=e392]:
+                - link "Setup & Recovery" [ref=e393] [cursor=pointer]:
+                  - /url: /settings
+              - listitem [ref=e401]:
+                - link "tldw Server" [ref=e402] [cursor=pointer]:
+                  - /url: /settings/tldw
+              - listitem [ref=e407]:
+                - link "Provider Keys" [ref=e408] [cursor=pointer]:
+                  - /url: /settings/provider-keys
+              - listitem [ref=e413]:
+                - link "Manage Models" [ref=e414] [cursor=pointer]:
+                  - /url: /settings/model
+              - listitem [ref=e429]:
+                - link "Health & Diagnostics" [ref=e430] [cursor=pointer]:
+                  - /url: /settings/health
+          - generic [ref=e434]:
+            - generic [ref=e435]: Preferences & Workflow
+            - list [ref=e437]:
+              - listitem [ref=e438]:
+                - link "Preferences" [ref=e439] [cursor=pointer]:
+                  - /url: /settings/preferences
+              - listitem [ref=e442]:
+                - link "Chat" [ref=e443] [cursor=pointer]:
+                  - /url: /settings/chat
+              - listitem [ref=e447]:
+                - link "Chat Macros" [ref=e448] [cursor=pointer]:
+                  - /url: /settings/chat-macros
+              - listitem [ref=e457]:
+                - link "UI customization" [ref=e458] [cursor=pointer]:
+                  - /url: /settings/ui
+              - listitem [ref=e461]:
+                - link "Splash screens" [ref=e462] [cursor=pointer]:
+                  - /url: /settings/splash
+              - listitem [ref=e467]:
+                - link "Quick Ingest" [ref=e468] [cursor=pointer]:
+                  - /url: /settings/quick-ingest
+              - listitem [ref=e473]:
+                - link "Speech" [ref=e474] [cursor=pointer]:
+                  - /url: /settings/speech
+              - listitem [ref=e479]:
+                - link "Image Generation" [ref=e480] [cursor=pointer]:
+                  - /url: /settings/image-generation
+              - listitem [ref=e486]:
+                - link "Knowledge QA" [ref=e487] [cursor=pointer]:
+                  - /url: /settings/knowledge
+              - listitem [ref=e491]:
+                - link "RAG Settings" [ref=e492] [cursor=pointer]:
+                  - /url: /settings/rag
+              - listitem [ref=e501]:
+                - link "Workflow prompts" [ref=e502] [cursor=pointer]:
+                  - /url: /settings/prompt
+              - listitem [ref=e506]:
+                - link "Prompt Studio" [ref=e507] [cursor=pointer]:
+                  - /url: /settings/prompt-studio
+                - generic [ref=e513]: Beta
+              - listitem [ref=e514]:
+                - link "Chatbooks settings" [ref=e515] [cursor=pointer]:
+                  - /url: /settings/chatbooks
+              - listitem [ref=e519]:
+                - link "Characters" [ref=e520] [cursor=pointer]:
+                  - /url: /settings/characters
+              - listitem [ref=e524]:
+                - link "World Books" [ref=e525] [cursor=pointer]:
+                  - /url: /settings/world-books
+              - listitem [ref=e529]:
+                - link "Chat Dictionaries" [ref=e530] [cursor=pointer]:
+                  - /url: /settings/chat-dictionaries
+          - generic [ref=e535]:
+            - generic [ref=e536]: Data & Administration
+            - list [ref=e538]:
+              - listitem [ref=e539]:
+                - link "Data Management" [ref=e540] [cursor=pointer]:
+                  - /url: /settings/data
+              - listitem [ref=e546]:
+                - link "Manage Share" [ref=e547] [cursor=pointer]:
+                  - /url: /settings/share
+              - listitem [ref=e552]:
+                - link "Evaluations" [ref=e553] [cursor=pointer]:
+                  - /url: /settings/evaluations
+              - listitem [ref=e557]:
+                - link "Moderation Review" [ref=e558] [cursor=pointer]:
+                  - /url: /moderation
+              - listitem [ref=e563]:
+                - link "Content Rules" [ref=e564] [cursor=pointer]:
+                  - /url: /moderation/rules
+              - listitem [ref=e569]:
+                - link "MCP Hub" [ref=e570] [cursor=pointer]:
+                  - /url: /settings/mcp-hub
+              - listitem [ref=e575]:
+                - link "About" [ref=e576] [cursor=pointer]:
+                  - /url: /settings/about
+        - button "Hide beta badges" [ref=e581] [cursor=pointer]
+    - region [ref=e582]:
+      - button "Close" [ref=e584] [cursor=pointer]
+      - generic [ref=e589]:
+        - heading "Model settings" [level=1] [ref=e590]
+        - paragraph [ref=e592]: Current section:Manage Models
+        - generic [ref=e595]:
+          - button "Refresh" [ref=e598] [cursor=pointer]
+          - generic [ref=e599]:
+            - generic [ref=e600]:
+              - generic [ref=e601]: Set your defaults
+              - paragraph [ref=e602]: Pick a default provider and model for new chats.
+            - generic [ref=e603]:
+              - generic [ref=e604]: No providers available.
+              - generic [ref=e605]: The extension could not load providers from your tldw_server. Check your server URL and API key in Settings, ensure the server is running, then use Retry (or Refresh) to try again.
+          - generic [ref=e606]:
+            - generic [ref=e607]:
+              - generic [ref=e608]:
+                - generic [ref=e609]: Provider readiness
+                - paragraph [ref=e610]: Review usable providers and saved defaults before browsing the full catalog.
+              - generic [ref=e611]: 0 usable
+            - generic [ref=e612]:
+              - generic [ref=e613]:
+                - generic [ref=e614]: Default provider
+                - generic [ref=e615]: Auto (from model)
+              - generic [ref=e616]:
+                - generic [ref=e617]: Default model
+                - generic [ref=e618]: Auto (route on server)
+              - generic [ref=e619]:
+                - generic [ref=e620]: Configured providers
+                - generic [ref=e621]: Account keys unavailable
+              - generic [ref=e622]:
+                - generic [ref=e623]: Usable providers
+                - generic [ref=e624]: 0 usable
+            - generic [ref=e625]:
+              - link "Configure server" [ref=e626] [cursor=pointer]:
+                - /url: /settings/tldw
+              - link "Manage provider keys" [ref=e627] [cursor=pointer]:
+                - /url: /settings/provider-keys
+          - generic [ref=e628]:
+            - generic [ref=e629]:
+              - generic [ref=e630]:
+                - generic [ref=e631]: OpenAI Account Linking
+                - paragraph [ref=e632]: Connect OpenAI with OAuth, refresh tokens, or fall back to your API key.
+              - generic [ref=e633]: Not connected
+            - generic [ref=e634]: OpenAI OAuth is unavailable on this server. Configure and enable it to use account linking.
+          - generic [ref=e635]:
+            - generic [ref=e636]:
+              - generic [ref=e640]:
+                - generic [ref=e643]: OpenAI
+                - generic [ref=e644]: "55"
+              - generic [ref=e646]:
+                - generic [ref=e647]: gpt-3.5-turbo
+                - generic [ref=e649]: gpt-3.5-turbo-0125
+                - generic [ref=e651]: gpt-4
+                - generic [ref=e653]: gpt-4-0613
+                - generic [ref=e655]: gpt-4-turbo
+                - generic [ref=e657]: gpt-4-turbo-2024-04-09
+                - generic [ref=e659]: gpt-4.1
+                - generic [ref=e661]: gpt-4.1-2025-04-14
+                - generic [ref=e663]: gpt-4.1-mini
+                - generic [ref=e665]: gpt-4.1-mini-2025-04-14
+                - generic [ref=e667]: gpt-4.1-nano
+                - generic [ref=e669]: gpt-4.1-nano-2025-04-14
+                - generic [ref=e671]: gpt-4o
+                - generic [ref=e673]: gpt-4o-2024-05-13
+                - generic [ref=e675]: gpt-4o-2024-08-06
+                - generic [ref=e677]: gpt-4o-2024-11-20
+                - generic [ref=e679]: gpt-4o-mini
+                - generic [ref=e681]: gpt-4o-mini-2024-07-18
+                - generic [ref=e683]: gpt-5
+                - generic [ref=e685]: gpt-5-2025-08-07
+                - generic [ref=e687]: gpt-5-mini
+                - generic [ref=e689]: gpt-5-mini-2025-08-07
+                - generic [ref=e691]: gpt-5-nano
+                - generic [ref=e693]: gpt-5-nano-2025-08-07
+                - generic [ref=e695]: gpt-5-pro
+                - generic [ref=e697]: gpt-5-pro-2025-10-06
+                - generic [ref=e699]: gpt-5.1
+                - generic [ref=e701]: gpt-5.1-2025-11-13
+                - generic [ref=e703]: gpt-5.2
+                - generic [ref=e705]: gpt-5.2-2025-12-11
+                - generic [ref=e707]: gpt-5.2-pro
+                - generic [ref=e709]: gpt-5.2-pro-2025-12-11
+                - generic [ref=e711]: gpt-5.4
+                - generic [ref=e713]: gpt-5.4-2026-03-05
+                - generic [ref=e715]: gpt-5.4-mini
+                - generic [ref=e717]: gpt-5.4-mini-2026-03-17
+                - generic [ref=e719]: gpt-5.4-nano
+                - generic [ref=e721]: gpt-5.4-nano-2026-03-17
+                - generic [ref=e723]: gpt-5.4-pro
+                - generic [ref=e725]: gpt-5.4-pro-2026-03-05
+                - generic [ref=e727]: gpt-5.5
+                - generic [ref=e729]: gpt-5.5-2026-04-23
+                - generic [ref=e731]: gpt-5.5-pro
+                - generic [ref=e733]: gpt-5.5-pro-2026-04-23
+                - generic [ref=e735]: o1
+                - generic [ref=e737]: o1-mini
+                - generic [ref=e739]: o1-mini-2024-09-12
+                - generic [ref=e741]: o1-pro
+                - generic [ref=e743]: o1-pro-2025-03-19
+                - generic [ref=e745]: o3
+                - generic [ref=e747]: o3-2025-04-16
+                - generic [ref=e749]: o3-mini
+                - generic [ref=e751]: o3-mini-2025-01-31
+                - generic [ref=e753]: o4-mini
+                - generic [ref=e755]: o4-mini-2025-04-16
+            - generic [ref=e757]:
+              - generic [ref=e761]:
+                - generic [ref=e765]: bedrock
+                - generic [ref=e766]: "1"
+              - generic [ref=e767]: anthropic.claude-3-5-sonnet-20241022-v2:0
+            - generic [ref=e771]:
+              - generic [ref=e775]:
+                - generic [ref=e779]: Anthropic
+                - generic [ref=e780]: "20"
+              - generic [ref=e782]:
+                - generic [ref=e783]: claude-3-5-sonnet-latest
+                - generic [ref=e785]: claude-3-haiku-20240307
+                - generic [ref=e787]: claude-3-opus-20240229
+                - generic [ref=e789]: claude-3-sonnet-20240229
+                - generic [ref=e791]: claude-haiku-3.5
+                - generic [ref=e793]: claude-haiku-4-5
+                - generic [ref=e795]: claude-haiku-4-5-20251001
+                - generic [ref=e797]: claude-haiku-4.5
+                - generic [ref=e799]: claude-opus-4
+                - generic [ref=e801]: claude-opus-4-20250514
+                - generic [ref=e803]: claude-opus-4-6
+                - generic [ref=e805]: claude-opus-4-7
+                - generic [ref=e807]: claude-opus-4-7-20260103
+                - generic [ref=e809]: claude-opus-4.1
+                - generic [ref=e811]: claude-opus-4.5
+                - generic [ref=e813]: claude-sonnet-3.7
+                - generic [ref=e815]: claude-sonnet-4
+                - generic [ref=e817]: claude-sonnet-4-6
+                - generic [ref=e819]: claude-sonnet-4-6-20260105
+                - generic [ref=e821]: claude-sonnet-4.5
+            - generic [ref=e823]:
+              - generic [ref=e827]:
+                - generic [ref=e831]: Cohere
+                - generic [ref=e832]: "7"
+              - generic [ref=e834]:
+                - generic [ref=e835]: command-a-03-2025
+                - generic [ref=e837]: command-a-reasoning-08-2025
+                - generic [ref=e839]: command-a-vision-07-2025
+                - generic [ref=e841]: command-r
+                - generic [ref=e843]: command-r-08-2024
+                - generic [ref=e845]: command-r-plus-08-2024
+                - generic [ref=e847]: command-r7b-12-2024
+            - generic [ref=e849]:
+              - generic [ref=e853]:
+                - generic [ref=e856]: DeepSeek
+                - generic [ref=e857]: "4"
+              - generic [ref=e859]:
+                - generic [ref=e860]: deepseek-chat
+                - generic [ref=e862]: deepseek-reasoner
+                - generic [ref=e864]: deepseek-v4-flash
+                - generic [ref=e866]: deepseek-v4-pro
+            - generic [ref=e868]:
+              - generic [ref=e872]:
+                - generic [ref=e876]: qwen
+                - generic [ref=e877]: "13"
+              - generic [ref=e879]:
+                - generic [ref=e880]: qwen-max-2025-01-25
+                - generic [ref=e882]: qwen-max-latest
+                - generic [ref=e884]: qwen-plus
+                - generic [ref=e886]: qwen-plus-2025-01-25
+                - generic [ref=e888]: qwen-plus-2025-04-28
+                - generic [ref=e890]: qwen-plus-latest
+                - generic [ref=e892]: qwen-turbo-2025-04-28
+                - generic [ref=e894]: qwen3-max-preview
+                - generic [ref=e896]: qwen3-next-80b-a3b-instruct
+                - generic [ref=e898]: qwen3-next-80b-a3b-thinking
+                - generic [ref=e900]: qwen3-vl-flash
+                - generic [ref=e902]: qwen3-vl-plus
+                - generic [ref=e904]: qwq-plus-2025-03-05
+            - generic [ref=e906]:
+              - generic [ref=e910]:
+                - generic [ref=e914]: Google
+                - generic [ref=e915]: "14"
+              - generic [ref=e917]:
+                - generic [ref=e918]: gemini-2.0-flash
+                - generic [ref=e920]: gemini-2.0-flash-001
+                - generic [ref=e922]: gemini-2.0-flash-lite
+                - generic [ref=e924]: gemini-2.5-flash
+                - generic [ref=e926]: gemini-2.5-flash-lite
+                - generic [ref=e928]: gemini-2.5-flash-lite-preview
+                - generic [ref=e930]: gemini-2.5-flash-lite-preview-09-2025
+                - generic [ref=e932]: gemini-2.5-flash-preview
+                - generic [ref=e934]: gemini-2.5-flash-preview-09-2025
+                - generic [ref=e936]: gemini-2.5-pro
+                - generic [ref=e938]: gemini-2.5-pro-high
+                - generic [ref=e940]: gemini-3-flash-preview
+                - generic [ref=e942]: gemini-3.1-flash-lite
+                - generic [ref=e944]: gemini-3.1-pro-preview
+            - generic [ref=e946]:
+              - generic [ref=e950]:
+                - generic [ref=e953]: Groq
+                - generic [ref=e954]: "12"
+              - generic [ref=e956]:
+                - generic [ref=e957]: deepseek-r1-distill-llama-70b
+                - generic [ref=e959]: llama-3.1-8b-instant
+                - generic [ref=e961]: llama-3.3-70b-versatile
+                - generic [ref=e963]: llama-guard-3-8b
+                - generic [ref=e965]: meta-llama/llama-4-maverick-17b-128e-instruct
+                - generic [ref=e967]: meta-llama/llama-4-scout-17b-16e-instruct
+                - generic [ref=e969]: meta-llama/llama-guard-4-12b
+                - generic [ref=e971]: mistral-saba-24b
+                - generic [ref=e973]: moonshotai/kimi-k2-instruct
+                - generic [ref=e975]: openai/gpt-oss-120b
+                - generic [ref=e977]: openai/gpt-oss-20b
+                - generic [ref=e979]: qwen/qwen3-32b
+            - generic [ref=e981]:
+              - generic [ref=e985]:
+                - generic [ref=e994]: Mistral
+                - generic [ref=e995]: "10"
+              - generic [ref=e997]:
+                - generic [ref=e998]: codestral-2508
+                - generic [ref=e1000]: ministral-14b-2512
+                - generic [ref=e1002]: ministral-3b-2512
+                - generic [ref=e1004]: ministral-8b-2512
+                - generic [ref=e1006]: mistral-large-2512
+                - generic [ref=e1008]: mistral-medium-2505
+                - generic [ref=e1010]: mistral-medium-2508
+                - generic [ref=e1012]: mistral-medium-3.5
+                - generic [ref=e1014]: mistral-small-2603
+                - generic [ref=e1016]: open-mistral-nemo
+            - generic [ref=e1018]:
+              - generic [ref=e1022]:
+                - generic [ref=e1030]: Hugging Face
+                - generic [ref=e1031]: "2"
+              - generic [ref=e1033]:
+                - generic [ref=e1034]: default
+                - generic [ref=e1036]: ServiceNow-AI/Apriel-1.6-15b-Thinker:together
+            - generic [ref=e1038]:
+              - generic [ref=e1042]:
+                - generic [ref=e1045]: OpenRouter
+                - generic [ref=e1046]: "32"
+              - generic [ref=e1048]:
+                - generic [ref=e1049]: ~anthropic/claude-haiku-latest
+                - generic [ref=e1051]: ~anthropic/claude-sonnet-latest
+                - generic [ref=e1053]: ~google/gemini-flash-latest
+                - generic [ref=e1055]: ~google/gemini-pro-latest
+                - generic [ref=e1057]: ~moonshotai/kimi-latest
+                - generic [ref=e1059]: ~openai/gpt-latest
+                - generic [ref=e1061]: ~openai/gpt-mini-latest
+                - generic [ref=e1063]: anthropic/claude-opus-4.7
+                - generic [ref=e1065]: anthropic/claude-sonnet-4.6
+                - generic [ref=e1067]: deepseek/deepseek-v4-flash
+                - generic [ref=e1069]: deepseek/deepseek-v4-pro
+                - generic [ref=e1071]: google/gemini-3.1-flash-lite
+                - generic [ref=e1073]: google/gemini-3.1-pro-preview
+                - generic [ref=e1075]: minimax/minimax-m2.5
+                - generic [ref=e1077]: minimax/minimax-m2.7
+                - generic [ref=e1079]: mistralai/mistral-medium-3-5
+                - generic [ref=e1081]: moonshotai/kimi-k2.5
+                - generic [ref=e1083]: moonshotai/kimi-k2.6
+                - generic [ref=e1085]: openai/gpt-4o-mini
+                - generic [ref=e1087]: openai/gpt-5.4
+                - generic [ref=e1089]: openai/gpt-5.4-mini
+                - generic [ref=e1091]: openai/gpt-5.5
+                - generic [ref=e1093]: openai/gpt-5.5-pro
+                - generic [ref=e1095]: openai/gpt-chat-latest
+                - generic [ref=e1097]: qwen/qwen3-coder-next
+                - generic [ref=e1099]: qwen/qwen3.6-flash
+                - generic [ref=e1101]: qwen/qwen3.6-max-preview
+                - generic [ref=e1103]: qwen/qwen3.6-plus
+                - generic [ref=e1105]: x-ai/grok-4.20
+                - generic [ref=e1107]: x-ai/grok-4.3
+                - generic [ref=e1109]: z-ai/glm-5
+                - generic [ref=e1111]: z-ai/glm-5.1
+            - generic [ref=e1113]:
+              - generic [ref=e1117]:
+                - generic [ref=e1120]: Moonshot
+                - generic [ref=e1121]: "7"
+              - generic [ref=e1123]:
+                - generic [ref=e1124]: kimi-k2
+                - generic [ref=e1126]: kimi-k2-0711-preview
+                - generic [ref=e1128]: kimi-k2-0905-preview
+                - generic [ref=e1130]: kimi-k2-thinking
+                - generic [ref=e1132]: kimi-k2-thinking-turbo
+                - generic [ref=e1134]: kimi-k2.5
+                - generic [ref=e1136]: kimi-k2.6
+            - generic [ref=e1138]:
+              - generic [ref=e1142]:
+                - generic [ref=e1146]: Z.AI
+                - generic [ref=e1147]: "15"
+              - generic [ref=e1149]:
+                - generic [ref=e1150]: glm-4-32b-0414-128k
+                - generic [ref=e1152]: glm-4.5
+                - generic [ref=e1154]: glm-4.5-air
+                - generic [ref=e1156]: glm-4.5-airx
+                - generic [ref=e1158]: glm-4.5-flash
+                - generic [ref=e1160]: glm-4.5-x
+                - generic [ref=e1162]: glm-4.5v
+                - generic [ref=e1164]: glm-4.6
+                - generic [ref=e1166]: glm-4.6v
+                - generic [ref=e1168]: glm-4.7
+                - generic [ref=e1170]: glm-4.7-flash
+                - generic [ref=e1172]: glm-4.7-flashx
+                - generic [ref=e1174]: glm-5
+                - generic [ref=e1176]: glm-5-turbo
+                - generic [ref=e1178]: glm-5.1
+            - generic [ref=e1180]:
+              - generic [ref=e1184]:
+                - generic [ref=e1188]: minimax
+                - generic [ref=e1189]: "4"
+              - generic [ref=e1191]:
+                - generic [ref=e1192]: minimax-m2.1
+                - generic [ref=e1194]: minimax-m2.5
+                - generic [ref=e1196]: minimax-m2.7
+                - generic [ref=e1198]: minimax-m2.7-highspeed
+            - generic [ref=e1200]:
+              - generic [ref=e1204]:
+                - generic [ref=e1209]: Ollama
+                - generic [ref=e1210]: "1"
+              - generic [ref=e1211]: gemma3:1b
+            - generic [ref=e1215]:
+              - generic [ref=e1219]:
+                - generic [ref=e1223]: mlx
+                - generic [ref=e1224]: "1"
+              - generic [ref=e1225]: Qwen/Qwen3-0.6B-MLX-4bit
+            - generic [ref=e1229]:
+              - generic [ref=e1233]:
+                - generic [ref=e1237]: Custom OpenAI API
+                - generic [ref=e1238]: "1"
+              - generic [ref=e1239]: gpt-4.1-2025-04-14
+            - generic [ref=e1243]:
+              - generic [ref=e1247]:
+                - generic [ref=e1251]: custom-openai-api-2
+                - generic [ref=e1252]: "1"
+              - generic [ref=e1253]: gpt-4.1-2025-04-14
+            - generic [ref=e1257]:
+              - generic [ref=e1261]:
+                - generic [ref=e1265]: image
+                - generic [ref=e1266]: "1"
+              - generic [ref=e1267]: image/stable_diffusion_cpp
+  - button "Open Next.js Dev Tools" [ref=e57] [cursor=pointer]
+  - alert [ref=e10]: /settings/model

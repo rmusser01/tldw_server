@@ -1,0 +1,24 @@
+### Result
+Total messages: 10 (Errors: 2, Warnings: 2)
+
+[INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18582/_next/static/chunks/bdf27_react-dom_cjs_react-dom_development_018fd5a3.js:25055
+[LOG] [HMR] connected @ http://127.0.0.1:18582/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[ERROR] Failed to load resource: the server responded with a status of 403 (Forbidden) @ http://127.0.0.1:18582/api/v1/users/keys/openai/oauth/status:0
+[ERROR] Failed to load resource: the server responded with a status of 403 (Forbidden) @ http://127.0.0.1:18582/api/v1/users/keys:0
+[WARNING] [tldw:request] GET /api/v1/users/keys/openai/oauth/status 403 BYOK is disabled in this deployment @ http://127.0.0.1:18582/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[WARNING] [tldw:request] GET /api/v1/users/keys 403 BYOK is disabled in this deployment @ http://127.0.0.1:18582/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18582/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[LOG] [Fast Refresh] done in 1134ms @ http://127.0.0.1:18582/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18582/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[LOG] [Fast Refresh] done in 250ms @ http://127.0.0.1:18582/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Server Settings | tldw](http://127.0.0.1:18583/settings/tldw)
+- 5: (current) [Setup | tldw](http://127.0.0.1:18582/setup)
+### Page
+- Page URL: http://127.0.0.1:18582/setup
+- Page Title: Setup | tldw
+- Console: 2 errors, 2 warnings

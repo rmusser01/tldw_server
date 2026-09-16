@@ -2,6 +2,8 @@
 
 ## Run status
 
+- **22:37 UTC reconciliation:170 findings —161 verified,4 awaiting acceptance,5 unresolved (166–170), zero tool-blocked checks.** [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-170-targeted-checkpoint.json). Retained independent native acceptance closes138/139/141/163/164/165. Remaining older acceptance:024/031/137/151. PostgreSQL native Flashcards work found167 timestamp serialization and168 row-index failures;169 scheduled auth monitoring and170 narrow selectors are also tracked.166 is singular generation feedback. Repairs precede any full UAT restart.
+
 - **21:52 UTC reconciliation: 164 unique findings — 155 verified, 7 awaiting acceptance, 2 unresolved (163/164), zero tool-blocked checks.** [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-164-source-checkpoint.json). Independent retained native acceptance passes013/103/152/156 on `223591ac4f`;162 is already accepted. Pending acceptance:024/031/137/138/139/141/151.163 repair is under review;164 is misleading empty-model guidance observed during actual PostgreSQL multi-user setup. Official PostgreSQL admin creation and native login pass; full native PostgreSQL matrix remains pending. No full UAT restart.
 
 - **21:40 UTC targeted source checkpoint: 163 unique findings.** UAT162 label repair is accepted and committed `223591ac4f`. Actual saved Chat now returns the correct Rowan facts after a14.588second scoped RAG request and retains user/answer order after reload. Local retrieval-failure diagnostics remain visible exactly once and absent from canonical history. Independent acceptance audit for013/103/152/156 is underway. New163 tracks lost retrieval activation on reload; do not attribute the earlier013 wrong-with-evidence answer to this separate defect. No full UAT restart.
@@ -86,17 +88,47 @@
 - UAT095 audit correction: independent follow-up found the launched-browser private-path sentinel requirement was stronger than the actual task/design. Retained real endpoint/transport/sink tests and independent review verify the original synthetic transport defect. No native private disclosure or launched-extension claim is made.
 - UAT114 remains tool-blocked: current supported native inventory offers only Codex in-app browser. Two actual probe tabs both report `document.visibilityState=visible` after switching. Both temporary tabs were closed; no visibility override or product/tooling patch was applied.
 
+## UAT-170 — P3: Model default selectors overflow on narrow screens
+
+- At390px, actual Models default-provider and default-model selectors extend past the Set your defaults card and viewport, clipping their selected values and right-side controls. The separately repaired165 readiness value stays contained.
+- Status: unresolved, TASK13260.107. Preserve selection semantics and full option labels while constraining both selectors to their available width. Native screenshot `.tmp/uat165-repair-20260916/native-narrow.png` is retained with165.
+
+## UAT-169 — P2: PostgreSQL authentication monitor fails on its timestamp cutoff
+
+- Current PostgreSQL multi-user logs show the scheduled authentication-failure monitor failing every five minutes. At AuthNZ/scheduler.py644, asyncpg rejects the aware cutoff against a naive timestamp parameter. Existing users self-verification task12167 covers a different table/path.
+- Status: unresolved, TASK13260.106. Match the actual audit-log timestamp contract, preserve UTC cutoff semantics, and execute required PostgreSQL plus control regressions. Independent log inventory found four current failures through22:30:35UTC; no current Buddy500/deadlock was observed.
+
+## UAT-168 — P1: PostgreSQL Flashcards listing fails when reading its count
+
+- Two actual GET /flashcards requests return500 during the PostgreSQL Notes handoff. count_flashcards uses row[0] on a mapping result containing the named cnt column, raising KeyError0. This is distinct from167's response timestamp validation failure.
+- Status: unresolved, TASK13260.105. Use the existing named-column convention without changing visibility/filter SQL; verify empty/nonempty/filtered counts on actual PostgreSQL and SQLite, then repeat the native list.
+
+## UAT-167 — P1: PostgreSQL generated-card save fails while returning the new deck
+
+- Alice's actual Notes handoff and real Gemma generation succeed with one grounded card. Save generated cards then returns HTTP500 from POST /flashcards/decks. Backend response validation rejects PostgreSQL datetime values for created_at and last_modified because the public schema expects strings. The generated draft remains visible; the deck write may already have committed, so a failed response cannot be treated as a rolled-back operation.
+- Status: unresolved. TASK13260.104 tracks backend-neutral timestamp serialization, required real PostgreSQL tests, SQLite controls, independent review and native recovery with provenance. UAT151/137 acceptance is paused at this dependency. Evidence: `.tmp/uat151-137-native-20260916/alice-deck-save-failure-events.txt` and screenshot, pending durable retention.
+
+## UAT-166 — P3: One generated flashcard uses plural feedback
+
+- Actual successful one-card generation displays “Generated 1 cards.” in the Import/Export last-action summary. This is separate from137's Study remaining-card label.
+- Status: unresolved, TASK13260.103. Use existing localization plural rules without changing card counts. Native evidence: `.tmp/uat151-137-native-20260916/alice-generation-result.txt`, pending durable retention.
+
+## UAT-165 — P3: Long default model identifier overlaps the neighboring readiness tile
+
+- Native PostgreSQL multi-user Models screenshots show the saved local model path overflowing Default model into Configured providers, both with an empty catalog and after successful provider recovery. Root and independent reviewer visually confirmed the overlap.
+- Status: verified, TASK13260.102. One wrapping class preserves full text;21/3 existing tests, independent review and actual1200/390px contained text rectangles pass. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup165/README.md). Original screenshots are retained with the UAT164 native evidence. This is separate from164's functional guidance repair.
+
 ## UAT-164 — P3: Empty model configuration is described as an extension/API-key failure
 
 - Actual PostgreSQL multi-user administrator login and model metadata reads succeed200. The catalog has no selectable chat model: most entries are unconfigured references; MLX is configured but unavailable. Model Settings nevertheless says the extension could not load providers and advises checking an API key. Home promises provider connection in Model Settings, while this multi-user path uses operator configuration.
 - Existing lower Configure server and Provider Keys links are present; this finding does not claim that all actions are absent. Expected: accurate empty-readiness guidance, existing operator/user setup direction and distinct actual network/authentication failure states.
-- Status: unresolved, TASK13260.101. Preserve Refresh, the intentional multi-user operator setup boundary and permissions. Original evidence: private `pg-multi-model-settings.txt` / `pg-multi-model-events.txt`, retained with the repair's acceptance bundle.
+- Status: verified, TASK13260.101. Repair588d6c3cef passes31/6 targeted checks and independent native empty-to-ready acceptance. Final guide click is native single-user; multi readiness evidence precedes only the CTA correction. [Native evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup164-native/README.md). Preserve Refresh, the intentional multi-user operator setup boundary and permissions. Original evidence: private `pg-multi-model-settings.txt` / `pg-multi-model-events.txt`, retained with the repair's acceptance bundle.
 
 ## UAT-163 — P2: Reload silently disables selected-source retrieval
 
 - On frozen `223591ac4f`, Home's Rowan starter enables source retrieval in the saved Cedar conversation. After a controlled retrieval failure and real reload, the next Send emits ordinary Chat request79 with Cedar history, no RAG request and no Rowan source content. The model answers from Cedar. Actual persisted-session diagnosis confirms that media IDs and mode survive, while omitted `fileRetrievalEnabled` returns to its cold false default.
 - Expected: same-owner/session reload preserves the explicit retrieval choice; intentional disabled state and conversation/account changes remain safe.
-- Status: unresolved, TASK13260.100. Repair with actual cold persistence/restore/Send regressions, independent review and native scoped-request acceptance. Evidence: [retained original requests and final canonical history](../../output/playwright/cycle5-repair-verification-2026-09-16/followup013-103-152-156-native/final-source-events.txt). This is separate from013's historical wrong answer despite supplied facts.
+- Status: verified, TASK13260.100. Repair ec28c34b7c passes57/4 targeted tests and independent native Home→reload→newSend scopedRAG→real groundedanswer→canonicalreload. [Native evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup163-native/README.md). Evidence: [retained original requests and final canonical history](../../output/playwright/cycle5-repair-verification-2026-09-16/followup013-103-152-156-native/final-source-events.txt). This is separate from013's historical wrong answer despite supplied facts.
 
 ## UAT-162 — P3: Advanced timeout controls have no associated accessible labels
 
