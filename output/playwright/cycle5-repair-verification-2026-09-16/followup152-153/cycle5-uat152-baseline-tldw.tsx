@@ -73,14 +73,14 @@ export const TldwSettings = () => {
   const [magicSent, setMagicSent] = useState(false)
   const [magicSending, setMagicSending] = useState(false)
   const [serverUrl, setServerUrl] = useState("")
-  const [requestTimeoutSec, setRequestTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.request)
-  const [streamIdleTimeoutSec, setStreamIdleTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.stream)
-  const [chatRequestTimeoutSec, setChatRequestTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.chatRequest)
-  const [chatStartupTimeoutSec, setChatStartupTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.chatStartup)
-  const [chatStreamIdleTimeoutSec, setChatStreamIdleTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.chatStream)
-  const [ragRequestTimeoutSec, setRagRequestTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.ragRequest)
-  const [mediaRequestTimeoutSec, setMediaRequestTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.media)
-  const [uploadRequestTimeoutSec, setUploadRequestTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.upload)
+  const [requestTimeoutSec, setRequestTimeoutSec] = useState<number>(10)
+  const [streamIdleTimeoutSec, setStreamIdleTimeoutSec] = useState<number>(15)
+  const [chatRequestTimeoutSec, setChatRequestTimeoutSec] = useState<number>(10)
+  const [chatStartupTimeoutSec, setChatStartupTimeoutSec] = useState<number>(10)
+  const [chatStreamIdleTimeoutSec, setChatStreamIdleTimeoutSec] = useState<number>(15)
+  const [ragRequestTimeoutSec, setRagRequestTimeoutSec] = useState<number>(10)
+  const [mediaRequestTimeoutSec, setMediaRequestTimeoutSec] = useState<number>(60)
+  const [uploadRequestTimeoutSec, setUploadRequestTimeoutSec] = useState<number>(60)
   const [timeoutPreset, setTimeoutPreset] = useState<TimeoutPresetKey | 'custom'>('balanced')
   const [showDefaultKeyWarning, setShowDefaultKeyWarning] = useState(false)
   const [billingLoading, setBillingLoading] = useState(false)
@@ -235,10 +235,10 @@ export const TldwSettings = () => {
         authMode: values.authMode,
         requestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(requestTimeoutSec) || 10)) * 1000),
         streamIdleTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(streamIdleTimeoutSec) || 15)) * 1000),
-        chatRequestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(chatRequestTimeoutSec) || TIMEOUT_PRESETS.balanced.chatRequest)) * 1000),
+        chatRequestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(chatRequestTimeoutSec) || requestTimeoutSec || 10)) * 1000),
         chatStartupTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(chatStartupTimeoutSec) || TIMEOUT_PRESETS.balanced.chatStartup)) * 1000),
         chatStreamIdleTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(chatStreamIdleTimeoutSec) || streamIdleTimeoutSec || 15)) * 1000),
-        ragRequestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(ragRequestTimeoutSec) || TIMEOUT_PRESETS.balanced.ragRequest)) * 1000),
+        ragRequestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(ragRequestTimeoutSec) || requestTimeoutSec || 10)) * 1000),
         mediaRequestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(mediaRequestTimeoutSec) || requestTimeoutSec || 10)) * 1000),
         uploadRequestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(uploadRequestTimeoutSec) || mediaRequestTimeoutSec || 60)) * 1000)
       }

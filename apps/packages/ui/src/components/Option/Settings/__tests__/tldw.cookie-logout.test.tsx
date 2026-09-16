@@ -13,6 +13,11 @@ import {
 import { COOKIE_SESSION_CONFIG_KEY } from "@/services/tldw/browser-networking"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+// Match the WebUI storage boundary, including same-tab and cross-tab watches.
+vi.mock("@plasmohq/storage", async () =>
+  import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage")
+)
+
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   logout: vi.fn(),

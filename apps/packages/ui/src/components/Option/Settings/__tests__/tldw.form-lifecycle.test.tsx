@@ -5,6 +5,11 @@ import { Storage } from "@plasmohq/storage"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 
+// Match the WebUI storage boundary, including same-tab and cross-tab watches.
+vi.mock("@plasmohq/storage", async () =>
+  import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage")
+)
+
 const mocks = vi.hoisted(() => ({ getConfig: vi.fn(), logout: vi.fn() }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: {
   getConfig: mocks.getConfig,

@@ -1,0 +1,60 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:75457) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+stderr | src/components/Option/Settings/__tests__/tldw.timeouts.form.test.tsx > a first server connection with no stored config uses the same generation defaults
+Could not clear private Flashcards transfers after the account or server changed.
+
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+ ✓ src/components/Option/Settings/__tests__/tldw.timeouts.form.test.tsx (9 tests) 17791ms
+   ✓ ordinary Settings save persists generation defaults without opening Advanced, and reload preserves them  2707ms
+   ✓ a first server connection with no stored config uses the same generation defaults  883ms
+   ✓ Extended and explicit Reset persist their generation budgets across reload  3340ms
+   ✓ preserves explicit stored 10000 ms generation overrides on ordinary save and reload  2513ms
+   ✓ preserves explicit stored 237000 ms generation overrides on ordinary save and reload  2464ms
+   ✓ invalid zero generation values fall back to generation presets instead of the generic timeout  1184ms
+   ✓ clicking Balanced from a preserved Custom configuration applies the selected preset  2347ms
+   ✓ the actual request layer accepts a generation longer than 10 seconds using ordinary Settings save output  1175ms
+   ✓ the same actual request layer still honors a deliberate 10-second RAG limit  1179ms
+(node:75559) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Settings/__tests__/tldw-settings-tabs.test.tsx (5 tests) 19ms
+(node:75563) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/tldw/__tests__/request-core.refresh-timeout.test.ts (9 tests) 7ms
+(node:75564) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/tldw-settings-storage.test.ts (2 tests) 3ms
+
+ Test Files  4 passed (4)
+      Tests  25 passed (25)
+   Start at  10:52:34
+   Duration  20.01s (transform 479ms, setup 193ms, import 927ms, tests 17.82s, environment 752ms)

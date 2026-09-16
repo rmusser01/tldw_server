@@ -1,0 +1,3825 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:71784) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx (24 tests | 18 failed) 17237ms
+     ✓ restores a clean manual single-user form after cookie-only logout 108ms
+     ✓ tests an unverified authenticated session without profile permissions and defaults to password login 17ms
+     × does not load or render billing when the server does not advertise it 1007ms
+     ✓ does not send a saved login to an edited foreign server URL 17ms
+     × loads billing only after all billing read routes are advertised 1002ms
+     ✓ describes rejected multi-user sessions without calling them invalid API keys 15ms
+       × tracks ordinary same-tab login and logout without replacing unsaved fields 1005ms
+       × tracks ordinary cross-tab login and logout without replacing unsaved fields 1005ms
+       × tracks ordinary config-event login and logout without replacing unsaved fields 1005ms
+       ✓ uses actual storage rather than a stale cached signed-in client config 3ms
+       × recovers after exact-pair same-tab rotation while the raw pair stays invalidated 1006ms
+       × recovers after exact-pair cross-tab rotation while the raw pair stays invalidated 1005ms
+       × observes same-tab exact-pair invalidation 1003ms
+       × observes cross-tab exact-pair invalidation 1003ms
+       × observes storage-only exact-pair invalidation 1003ms
+       × does not treat a foreign server login as authentication for the displayed server 1005ms
+       × keeps valid offline authentication 1002ms
+       × ignores a delayed signed-in read across A-to-B-to-A account changes 1005ms
+       × ignores a delayed signed-in read across A-to-B-to-A server changes 1003ms
+       × revalidates an edited target and ignores an earlier pending auth read 1003ms
+       × revalidates cookie ownership without reloading the form 1004ms
+       × cleans up storage and window subscriptions under StrictMode 1003ms
+       ✓ does not let an older initial load replace fields edited after StrictMode setup 7ms
+       × supports extension-style boolean watch results and removes obsolete marker subscriptions 1ms
+(node:71951) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+ ❯ src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx (7 tests | 5 failed) 7094ms
+   × loads the actual form before applying async configuration values 1194ms
+   × normal logout reaches the actual login form without a disconnected-form warning 1015ms
+   ✓ clears the actual 'cookie session' form after a pending disconnect  949ms
+   ✓ clears the actual 'manual API key' form after a pending disconnect  895ms
+   × preserves the mounted server draft across storage account transitions 1011ms
+   × rejects an old account's delayed initial load after the Settings owner is replaced 1016ms
+   × keeps the current form available when logout fails before credentials are cleared 1013ms
+(node:71981) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx (5 tests | 5 failed) 5271ms
+     × opens its real confirmation in the current application context without a static modal warning 1164ms
+     × restores the authenticated notice after cancelling the mode change 1029ms
+     × keeps a confirmed single-user draft unauthenticated by the saved multi-user token 1023ms
+     × revalidates a confirmed return to the saved multi-user mode 1030ms
+     × does not restore an invalidated session when the mode change is cancelled 1024ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 28 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx > Settings auth-mode changes through the actual Form > opens its real confirmation in the current application context without a static modal warning
+TestingLibraryElementError: Unable to find an element with the text: Logged In. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-r0"[39m
+    [36m>[39m
+      [36m<form[39m
+        [33mclass[39m=[32m"ant-form ant-form-horizontal css-var-r0 ant-form-css-var css-dev-only-do-not-override-3uaqrl"[39m
+      [36m>[39m
+        [36m<output[39m
+          [33mdata-testid[39m=[32m"login-status"[39m
+        [36m>[39m
+          [0munauthenticated[0m
+        [36m</output>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r0 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"serverUrl"[39m
+                [33mtitle[39m=[32m"Server URL"[39m
+              [36m>[39m
+                [0mServer URL[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33maria-describedby[39m=[32m"serverUrl_extra"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-r0 ant-input-css-var"[39m
+                    [33mid[39m=[32m"serverUrl"[39m
+                    [33mplaceholder[39m=[32m"http://127.0.0.1:8000"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m"https://settings.example.test"[39m
+                  [36m/>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-additional"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-extra"[39m
+                  [33mid[39m=[32m"serverUrl_extra"[39m
+                [36m>[39m
+                  [0mThe URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000[0m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r0 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"authMode"[39m
+                [33mtitle[39m=[32m"Authentication Mode"[39m
+              [36m>[39m
+                [0mAuthentication Mode[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-label[39m=[32m"segmented control"[39m
+                    [33maria-orientation[39m=[32m"horizontal"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+                    [33mid[39m=[32m"authMode"[39m
+                    [33mrole[39m=[32m"radiogroup"[39m
+                    [33mtabindex[39m=[32m"0"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-segmented-group"[39m
+                    [36m>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Single User (API Key)"[39m
+                        [36m>[39m
+                          [0mSingle User (API Key)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mchecked[39m=[32m""[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Multi User (Login)"[39m
+                        [36m>[39m
+                          [0mMulti User (Login)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg bo...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-r0"[39m
+    [36m>[39m
+      [36m<form[39m
+        [33mclass[39m=[32m"ant-form ant-form-horizontal css-var-r0 ant-form-css-var css-dev-only-do-not-override-3uaqrl"[39m
+      [36m>[39m
+        [36m<output[39m
+          [33mdata-testid[39m=[32m"login-status"[39m
+        [36m>[39m
+          [0munauthenticated[0m
+        [36m</output>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r0 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"serverUrl"[39m
+                [33mtitle[39m=[32m"Server URL"[39m
+              [36m>[39m
+                [0mServer URL[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33maria-describedby[39m=[32m"serverUrl_extra"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-r0 ant-input-css-var"[39m
+                    [33mid[39m=[32m"serverUrl"[39m
+                    [33mplaceholder[39m=[32m"http://127.0.0.1:8000"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m"https://settings.example.test"[39m
+                  [36m/>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-additional"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-extra"[39m
+                  [33mid[39m=[32m"serverUrl_extra"[39m
+                [36m>[39m
+                  [0mThe URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000[0m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r0 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"authMode"[39m
+                [33mtitle[39m=[32m"Authentication Mode"[39m
+              [36m>[39m
+                [0mAuthentication Mode[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-label[39m=[32m"segmented control"[39m
+                    [33maria-orientation[39m=[32m"horizontal"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+                    [33mid[39m=[32m"authMode"[39m
+                    [33mrole[39m=[32m"radiogroup"[39m
+                    [33mtabindex[39m=[32m"0"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-segmented-group"[39m
+                    [36m>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Single User (API Key)"[39m
+                        [36m>[39m
+                          [0mSingle User (API Key)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mchecked[39m=[32m""[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Multi User (Login)"[39m
+                        [36m>[39m
+                          [0mMulti User (Login)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg bo...
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ startModeChange src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx:109:18
+    107|   const startModeChange = async () => {
+    108|     render(<ConfigProvider theme={{ token: { colorPrimary: "#3267ab", …
+    109|     await screen.findByText("Logged In")
+       |                  ^
+    110|     fireEvent.click(
+    111|       screen.getByRole("radio", { name: "Single User (API Key)" })
+ ❯ src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx:123:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/28]⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx > Settings auth-mode changes through the actual Form > restores the authenticated notice after cancelling the mode change
+TestingLibraryElementError: Unable to find an element with the text: Logged In. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-r3"[39m
+    [36m>[39m
+      [36m<form[39m
+        [33mclass[39m=[32m"ant-form ant-form-horizontal css-var-r3 ant-form-css-var css-dev-only-do-not-override-3uaqrl"[39m
+      [36m>[39m
+        [36m<output[39m
+          [33mdata-testid[39m=[32m"login-status"[39m
+        [36m>[39m
+          [0munauthenticated[0m
+        [36m</output>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r3 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r3"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r3"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"serverUrl"[39m
+                [33mtitle[39m=[32m"Server URL"[39m
+              [36m>[39m
+                [0mServer URL[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r3"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33maria-describedby[39m=[32m"serverUrl_extra"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-r3 ant-input-css-var"[39m
+                    [33mid[39m=[32m"serverUrl"[39m
+                    [33mplaceholder[39m=[32m"http://127.0.0.1:8000"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m"https://settings.example.test"[39m
+                  [36m/>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-additional"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-extra"[39m
+                  [33mid[39m=[32m"serverUrl_extra"[39m
+                [36m>[39m
+                  [0mThe URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000[0m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r3 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r3"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r3"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"authMode"[39m
+                [33mtitle[39m=[32m"Authentication Mode"[39m
+              [36m>[39m
+                [0mAuthentication Mode[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r3"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-label[39m=[32m"segmented control"[39m
+                    [33maria-orientation[39m=[32m"horizontal"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-r3"[39m
+                    [33mid[39m=[32m"authMode"[39m
+                    [33mrole[39m=[32m"radiogroup"[39m
+                    [33mtabindex[39m=[32m"0"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-segmented-group"[39m
+                    [36m>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Single User (API Key)"[39m
+                        [36m>[39m
+                          [0mSingle User (API Key)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mchecked[39m=[32m""[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Multi User (Login)"[39m
+                        [36m>[39m
+                          [0mMulti User (Login)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg bo...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-r3"[39m
+    [36m>[39m
+      [36m<form[39m
+        [33mclass[39m=[32m"ant-form ant-form-horizontal css-var-r3 ant-form-css-var css-dev-only-do-not-override-3uaqrl"[39m
+      [36m>[39m
+        [36m<output[39m
+          [33mdata-testid[39m=[32m"login-status"[39m
+        [36m>[39m
+          [0munauthenticated[0m
+        [36m</output>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r3 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r3"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r3"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"serverUrl"[39m
+                [33mtitle[39m=[32m"Server URL"[39m
+              [36m>[39m
+                [0mServer URL[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r3"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33maria-describedby[39m=[32m"serverUrl_extra"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-r3 ant-input-css-var"[39m
+                    [33mid[39m=[32m"serverUrl"[39m
+                    [33mplaceholder[39m=[32m"http://127.0.0.1:8000"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m"https://settings.example.test"[39m
+                  [36m/>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-additional"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-extra"[39m
+                  [33mid[39m=[32m"serverUrl_extra"[39m
+                [36m>[39m
+                  [0mThe URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000[0m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r3 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r3"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r3"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"authMode"[39m
+                [33mtitle[39m=[32m"Authentication Mode"[39m
+              [36m>[39m
+                [0mAuthentication Mode[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r3"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-label[39m=[32m"segmented control"[39m
+                    [33maria-orientation[39m=[32m"horizontal"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-r3"[39m
+                    [33mid[39m=[32m"authMode"[39m
+                    [33mrole[39m=[32m"radiogroup"[39m
+                    [33mtabindex[39m=[32m"0"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-segmented-group"[39m
+                    [36m>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Single User (API Key)"[39m
+                        [36m>[39m
+                          [0mSingle User (API Key)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mchecked[39m=[32m""[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Multi User (Login)"[39m
+                        [36m>[39m
+                          [0mMulti User (Login)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg bo...
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ startModeChange src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx:109:18
+    107|   const startModeChange = async () => {
+    108|     render(<ConfigProvider theme={{ token: { colorPrimary: "#3267ab", …
+    109|     await screen.findByText("Logged In")
+       |                  ^
+    110|     fireEvent.click(
+    111|       screen.getByRole("radio", { name: "Single User (API Key)" })
+ ❯ src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx:130:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/28]⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx > Settings auth-mode changes through the actual Form > keeps a confirmed single-user draft unauthenticated by the saved multi-user token
+TestingLibraryElementError: Unable to find an element with the text: Logged In. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-r6"[39m
+    [36m>[39m
+      [36m<form[39m
+        [33mclass[39m=[32m"ant-form ant-form-horizontal css-var-r6 ant-form-css-var css-dev-only-do-not-override-3uaqrl"[39m
+      [36m>[39m
+        [36m<output[39m
+          [33mdata-testid[39m=[32m"login-status"[39m
+        [36m>[39m
+          [0munauthenticated[0m
+        [36m</output>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r6 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r6"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r6"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"serverUrl"[39m
+                [33mtitle[39m=[32m"Server URL"[39m
+              [36m>[39m
+                [0mServer URL[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r6"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33maria-describedby[39m=[32m"serverUrl_extra"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-r6 ant-input-css-var"[39m
+                    [33mid[39m=[32m"serverUrl"[39m
+                    [33mplaceholder[39m=[32m"http://127.0.0.1:8000"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m"https://settings.example.test"[39m
+                  [36m/>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-additional"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-extra"[39m
+                  [33mid[39m=[32m"serverUrl_extra"[39m
+                [36m>[39m
+                  [0mThe URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000[0m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r6 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r6"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r6"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"authMode"[39m
+                [33mtitle[39m=[32m"Authentication Mode"[39m
+              [36m>[39m
+                [0mAuthentication Mode[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r6"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-label[39m=[32m"segmented control"[39m
+                    [33maria-orientation[39m=[32m"horizontal"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-r6"[39m
+                    [33mid[39m=[32m"authMode"[39m
+                    [33mrole[39m=[32m"radiogroup"[39m
+                    [33mtabindex[39m=[32m"0"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-segmented-group"[39m
+                    [36m>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Single User (API Key)"[39m
+                        [36m>[39m
+                          [0mSingle User (API Key)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mchecked[39m=[32m""[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Multi User (Login)"[39m
+                        [36m>[39m
+                          [0mMulti User (Login)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg bo...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-r6"[39m
+    [36m>[39m
+      [36m<form[39m
+        [33mclass[39m=[32m"ant-form ant-form-horizontal css-var-r6 ant-form-css-var css-dev-only-do-not-override-3uaqrl"[39m
+      [36m>[39m
+        [36m<output[39m
+          [33mdata-testid[39m=[32m"login-status"[39m
+        [36m>[39m
+          [0munauthenticated[0m
+        [36m</output>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r6 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r6"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r6"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"serverUrl"[39m
+                [33mtitle[39m=[32m"Server URL"[39m
+              [36m>[39m
+                [0mServer URL[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r6"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33maria-describedby[39m=[32m"serverUrl_extra"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-r6 ant-input-css-var"[39m
+                    [33mid[39m=[32m"serverUrl"[39m
+                    [33mplaceholder[39m=[32m"http://127.0.0.1:8000"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m"https://settings.example.test"[39m
+                  [36m/>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-additional"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-extra"[39m
+                  [33mid[39m=[32m"serverUrl_extra"[39m
+                [36m>[39m
+                  [0mThe URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000[0m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r6 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r6"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r6"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"authMode"[39m
+                [33mtitle[39m=[32m"Authentication Mode"[39m
+              [36m>[39m
+                [0mAuthentication Mode[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r6"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-label[39m=[32m"segmented control"[39m
+                    [33maria-orientation[39m=[32m"horizontal"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-r6"[39m
+                    [33mid[39m=[32m"authMode"[39m
+                    [33mrole[39m=[32m"radiogroup"[39m
+                    [33mtabindex[39m=[32m"0"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-segmented-group"[39m
+                    [36m>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Single User (API Key)"[39m
+                        [36m>[39m
+                          [0mSingle User (API Key)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mchecked[39m=[32m""[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Multi User (Login)"[39m
+                        [36m>[39m
+                          [0mMulti User (Login)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg bo...
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ startModeChange src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx:109:18
+    107|   const startModeChange = async () => {
+    108|     render(<ConfigProvider theme={{ token: { colorPrimary: "#3267ab", …
+    109|     await screen.findByText("Logged In")
+       |                  ^
+    110|     fireEvent.click(
+    111|       screen.getByRole("radio", { name: "Single User (API Key)" })
+ ❯ src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx:137:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/28]⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx > Settings auth-mode changes through the actual Form > revalidates a confirmed return to the saved multi-user mode
+TestingLibraryElementError: Unable to find an element with the text: Logged In. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-r9"[39m
+    [36m>[39m
+      [36m<form[39m
+        [33mclass[39m=[32m"ant-form ant-form-horizontal css-var-r9 ant-form-css-var css-dev-only-do-not-override-3uaqrl"[39m
+      [36m>[39m
+        [36m<output[39m
+          [33mdata-testid[39m=[32m"login-status"[39m
+        [36m>[39m
+          [0munauthenticated[0m
+        [36m</output>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r9 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r9"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r9"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"serverUrl"[39m
+                [33mtitle[39m=[32m"Server URL"[39m
+              [36m>[39m
+                [0mServer URL[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r9"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33maria-describedby[39m=[32m"serverUrl_extra"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-r9 ant-input-css-var"[39m
+                    [33mid[39m=[32m"serverUrl"[39m
+                    [33mplaceholder[39m=[32m"http://127.0.0.1:8000"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m"https://settings.example.test"[39m
+                  [36m/>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-additional"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-extra"[39m
+                  [33mid[39m=[32m"serverUrl_extra"[39m
+                [36m>[39m
+                  [0mThe URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000[0m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r9 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r9"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r9"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"authMode"[39m
+                [33mtitle[39m=[32m"Authentication Mode"[39m
+              [36m>[39m
+                [0mAuthentication Mode[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r9"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-label[39m=[32m"segmented control"[39m
+                    [33maria-orientation[39m=[32m"horizontal"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-r9"[39m
+                    [33mid[39m=[32m"authMode"[39m
+                    [33mrole[39m=[32m"radiogroup"[39m
+                    [33mtabindex[39m=[32m"0"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-segmented-group"[39m
+                    [36m>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Single User (API Key)"[39m
+                        [36m>[39m
+                          [0mSingle User (API Key)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mchecked[39m=[32m""[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Multi User (Login)"[39m
+                        [36m>[39m
+                          [0mMulti User (Login)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg bo...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-r9"[39m
+    [36m>[39m
+      [36m<form[39m
+        [33mclass[39m=[32m"ant-form ant-form-horizontal css-var-r9 ant-form-css-var css-dev-only-do-not-override-3uaqrl"[39m
+      [36m>[39m
+        [36m<output[39m
+          [33mdata-testid[39m=[32m"login-status"[39m
+        [36m>[39m
+          [0munauthenticated[0m
+        [36m</output>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r9 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r9"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r9"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"serverUrl"[39m
+                [33mtitle[39m=[32m"Server URL"[39m
+              [36m>[39m
+                [0mServer URL[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r9"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33maria-describedby[39m=[32m"serverUrl_extra"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-r9 ant-input-css-var"[39m
+                    [33mid[39m=[32m"serverUrl"[39m
+                    [33mplaceholder[39m=[32m"http://127.0.0.1:8000"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m"https://settings.example.test"[39m
+                  [36m/>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-additional"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-extra"[39m
+                  [33mid[39m=[32m"serverUrl_extra"[39m
+                [36m>[39m
+                  [0mThe URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000[0m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-r9 ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-r9"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-r9"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"authMode"[39m
+                [33mtitle[39m=[32m"Authentication Mode"[39m
+              [36m>[39m
+                [0mAuthentication Mode[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-r9"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-label[39m=[32m"segmented control"[39m
+                    [33maria-orientation[39m=[32m"horizontal"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-r9"[39m
+                    [33mid[39m=[32m"authMode"[39m
+                    [33mrole[39m=[32m"radiogroup"[39m
+                    [33mtabindex[39m=[32m"0"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-segmented-group"[39m
+                    [36m>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Single User (API Key)"[39m
+                        [36m>[39m
+                          [0mSingle User (API Key)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mchecked[39m=[32m""[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Multi User (Login)"[39m
+                        [36m>[39m
+                          [0mMulti User (Login)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg bo...
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ startModeChange src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx:109:18
+    107|   const startModeChange = async () => {
+    108|     render(<ConfigProvider theme={{ token: { colorPrimary: "#3267ab", …
+    109|     await screen.findByText("Logged In")
+       |                  ^
+    110|     fireEvent.click(
+    111|       screen.getByRole("radio", { name: "Single User (API Key)" })
+ ❯ src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx:147:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/28]⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx > Settings auth-mode changes through the actual Form > does not restore an invalidated session when the mode change is cancelled
+TestingLibraryElementError: Unable to find an element with the text: Logged In. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-rc"[39m
+    [36m>[39m
+      [36m<form[39m
+        [33mclass[39m=[32m"ant-form ant-form-horizontal css-var-rc ant-form-css-var css-dev-only-do-not-override-3uaqrl"[39m
+      [36m>[39m
+        [36m<output[39m
+          [33mdata-testid[39m=[32m"login-status"[39m
+        [36m>[39m
+          [0munauthenticated[0m
+        [36m</output>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-rc ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-rc"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-rc"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"serverUrl"[39m
+                [33mtitle[39m=[32m"Server URL"[39m
+              [36m>[39m
+                [0mServer URL[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-rc"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33maria-describedby[39m=[32m"serverUrl_extra"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-rc ant-input-css-var"[39m
+                    [33mid[39m=[32m"serverUrl"[39m
+                    [33mplaceholder[39m=[32m"http://127.0.0.1:8000"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m"https://settings.example.test"[39m
+                  [36m/>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-additional"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-extra"[39m
+                  [33mid[39m=[32m"serverUrl_extra"[39m
+                [36m>[39m
+                  [0mThe URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000[0m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-rc ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-rc"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-rc"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"authMode"[39m
+                [33mtitle[39m=[32m"Authentication Mode"[39m
+              [36m>[39m
+                [0mAuthentication Mode[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-rc"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-label[39m=[32m"segmented control"[39m
+                    [33maria-orientation[39m=[32m"horizontal"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-rc"[39m
+                    [33mid[39m=[32m"authMode"[39m
+                    [33mrole[39m=[32m"radiogroup"[39m
+                    [33mtabindex[39m=[32m"0"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-segmented-group"[39m
+                    [36m>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Single User (API Key)"[39m
+                        [36m>[39m
+                          [0mSingle User (API Key)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mchecked[39m=[32m""[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Multi User (Login)"[39m
+                        [36m>[39m
+                          [0mMulti User (Login)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg bo...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-rc"[39m
+    [36m>[39m
+      [36m<form[39m
+        [33mclass[39m=[32m"ant-form ant-form-horizontal css-var-rc ant-form-css-var css-dev-only-do-not-override-3uaqrl"[39m
+      [36m>[39m
+        [36m<output[39m
+          [33mdata-testid[39m=[32m"login-status"[39m
+        [36m>[39m
+          [0munauthenticated[0m
+        [36m</output>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-rc ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-rc"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-rc"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"serverUrl"[39m
+                [33mtitle[39m=[32m"Server URL"[39m
+              [36m>[39m
+                [0mServer URL[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-rc"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33maria-describedby[39m=[32m"serverUrl_extra"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-rc ant-input-css-var"[39m
+                    [33mid[39m=[32m"serverUrl"[39m
+                    [33mplaceholder[39m=[32m"http://127.0.0.1:8000"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m"https://settings.example.test"[39m
+                  [36m/>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-additional"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-extra"[39m
+                  [33mid[39m=[32m"serverUrl_extra"[39m
+                [36m>[39m
+                  [0mThe URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000[0m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-form-item css-var-rc ant-form-css-var css-dev-only-do-not-override-3uaqrl ant-form-item-horizontal"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-3uaqrl css-var-rc"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-3uaqrl css-var-rc"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-form-item-required"[39m
+                [33mfor[39m=[32m"authMode"[39m
+                [33mtitle[39m=[32m"Authentication Mode"[39m
+              [36m>[39m
+                [0mAuthentication Mode[0m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-3uaqrl css-var-rc"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item-control-input"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-label[39m=[32m"segmented control"[39m
+                    [33maria-orientation[39m=[32m"horizontal"[39m
+                    [33maria-required[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-rc"[39m
+                    [33mid[39m=[32m"authMode"[39m
+                    [33mrole[39m=[32m"radiogroup"[39m
+                    [33mtabindex[39m=[32m"0"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-segmented-group"[39m
+                    [36m>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Single User (API Key)"[39m
+                        [36m>[39m
+                          [0mSingle User (API Key)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                      [36m<label[39m
+                        [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33mchecked[39m=[32m""[39m
+                          [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                          [33mname[39m=[32m"test-id"[39m
+                          [33mtype[39m=[32m"radio"[39m
+                        [36m/>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                          [33mtitle[39m=[32m"Multi User (Login)"[39m
+                        [36m>[39m
+                          [0mMulti User (Login)[0m
+                        [36m</div>[39m
+                      [36m</label>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg bo...
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ startModeChange src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx:109:18
+    107|   const startModeChange = async () => {
+    108|     render(<ConfigProvider theme={{ token: { colorPrimary: "#3267ab", …
+    109|     await screen.findByText("Logged In")
+       |                  ^
+    110|     fireEvent.click(
+    111|       screen.getByRole("radio", { name: "Single User (API Key)" })
+ ❯ src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx:165:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/28]⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > does not load or render billing when the server does not advertise it
+AssertionError: expected "vi.fn()" to be called at least once
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"max-w-2xl"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+        [36m>[39m
+          [36m<h3[39m
+            [33mclass[39m=[32m"mb-2 font-semibold"[39m
+          [36m>[39m
+            [0mAbout tldw server integration[0m
+          [36m</h3>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"text-sm text-text-muted"[39m
+          [36m>[39m
+            [0mConnect to tldw server for chat, knowledge search, and media.[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-sm text-text"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"mr-2 font-medium"[39m
+            [36m>[39m
+              [0mServer:[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-text-muted break-all"[39m
+            [36m>[39m
+              [0mhttp://127.0.0.1:8000[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mHealth[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mRecheck[0m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<h2[39m
+          [33mclass[39m=[32m"mb-4 scroll-mt-24 text-base font-semibold text-text"[39m
+          [33mid[39m=[32m"tldw-settings-connection"[39m
+        [36m>[39m
+          [0mtldw Server Configuration[0m
+        [36m</h2>[39m
+        [36m<form>[39m
+          [36m<div>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"server-url"[39m
+            [36m>[39m
+              [0mhttp://127.0.0.1:8000[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"auth-source"[39m
+            [36m>[39m
+              [0mmanual[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"auth-mode"[39m
+            [36m>[39m
+              [0mmulti-user[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"login-method"[39m
+            [36m>[39m
+              [0mpassword[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"remember-key"[39m
+            [36m>[39m
+              [0mtrue[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"connection-status"[39m
+            [36m>[39m
+              [0mnone[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"connection-detail"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"core-status"[39m
+            [36m>[39m
+              [0munknown[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"rag-status"[39m
+            [36m>[39m
+              [0munknown[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"login-status"[39m
+            [36m>[39m
+              [0mLogin Required[0m
+            [36m</span>[39m
+            [36m<input[39m
+              [33maria-label[39m=[32m"Edit server"[39m
+            [36m/>[39m
+            [36m<span>[39m
+              [0mManual key controls[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mTest connection[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mLogout[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"Request timeout"[39m
+            [33mtype[39m=[32m"number"[39m
+            [33mvalue[39m=[32m"10"[39m
+          [36m/>[39m
+        [36m</form>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+ ❯ src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx:265:43
+    263|     render(<TldwSettings />)
+    264|     await screen.findByTestId("auth-mode")
+    265|     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+       |                                           ^
+    266|     expect(mocks.apiSend).not.toHaveBeenCalledWith(expect.objectContai…
+    267|     expect(screen.queryByText("Billing controls")).not.toBeInTheDocume…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/28]⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > loads billing only after all billing read routes are advertised
+TestingLibraryElementError: Unable to find an element with the text: Billing controls. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"max-w-2xl"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+      [36m>[39m
+        [36m<h3[39m
+          [33mclass[39m=[32m"mb-2 font-semibold"[39m
+        [36m>[39m
+          [0mAbout tldw server integration[0m
+        [36m</h3>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm text-text-muted"[39m
+        [36m>[39m
+          [0mConnect to tldw server for chat, knowledge search, and media.[0m
+        [36m</p>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"text-sm text-text"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"mr-2 font-medium"[39m
+          [36m>[39m
+            [0mServer:[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"text-text-muted break-all"[39m
+          [36m>[39m
+            [0mhttp://127.0.0.1:8000[0m
+          [36m</span>[39m
+        [36m</div>[39m
+        [36m<button[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0mHealth[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0mRecheck[0m
+        [36m</button>[39m
+      [36m</div>[39m
+      [36m<h2[39m
+        [33mclass[39m=[32m"mb-4 scroll-mt-24 text-base font-semibold text-text"[39m
+        [33mid[39m=[32m"tldw-settings-connection"[39m
+      [36m>[39m
+        [0mtldw Server Configuration[0m
+      [36m</h2>[39m
+      [36m<form>[39m
+        [36m<div>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"server-url"[39m
+          [36m>[39m
+            [0mhttp://127.0.0.1:8000[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"auth-source"[39m
+          [36m>[39m
+            [0mmanual[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"auth-mode"[39m
+          [36m>[39m
+            [0mmulti-user[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"login-method"[39m
+          [36m>[39m
+            [0mpassword[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"remember-key"[39m
+          [36m>[39m
+            [0mtrue[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"connection-status"[39m
+          [36m>[39m
+            [0mnone[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"connection-detail"[39m
+          [36m/>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"core-status"[39m
+          [36m>[39m
+            [0munknown[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"rag-status"[39m
+          [36m>[39m
+            [0munknown[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"login-status"[39m
+          [36m>[39m
+            [0mLogin Required[0m
+          [36m</span>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"Edit server"[39m
+          [36m/>[39m
+          [36m<span>[39m
+            [0mManual key controls[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mTest connection[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mLogout[0m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<input[39m
+          [33maria-label[39m=[32m"Request timeout"[39m
+          [33mtype[39m=[32m"number"[39m
+          [33mvalue[39m=[32m"10"[39m
+        [36m/>[39m
+      [36m</form>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"max-w-2xl"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+      [36m>[39m
+        [36m<h3[39m
+          [33mclass[39m=[32m"mb-2 font-semibold"[39m
+        [36m>[39m
+          [0mAbout tldw server integration[0m
+        [36m</h3>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm text-text-muted"[39m
+        [36m>[39m
+          [0mConnect to tldw server for chat, knowledge search, and media.[0m
+        [36m</p>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"text-sm text-text"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"mr-2 font-medium"[39m
+          [36m>[39m
+            [0mServer:[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"text-text-muted break-all"[39m
+          [36m>[39m
+            [0mhttp://127.0.0.1:8000[0m
+          [36m</span>[39m
+        [36m</div>[39m
+        [36m<button[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0mHealth[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0mRecheck[0m
+        [36m</button>[39m
+      [36m</div>[39m
+      [36m<h2[39m
+        [33mclass[39m=[32m"mb-4 scroll-mt-24 text-base font-semibold text-text"[39m
+        [33mid[39m=[32m"tldw-settings-connection"[39m
+      [36m>[39m
+        [0mtldw Server Configuration[0m
+      [36m</h2>[39m
+      [36m<form>[39m
+        [36m<div>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"server-url"[39m
+          [36m>[39m
+            [0mhttp://127.0.0.1:8000[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"auth-source"[39m
+          [36m>[39m
+            [0mmanual[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"auth-mode"[39m
+          [36m>[39m
+            [0mmulti-user[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"login-method"[39m
+          [36m>[39m
+            [0mpassword[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"remember-key"[39m
+          [36m>[39m
+            [0mtrue[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"connection-status"[39m
+          [36m>[39m
+            [0mnone[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"connection-detail"[39m
+          [36m/>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"core-status"[39m
+          [36m>[39m
+            [0munknown[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"rag-status"[39m
+          [36m>[39m
+            [0munknown[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-testid[39m=[32m"login-status"[39m
+          [36m>[39m
+            [0mLogin Required[0m
+          [36m</span>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"Edit server"[39m
+          [36m/>[39m
+          [36m<span>[39m
+            [0mManual key controls[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mTest connection[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mLogout[0m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<input[39m
+          [33maria-label[39m=[32m"Request timeout"[39m
+          [33mtype[39m=[32m"number"[39m
+          [33mvalue[39m=[32m"10"[39m
+        [36m/>[39m
+      [36m</form>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx:288:25
+    286|     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON…
+    287|     render(<TldwSettings />)
+    288|     expect(await screen.findByText("Billing controls")).toBeInTheDocum…
+       |                         ^
+    289|     await waitFor(() => expect(mocks.apiSend).toHaveBeenCalledWith(exp…
+    290|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/28]⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > tracks ordinary same-tab login and logout without replacing unsaved fields
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > tracks ordinary cross-tab login and logout without replacing unsaved fields
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > tracks ordinary config-event login and logout without replacing unsaved fields
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  Logged In
+Received:
+  Login Required
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"max-w-2xl"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+        [36m>[39m
+          [36m<h3[39m
+            [33mclass[39m=[32m"mb-2 font-semibold"[39m
+          [36m>[39m
+            [0mAbout tldw server integration[0m
+          [36m</h3>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"text-sm text-text-muted"[39m
+          [36m>[39m
+            [0mConnect to tldw server for chat, knowledge search, and media.[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-sm text-text"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"mr-2 font-medium"[39m
+            [36m>[39m
+              [0mServer:[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-text-muted break-all"[39m
+            [36m>[39m
+              [0mhttps://settings.example.test[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mHealth[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mRecheck[0m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<h2[39m
+          [33mclass[39m=[32m"mb-4 scroll-mt-24 text-base font-semibold text-text"[39m
+          [33mid[39m=[32m"tldw-settings-connection"[39m
+        [36m>[39m
+          [0mtldw Server Configuration[0m
+        [36m</h2>[39m
+        [36m<form>[39m
+          [36m<div>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"server-url"[39m
+            [36m>[39m
+              [0mhttps://settings.example.test[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"auth-source"[39m
+            [36m>[39m
+              [0mmanual[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"auth-mode"[39m
+            [36m>[39m
+              [0mmulti-user[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"login-method"[39m
+            [36m>[39m
+              [0mpassword[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"remember-key"[39m
+            [36m>[39m
+              [0mtrue[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"connection-status"[39m
+            [36m>[39m
+              [0mnone[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"connection-detail"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"core-status"[39m
+            [36m>[39m
+              [0munknown[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"rag-status"[39m
+            [36m>[39m
+              [0munknown[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"login-status"[39m
+            [36m>[39m
+              [0mLogin Required[0m
+            [36m</span>[39m
+            [36m<input[39m
+              [33maria-label[39m=[32m"Edit server"[39m
+            [36m/>[39m
+            [36m<span>[39m
+              [0mManual key controls[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mTest connection[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mLogout[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"Request timeout"[39m
+            [33mtype[39m=[32m"number"[39m
+            [33mvalue[39m=[32m"47"[39m
+          [36m/>[39m
+        [36m</form>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+ ❯ src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx:316:50
+    314|
+    315|     const status = (expected: string) => waitFor(() =>
+    316|       expect(screen.getByTestId("login-status")).toHaveTextContent(exp…
+       |                                                  ^
+    317|     )
+    318|     const nativeWrite = (key: string, value: unknown) => {
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/28]⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > recovers after exact-pair same-tab rotation while the raw pair stays invalidated
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > recovers after exact-pair cross-tab rotation while the raw pair stays invalidated
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > observes same-tab exact-pair invalidation
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > observes cross-tab exact-pair invalidation
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > observes storage-only exact-pair invalidation
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > does not treat a foreign server login as authentication for the displayed server
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > keeps valid offline authentication
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > ignores a delayed signed-in read across A-to-B-to-A account changes
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > ignores a delayed signed-in read across A-to-B-to-A server changes
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > revalidates an edited target and ignores an earlier pending auth read
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > revalidates cookie ownership without reloading the form
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > cleans up storage and window subscriptions under StrictMode
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  Logged In
+Received:
+  Login Required
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"max-w-2xl"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+        [36m>[39m
+          [36m<h3[39m
+            [33mclass[39m=[32m"mb-2 font-semibold"[39m
+          [36m>[39m
+            [0mAbout tldw server integration[0m
+          [36m</h3>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"text-sm text-text-muted"[39m
+          [36m>[39m
+            [0mConnect to tldw server for chat, knowledge search, and media.[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-sm text-text"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"mr-2 font-medium"[39m
+            [36m>[39m
+              [0mServer:[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-text-muted break-all"[39m
+            [36m>[39m
+              [0mhttps://settings.example.test[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mHealth[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mRecheck[0m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<h2[39m
+          [33mclass[39m=[32m"mb-4 scroll-mt-24 text-base font-semibold text-text"[39m
+          [33mid[39m=[32m"tldw-settings-connection"[39m
+        [36m>[39m
+          [0mtldw Server Configuration[0m
+        [36m</h2>[39m
+        [36m<form>[39m
+          [36m<div>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"server-url"[39m
+            [36m>[39m
+              [0mhttps://settings.example.test[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"auth-source"[39m
+            [36m>[39m
+              [0mmanual[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"auth-mode"[39m
+            [36m>[39m
+              [0mmulti-user[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"login-method"[39m
+            [36m>[39m
+              [0mpassword[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"remember-key"[39m
+            [36m>[39m
+              [0mtrue[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"connection-status"[39m
+            [36m>[39m
+              [0mnone[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"connection-detail"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"core-status"[39m
+            [36m>[39m
+              [0munknown[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"rag-status"[39m
+            [36m>[39m
+              [0munknown[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mdata-testid[39m=[32m"login-status"[39m
+            [36m>[39m
+              [0mLogin Required[0m
+            [36m</span>[39m
+            [36m<input[39m
+              [33maria-label[39m=[32m"Edit server"[39m
+            [36m/>[39m
+            [36m<span>[39m
+              [0mManual key controls[0m
+            [36m</span>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mTest connection[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mLogout[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"Request timeout"[39m
+            [33mtype[39m=[32m"number"[39m
+            [33mvalue[39m=[32m"10"[39m
+          [36m/>[39m
+        [36m</form>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+ ❯ src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx:316:50
+    314|
+    315|     const status = (expected: string) => waitFor(() =>
+    316|       expect(screen.getByTestId("login-status")).toHaveTextContent(exp…
+       |                                                  ^
+    317|     )
+    318|     const nativeWrite = (key: string, value: unknown) => {
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/28]⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx > TldwSettings cookie logout > effective login status on the mounted Settings owner > supports extension-style boolean watch results and removes obsolete marker subscriptions
+Error: The property "watch" is not defined on the object.
+ ❯ src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx:506:10
+    504|       const originalWatch = Storage.prototype.watch
+    505|       const watched: Array<{ storage: Storage; callbacks: Parameters<S…
+    506|       vi.spyOn(Storage.prototype, "watch").mockImplementation(function…
+       |          ^
+    507|         watched.push({ storage: this, callbacks })
+    508|         originalWatch.call(this, callbacks)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/28]⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx > loads the actual form before applying async configuration values
+TestingLibraryElementError: Unable to find an element with the text: Logged In. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-r0"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-spin-container"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"max-w-2xl"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+            [36m>[39m
+              [36m<h3[39m
+                [33mclass[39m=[32m"mb-2 font-semibold"[39m
+              [36m>[39m
+                [0mAbout tldw server integration[0m
+              [36m</h3>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-sm text-text-muted"[39m
+              [36m>[39m
+                [0mConnect to tldw server for chat, knowledge search, and media.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-sm text-text"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"mr-2 font-medium"[39m
+                [36m>[39m
+                  [0mServer:[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-text-muted break-all"[39m
+                [36m>[39m
+                  [0mhttps://settings.example.test[0m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-3uaqrl ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small css-var-r0"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-r0 ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mHealth[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-r0 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mRecheck[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-tabs ant-tabs-top ant-tabs-small sticky top-0 z-20 mb-4 border-b border-border bg-surface/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-surface/85 css-dev-only-do-not-override-3uaqrl css-var-r0 ant-tabs-css-var"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33maria-orientation[39m=[32m"horizontal"[39m
+                [33mclass[39m=[32m"ant-tabs-nav"[39m
+                [33mrole[39m=[32m"tablist"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-wrap"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-list"[39m
+                    [33mstyle[39m=[32m"transform: translate(0px, 0px);"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab ant-tabs-tab-active"[39m
+                      [33mdata-node-key[39m=[32m"connection"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-connection"[39m
+                        [33maria-selected[39m=[32m"true"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-connection"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"0"[39m
+                      [36m>[39m
+                        [0mConnection[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab"[39m
+                      [33mdata-node-key[39m=[32m"timeouts"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-timeouts"[39m
+                        [33maria-selected[39m=[32m"false"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-timeouts"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"-1"[39m
+                      [36m>[39m
+                        [0mTimeouts[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-ink-bar ant-tabs-ink-bar-animated"[39m
+                      [33mstyle[39m=[32m"width: 0px; left: 0px; transform: translateX(-50%);"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-operations ant-tabs-nav-operations-hidden"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-more-popup"[39m
+                    [33maria-expanded[39m=[32m"false"[39m
+                    [33maria-haspopup[39m=[32m"listbox"[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-more"[39m
+                    [33mid[39m=[32m"rc-tabs-test-more"[39m
+                    [33mstyle[39m=[32m"visibility: hidden; order: 1;"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33maria-label[39m=[32m"e...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-r0"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-3uaqrl css-var-r0"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-spin-container"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"max-w-2xl"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+            [36m>[39m
+              [36m<h3[39m
+                [33mclass[39m=[32m"mb-2 font-semibold"[39m
+              [36m>[39m
+                [0mAbout tldw server integration[0m
+              [36m</h3>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-sm text-text-muted"[39m
+              [36m>[39m
+                [0mConnect to tldw server for chat, knowledge search, and media.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-sm text-text"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"mr-2 font-medium"[39m
+                [36m>[39m
+                  [0mServer:[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-text-muted break-all"[39m
+                [36m>[39m
+                  [0mhttps://settings.example.test[0m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-3uaqrl ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small css-var-r0"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-r0 ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mHealth[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-r0 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mRecheck[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-tabs ant-tabs-top ant-tabs-small sticky top-0 z-20 mb-4 border-b border-border bg-surface/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-surface/85 css-dev-only-do-not-override-3uaqrl css-var-r0 ant-tabs-css-var"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33maria-orientation[39m=[32m"horizontal"[39m
+                [33mclass[39m=[32m"ant-tabs-nav"[39m
+                [33mrole[39m=[32m"tablist"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-wrap"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-list"[39m
+                    [33mstyle[39m=[32m"transform: translate(0px, 0px);"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab ant-tabs-tab-active"[39m
+                      [33mdata-node-key[39m=[32m"connection"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-connection"[39m
+                        [33maria-selected[39m=[32m"true"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-connection"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"0"[39m
+                      [36m>[39m
+                        [0mConnection[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab"[39m
+                      [33mdata-node-key[39m=[32m"timeouts"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-timeouts"[39m
+                        [33maria-selected[39m=[32m"false"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-timeouts"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"-1"[39m
+                      [36m>[39m
+                        [0mTimeouts[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-ink-bar ant-tabs-ink-bar-animated"[39m
+                      [33mstyle[39m=[32m"width: 0px; left: 0px; transform: translateX(-50%);"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-operations ant-tabs-nav-operations-hidden"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-more-popup"[39m
+                    [33maria-expanded[39m=[32m"false"[39m
+                    [33maria-haspopup[39m=[32m"listbox"[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-more"[39m
+                    [33mid[39m=[32m"rc-tabs-test-more"[39m
+                    [33mstyle[39m=[32m"visibility: hidden; order: 1;"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33maria-label[39m=[32m"e...
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx:60:16
+     58|     await new Promise(done => setTimeout(done, 0))
+     59|   })
+     60|   await screen.findByText("Logged In", { exact: true })
+       |                ^
+     61|   expect(screen.getByRole("textbox", { name: "Server URL" })).toHaveVa…
+     62|   expect(formErrors(errors)).toEqual([])
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/28]⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx > normal logout reaches the actual login form without a disconnected-form warning
+TestingLibraryElementError: Unable to find an element with the text: Logged In. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-r4"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-3uaqrl css-var-r4"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-spin-container"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"max-w-2xl"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+            [36m>[39m
+              [36m<h3[39m
+                [33mclass[39m=[32m"mb-2 font-semibold"[39m
+              [36m>[39m
+                [0mAbout tldw server integration[0m
+              [36m</h3>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-sm text-text-muted"[39m
+              [36m>[39m
+                [0mConnect to tldw server for chat, knowledge search, and media.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-sm text-text"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"mr-2 font-medium"[39m
+                [36m>[39m
+                  [0mServer:[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-text-muted break-all"[39m
+                [36m>[39m
+                  [0mhttps://settings.example.test[0m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-3uaqrl ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small css-var-r4"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-r4 ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mHealth[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-r4 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mRecheck[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-tabs ant-tabs-top ant-tabs-small sticky top-0 z-20 mb-4 border-b border-border bg-surface/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-surface/85 css-dev-only-do-not-override-3uaqrl css-var-r4 ant-tabs-css-var"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33maria-orientation[39m=[32m"horizontal"[39m
+                [33mclass[39m=[32m"ant-tabs-nav"[39m
+                [33mrole[39m=[32m"tablist"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-wrap"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-list"[39m
+                    [33mstyle[39m=[32m"transform: translate(0px, 0px);"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab ant-tabs-tab-active"[39m
+                      [33mdata-node-key[39m=[32m"connection"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-connection"[39m
+                        [33maria-selected[39m=[32m"true"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-connection"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"0"[39m
+                      [36m>[39m
+                        [0mConnection[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab"[39m
+                      [33mdata-node-key[39m=[32m"timeouts"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-timeouts"[39m
+                        [33maria-selected[39m=[32m"false"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-timeouts"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"-1"[39m
+                      [36m>[39m
+                        [0mTimeouts[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-ink-bar ant-tabs-ink-bar-animated"[39m
+                      [33mstyle[39m=[32m"width: 0px; left: 0px; transform: translateX(-50%);"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-operations ant-tabs-nav-operations-hidden"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-more-popup"[39m
+                    [33maria-expanded[39m=[32m"false"[39m
+                    [33maria-haspopup[39m=[32m"listbox"[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-more"[39m
+                    [33mid[39m=[32m"rc-tabs-test-more"[39m
+                    [33mstyle[39m=[32m"visibility: hidden; order: 1;"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33maria-label[39m=[32m"e...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-r4"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-3uaqrl css-var-r4"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-spin-container"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"max-w-2xl"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+            [36m>[39m
+              [36m<h3[39m
+                [33mclass[39m=[32m"mb-2 font-semibold"[39m
+              [36m>[39m
+                [0mAbout tldw server integration[0m
+              [36m</h3>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-sm text-text-muted"[39m
+              [36m>[39m
+                [0mConnect to tldw server for chat, knowledge search, and media.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-sm text-text"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"mr-2 font-medium"[39m
+                [36m>[39m
+                  [0mServer:[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-text-muted break-all"[39m
+                [36m>[39m
+                  [0mhttps://settings.example.test[0m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-3uaqrl ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small css-var-r4"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-r4 ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mHealth[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-r4 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mRecheck[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-tabs ant-tabs-top ant-tabs-small sticky top-0 z-20 mb-4 border-b border-border bg-surface/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-surface/85 css-dev-only-do-not-override-3uaqrl css-var-r4 ant-tabs-css-var"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33maria-orientation[39m=[32m"horizontal"[39m
+                [33mclass[39m=[32m"ant-tabs-nav"[39m
+                [33mrole[39m=[32m"tablist"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-wrap"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-list"[39m
+                    [33mstyle[39m=[32m"transform: translate(0px, 0px);"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab ant-tabs-tab-active"[39m
+                      [33mdata-node-key[39m=[32m"connection"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-connection"[39m
+                        [33maria-selected[39m=[32m"true"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-connection"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"0"[39m
+                      [36m>[39m
+                        [0mConnection[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab"[39m
+                      [33mdata-node-key[39m=[32m"timeouts"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-timeouts"[39m
+                        [33maria-selected[39m=[32m"false"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-timeouts"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"-1"[39m
+                      [36m>[39m
+                        [0mTimeouts[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-ink-bar ant-tabs-ink-bar-animated"[39m
+                      [33mstyle[39m=[32m"width: 0px; left: 0px; transform: translateX(-50%);"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-operations ant-tabs-nav-operations-hidden"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-more-popup"[39m
+                    [33maria-expanded[39m=[32m"false"[39m
+                    [33maria-haspopup[39m=[32m"listbox"[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-more"[39m
+                    [33mid[39m=[32m"rc-tabs-test-more"[39m
+                    [33mstyle[39m=[32m"visibility: hidden; order: 1;"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33maria-label[39m=[32m"e...
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx:68:16
+     66|   const errors = vi.spyOn(console, "error").mockImplementation(() => {…
+     67|   mount()
+     68|   await screen.findByText("Logged In", { exact: true })
+       |                ^
+     69|   errors.mockClear()
+     70|   fireEvent.click(screen.getByRole("button", { name: "Logout", exact: …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/28]⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx > preserves the mounted server draft across storage account transitions
+TestingLibraryElementError: Unable to find an element with the text: Logged In. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-re"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-3uaqrl css-var-re"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-spin-container"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"max-w-2xl"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+            [36m>[39m
+              [36m<h3[39m
+                [33mclass[39m=[32m"mb-2 font-semibold"[39m
+              [36m>[39m
+                [0mAbout tldw server integration[0m
+              [36m</h3>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-sm text-text-muted"[39m
+              [36m>[39m
+                [0mConnect to tldw server for chat, knowledge search, and media.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-sm text-text"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"mr-2 font-medium"[39m
+                [36m>[39m
+                  [0mServer:[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-text-muted break-all"[39m
+                [36m>[39m
+                  [0mhttps://settings.example.test[0m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-3uaqrl ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small css-var-re"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-re ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mHealth[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-re ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mRecheck[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-tabs ant-tabs-top ant-tabs-small sticky top-0 z-20 mb-4 border-b border-border bg-surface/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-surface/85 css-dev-only-do-not-override-3uaqrl css-var-re ant-tabs-css-var"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33maria-orientation[39m=[32m"horizontal"[39m
+                [33mclass[39m=[32m"ant-tabs-nav"[39m
+                [33mrole[39m=[32m"tablist"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-wrap"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-list"[39m
+                    [33mstyle[39m=[32m"transform: translate(0px, 0px);"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab ant-tabs-tab-active"[39m
+                      [33mdata-node-key[39m=[32m"connection"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-connection"[39m
+                        [33maria-selected[39m=[32m"true"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-connection"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"0"[39m
+                      [36m>[39m
+                        [0mConnection[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab"[39m
+                      [33mdata-node-key[39m=[32m"timeouts"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-timeouts"[39m
+                        [33maria-selected[39m=[32m"false"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-timeouts"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"-1"[39m
+                      [36m>[39m
+                        [0mTimeouts[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-ink-bar ant-tabs-ink-bar-animated"[39m
+                      [33mstyle[39m=[32m"width: 0px; left: 0px; transform: translateX(-50%);"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-operations ant-tabs-nav-operations-hidden"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-more-popup"[39m
+                    [33maria-expanded[39m=[32m"false"[39m
+                    [33maria-haspopup[39m=[32m"listbox"[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-more"[39m
+                    [33mid[39m=[32m"rc-tabs-test-more"[39m
+                    [33mstyle[39m=[32m"visibility: hidden; order: 1;"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33maria-label[39m=[32m"e...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-re"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-3uaqrl css-var-re"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-spin-container"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"max-w-2xl"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+            [36m>[39m
+              [36m<h3[39m
+                [33mclass[39m=[32m"mb-2 font-semibold"[39m
+              [36m>[39m
+                [0mAbout tldw server integration[0m
+              [36m</h3>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-sm text-text-muted"[39m
+              [36m>[39m
+                [0mConnect to tldw server for chat, knowledge search, and media.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-sm text-text"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"mr-2 font-medium"[39m
+                [36m>[39m
+                  [0mServer:[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-text-muted break-all"[39m
+                [36m>[39m
+                  [0mhttps://settings.example.test[0m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-3uaqrl ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small css-var-re"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-re ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mHealth[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-re ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mRecheck[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-tabs ant-tabs-top ant-tabs-small sticky top-0 z-20 mb-4 border-b border-border bg-surface/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-surface/85 css-dev-only-do-not-override-3uaqrl css-var-re ant-tabs-css-var"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33maria-orientation[39m=[32m"horizontal"[39m
+                [33mclass[39m=[32m"ant-tabs-nav"[39m
+                [33mrole[39m=[32m"tablist"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-wrap"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-list"[39m
+                    [33mstyle[39m=[32m"transform: translate(0px, 0px);"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab ant-tabs-tab-active"[39m
+                      [33mdata-node-key[39m=[32m"connection"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-connection"[39m
+                        [33maria-selected[39m=[32m"true"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-connection"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"0"[39m
+                      [36m>[39m
+                        [0mConnection[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab"[39m
+                      [33mdata-node-key[39m=[32m"timeouts"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-timeouts"[39m
+                        [33maria-selected[39m=[32m"false"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-timeouts"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"-1"[39m
+                      [36m>[39m
+                        [0mTimeouts[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-ink-bar ant-tabs-ink-bar-animated"[39m
+                      [33mstyle[39m=[32m"width: 0px; left: 0px; transform: translateX(-50%);"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-operations ant-tabs-nav-operations-hidden"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-more-popup"[39m
+                    [33maria-expanded[39m=[32m"false"[39m
+                    [33maria-haspopup[39m=[32m"listbox"[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-more"[39m
+                    [33mid[39m=[32m"rc-tabs-test-more"[39m
+                    [33mstyle[39m=[32m"visibility: hidden; order: 1;"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33maria-label[39m=[32m"e...
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx:103:16
+    101| it("preserves the mounted server draft across storage account transiti…
+    102|   mount()
+    103|   await screen.findByText("Logged In", { exact: true })
+       |                ^
+    104|   const input = screen.getByRole("textbox", { name: "Server URL" })
+    105|   fireEvent.change(input, { target: { value: "https://unsaved.example.…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/28]⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx > rejects an old account's delayed initial load after the Settings owner is replaced
+TestingLibraryElementError: Unable to find an element with the text: Logged In. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-rj"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-3uaqrl css-var-rj"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-spin-container"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"max-w-2xl"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+            [36m>[39m
+              [36m<h3[39m
+                [33mclass[39m=[32m"mb-2 font-semibold"[39m
+              [36m>[39m
+                [0mAbout tldw server integration[0m
+              [36m</h3>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-sm text-text-muted"[39m
+              [36m>[39m
+                [0mConnect to tldw server for chat, knowledge search, and media.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-sm text-text"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"mr-2 font-medium"[39m
+                [36m>[39m
+                  [0mServer:[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-text-muted break-all"[39m
+                [36m>[39m
+                  [0mhttps://bob.example.test[0m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-3uaqrl ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small css-var-rj"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-rj ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mHealth[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-rj ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mRecheck[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-tabs ant-tabs-top ant-tabs-small sticky top-0 z-20 mb-4 border-b border-border bg-surface/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-surface/85 css-dev-only-do-not-override-3uaqrl css-var-rj ant-tabs-css-var"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33maria-orientation[39m=[32m"horizontal"[39m
+                [33mclass[39m=[32m"ant-tabs-nav"[39m
+                [33mrole[39m=[32m"tablist"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-wrap"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-list"[39m
+                    [33mstyle[39m=[32m"transform: translate(0px, 0px);"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab ant-tabs-tab-active"[39m
+                      [33mdata-node-key[39m=[32m"connection"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-connection"[39m
+                        [33maria-selected[39m=[32m"true"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-connection"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"0"[39m
+                      [36m>[39m
+                        [0mConnection[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab"[39m
+                      [33mdata-node-key[39m=[32m"timeouts"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-timeouts"[39m
+                        [33maria-selected[39m=[32m"false"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-timeouts"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"-1"[39m
+                      [36m>[39m
+                        [0mTimeouts[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-ink-bar ant-tabs-ink-bar-animated"[39m
+                      [33mstyle[39m=[32m"width: 0px; left: 0px; transform: translateX(-50%);"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-operations ant-tabs-nav-operations-hidden"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-more-popup"[39m
+                    [33maria-expanded[39m=[32m"false"[39m
+                    [33maria-haspopup[39m=[32m"listbox"[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-more"[39m
+                    [33mid[39m=[32m"rc-tabs-test-more"[39m
+                    [33mstyle[39m=[32m"visibility: hidden; order: 1;"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33maria-lab...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-rj"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-3uaqrl css-var-rj"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-spin-container"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"max-w-2xl"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+            [36m>[39m
+              [36m<h3[39m
+                [33mclass[39m=[32m"mb-2 font-semibold"[39m
+              [36m>[39m
+                [0mAbout tldw server integration[0m
+              [36m</h3>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-sm text-text-muted"[39m
+              [36m>[39m
+                [0mConnect to tldw server for chat, knowledge search, and media.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-sm text-text"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"mr-2 font-medium"[39m
+                [36m>[39m
+                  [0mServer:[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-text-muted break-all"[39m
+                [36m>[39m
+                  [0mhttps://bob.example.test[0m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-3uaqrl ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small css-var-rj"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-rj ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mHealth[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-rj ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mRecheck[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-tabs ant-tabs-top ant-tabs-small sticky top-0 z-20 mb-4 border-b border-border bg-surface/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-surface/85 css-dev-only-do-not-override-3uaqrl css-var-rj ant-tabs-css-var"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33maria-orientation[39m=[32m"horizontal"[39m
+                [33mclass[39m=[32m"ant-tabs-nav"[39m
+                [33mrole[39m=[32m"tablist"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-wrap"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-list"[39m
+                    [33mstyle[39m=[32m"transform: translate(0px, 0px);"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab ant-tabs-tab-active"[39m
+                      [33mdata-node-key[39m=[32m"connection"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-connection"[39m
+                        [33maria-selected[39m=[32m"true"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-connection"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"0"[39m
+                      [36m>[39m
+                        [0mConnection[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab"[39m
+                      [33mdata-node-key[39m=[32m"timeouts"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-timeouts"[39m
+                        [33maria-selected[39m=[32m"false"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-timeouts"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"-1"[39m
+                      [36m>[39m
+                        [0mTimeouts[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-ink-bar ant-tabs-ink-bar-animated"[39m
+                      [33mstyle[39m=[32m"width: 0px; left: 0px; transform: translateX(-50%);"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-operations ant-tabs-nav-operations-hidden"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-more-popup"[39m
+                    [33maria-expanded[39m=[32m"false"[39m
+                    [33maria-haspopup[39m=[32m"listbox"[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-more"[39m
+                    [33mid[39m=[32m"rc-tabs-test-more"[39m
+                    [33mstyle[39m=[32m"visibility: hidden; order: 1;"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33maria-lab...
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx:126:16
+    124|   mocks.getConfig.mockResolvedValue(next)
+    125|   mount()
+    126|   await screen.findByText("Logged In", { exact: true })
+       |                ^
+    127|   const input = screen.getByRole("textbox", { name: "Server URL" })
+    128|   fireEvent.change(input, { target: { value: "https://bob-draft.exampl…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/28]⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx > keeps the current form available when logout fails before credentials are cleared
+TestingLibraryElementError: Unable to find an element with the text: Logged In. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-rn"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-3uaqrl css-var-rn"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-spin-container"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"max-w-2xl"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+            [36m>[39m
+              [36m<h3[39m
+                [33mclass[39m=[32m"mb-2 font-semibold"[39m
+              [36m>[39m
+                [0mAbout tldw server integration[0m
+              [36m</h3>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-sm text-text-muted"[39m
+              [36m>[39m
+                [0mConnect to tldw server for chat, knowledge search, and media.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-sm text-text"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"mr-2 font-medium"[39m
+                [36m>[39m
+                  [0mServer:[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-text-muted break-all"[39m
+                [36m>[39m
+                  [0mhttps://settings.example.test[0m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-3uaqrl ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small css-var-rn"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-rn ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mHealth[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-rn ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mRecheck[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-tabs ant-tabs-top ant-tabs-small sticky top-0 z-20 mb-4 border-b border-border bg-surface/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-surface/85 css-dev-only-do-not-override-3uaqrl css-var-rn ant-tabs-css-var"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33maria-orientation[39m=[32m"horizontal"[39m
+                [33mclass[39m=[32m"ant-tabs-nav"[39m
+                [33mrole[39m=[32m"tablist"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-wrap"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-list"[39m
+                    [33mstyle[39m=[32m"transform: translate(0px, 0px);"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab ant-tabs-tab-active"[39m
+                      [33mdata-node-key[39m=[32m"connection"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-connection"[39m
+                        [33maria-selected[39m=[32m"true"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-connection"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"0"[39m
+                      [36m>[39m
+                        [0mConnection[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab"[39m
+                      [33mdata-node-key[39m=[32m"timeouts"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-timeouts"[39m
+                        [33maria-selected[39m=[32m"false"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-timeouts"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"-1"[39m
+                      [36m>[39m
+                        [0mTimeouts[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-ink-bar ant-tabs-ink-bar-animated"[39m
+                      [33mstyle[39m=[32m"width: 0px; left: 0px; transform: translateX(-50%);"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-operations ant-tabs-nav-operations-hidden"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-more-popup"[39m
+                    [33maria-expanded[39m=[32m"false"[39m
+                    [33maria-haspopup[39m=[32m"listbox"[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-more"[39m
+                    [33mid[39m=[32m"rc-tabs-test-more"[39m
+                    [33mstyle[39m=[32m"visibility: hidden; order: 1;"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33maria-label[39m=[32m"e...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"css-dev-only-do-not-override-3uaqrl ant-app css-var-rn"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-3uaqrl css-var-rn"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-spin-container"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"max-w-2xl"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 rounded-lg bg-surface2 p-4"[39m
+            [36m>[39m
+              [36m<h3[39m
+                [33mclass[39m=[32m"mb-2 font-semibold"[39m
+              [36m>[39m
+                [0mAbout tldw server integration[0m
+              [36m</h3>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-sm text-text-muted"[39m
+              [36m>[39m
+                [0mConnect to tldw server for chat, knowledge search, and media.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4 p-2 rounded border border-transparent bg-transparent flex items-center justify-between transition-colors duration-150 hover:border-border hover:bg-surface2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-sm text-text"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"mr-2 font-medium"[39m
+                [36m>[39m
+                  [0mServer:[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-text-muted break-all"[39m
+                [36m>[39m
+                  [0mhttps://settings.example.test[0m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-3uaqrl ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small css-var-rn"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-rn ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mHealth[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-rn ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mRecheck[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-tabs ant-tabs-top ant-tabs-small sticky top-0 z-20 mb-4 border-b border-border bg-surface/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-surface/85 css-dev-only-do-not-override-3uaqrl css-var-rn ant-tabs-css-var"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33maria-orientation[39m=[32m"horizontal"[39m
+                [33mclass[39m=[32m"ant-tabs-nav"[39m
+                [33mrole[39m=[32m"tablist"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-wrap"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-list"[39m
+                    [33mstyle[39m=[32m"transform: translate(0px, 0px);"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab ant-tabs-tab-active"[39m
+                      [33mdata-node-key[39m=[32m"connection"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-connection"[39m
+                        [33maria-selected[39m=[32m"true"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-connection"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"0"[39m
+                      [36m>[39m
+                        [0mConnection[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-tab"[39m
+                      [33mdata-node-key[39m=[32m"timeouts"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-controls[39m=[32m"rc-tabs-test-panel-timeouts"[39m
+                        [33maria-selected[39m=[32m"false"[39m
+                        [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                        [33mid[39m=[32m"rc-tabs-test-tab-timeouts"[39m
+                        [33mrole[39m=[32m"tab"[39m
+                        [33mtabindex[39m=[32m"-1"[39m
+                      [36m>[39m
+                        [0mTimeouts[0m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-tabs-ink-bar ant-tabs-ink-bar-animated"[39m
+                      [33mstyle[39m=[32m"width: 0px; left: 0px; transform: translateX(-50%);"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-nav-operations ant-tabs-nav-operations-hidden"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-more-popup"[39m
+                    [33maria-expanded[39m=[32m"false"[39m
+                    [33maria-haspopup[39m=[32m"listbox"[39m
+                    [33mclass[39m=[32m"ant-tabs-nav-more"[39m
+                    [33mid[39m=[32m"rc-tabs-test-more"[39m
+                    [33mstyle[39m=[32m"visibility: hidden; order: 1;"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33maria-label[39m=[32m"e...
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx:142:16
+    140|   mocks.logout.mockRejectedValue(new Error("Local credential storage u…
+    141|   mount()
+    142|   await screen.findByText("Logged In", { exact: true })
+       |                ^
+    143|   fireEvent.click(screen.getByRole("button", { name: "Logout", exact: …
+    144|   await screen.findByText("Logout failed", { exact: true })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/28]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  28 failed | 8 passed (36)
+   Start at  10:46:08
+   Duration  32.03s (transform 537ms, setup 161ms, import 1.40s, tests 29.60s, environment 602ms)

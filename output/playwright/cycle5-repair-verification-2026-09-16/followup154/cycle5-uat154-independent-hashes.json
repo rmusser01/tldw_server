@@ -1,0 +1,24 @@
+{
+  "frozenAt": "2026-09-16T17:56:28.747Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx",
+      "sha256": "026a49957d45e37b73b2f0c88f9cbc5669d3f913f7598bb31aa753e1c983af6c",
+      "actual": "026a49957d45e37b73b2f0c88f9cbc5669d3f913f7598bb31aa753e1c983af6c",
+      "match": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx",
+      "sha256": "77d71831a5d0ea79154c3c9a30f5259c74edcfe2612699f11d1698129163d3e5",
+      "actual": "77d71831a5d0ea79154c3c9a30f5259c74edcfe2612699f11d1698129163d3e5",
+      "match": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx",
+      "sha256": "b9367428d439626d3da24a225057a29b5627d1c179c54e6466910d1345ced906",
+      "actual": "b9367428d439626d3da24a225057a29b5627d1c179c54e6466910d1345ced906",
+      "match": true
+    }
+  ],
+  "verifiedAfterTests": "2026-09-16T17:57:56.386Z"
+}

@@ -18,6 +18,11 @@ import { invalidateRefreshSessionIfCurrent } from "@/services/tldw/single-user-c
 import { TldwConnectionSettings } from "../TldwConnectionSettings"
 import { useSettingsLoginStatus } from "../useSettingsLoginStatus"
 
+// Match the WebUI storage boundary, including same-tab and cross-tab watches.
+vi.mock("@plasmohq/storage", async () =>
+  import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage")
+)
+
 const signedIn: TldwConfig = {
   serverUrl: "https://settings.example.test",
   authMode: "multi-user",

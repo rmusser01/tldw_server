@@ -1,0 +1,50 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:71762) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+ ❯ src/components/Option/Settings/__tests__/tldw.timeouts.form.test.tsx (9 tests | 1 failed | 8 skipped) 1989ms
+   ↓ ordinary Settings save persists generation defaults without opening Advanced, and reload preserves them
+   ↓ a first server connection with no stored config uses the same generation defaults
+   ↓ Extended and explicit Reset persist their generation budgets across reload
+   ↓ preserves explicit stored 10000 ms generation overrides on ordinary save and reload
+   ↓ preserves explicit stored 237000 ms generation overrides on ordinary save and reload
+   ↓ invalid zero generation values fall back to generation presets instead of the generic timeout
+   × clicking Balanced from a preserved Custom configuration applies the selected preset 1988ms
+   ↓ the actual request layer accepts a generation longer than 10 seconds using ordinary Settings save output
+   ↓ the same actual request layer still honors a deliberate 10-second RAG limit
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Settings/__tests__/tldw.timeouts.form.test.tsx > clicking Balanced from a preserved Custom configuration applies the selected preset
+AssertionError: expected [ 10000, 10000, 10000 ] to deeply equal [ 120000, 120000, 120000 ]
+
+- Expected
++ Received
+
+  [
+-   120000,
+-   120000,
+-   120000,
++   10000,
++   10000,
++   10000,
+  ]
+
+ ❯ src/components/Option/Settings/__tests__/tldw.timeouts.form.test.tsx:125:36
+    123|   expect(screen.getByText("settings:tldw.timeoutPresetCustom")).toBeIn…
+    124|   fireEvent.click(screen.getByRole("radio", { name: "settings:tldw.tim…
+    125|   expect(generation(await save())).toEqual([120000, 120000, 120000])
+       |                                    ^
+    126| })
+    127|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  10:46:06
+   Duration  3.41s (transform 547ms, setup 67ms, import 1.05s, tests 1.99s, environment 211ms)

@@ -26,20 +26,20 @@ export const TIMEOUT_PRESETS: Record<TimeoutPresetKey, TimeoutValues> = {
   balanced: {
     request: 10,
     stream: 15,
-    chatRequest: 120,
-    chatStartup: 120,
+    chatRequest: 10,
+    chatStartup: 10,
     chatStream: 15,
-    ragRequest: 120,
+    ragRequest: 10,
     media: 60,
     upload: 60
   },
   extended: {
     request: 20,
     stream: 30,
-    chatRequest: 240,
-    chatStartup: 240,
+    chatRequest: 20,
+    chatStartup: 20,
     chatStream: 30,
-    ragRequest: 240,
+    ragRequest: 20,
     media: 90,
     upload: 90
   }
@@ -161,7 +161,7 @@ export const TldwTimeoutSettings = ({
                 </span>
                 <div className="flex flex-wrap items-center gap-3">
                   <Segmented
-                    value={timeoutPreset}
+                    value={timeoutPreset === 'extended' ? 'extended' : 'balanced'}
                     onChange={(value) => applyTimeoutPreset(value as TimeoutPresetKey)}
                     options={[
                       {

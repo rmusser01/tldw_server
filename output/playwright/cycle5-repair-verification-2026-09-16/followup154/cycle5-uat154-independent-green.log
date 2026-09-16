@@ -1,0 +1,38 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:76840) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+ ✓ src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx (7 tests) 4321ms
+   ✓ loads the actual form before applying async configuration values  441ms
+   ✓ normal logout reaches the actual login form without a disconnected-form warning  767ms
+   ✓ clears the actual 'cookie session' form after a pending disconnect  1065ms
+   ✓ clears the actual 'manual API key' form after a pending disconnect  1035ms
+   ✓ keeps the current form available when logout fails before credentials are cleared  598ms
+(node:76869) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx (5 tests) 1902ms
+     ✓ opens its real confirmation in the current application context without a static modal warning  503ms
+     ✓ revalidates a confirmed return to the saved multi-user mode  549ms
+(node:76888) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx (24 tests) 438ms
+
+ Test Files  3 passed (3)
+      Tests  36 passed (36)
+   Start at  10:56:52
+   Duration  9.74s (transform 579ms, setup 221ms, import 1.78s, tests 6.66s, environment 799ms)

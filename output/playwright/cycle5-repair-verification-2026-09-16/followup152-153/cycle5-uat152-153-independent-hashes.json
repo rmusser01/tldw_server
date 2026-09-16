@@ -1,0 +1,24 @@
+{
+  "frozenAt": "2026-09-16T17:49:38.290Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/TldwTimeoutSettings.tsx",
+      "sha256": "7123b21be2545f87fc0428f9466167c6bc022ad4ab99a63fe729fe78565a5051",
+      "actual": "7123b21be2545f87fc0428f9466167c6bc022ad4ab99a63fe729fe78565a5051",
+      "match": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/tldw.tsx",
+      "sha256": "931e92bf7d74580194531b6a47c905d6a296bbfa0e1023a22257da7a81093a69",
+      "actual": "931e92bf7d74580194531b6a47c905d6a296bbfa0e1023a22257da7a81093a69",
+      "match": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/__tests__/tldw.timeouts.form.test.tsx",
+      "sha256": "5af76fc32b3e93ce3e35e386a8b89d6d4fa986df8e35e66253653fb5840884e3",
+      "actual": "5af76fc32b3e93ce3e35e386a8b89d6d4fa986df8e35e66253653fb5840884e3",
+      "match": true
+    }
+  ],
+  "verifiedAfterTests": "2026-09-16T17:54:10.401Z"
+}

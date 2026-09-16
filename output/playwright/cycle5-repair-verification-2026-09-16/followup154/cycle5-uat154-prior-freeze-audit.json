@@ -1,0 +1,21 @@
+{
+  "checkedAt": "2026-09-16T17:56:28.747Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/TldwTimeoutSettings.tsx",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/tldw.tsx",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/__tests__/tldw.timeouts.form.test.tsx",
+      "matches": true
+    },
+    {
+      "path": "backlog/tasks/task-13260.91 - Preserve-generation-appropriate-timeouts-in-server-settings.md",
+      "matches": true
+    }
+  ]
+}
