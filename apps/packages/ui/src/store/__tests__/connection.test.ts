@@ -326,8 +326,8 @@ describe("connection store stability", () => {
       : { ok: false, status: 403, error: "Email not verified or missing system.logs" })
     await useConnectionStore.getState().checkOnce()
     expect(useConnectionStore.getState().state.isConnected).toBe(true)
-    expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/auth/sessions", noAuth: false }))
-    expect(mockedApiSend).not.toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/health/live" }))
+    expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/auth/sessions", noAuth: false }), expect.objectContaining({ readiness: { config: expect.any(Object), isCurrent: expect.any(Function) } }))
+    expect(mockedApiSend).not.toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/health/live" }), expect.anything())
   })
 
   it("uses lightweight health liveness endpoint and resets failure streak on success", async () => {
@@ -354,7 +354,7 @@ describe("connection store stability", () => {
         path: "/api/v1/health/live",
         method: "GET",
         timeoutMs: CONNECTION_TIMEOUT_MS
-      })
+      }), expect.anything()
     )
   })
 
@@ -370,7 +370,7 @@ describe("connection store stability", () => {
     mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: { status: "alive" } })
     await useConnectionStore.getState().checkOnce()
     expect(useConnectionStore.getState().state.isConnected).toBe(expected)
-    if (expected) expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/auth/sessions", noAuth: false }))
+    if (expected) expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/auth/sessions", noAuth: false }), expect.objectContaining({ readiness: { config: expect.any(Object), isCurrent: expect.any(Function) } }))
     else expect(useConnectionStore.getState().state.configStep).toBe("auth")
   })
 
@@ -423,7 +423,7 @@ describe("connection store stability", () => {
         path: "/api/v1/health/live",
         method: "GET",
         noAuth: false
-      })
+      }), expect.anything()
     )
   })
 
@@ -469,7 +469,7 @@ describe("connection store stability", () => {
       expect.objectContaining({
         path: "/api/v1/health/live",
         method: "GET"
-      })
+      }), expect.anything()
     )
     expect(state.phase).toBe(ConnectionPhase.CONNECTED)
     expect(state.isConnected).toBe(true)
@@ -477,7 +477,7 @@ describe("connection store stability", () => {
     expect(state.lastError).toBeNull()
   })
 
-  it("surfaces a CORS hint for cross-origin network-blocked health checks", async () => {
+  it("preserves an opaque cross-origin network failure without inferring a CORS denial", async () => {
     setConnectionState({
       phase: ConnectionPhase.SEARCHING,
       serverUrl: "http://192.168.5.186:8000",
@@ -502,11 +502,10 @@ describe("connection store stability", () => {
     const state = useConnectionStore.getState().state
     expect(state.phase).toBe(ConnectionPhase.ERROR)
     expect(state.errorKind).toBe("unreachable")
-    expect(state.lastError).toContain("Likely CORS mismatch")
-    expect(state.lastError).toContain("ALLOWED_ORIGINS")
+    expect(state.lastError).toBe("NetworkError when attempting to fetch resource.")
   })
 
-  it("surfaces a CORS/network hint for aborted cross-origin health checks", async () => {
+  it("preserves an aborted cross-origin health check without inferring a CORS denial", async () => {
     setConnectionState({
       phase: ConnectionPhase.SEARCHING,
       serverUrl: "http://192.168.5.186:8000",
@@ -531,8 +530,7 @@ describe("connection store stability", () => {
     const state = useConnectionStore.getState().state
     expect(state.phase).toBe(ConnectionPhase.ERROR)
     expect(state.errorKind).toBe("unreachable")
-    expect(state.lastError).toContain("Likely CORS mismatch")
-    expect(state.lastError).toContain("ALLOWED_ORIGINS")
+    expect(state.lastError).toBe("The operation was aborted.")
   })
 
   it("recovers from stale LAN host by switching to current browser host when probe succeeds", async () => {
@@ -1214,7 +1212,7 @@ describe("connection store stability", () => {
     expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({
       path: kind === "cookie-session" ? "/api/v1/auth/sessions" : "/api/v1/health/live",
       noAuth: false
-    }))
+    }), expect.anything())
   })
 
   it("discards a pre-logout health result without releasing the reconnect check guard", async () => {

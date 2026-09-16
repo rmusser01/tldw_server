@@ -1,0 +1,61 @@
+$ vitest ../packages/ui/src/store/__tests__/connection.readiness-refresh.test.ts ../packages/ui/src/store/__tests__/connection.test.ts ../packages/ui/src/services/__tests__/api-send.test.ts ../packages/ui/src/services/__tests__/background-proxy.web-refresh.test.ts ../packages/ui/src/services/__tests__/recipe-persistence-uncertainty.test.ts "--maxWorkers=1" --no-file-parallelism
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:20290) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | ../packages/ui/src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > invalidates a revoked rotated session without replaying its stale raw JWT (scoped=false)
+[tldw:request] GET /api/v1/notes/private-note 401 Session expired. Please log in again.
+
+stderr | ../packages/ui/src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > invalidates a revoked rotated session without replaying its stale raw JWT (scoped=true)
+[tldw:request] GET /api/v1/notes/private-note 401 Session expired. Please log in again.
+
+stderr | ../packages/ui/src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > invalidates only the current session after an actual refresh401 (scoped=false)
+[tldw:request] GET /api/v1/notes/private-note 401 Session expired. Please log in again.
+
+stderr | ../packages/ui/src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > invalidates only the current session after an actual refresh401 (scoped=true)
+[tldw:request] GET /api/v1/notes/private-note 401 Session expired. Please log in again.
+
+stderr | ../packages/ui/src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > still reports an actual request deadline as a connection failure
+[tldw:request] GET /api/v1/notes/ 0 Request timed out. REQUEST_TIMEOUT
+
+stderr | ../packages/ui/src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > retains retryable refresh failure details and does not replay a write (scoped=false)
+[tldw:request] POST /api/v1/notes/ 503 Authentication service is busy
+
+stderr | ../packages/ui/src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > retains retryable refresh failure details and does not replay a write (scoped=true)
+[tldw:request] POST /api/v1/notes/ 503 Authentication service is busy
+
+stderr | ../packages/ui/src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > signals refresh failure when /auth/refresh returns no access_token (no masking with stale token)
+[tldw:request] POST /api/v1/notes/search/ 502 Token refresh returned no access token. Please try again.
+
+stderr | ../packages/ui/src/services/__tests__/background-proxy.web-refresh.test.ts > background proxy web token refresh > signals refresh failure when /auth/refresh itself returns 401
+[tldw:request] POST /api/v1/notes/search/ 401 Session expired. Please log in again.
+
+ ✓ ../packages/ui/src/services/__tests__/background-proxy.web-refresh.test.ts (60 tests) 6311ms
+     ✓ invalidates a revoked rotated session without replaying its stale raw JWT (scoped=false)  1142ms
+     ✓ invalidates a revoked rotated session without replaying its stale raw JWT (scoped=true)  1017ms
+     ✓ invalidates only the current session after an actual refresh401 (scoped=false)  1008ms
+     ✓ invalidates only the current session after an actual refresh401 (scoped=true)  1012ms
+     ✓ retains retryable refresh failure details and does not replay a write (scoped=true)  1011ms
+     ✓ signals refresh failure when /auth/refresh itself returns 401  1014ms
+(node:20341) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/store/__tests__/connection.readiness-refresh.test.ts (15 tests) 2187ms
+     ✓ terminal refresh401 invalidates the pair and later readiness checks do not poll it  1018ms
+     ✓ keeps the current pair after a retryable refresh503 and does not replay the GET  1013ms
+(node:20391) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/store/__tests__/connection.test.ts (63 tests) 1333ms
+     ✓ keeps concurrent onboarding edits but discards readiness for a replaced server (H7)  345ms
+(node:20424) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/services/__tests__/api-send.test.ts (13 tests) 47ms
+(node:20427) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/services/__tests__/recipe-persistence-uncertainty.test.ts (6 tests) 15ms
+
+ Test Files  5 passed (5)
+      Tests  157 passed (157)
+   Start at  06:36:06
+   Duration  12.53s (transform 629ms, setup 413ms, import 219ms, tests 9.89s, environment 1.45s)
+

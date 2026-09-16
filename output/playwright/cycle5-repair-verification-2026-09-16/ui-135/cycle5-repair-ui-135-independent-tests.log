@@ -1,0 +1,22 @@
+$ vitest ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx ../packages/ui/src/store/__tests__/connection.test.ts ../packages/ui/src/components/Knowledge/__tests__/SetupDiagnostics.test.tsx ../packages/ui/src/store/__tests__/connection.readiness-refresh.test.ts "--maxWorkers=1" --no-file-parallelism
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:24342) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/store/__tests__/connection.readiness-refresh.test.ts (15 tests) 2197ms
+     ✓ terminal refresh401 invalidates the pair and later readiness checks do not poll it  1010ms
+     ✓ keeps the current pair after a retryable refresh503 and does not replay the GET  1016ms
+(node:24379) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/store/__tests__/connection.test.ts (63 tests) 1354ms
+     ✓ keeps concurrent onboarding edits but discards readiness for a replaced server (H7)  360ms
+(node:24386) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx (9 tests) 182ms
+
+ Test Files  3 passed (3)
+      Tests  87 passed (87)
+   Start at  06:41:26
+   Duration  5.39s (transform 543ms, setup 251ms, import 300ms, tests 3.73s, environment 786ms)
+

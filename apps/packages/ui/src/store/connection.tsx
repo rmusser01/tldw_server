@@ -305,15 +305,6 @@ const deriveKnowledgeStatusFromHealth = (raw: unknown): KnowledgeStatus => {
   return "ready"
 }
 
-const getNormalizedOrigin = (value: string | null | undefined): string | null => {
-  if (!value) return null
-  try {
-    return new URL(String(value)).origin
-  } catch {
-    return null
-  }
-}
-
 const getCurrentBrowserOrigin = (): string | null => {
   if (typeof window === "undefined") return null
   try {
@@ -440,12 +431,6 @@ const probeServerLiveness = async (
   }
 }
 
-const CORS_ERROR_PATTERNS = [
-  /cors/i,
-  /cross-origin/i,
-  /disallowed origin/i
-]
-
 const NETWORK_BLOCK_PATTERNS = [
   /networkerror when attempting to fetch resource/i,
   /failed to fetch/i,
@@ -453,52 +438,6 @@ const NETWORK_BLOCK_PATTERNS = [
   /load failed/i,
   /the operation was aborted/i
 ]
-
-const maybeAnnotateCorsMismatchError = ({
-  error,
-  status,
-  serverUrl
-}: {
-  error: string | null
-  status: number
-  serverUrl: string | null
-}): string | null => {
-  if (!error) return error
-  const trimmed = String(error).trim()
-  if (!trimmed) return error
-  const normalized = trimmed.toLowerCase()
-  if (normalized.startsWith("likely cors mismatch:")) {
-    return trimmed
-  }
-
-  const mentionsCors = CORS_ERROR_PATTERNS.some((pattern) =>
-    pattern.test(trimmed)
-  )
-  const looksLikeNetworkBlock = NETWORK_BLOCK_PATTERNS.some((pattern) =>
-    pattern.test(trimmed)
-  )
-  if (!mentionsCors && !looksLikeNetworkBlock) {
-    return trimmed
-  }
-
-  const browserOrigin = getCurrentBrowserOrigin()
-  const backendOrigin = getNormalizedOrigin(serverUrl)
-  if (browserOrigin && backendOrigin && browserOrigin === backendOrigin && !mentionsCors) {
-    return trimmed
-  }
-
-  if (status > 0 && status < 400 && !mentionsCors) {
-    return trimmed
-  }
-
-  const browserLabel = browserOrigin || "current browser origin"
-  const backendLabel = backendOrigin || (serverUrl ? String(serverUrl) : "configured server")
-  return (
-    `Likely CORS mismatch: ${browserLabel} is not allowed by ${backendLabel}. ` +
-    `Set ALLOWED_ORIGINS to include ${browserLabel} (or disable CORS for local development). ` +
-    `Original error: ${trimmed}`
-  )
-}
 
 type ConnectionStore = {
   state: ConnectionState
@@ -884,7 +823,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
               // reachable server URL. Once an API key or access token exists,
               // health should run with auth.
               noAuth: noAuthForHealth
-            })
+            }, cfg ? { readiness: { config: cfg, isCurrent } } : {})
             return { ok: Boolean(resp?.ok), status: Number(resp?.status) || 0, error: resp?.ok ? null : (resp?.error || null) }
           } catch (e) {
             return { ok: false, status: 0, error: (e as Error)?.message || 'Network error' }
@@ -944,11 +883,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
 
         if (!isCurrent()) return
         const ok = healthResult.ok
-        const resolvedHealthError = maybeAnnotateCorsMismatchError({
-          error: healthResult.error,
-          status: healthResult.status,
-          serverUrl
-        })
+        const resolvedHealthError = healthResult.error
 
         let knowledgeStatus: KnowledgeStatus = currentState.knowledgeStatus
         let knowledgeLastCheckedAt = currentState.knowledgeLastCheckedAt
@@ -1058,12 +993,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
         }))
       } catch (error) {
         if (!isCurrent()) return
-        const fallbackError =
-          maybeAnnotateCorsMismatchError({
-            error: (error as Error)?.message ?? "unknown-error",
-            status: 0,
-            serverUrl: currentState.serverUrl
-          }) ?? "unknown-error"
+        const fallbackError = (error as Error)?.message ?? "unknown-error"
         set((s) => ({
           state: {
             ...s.state,

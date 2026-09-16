@@ -1,0 +1,25 @@
+$ vitest ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx ../packages/ui/src/store/__tests__/connection.test.ts ../packages/ui/src/store/__tests__/connection.readiness-refresh.test.ts ../packages/ui/src/components/Option/KnowledgeQA/__tests__/SetupDiagnostics.design-system.test.tsx "--maxWorkers=1" --no-file-parallelism
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:23348) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/store/__tests__/connection.test.ts (63 tests) 1426ms
+     ✓ keeps concurrent onboarding edits but discards readiness for a replaced server (H7)  424ms
+(node:23376) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx (9 tests) 204ms
+(node:23382) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/store/__tests__/connection.readiness-refresh.test.ts (15 tests) 2102ms
+     ✓ terminal refresh401 invalidates the pair and later readiness checks do not poll it  1016ms
+     ✓ keeps the current pair after a retryable refresh503 and does not replay the GET  1011ms
+(node:23415) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/KnowledgeQA/__tests__/SetupDiagnostics.design-system.test.tsx (2 tests) 22ms
+
+ Test Files  4 passed (4)
+      Tests  89 passed (89)
+   Start at  06:39:37
+   Duration  6.25s (transform 625ms, setup 382ms, import 452ms, tests 3.75s, environment 1.21s)
+

@@ -836,7 +836,7 @@ const refreshAuthDirect = async (
 // Runtime for the web/direct fallback. Supplies a working `refreshAuth` so
 // request-core's 401 refresh-and-retry runs in the browser (not just inside the
 // extension worker), and single-flights it across concurrent callers.
-const createDirectRuntime = (
+export const createDirectRuntime = (
   storage: DirectRuntimeStorage,
   servicePromptConfig?: ServicePromptTargetConfig,
   initialConfig?: DirectConfigSnapshot

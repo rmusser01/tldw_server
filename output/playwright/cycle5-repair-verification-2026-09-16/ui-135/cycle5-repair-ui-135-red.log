@@ -1,0 +1,247 @@
+$ vitest ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx "--maxWorkers=1" --no-file-parallelism
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:20638) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx (9 tests | 5 failed) 222ms
+     × keeps restored credentials configured and a network failure uncertain: Failed to fetch 154ms
+     × keeps restored credentials configured and a network failure uncertain: NetworkError when attempting to fetch resource. 15ms
+     × keeps restored credentials configured and a network failure uncertain: The operation was aborted. 13ms
+     × keeps restored credentials configured and a network failure uncertain: Request timed out. 11ms
+     ✓ keeps credential recovery for an actual auth rejection 401 12ms
+     ✓ keeps credential recovery for an actual auth rejection 403 10ms
+     ✓ does not dispatch when credentials are missing 2ms
+     ✓ retains an explicit browser allowlist denial 1ms
+     × clears outage guidance when the configured server recovers 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: Failed to fetch
+AssertionError: expected 'Likely CORS mismatch: http://localhos…' to be 'Failed to fetch' // Object.is equality
+
+Expected: "Failed to fetch"
+Received: "Likely CORS mismatch: http://localhost:3000 is not allowed by https://offline.test. Set ALLOWED_ORIGINS to include http://localhost:3000 (or disable CORS for local development). Original error: Failed to fetch"
+
+ ❯ ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx:49:36
+     47|       const state = useConnectionStore.getState().state
+     48|       expect(state).toMatchObject({ configStep: "auth", errorKind: "un…
+     49|       expect.soft(state.lastError).toBe(error)
+       |                                    ^
+     50|       renderCurrentDiagnostics()
+     51|       expect.soft(screen.getByTestId("knowledge-setup-check-credential…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/23]⎯
+
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: Failed to fetch
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: NetworkError when attempting to fetch resource.
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: The operation was aborted.
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: Request timed out.
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  Credentials are configured
+Received:
+  CredentialsMissingAdd the API key or login token for this tldw server.
+ ❯ ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx:51:76
+     49|       expect.soft(state.lastError).toBe(error)
+     50|       renderCurrentDiagnostics()
+     51|       expect.soft(screen.getByTestId("knowledge-setup-check-credential…
+       |                                                                            ^
+     52|       expect.soft(screen.getByTestId("knowledge-setup-check-browser-ac…
+     53|       expect.soft(screen.getByTestId("knowledge-setup-check-backend"))…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/23]⎯
+
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: Failed to fetch
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: NetworkError when attempting to fetch resource.
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: The operation was aborted.
+Error: expect(element).not.toHaveTextContent()
+
+Expected element not to have text content:
+  Blocked
+Received:
+  Browser accessBlockedAllowlist this server origin or grant extension host access before retrying.
+ ❯ ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx:52:83
+     50|       renderCurrentDiagnostics()
+     51|       expect.soft(screen.getByTestId("knowledge-setup-check-credential…
+     52|       expect.soft(screen.getByTestId("knowledge-setup-check-browser-ac…
+       |                                                                                   ^
+     53|       expect.soft(screen.getByTestId("knowledge-setup-check-backend"))…
+     54|       const button = screen.queryByRole("button", { name: "Retry conne…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/23]⎯
+
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: Failed to fetch
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: NetworkError when attempting to fetch resource.
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: The operation was aborted.
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: Request timed out.
+Error: expect(element).not.toHaveTextContent()
+
+Expected element not to have text content:
+  Waiting for credentials
+Received:
+  Backend reachabilityWaitingWaiting for credentials before checking backend reachability.
+ ❯ ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx:53:76
+     51|       expect.soft(screen.getByTestId("knowledge-setup-check-credential…
+     52|       expect.soft(screen.getByTestId("knowledge-setup-check-browser-ac…
+     53|       expect.soft(screen.getByTestId("knowledge-setup-check-backend"))…
+       |                                                                            ^
+     54|       const button = screen.queryByRole("button", { name: "Retry conne…
+     55|       expect.soft(button).not.toBeNull()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/23]⎯
+
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: Failed to fetch
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: NetworkError when attempting to fetch resource.
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: The operation was aborted.
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: Request timed out.
+AssertionError: expected null not to be null
+ ❯ ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx:55:31
+     53|       expect.soft(screen.getByTestId("knowledge-setup-check-backend"))…
+     54|       const button = screen.queryByRole("button", { name: "Retry conne…
+     55|       expect.soft(button).not.toBeNull()
+       |                               ^
+     56|       if (button) fireEvent.click(button)
+     57|       expect.soft(retry).toHaveBeenCalledTimes(1)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/23]⎯
+
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: Failed to fetch
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: NetworkError when attempting to fetch resource.
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: The operation was aborted.
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: Request timed out.
+AssertionError: expected "vi.fn()" to be called 1 times, but got 0 times
+ ❯ ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx:57:26
+     55|       expect.soft(button).not.toBeNull()
+     56|       if (button) fireEvent.click(button)
+     57|       expect.soft(retry).toHaveBeenCalledTimes(1)
+       |                          ^
+     58|     }
+     59|   )
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/23]⎯
+
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: NetworkError when attempting to fetch resource.
+AssertionError: expected 'Likely CORS mismatch: http://localhos…' to be 'NetworkError when attempting to fetch…' // Object.is equality
+
+Expected: "NetworkError when attempting to fetch resource."
+Received: "Likely CORS mismatch: http://localhost:3000 is not allowed by https://offline.test. Set ALLOWED_ORIGINS to include http://localhost:3000 (or disable CORS for local development). Original error: NetworkError when attempting to fetch resource."
+
+ ❯ ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx:49:36
+     47|       const state = useConnectionStore.getState().state
+     48|       expect(state).toMatchObject({ configStep: "auth", errorKind: "un…
+     49|       expect.soft(state.lastError).toBe(error)
+       |                                    ^
+     50|       renderCurrentDiagnostics()
+     51|       expect.soft(screen.getByTestId("knowledge-setup-check-credential…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/23]⎯
+
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > keeps restored credentials configured and a network failure uncertain: The operation was aborted.
+AssertionError: expected 'Likely CORS mismatch: http://localhos…' to be 'The operation was aborted.' // Object.is equality
+
+Expected: "The operation was aborted."
+Received: "Likely CORS mismatch: http://localhost:3000 is not allowed by https://offline.test. Set ALLOWED_ORIGINS to include http://localhost:3000 (or disable CORS for local development). Original error: The operation was aborted."
+
+ ❯ ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx:49:36
+     47|       const state = useConnectionStore.getState().state
+     48|       expect(state).toMatchObject({ configStep: "auth", errorKind: "un…
+     49|       expect.soft(state.lastError).toBe(error)
+       |                                    ^
+     50|       renderCurrentDiagnostics()
+     51|       expect.soft(screen.getByTestId("knowledge-setup-check-credential…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/23]⎯
+
+ FAIL  ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx > Knowledge diagnostics after actual connection state transitions > clears outage guidance when the configured server recovers
+TestingLibraryElementError: Unable to find an element with the text: Ready. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<div[39m
+  [33mclass[39m=[32m"rounded-md border border-border bg-surface px-3 py-2"[39m
+  [33mdata-testid[39m=[32m"knowledge-setup-check-backend"[39m
+[36m>[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"flex items-center justify-between gap-3"[39m
+  [36m>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"flex min-w-0 items-center gap-2"[39m
+    [36m>[39m
+      [36m<svg[39m
+        [33maria-hidden[39m=[32m"true"[39m
+        [33mclass[39m=[32m"lucide lucide-circle-dashed h-4 w-4 text-text-muted"[39m
+        [33mfill[39m=[32m"none"[39m
+        [33mheight[39m=[32m"24"[39m
+        [33mstroke[39m=[32m"currentColor"[39m
+        [33mstroke-linecap[39m=[32m"round"[39m
+        [33mstroke-linejoin[39m=[32m"round"[39m
+        [33mstroke-width[39m=[32m"2"[39m
+        [33mviewBox[39m=[32m"0 0 24 24"[39m
+        [33mwidth[39m=[32m"24"[39m
+        [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+      [36m>[39m
+        [36m<path[39m
+          [33md[39m=[32m"M10.1 2.182a10 10 0 0 1 3.8 0"[39m
+        [36m/>[39m
+        [36m<path[39m
+          [33md[39m=[32m"M13.9 21.818a10 10 0 0 1-3.8 0"[39m
+        [36m/>[39m
+        [36m<path[39m
+          [33md[39m=[32m"M17.609 3.721a10 10 0 0 1 2.69 2.7"[39m
+        [36m/>[39m
+        [36m<path[39m
+          [33md[39m=[32m"M2.182 13.9a10 10 0 0 1 0-3.8"[39m
+        [36m/>[39m
+        [36m<path[39m
+          [33md[39m=[32m"M20.279 17.609a10 10 0 0 1-2.7 2.69"[39m
+        [36m/>[39m
+        [36m<path[39m
+          [33md[39m=[32m"M21.818 10.1a10 10 0 0 1 0 3.8"[39m
+        [36m/>[39m
+        [36m<path[39m
+          [33md[39m=[32m"M3.721 6.391a10 10 0 0 1 2.7-2.69"[39m
+        [36m/>[39m
+        [36m<path[39m
+          [33md[39m=[32m"M6.391 20.279a10 10 0 0 1-2.69-2.7"[39m
+        [36m/>[39m
+      [36m</svg>[39m
+      [36m<span[39m
+        [33mclass[39m=[32m"font-medium text-text"[39m
+      [36m>[39m
+        [0mBackend reachability[0m
+      [36m</span>[39m
+    [36m</div>[39m
+    [36m<span[39m
+      [33mclass[39m=[32m"shrink-0 text-xs font-medium text-text-muted"[39m
+    [36m>[39m
+      [0mWaiting[0m
+    [36m</span>[39m
+  [36m</div>[39m
+  [36m<p[39m
+    [33mclass[39m=[32m"mt-1 text-sm text-text-muted"[39m
+  [36m>[39m
+    [0mWaiting for credentials before checking backend reachability.[0m
+  [36m</p>[39m
+[36m</div>[39m
+ ❯ Object.getElementError ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ ../packages/ui/src/store/__tests__/connection.diagnostics.integration.test.tsx:86:72
+     84|     renderCurrentDiagnostics()
+     85|     expect(useConnectionStore.getState().state).toMatchObject({ isConn…
+     86|     expect(within(screen.getByTestId("knowledge-setup-check-backend"))…
+       |                                                                        ^
+     87|     expect(screen.getByTestId("knowledge-setup-check-credentials")).to…
+     88|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/23]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 4 passed (9)
+   Start at  06:36:34
+   Duration  1.10s (transform 199ms, setup 125ms, import 162ms, tests 222ms, environment 485ms)
+
+error: script "test" exited with code 1

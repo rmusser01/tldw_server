@@ -1,0 +1,774 @@
+[
+  {
+    "filePath": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/store/connection.tsx",
+    "messages": [],
+    "suppressedMessages": [
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1398,
+        "column": 15,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1398,
+        "endColumn": 18,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                45139,
+                45142
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                45139,
+                45142
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ],
+        "suppressions": [
+          {
+            "kind": "directive",
+            "justification": ""
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1403,
+        "column": 15,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1403,
+        "endColumn": 18,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                45401,
+                45404
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                45401,
+                45404
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ],
+        "suppressions": [
+          {
+            "kind": "directive",
+            "justification": ""
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1403,
+        "column": 46,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1403,
+        "endColumn": 49,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                45432,
+                45435
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                45432,
+                45435
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ],
+        "suppressions": [
+          {
+            "kind": "directive",
+            "justification": ""
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1413,
+        "column": 15,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1413,
+        "endColumn": 18,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                45720,
+                45723
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                45720,
+                45723
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ],
+        "suppressions": [
+          {
+            "kind": "directive",
+            "justification": ""
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1423,
+        "column": 15,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1423,
+        "endColumn": 18,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                45983,
+                45986
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                45983,
+                45986
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ],
+        "suppressions": [
+          {
+            "kind": "directive",
+            "justification": ""
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1434,
+        "column": 15,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 1434,
+        "endColumn": 18,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                46328,
+                46331
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                46328,
+                46331
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ],
+        "suppressions": [
+          {
+            "kind": "directive",
+            "justification": ""
+          }
+        ]
+      }
+    ],
+    "errorCount": 0,
+    "fatalErrorCount": 0,
+    "warningCount": 0,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "usedDeprecatedRules": []
+  },
+  {
+    "filePath": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/store/__tests__/connection.test.ts",
+    "messages": [
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 217,
+        "column": 10,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 217,
+        "endColumn": 13,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                5637,
+                5640
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                5637,
+                5640
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 220,
+        "column": 71,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 220,
+        "endColumn": 74,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                5811,
+                5814
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                5811,
+                5814
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 408,
+        "column": 10,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 408,
+        "endColumn": 13,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                12512,
+                12515
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                12512,
+                12515
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 436,
+        "column": 12,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 436,
+        "endColumn": 15,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                13360,
+                13363
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                13360,
+                13363
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 493,
+        "column": 10,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 493,
+        "endColumn": 13,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                15150,
+                15153
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                15150,
+                15153
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 522,
+        "column": 10,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 522,
+        "endColumn": 13,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                16118,
+                16121
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                16118,
+                16121
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 551,
+        "column": 10,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 551,
+        "endColumn": 13,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                17083,
+                17086
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                17083,
+                17086
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 616,
+        "column": 10,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 616,
+        "endColumn": 13,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                18941,
+                18944
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                18941,
+                18944
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 671,
+        "column": 10,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 671,
+        "endColumn": 13,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                20586,
+                20589
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                20586,
+                20589
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 726,
+        "column": 10,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 726,
+        "endColumn": 13,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                22209,
+                22212
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                22209,
+                22212
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 829,
+        "column": 10,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 829,
+        "endColumn": 13,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                25188,
+                25191
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                25188,
+                25191
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 862,
+        "column": 10,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 862,
+        "endColumn": 13,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                26280,
+                26283
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                26280,
+                26283
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 885,
+        "column": 45,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 885,
+        "endColumn": 48,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                27074,
+                27077
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                27074,
+                27077
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 928,
+        "column": 54,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 928,
+        "endColumn": 57,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                29155,
+                29158
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                29155,
+                29158
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      }
+    ],
+    "suppressedMessages": [],
+    "errorCount": 0,
+    "fatalErrorCount": 0,
+    "warningCount": 14,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "source": "import { afterEach, beforeEach, describe, expect, it, vi } from \"vitest\"\nimport { browser } from \"wxt/browser\"\nimport {\n  ConnectionPhase,\n  deriveConnectionUxState,\n  type ConnectionState,\n  type ConnectionUxState\n} from \"@/types/connection\"\n\nvi.mock(\"@/services/tldw-server-url\", () => ({\n  getStoredTldwServerURL: vi.fn(async () => null)\n}))\n\nvi.mock(\"@/services/api-send\", () => ({\n  apiSend: vi.fn()\n}))\n\nvi.mock(\"@/services/tldw/TldwApiClient\", () => ({\n  tldwClient: {\n    getConfig: vi.fn(),\n    initialize: vi.fn(),\n    ragHealth: vi.fn(),\n    updateConfig: vi.fn(),\n    clearManualSingleUserCredentials: vi.fn()\n  }\n}))\n\nvi.mock(\"@/services/tldw/runtime-auth-override\", () => ({\n  getRuntimeSingleUserApiKeyOverride: vi.fn(() => null),\n  isCookieSessionConfigInvalidated: vi.fn(() => false)\n}))\n\nimport { apiSend } from \"@/services/api-send\"\nimport { tldwClient, type TldwConfig } from \"@/services/tldw/TldwApiClient\"\nimport { getRuntimeSingleUserApiKeyOverride, isCookieSessionConfigInvalidated } from \"@/services/tldw/runtime-auth-override\"\nimport { CONNECTION_TIMEOUT_MS, useConnectionStore } from \"../connection\"\n\nconst mockedApiSend = vi.mocked(apiSend)\nconst mockedClient = vi.mocked(tldwClient, true)\nconst mockedRuntimeApiKey = vi.mocked(getRuntimeSingleUserApiKeyOverride)\nconst originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE\n// Fixed wall-clock so state-setup timestamps are deterministic across runs\n// (workflow code must use real Date.now(), but test fixtures should not).\nconst FIXED_NOW_MS = 1_700_000_000_000\n\nconst setConnectionState = (overrides: Record<string, unknown>) => {\n  const prev = useConnectionStore.getState().state\n  useConnectionStore.setState({\n    state: {\n      ...prev,\n      ...overrides\n    }\n  })\n}\n\nconst ageLastCheck = () => {\n  setConnectionState({\n    lastCheckedAt: Date.now() - 60_000,\n    isChecking: false\n  })\n}\n\nconst createBaseConnectionState = (): ConnectionState => ({\n  phase: ConnectionPhase.UNCONFIGURED,\n  serverUrl: null,\n  lastCheckedAt: null,\n  lastError: null,\n  lastStatusCode: null,\n  isConnected: false,\n  isChecking: false,\n  consecutiveFailures: 0,\n  offlineBypass: false,\n  knowledgeStatus: \"unknown\",\n  knowledgeLastCheckedAt: null,\n  knowledgeError: null,\n  mode: \"normal\",\n  configStep: \"none\",\n  errorKind: \"none\",\n  hasCompletedFirstRun: false,\n  userPersona: null,\n  lastConfigUpdatedAt: null,\n  checksSinceConfigChange: 0\n})\n\ntype ConnectionUxMatrixCase = {\n  name: string\n  overrides: Partial<ConnectionState>\n  expected: ConnectionUxState\n}\n\nconst connectionUxMatrix: ConnectionUxMatrixCase[] = [\n  {\n    name: \"unconfigured first run\",\n    overrides: {},\n    expected: \"unconfigured\"\n  },\n  {\n    name: \"URL configuration step\",\n    overrides: { configStep: \"url\" },\n    expected: \"configuring_url\"\n  },\n  {\n    name: \"auth configuration step\",\n    overrides: { configStep: \"auth\" },\n    expected: \"configuring_auth\"\n  },\n  {\n    name: \"active health check from setup\",\n    overrides: { configStep: \"health\", isChecking: true },\n    expected: \"testing\"\n  },\n  {\n    name: \"searching health check\",\n    overrides: {\n      phase: ConnectionPhase.SEARCHING,\n      configStep: \"health\",\n      isChecking: true\n    },\n    expected: \"testing\"\n  },\n  {\n    name: \"connected ready backend\",\n    overrides: {\n      phase: ConnectionPhase.CONNECTED,\n      isConnected: true,\n      serverUrl: \"http://127.0.0.1:8000\",\n      knowledgeStatus: \"ready\",\n      hasCompletedFirstRun: true\n    },\n    expected: \"connected_ok\"\n  },\n  {\n    name: \"connected partial error\",\n    overrides: {\n      phase: ConnectionPhase.CONNECTED,\n      isConnected: true,\n      serverUrl: \"http://127.0.0.1:8000\",\n      errorKind: \"partial\",\n      knowledgeStatus: \"ready\",\n      hasCompletedFirstRun: true\n    },\n    expected: \"connected_degraded\"\n  },\n  {\n    name: \"connected with offline knowledge\",\n    overrides: {\n      phase: ConnectionPhase.CONNECTED,\n      isConnected: true,\n      serverUrl: \"http://127.0.0.1:8000\",\n      knowledgeStatus: \"offline\",\n      hasCompletedFirstRun: true\n    },\n    expected: \"connected_degraded\"\n  },\n  {\n    name: \"auth error\",\n    overrides: {\n      phase: ConnectionPhase.ERROR,\n      errorKind: \"auth\",\n      serverUrl: \"http://127.0.0.1:8000\"\n    },\n    expected: \"error_auth\"\n  },\n  {\n    name: \"unreachable error\",\n    overrides: {\n      phase: ConnectionPhase.ERROR,\n      errorKind: \"unreachable\",\n      serverUrl: \"http://127.0.0.1:8000\"\n    },\n    expected: \"error_unreachable\"\n  },\n  {\n    name: \"demo mode\",\n    overrides: {\n      mode: \"demo\",\n      phase: ConnectionPhase.CONNECTED,\n      isConnected: true,\n      offlineBypass: true\n    },\n    expected: \"demo_mode\"\n  }\n]\n\ndescribe(\"connection store stability\", () => {\n  const originalChrome = (\n    globalThis as typeof globalThis & {\n      chrome?: unknown\n    }\n  ).chrome\n\n  beforeEach(() => {\n    vi.clearAllMocks()\n    localStorage.removeItem(\"__tldw_allow_offline\")\n    localStorage.removeItem(\"__tldw_force_unconfigured\")\n    localStorage.removeItem(\"__tldw_first_run_complete\")\n\n    setConnectionState({\n      phase: ConnectionPhase.CONNECTED,\n      serverUrl: \"http://127.0.0.1:8000\",\n      isConnected: true,\n      isChecking: false,\n      lastCheckedAt: Date.now() - 60_000,\n      lastError: null,\n      lastStatusCode: null,\n      errorKind: \"none\",\n      knowledgeStatus: \"ready\",\n      knowledgeError: null,\n      knowledgeLastCheckedAt: Date.now(),\n      consecutiveFailures: 0\n    })\n\n    mockedClient.getConfig.mockResolvedValue({\n      serverUrl: \"http://127.0.0.1:8000\",\n      authMode: \"single-user\",\n      apiKey: \"test-key\"\n    } as any)\n    mockedClient.initialize.mockResolvedValue(undefined)\n    mockedClient.updateConfig.mockReset()\n    mockedClient.ragHealth.mockResolvedValue({ status: \"healthy\" } as any)\n    mockedRuntimeApiKey.mockReturnValue(null)\n    vi.mocked(isCookieSessionConfigInvalidated).mockReturnValue(false)\n  })\n\n  afterEach(() => {\n    if (originalDeploymentMode === undefined) {\n      delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE\n    } else {\n      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = originalDeploymentMode\n    }\n    if (typeof originalChrome === \"undefined\") {\n      Reflect.deleteProperty(globalThis, \"chrome\")\n      return\n    }\n\n    Object.defineProperty(globalThis, \"chrome\", {\n      value: originalChrome,\n      configurable: true\n    })\n  })\n\n  it.each(connectionUxMatrix)(\n    \"maps $name to $expected in the setup connection UX state matrix\",\n    ({ overrides, expected }) => {\n      expect(\n        deriveConnectionUxState({\n          ...createBaseConnectionState(),\n          ...overrides\n        })\n      ).toBe(expected)\n    }\n  )\n\n  it(\"keeps connected state through transient unreachable checks before threshold\", async () => {\n    mockedApiSend.mockResolvedValue({\n      ok: false,\n      status: 0,\n      error: \"timeout\"\n    })\n\n    await useConnectionStore.getState().checkOnce()\n    let state = useConnectionStore.getState().state\n    expect(state.phase).toBe(ConnectionPhase.CONNECTED)\n    expect(state.isConnected).toBe(true)\n    expect(state.errorKind).toBe(\"partial\")\n    expect(state.consecutiveFailures).toBe(1)\n\n    ageLastCheck()\n    await useConnectionStore.getState().checkOnce()\n    state = useConnectionStore.getState().state\n    expect(state.phase).toBe(ConnectionPhase.CONNECTED)\n    expect(state.isConnected).toBe(true)\n    expect(state.consecutiveFailures).toBe(2)\n\n    ageLastCheck()\n    await useConnectionStore.getState().checkOnce()\n    state = useConnectionStore.getState().state\n    expect(state.phase).toBe(ConnectionPhase.ERROR)\n    expect(state.isConnected).toBe(false)\n    expect(state.errorKind).toBe(\"unreachable\")\n    expect(state.consecutiveFailures).toBe(3)\n  })\n\n  it(\"falls back to localStorage when chrome storage lacks the first-run flag\", async () => {\n    Object.defineProperty(globalThis, \"chrome\", {\n      value: {\n        storage: {\n          local: {\n            get: vi.fn((key: string, callback: (value: Record<string, unknown>) => void) => {\n              callback({})\n            })\n          }\n        }\n      },\n      configurable: true\n    })\n\n    localStorage.setItem(\"__tldw_first_run_complete\", \"true\")\n    mockedApiSend.mockResolvedValue({\n      ok: true,\n      status: 200,\n      data: { status: \"alive\" }\n    })\n\n    setConnectionState({\n      hasCompletedFirstRun: false,\n      phase: ConnectionPhase.SEARCHING,\n      isConnected: false,\n      lastCheckedAt: Date.now() - 60_000\n    })\n\n    await useConnectionStore.getState().checkOnce()\n\n    const state = useConnectionStore.getState().state\n    expect(state.hasCompletedFirstRun).toBe(true)\n  })\n\n  it(\"connects unverified multi-user sessions without profile or operator health permissions\", async () => {\n    mockedClient.getConfig.mockResolvedValue({\n      serverUrl: \"http://127.0.0.1:8000\",\n      authMode: \"multi-user\",\n      accessToken: \"ordinary-user-token\"\n    })\n    mockedApiSend.mockImplementation(async ({ path }) => path === \"/api/v1/auth/sessions\"\n      ? { ok: true, status: 200, data: [] }\n      : { ok: false, status: 403, error: \"Email not verified or missing system.logs\" })\n    await useConnectionStore.getState().checkOnce()\n    expect(useConnectionStore.getState().state.isConnected).toBe(true)\n    expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ path: \"/api/v1/auth/sessions\", noAuth: false }))\n    expect(mockedApiSend).not.toHaveBeenCalledWith(expect.objectContaining({ path: \"/api/v1/health/live\" }))\n  })\n\n  it(\"uses lightweight health liveness endpoint and resets failure streak on success\", async () => {\n    setConnectionState({\n      consecutiveFailures: 2,\n      errorKind: \"partial\",\n      lastError: \"timeout\"\n    })\n    mockedApiSend.mockResolvedValue({\n      ok: true,\n      status: 200,\n      data: { status: \"alive\" }\n    })\n\n    await useConnectionStore.getState().checkOnce()\n\n    const state = useConnectionStore.getState().state\n    expect(state.phase).toBe(ConnectionPhase.CONNECTED)\n    expect(state.isConnected).toBe(true)\n    expect(state.consecutiveFailures).toBe(0)\n    expect(state.lastError).toBeNull()\n    expect(mockedApiSend).toHaveBeenCalledWith(\n      expect.objectContaining({\n        path: \"/api/v1/health/live\",\n        method: \"GET\",\n        timeoutMs: CONNECTION_TIMEOUT_MS\n      })\n    )\n  })\n\n  it.each([\n    [\"active\", true], [\"invalidated\", false], [\"foreign-origin\", false]\n  ])(\"uses %s cookie-session readiness without an API key\", async (kind, expected) => {\n    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = \"quickstart\"\n    mockedClient.getConfig.mockResolvedValue({\n      serverUrl: kind === \"foreign-origin\" ? \"https://foreign.example\" : window.location.origin,\n      authMode: \"single-user\", authSource: \"cookie-session\"\n    })\n    vi.mocked(isCookieSessionConfigInvalidated).mockReturnValue(kind === \"invalidated\")\n    mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: { status: \"alive\" } })\n    await useConnectionStore.getState().checkOnce()\n    expect(useConnectionStore.getState().state.isConnected).toBe(expected)\n    if (expected) expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ path: \"/api/v1/auth/sessions\", noAuth: false }))\n    else expect(useConnectionStore.getState().state.configStep).toBe(\"auth\")\n  })\n\n  it.each([\"absent\", \"expired\", \"revoked\"])(\n    \"rejects %s cookies even when persisted transport metadata and public liveness are valid\",\n    async (reason) => {\n      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = \"quickstart\"\n      mockedClient.getConfig.mockResolvedValue({\n        serverUrl: window.location.origin,\n        authMode: \"single-user\",\n        authSource: \"cookie-session\"\n      })\n      mockedApiSend.mockImplementation(async ({ path }) =>\n        path === \"/api/v1/auth/sessions\"\n          ? { ok: false, status: 401, error: `Session ${reason}` }\n          : { ok: true, status: 200, data: { status: \"alive\" } }\n      )\n\n      await useConnectionStore.getState().checkOnce()\n\n      expect(useConnectionStore.getState().state).toMatchObject({\n        phase: ConnectionPhase.ERROR,\n        isConnected: false,\n        errorKind: \"auth\",\n        lastStatusCode: 401\n      })\n      expect(mockedClient.ragHealth).not.toHaveBeenCalled()\n    }\n  )\n\n  it(\"treats runtime single-user auth as configured without persisting an api key\", async () => {\n    mockedClient.getConfig.mockResolvedValue({\n      serverUrl: \"http://127.0.0.1:8000\",\n      authMode: \"single-user\"\n    } as any)\n    mockedRuntimeApiKey.mockReturnValue(\"runtime-key\")\n    mockedApiSend.mockResolvedValue({\n      ok: true,\n      status: 200,\n      data: { status: \"alive\" }\n    })\n\n    await useConnectionStore.getState().checkOnce()\n\n    const state = useConnectionStore.getState().state\n    expect(state.phase).toBe(ConnectionPhase.CONNECTED)\n    expect(state.isConnected).toBe(true)\n    expect(mockedApiSend).toHaveBeenCalledWith(\n      expect.objectContaining({\n        path: \"/api/v1/health/live\",\n        method: \"GET\",\n        noAuth: false\n      })\n    )\n  })\n\n  it.each([\"   \", \"CHANGE_ME_TO_SECURE_API_KEY\"])(\n    \"treats invalid runtime single-user auth %s as missing credentials\",\n    async (runtimeKey) => {\n      mockedClient.getConfig.mockResolvedValue({\n        serverUrl: \"http://127.0.0.1:8000\",\n        authMode: \"single-user\"\n      } as any)\n      mockedRuntimeApiKey.mockReturnValue(runtimeKey)\n\n      await useConnectionStore.getState().checkOnce()\n\n      const state = useConnectionStore.getState().state\n      expect(state.phase).toBe(ConnectionPhase.UNCONFIGURED)\n      expect(state.isConnected).toBe(false)\n      expect(state.configStep).toBe(\"auth\")\n      expect(mockedApiSend).not.toHaveBeenCalled()\n    }\n  )\n\n  it(\"can force a fresh health check after a recent connected state\", async () => {\n    setConnectionState({\n      phase: ConnectionPhase.CONNECTED,\n      isConnected: true,\n      isChecking: false,\n      lastCheckedAt: Date.now(),\n      consecutiveFailures: 1,\n      errorKind: \"partial\",\n      lastError: \"previous transient failure\"\n    })\n    mockedApiSend.mockResolvedValue({\n      ok: true,\n      status: 200,\n      data: { status: \"alive\" }\n    })\n\n    await useConnectionStore.getState().checkOnce({ force: true })\n\n    const state = useConnectionStore.getState().state\n    expect(mockedApiSend).toHaveBeenCalledWith(\n      expect.objectContaining({\n        path: \"/api/v1/health/live\",\n        method: \"GET\"\n      })\n    )\n    expect(state.phase).toBe(ConnectionPhase.CONNECTED)\n    expect(state.isConnected).toBe(true)\n    expect(state.consecutiveFailures).toBe(0)\n    expect(state.lastError).toBeNull()\n  })\n\n  it(\"surfaces a CORS hint for cross-origin network-blocked health checks\", async () => {\n    setConnectionState({\n      phase: ConnectionPhase.SEARCHING,\n      serverUrl: \"http://192.168.5.186:8000\",\n      isConnected: false,\n      isChecking: false,\n      lastCheckedAt: Date.now() - 60_000,\n      consecutiveFailures: 0\n    })\n    mockedClient.getConfig.mockResolvedValue({\n      serverUrl: \"http://192.168.5.186:8000\",\n      authMode: \"single-user\",\n      apiKey: \"test-key\"\n    } as any)\n    mockedApiSend.mockResolvedValue({\n      ok: false,\n      status: 0,\n      error: \"NetworkError when attempting to fetch resource.\"\n    })\n\n    await useConnectionStore.getState().checkOnce()\n\n    const state = useConnectionStore.getState().state\n    expect(state.phase).toBe(ConnectionPhase.ERROR)\n    expect(state.errorKind).toBe(\"unreachable\")\n    expect(state.lastError).toContain(\"Likely CORS mismatch\")\n    expect(state.lastError).toContain(\"ALLOWED_ORIGINS\")\n  })\n\n  it(\"surfaces a CORS/network hint for aborted cross-origin health checks\", async () => {\n    setConnectionState({\n      phase: ConnectionPhase.SEARCHING,\n      serverUrl: \"http://192.168.5.186:8000\",\n      isConnected: false,\n      isChecking: false,\n      lastCheckedAt: Date.now() - 60_000,\n      consecutiveFailures: 0\n    })\n    mockedClient.getConfig.mockResolvedValue({\n      serverUrl: \"http://192.168.5.186:8000\",\n      authMode: \"single-user\",\n      apiKey: \"test-key\"\n    } as any)\n    mockedApiSend.mockResolvedValue({\n      ok: false,\n      status: 0,\n      error: \"The operation was aborted.\"\n    })\n\n    await useConnectionStore.getState().checkOnce()\n\n    const state = useConnectionStore.getState().state\n    expect(state.phase).toBe(ConnectionPhase.ERROR)\n    expect(state.errorKind).toBe(\"unreachable\")\n    expect(state.lastError).toContain(\"Likely CORS mismatch\")\n    expect(state.lastError).toContain(\"ALLOWED_ORIGINS\")\n  })\n\n  it(\"recovers from stale LAN host by switching to current browser host when probe succeeds\", async () => {\n    setConnectionState({\n      phase: ConnectionPhase.SEARCHING,\n      serverUrl: \"http://192.168.5.186:8000\",\n      isConnected: false,\n      isChecking: false,\n      lastCheckedAt: Date.now() - 60_000,\n      consecutiveFailures: 0\n    })\n    mockedClient.getConfig.mockResolvedValue({\n      serverUrl: \"http://192.168.5.186:8000\",\n      authMode: \"single-user\",\n      apiKey: \"test-key\"\n    } as any)\n    mockedApiSend\n      .mockResolvedValueOnce({\n        ok: false,\n        status: 0,\n        error: \"NetworkError when attempting to fetch resource.\"\n      })\n      .mockResolvedValueOnce({\n        ok: true,\n        status: 200,\n        data: { status: \"alive\" }\n      })\n\n    const fetchMock = vi\n      .spyOn(globalThis, \"fetch\")\n      .mockResolvedValue({\n        ok: true,\n        status: 200\n      } as Response)\n\n    const originalWindow = globalThis.window\n    Object.defineProperty(globalThis, \"window\", {\n      value: {\n        location: {\n          origin: \"http://192.168.5.184:3000\",\n          hostname: \"192.168.5.184\"\n        }\n      },\n      configurable: true\n    })\n\n    try {\n      await useConnectionStore.getState().checkOnce()\n    } finally {\n      fetchMock.mockRestore()\n      Object.defineProperty(globalThis, \"window\", {\n        value: originalWindow,\n        configurable: true\n      })\n    }\n\n    const state = useConnectionStore.getState().state\n    expect(mockedClient.updateConfig).toHaveBeenCalledWith({\n      serverUrl: \"http://192.168.5.184:8000\"\n    })\n    expect(state.phase).toBe(ConnectionPhase.CONNECTED)\n    expect(state.isConnected).toBe(true)\n    expect(state.serverUrl).toBe(\"http://192.168.5.184:8000\")\n    expect(mockedApiSend).toHaveBeenCalledTimes(2)\n  })\n\n  it(\"canonicalizes quickstart webui health checks to the current page origin\", async () => {\n    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = \"quickstart\"\n    setConnectionState({\n      phase: ConnectionPhase.SEARCHING,\n      serverUrl: \"http://127.0.0.1:8000\",\n      isConnected: false,\n      isChecking: false,\n      lastCheckedAt: Date.now() - 60_000,\n      consecutiveFailures: 0\n    })\n    mockedClient.getConfig.mockResolvedValue({\n      serverUrl: \"http://127.0.0.1:8000\",\n      authMode: \"single-user\",\n      apiKey: \"test-key\"\n    } as any)\n    mockedApiSend.mockResolvedValue({\n      ok: true,\n      status: 200,\n      data: { status: \"alive\" }\n    })\n\n    const fetchMock = vi.spyOn(globalThis, \"fetch\")\n\n    const originalWindow = globalThis.window\n    Object.defineProperty(globalThis, \"window\", {\n      value: {\n        location: {\n          origin: \"http://192.168.5.184:3000\",\n          hostname: \"192.168.5.184\",\n          protocol: \"http:\"\n        }\n      },\n      configurable: true\n    })\n\n    try {\n      await useConnectionStore.getState().checkOnce()\n    } finally {\n      fetchMock.mockRestore()\n      Object.defineProperty(globalThis, \"window\", {\n        value: originalWindow,\n        configurable: true\n      })\n    }\n\n    const state = useConnectionStore.getState().state\n    expect(mockedClient.updateConfig).toHaveBeenCalledWith({\n      serverUrl: \"http://192.168.5.184:3000\"\n    })\n    expect(state.phase).toBe(ConnectionPhase.CONNECTED)\n    expect(state.isConnected).toBe(true)\n    expect(state.serverUrl).toBe(\"http://192.168.5.184:3000\")\n    expect(fetchMock).not.toHaveBeenCalled()\n  })\n\n  it(\"canonicalizes explicit custom hosts to the webui origin in quickstart mode\", async () => {\n    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = \"quickstart\"\n    setConnectionState({\n      phase: ConnectionPhase.SEARCHING,\n      serverUrl: \"https://api.example.test:9443\",\n      isConnected: false,\n      isChecking: false,\n      lastCheckedAt: Date.now() - 60_000,\n      consecutiveFailures: 0\n    })\n    mockedClient.getConfig.mockResolvedValue({\n      serverUrl: \"https://api.example.test:9443\",\n      authMode: \"single-user\",\n      apiKey: \"test-key\"\n    } as any)\n    mockedApiSend.mockResolvedValue({\n      ok: true,\n      status: 200,\n      data: { status: \"alive\" }\n    })\n\n    const fetchMock = vi.spyOn(globalThis, \"fetch\")\n\n    const originalWindow = globalThis.window\n    Object.defineProperty(globalThis, \"window\", {\n      value: {\n        location: {\n          origin: \"http://192.168.5.184:3000\",\n          hostname: \"192.168.5.184\",\n          protocol: \"http:\"\n        }\n      },\n      configurable: true\n    })\n\n    try {\n      await useConnectionStore.getState().checkOnce()\n    } finally {\n      Object.defineProperty(globalThis, \"window\", {\n        value: originalWindow,\n        configurable: true\n      })\n      fetchMock.mockRestore()\n    }\n\n    const state = useConnectionStore.getState().state\n    expect(mockedClient.updateConfig).toHaveBeenCalledWith({\n      serverUrl: \"http://192.168.5.184:3000\"\n    })\n    expect(state.phase).toBe(ConnectionPhase.CONNECTED)\n    expect(state.isConnected).toBe(true)\n    expect(state.serverUrl).toBe(\"http://192.168.5.184:3000\")\n    expect(fetchMock).not.toHaveBeenCalled()\n  })\n\n  it(\"uses the shared quickstart liveness path for recovery probes\", async () => {\n    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = \"quickstart\"\n    setConnectionState({\n      phase: ConnectionPhase.SEARCHING,\n      serverUrl: \"http://192.168.5.186:8000\",\n      isConnected: false,\n      isChecking: false,\n      lastCheckedAt: Date.now() - 60_000,\n      consecutiveFailures: 0\n    })\n    mockedClient.getConfig.mockResolvedValue({\n      serverUrl: \"http://192.168.5.186:8000\",\n      authMode: \"single-user\",\n      apiKey: \"test-key\"\n    } as any)\n    mockedApiSend\n      .mockResolvedValueOnce({\n        ok: false,\n        status: 0,\n        error: \"NetworkError when attempting to fetch resource.\"\n      })\n      .mockResolvedValueOnce({\n        ok: true,\n        status: 200,\n        data: { status: \"alive\" }\n      })\n\n    const fetchMock = vi.spyOn(globalThis, \"fetch\").mockResolvedValue({\n      ok: true,\n      status: 200\n    } as Response)\n\n    const originalWindow = globalThis.window\n    Object.defineProperty(globalThis, \"window\", {\n      value: {\n        location: {\n          origin: \"http://192.168.5.184:3000\",\n          hostname: \"192.168.5.184\",\n          protocol: \"http:\"\n        }\n      },\n      configurable: true\n    })\n\n    try {\n      await useConnectionStore.getState().checkOnce()\n\n      expect(fetchMock).toHaveBeenCalledWith(\n        \"/api/v1/health/live\",\n        expect.objectContaining({\n          method: \"GET\",\n          credentials: \"omit\"\n        })\n      )\n    } finally {\n      Object.defineProperty(globalThis, \"window\", {\n        value: originalWindow,\n        configurable: true\n      })\n      fetchMock.mockRestore()\n    }\n  })\n\n  it(\"preserves persisted first-run completion when offline bypass is enabled\", async () => {\n    setConnectionState({\n      hasCompletedFirstRun: false,\n      phase: ConnectionPhase.SEARCHING,\n      isConnected: false,\n      isChecking: false\n    })\n    localStorage.setItem(\"__tldw_first_run_complete\", \"true\")\n    localStorage.setItem(\"__tldw_allow_offline\", \"true\")\n\n    await useConnectionStore.getState().checkOnce()\n\n    const state = useConnectionStore.getState().state\n    expect(state.phase).toBe(ConnectionPhase.CONNECTED)\n    expect(state.offlineBypass).toBe(true)\n    expect(state.hasCompletedFirstRun).toBe(true)\n  })\n\n  it(\"preserves persisted first-run completion through a successful health check\", async () => {\n    setConnectionState({\n      hasCompletedFirstRun: false,\n      phase: ConnectionPhase.SEARCHING,\n      isConnected: false,\n      isChecking: false\n    })\n    localStorage.setItem(\"__tldw_first_run_complete\", \"true\")\n    mockedApiSend.mockResolvedValue({\n      ok: true,\n      status: 200,\n      data: { status: \"alive\" }\n    })\n\n    await useConnectionStore.getState().checkOnce()\n\n    const state = useConnectionStore.getState().state\n    expect(state.phase).toBe(ConnectionPhase.CONNECTED)\n    expect(state.isConnected).toBe(true)\n    expect(state.hasCompletedFirstRun).toBe(true)\n  })\n\n  it(\"treats a server URL without single-user credentials as unconfigured auth instead of connected\", async () => {\n    setConnectionState({\n      phase: ConnectionPhase.SEARCHING,\n      serverUrl: \"http://127.0.0.1:8000\",\n      isConnected: false,\n      isChecking: false,\n      lastCheckedAt: Date.now() - 60_000,\n      configStep: \"health\",\n      hasCompletedFirstRun: true\n    })\n    mockedClient.getConfig.mockResolvedValue({\n      serverUrl: \"http://127.0.0.1:8000\",\n      authMode: \"single-user\",\n      apiKey: \"\"\n    } as any)\n    mockedApiSend.mockResolvedValue({\n      ok: true,\n      status: 200,\n      data: { status: \"alive\" }\n    })\n\n    await useConnectionStore.getState().checkOnce()\n\n    const state = useConnectionStore.getState().state\n    expect(state.phase).toBe(ConnectionPhase.UNCONFIGURED)\n    expect(state.serverUrl).toBe(\"http://127.0.0.1:8000\")\n    expect(state.configStep).toBe(\"auth\")\n    expect(state.isConnected).toBe(false)\n    expect(state.errorKind).toBe(\"none\")\n    expect(mockedApiSend).not.toHaveBeenCalled()\n  })\n\n  it(\"begins onboarding without clearing first-run completion when a saved server still needs auth\", async () => {\n    setConnectionState({\n      phase: ConnectionPhase.ERROR,\n      serverUrl: \"http://127.0.0.1:8000\",\n      isConnected: false,\n      isChecking: false,\n      errorKind: \"auth\",\n      configStep: \"health\",\n      hasCompletedFirstRun: true\n    })\n    localStorage.setItem(\"__tldw_first_run_complete\", \"true\")\n    mockedClient.getConfig.mockResolvedValue({\n      serverUrl: \"http://127.0.0.1:8000\",\n      authMode: \"single-user\",\n      apiKey: \"\"\n    } as any)\n\n    await useConnectionStore.getState().beginOnboarding()\n\n    const state = useConnectionStore.getState().state\n    expect(state.serverUrl).toBe(\"http://127.0.0.1:8000\")\n    expect(state.configStep).toBe(\"auth\")\n    expect(state.hasCompletedFirstRun).toBe(true)\n    expect(localStorage.getItem(\"__tldw_first_run_complete\")).toBe(\"true\")\n  })\n\n  it(\"restarts onboarding from the beginning only when explicitly requested\", async () => {\n    setConnectionState({\n      phase: ConnectionPhase.ERROR,\n      serverUrl: \"http://127.0.0.1:8000\",\n      isConnected: false,\n      isChecking: false,\n      errorKind: \"auth\",\n      configStep: \"auth\",\n      hasCompletedFirstRun: true\n    })\n    localStorage.setItem(\"__tldw_first_run_complete\", \"true\")\n\n    await (useConnectionStore.getState() as any).restartOnboarding()\n\n    const state = useConnectionStore.getState().state\n    expect(state.phase).toBe(ConnectionPhase.UNCONFIGURED)\n    expect(state.configStep).toBe(\"url\")\n    expect(state.hasCompletedFirstRun).toBe(false)\n    expect(localStorage.getItem(\"__tldw_first_run_complete\")).toBeNull()\n    expect(mockedClient.clearManualSingleUserCredentials).toHaveBeenCalledOnce()\n  })\n\n  it(\"revokes readiness immediately on onboarding restart and discards its pending health check\", async () => {\n    setConnectionState({\n      phase: ConnectionPhase.CONNECTED, isConnected: true, isChecking: false,\n      lastCheckedAt: 0, knowledgeStatus: \"ready\", knowledgeLastCheckedAt: Date.now()\n    })\n    let finishHealth: (value: unknown) => void = () => {}\n    mockedApiSend.mockImplementationOnce(() => new Promise((resolve) => { finishHealth = resolve }))\n    const oldCheck = useConnectionStore.getState().checkOnce({ force: true })\n    await vi.waitFor(() => expect(mockedApiSend).toHaveBeenCalledOnce())\n    let finishClear: () => void = () => {}\n    mockedClient.clearManualSingleUserCredentials.mockImplementationOnce(() => new Promise<void>((resolve) => { finishClear = resolve }))\n    const restart = useConnectionStore.getState().restartOnboarding()\n    await vi.waitFor(() => expect(mockedClient.clearManualSingleUserCredentials).toHaveBeenCalledOnce())\n    const connectedWhileClearing = useConnectionStore.getState().state.isConnected\n    finishClear()\n    await restart\n    finishHealth({ ok: true, status: 200, data: {} })\n    await oldCheck\n    expect(connectedWhileClearing).toBe(false)\n    expect(useConnectionStore.getState().state.isConnected).toBe(false)\n  })\n\n  it(\"exits demo mode when entering onboarding so setup does not look connected\", async () => {\n    setConnectionState({\n      mode: \"demo\",\n      phase: ConnectionPhase.CONNECTED,\n      serverUrl: null,\n      isConnected: true,\n      isChecking: false,\n      configStep: \"health\",\n      errorKind: \"none\",\n      hasCompletedFirstRun: true\n    })\n    mockedClient.getConfig.mockResolvedValue(null as any)\n\n    await useConnectionStore.getState().beginOnboarding()\n\n    const state = useConnectionStore.getState().state\n    expect(state.mode).toBe(\"normal\")\n    expect(state.phase).toBe(ConnectionPhase.UNCONFIGURED)\n    expect(state.isConnected).toBe(false)\n    expect(state.configStep).toBe(\"url\")\n  })\n\n  it(\"keeps concurrent onboarding edits but discards readiness for a replaced server (H7)\", async () => {\n    setConnectionState({\n      phase: ConnectionPhase.SEARCHING,\n      isConnected: false,\n      isChecking: false,\n      configStep: \"url\",\n      hasCompletedFirstRun: false,\n      userPersona: null,\n      knowledgeStatus: \"ready\",\n      knowledgeLastCheckedAt: FIXED_NOW_MS,\n      lastCheckedAt: FIXED_NOW_MS - 60_000,\n      consecutiveFailures: 0,\n      errorKind: \"none\"\n    })\n\n    // Gate the health check so it stays in-flight while other actions run.\n    let releaseHealth: (value: {\n      ok: boolean\n      status: number\n      data?: unknown\n    }) => void = () => {}\n    const healthGate = new Promise<{\n      ok: boolean\n      status: number\n      data?: unknown\n    }>((resolve) => {\n      releaseHealth = resolve\n    })\n    mockedApiSend.mockReturnValue(healthGate as never)\n\n    // Start the (slow) health check but do not await it yet.\n    const checkPromise = useConnectionStore.getState().checkOnce({ force: true })\n\n    // While it is in-flight, concurrent onboarding actions mutate the store.\n    await useConnectionStore\n      .getState()\n      .setConfigPartial({ serverUrl: \"http://concurrent.test:9999\" })\n    await useConnectionStore.getState().markFirstRunComplete()\n\n    // Let the slow health check complete. Its terminal write must merge onto the\n    // LATEST state, not the snapshot captured before the concurrent edits.\n    releaseHealth({ ok: true, status: 200, data: { status: \"alive\" } })\n    await checkPromise\n\n    const final = useConnectionStore.getState().state\n    expect(final.configStep).toBe(\"auth\")\n    expect(final.hasCompletedFirstRun).toBe(true)\n    expect(final.phase).toBe(ConnectionPhase.UNCONFIGURED)\n    expect(final.isConnected).toBe(false)\n    expect(final.serverUrl).toBe(\"http://concurrent.test:9999\")\n  })\n\n  it.each([\n    { serverUrl: \"https://server-b.test\" },\n    { apiKey: \"replacement-key\" },\n    { orgId: 2 },\n    { authSource: \"cookie-session\" as const }\n  ])(\"discards pending readiness after a settings authority replacement: %j\", async (change) => {\n    let current: TldwConfig = { serverUrl: \"https://server-a.test\", authMode: \"single-user\", apiKey: \"old-key\", orgId: 1 }\n    mockedClient.getConfig.mockImplementation(async () => current)\n    mockedClient.updateConfig.mockImplementation(async (update) => { current = { ...current, ...update } })\n    let resolveProbe: (value: unknown) => void = () => {}\n    mockedApiSend.mockImplementationOnce(() => new Promise((resolve) => { resolveProbe = resolve }) as never)\n    const previousCheck = useConnectionStore.getState().checkOnce({ force: true })\n    await vi.waitFor(() => expect(mockedApiSend).toHaveBeenCalledTimes(1))\n    await useConnectionStore.getState().setConfigPartial(change)\n    const connectedAfterChange = useConnectionStore.getState().state.isConnected\n    resolveProbe({ ok: true, status: 200, data: {} })\n    await previousCheck\n    expect(connectedAfterChange).toBe(false)\n    expect(useConnectionStore.getState().state).toMatchObject({ phase: ConnectionPhase.UNCONFIGURED, isConnected: false })\n    expect(mockedClient.ragHealth).not.toHaveBeenCalled()\n  })\n\n  it(\"setServerUrl requires the replacement server's own successful probe\", async () => {\n    let current: TldwConfig = { serverUrl: \"https://server-a.test\", authMode: \"single-user\", apiKey: \"old-key\" }\n    mockedClient.getConfig.mockImplementation(async () => current)\n    mockedClient.updateConfig.mockImplementation(async (update) => { current = { ...current, ...update } })\n    const probes: Array<(value: unknown) => void> = []\n    mockedApiSend.mockImplementation(() => new Promise((resolve) => { probes.push(resolve) }) as never)\n    const oldCheck = useConnectionStore.getState().checkOnce({ force: true })\n    await vi.waitFor(() => expect(probes).toHaveLength(1))\n    const changed = useConnectionStore.getState().setServerUrl(\"https://server-b.test\")\n    try {\n      await vi.waitFor(() => expect(probes).toHaveLength(2))\n    } catch (error) {\n      probes[0]({ ok: true, status: 200, data: {} })\n      await oldCheck\n      throw error\n    }\n    probes[0]({ ok: true, status: 200, data: {} })\n    await oldCheck\n    expect(useConnectionStore.getState().state).toMatchObject({ serverUrl: \"https://server-b.test\", isConnected: false, isChecking: true })\n    probes[1]({ ok: true, status: 200, data: {} })\n    await changed\n    expect(useConnectionStore.getState().state).toMatchObject({ serverUrl: \"https://server-b.test\", isConnected: true })\n  })\n\n  it(\"invalidates a same-tab authority event synchronously but ignores benign updates\", () => {\n    window.dispatchEvent(new CustomEvent(\"tldw:config-updated\", { detail: { authorityChanged: false } }))\n    expect(useConnectionStore.getState().state.isConnected).toBe(true)\n    window.dispatchEvent(new CustomEvent(\"tldw:config-updated\", { detail: { authorityChanged: true } }))\n    expect(useConnectionStore.getState().state.isConnected).toBe(false)\n  })\n\n  it(\"continues verifying hosted cookie authentication without browser bearer tokens\", async () => {\n    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = \"hosted\"\n    mockedClient.getConfig.mockResolvedValue({ serverUrl: \"https://server.test\", authMode: \"multi-user\" })\n    mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: {} })\n    await useConnectionStore.getState().checkOnce({ force: true })\n    expect(useConnectionStore.getState().state.isConnected).toBe(true)\n    expect(mockedApiSend).toHaveBeenCalled()\n  })\n\n  it.each([\"same-tab\", \"other-tab\"])(\"discards a delayed expired-session check after a %s login\", async (source) => {\n    let finishRead: (config: TldwConfig) => void = () => {}\n    mockedClient.getConfig.mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve }))\n    window.dispatchEvent(new StorageEvent(\"storage\", { key: \"tldwInvalidRefreshSession:old-session\", newValue: \"true\" }))\n    await vi.waitFor(() => expect(mockedClient.getConfig).toHaveBeenCalled())\n    const current = { serverUrl: \"https://server.test\", authMode: \"multi-user\", accessToken: \"new-access\", refreshToken: \"new-refresh\" }\n    mockedClient.getConfig.mockResolvedValue(current as TldwConfig)\n    if (source === \"same-tab\") {\n      // Same-principal login still supersedes the old credential check.\n      window.dispatchEvent(new CustomEvent(\"tldw:config-updated\", { detail: { authorityChanged: false } }))\n    } else {\n      window.dispatchEvent(new StorageEvent(\"storage\", { key: \"tldwConfig\", newValue: JSON.stringify(current) }))\n    }\n    setConnectionState({ isConnected: true, phase: ConnectionPhase.CONNECTED })\n    finishRead({ serverUrl: \"https://server.test\", authMode: \"multi-user\" })\n    await new Promise(resolve => setTimeout(resolve, 0))\n    expect(useConnectionStore.getState().state.isConnected).toBe(true)\n  })\n\n  it.each([\"storage\", \"same-tab\", \"browser-storage\"])(\"rechecks an expiry marker from %s against current effective credentials\", async (source) => {\n    mockedClient.getConfig.mockResolvedValue({ serverUrl: \"https://server.test\", authMode: \"multi-user\" })\n    if (source === \"storage\") {\n      window.dispatchEvent(new StorageEvent(\"storage\", { key: \"tldwInvalidRefreshSession:expired\", newValue: \"true\" }))\n    } else if (source === \"browser-storage\") {\n      await browser.storage.local.set({ \"tldwInvalidRefreshSession:expired-browser-session\": true })\n    } else {\n      window.dispatchEvent(new CustomEvent(\"tldw:config-updated\", { detail: { refreshSessionInvalidated: true } }))\n    }\n    await vi.waitFor(() => expect(useConnectionStore.getState().state.isConnected).toBe(false))\n  })\n\n  it(\"discards pending readiness when another tab removes configured credentials\", async () => {\n    const current = { serverUrl: \"https://server-a.test\", authMode: \"single-user\" as const, apiKey: \"old-key\" }\n    mockedClient.getConfig.mockResolvedValue(current)\n    let resolveProbe: (value: unknown) => void = () => {}\n    mockedApiSend.mockImplementationOnce(() => new Promise((resolve) => { resolveProbe = resolve }) as never)\n    const oldCheck = useConnectionStore.getState().checkOnce({ force: true })\n    await vi.waitFor(() => expect(mockedApiSend).toHaveBeenCalledTimes(1))\n    const cleared = { ...current, apiKey: undefined }\n    mockedClient.getConfig.mockResolvedValue(cleared)\n    window.dispatchEvent(new StorageEvent(\"storage\", { key: \"tldwConfig\", oldValue: JSON.stringify(current), newValue: JSON.stringify(cleared) }))\n    const connectedAfterRemoval = useConnectionStore.getState().state.isConnected\n    resolveProbe({ ok: true, status: 200, data: {} })\n    await oldCheck\n    expect(connectedAfterRemoval).toBe(false)\n    await useConnectionStore.getState().checkOnce()\n    expect(useConnectionStore.getState().state.isConnected).toBe(false)\n    expect(mockedApiSend).toHaveBeenCalledTimes(1)\n  })\n\n  it(\"does not invalidate readiness for cross-tab rotation of the same known principal\", () => {\n    const current = { serverUrl: \"https://server.test\", authMode: \"multi-user\", accessToken: \"e30.eyJzdWIiOiJhbGljZSJ9.sig\" }\n    window.dispatchEvent(new StorageEvent(\"storage\", { key: \"tldwConfig\", oldValue: JSON.stringify(current), newValue: JSON.stringify({ ...current, accessToken: \"e30.eyJzdWIiOiJhbGljZSIsImlhdCI6Mn0.sig\" }) }))\n    expect(useConnectionStore.getState().state.isConnected).toBe(true)\n  })\n\n  it(\"rechecks normalized quickstart config after its own authority update without looping\", async () => {\n    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = \"quickstart\"\n    let current: TldwConfig = { serverUrl: \"https://old-server.test\", authMode: \"single-user\", apiKey: \"configured-key\" }\n    mockedClient.getConfig.mockImplementation(async () => current)\n    mockedClient.updateConfig.mockImplementation(async (update) => {\n      current = { ...current, ...update }\n      window.dispatchEvent(new CustomEvent(\"tldw:config-updated\", { detail: { authorityChanged: true } }))\n    })\n    mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: {} })\n    await useConnectionStore.getState().checkOnce({ force: true })\n    expect(useConnectionStore.getState().state).toMatchObject({ serverUrl: window.location.origin, isConnected: true })\n    expect(mockedClient.updateConfig).toHaveBeenCalledTimes(1)\n    expect(mockedApiSend).toHaveBeenCalledTimes(1)\n  })\n\n  it(\"does not normalize foreign cookie metadata into local authority during revalidation\", async () => {\n    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = \"quickstart\"\n    let current: TldwConfig = { serverUrl: \"https://foreign.test\", authMode: \"single-user\", authSource: \"cookie-session\" }\n    mockedClient.getConfig.mockImplementation(async () => current)\n    mockedClient.updateConfig.mockImplementation(async (update) => {\n      current = { ...current, ...update }\n      window.dispatchEvent(new CustomEvent(\"tldw:config-updated\", { detail: { authorityChanged: true } }))\n    })\n    mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: {} })\n    await useConnectionStore.getState().checkOnce({ force: true })\n    expect(useConnectionStore.getState().state.isConnected).toBe(false)\n    expect(mockedClient.updateConfig).not.toHaveBeenCalled()\n    expect(mockedApiSend).not.toHaveBeenCalled()\n  })\n\n  it.each([\"tldwConfig\", \"tldwCookieSessionConfig\"])(\"invalidates removed %s transport metadata in another tab\", (key) => {\n    window.dispatchEvent(new StorageEvent(\"storage\", {\n      key, oldValue: JSON.stringify({ serverUrl: window.location.origin, authMode: \"single-user\", authSource: \"cookie-session\" }), newValue: null\n    }))\n    expect(useConnectionStore.getState().state.isConnected).toBe(false)\n  })\n\n  it(\"ignores a concurrent checkOnce while one is already in flight (H7 guard)\", async () => {\n    setConnectionState({\n      phase: ConnectionPhase.SEARCHING,\n      isConnected: false,\n      isChecking: false,\n      knowledgeStatus: \"ready\",\n      knowledgeLastCheckedAt: Date.now(),\n      lastCheckedAt: Date.now() - 60_000\n    })\n\n    let releaseHealth: (value: {\n      ok: boolean\n      status: number\n      data?: unknown\n    }) => void = () => {}\n    const healthGate = new Promise<{\n      ok: boolean\n      status: number\n      data?: unknown\n    }>((resolve) => {\n      releaseHealth = resolve\n    })\n    mockedApiSend.mockReturnValue(healthGate as never)\n\n    // The in-flight guard is claimed synchronously (before the first await), so\n    // the second call must bail before issuing its own health request.\n    const first = useConnectionStore.getState().checkOnce({ force: true })\n    const second = useConnectionStore.getState().checkOnce({ force: true })\n\n    releaseHealth({ ok: true, status: 200, data: { status: \"alive\" } })\n    await Promise.all([first, second])\n\n    expect(mockedApiSend).toHaveBeenCalledTimes(1)\n  })\n\n  it.each([\"manual-key\", \"cookie-session\"])(\"invalidates logout authority until %s reconnect verifies\", async (kind) => {\n    if (kind === \"cookie-session\") {\n      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = \"quickstart\"\n      mockedClient.getConfig.mockResolvedValue({\n        serverUrl: window.location.origin,\n        authMode: \"single-user\",\n        authSource: \"cookie-session\"\n      })\n      vi.mocked(isCookieSessionConfigInvalidated).mockReturnValue(true)\n    } else {\n      mockedClient.getConfig.mockResolvedValue({ serverUrl: \"http://127.0.0.1:8000\", authMode: \"single-user\" })\n    }\n    window.dispatchEvent(new CustomEvent(\"tldw:auth-principal-changed\", { detail: { kind: \"logout\" } }))\n    expect(useConnectionStore.getState().state).toMatchObject({\n      phase: ConnectionPhase.UNCONFIGURED, configStep: \"auth\", isConnected: false,\n      isChecking: false, knowledgeStatus: \"unknown\", lastCheckedAt: null\n    })\n    await useConnectionStore.getState().checkOnce()\n    expect(mockedApiSend).not.toHaveBeenCalled()\n\n    if (kind === \"cookie-session\") {\n      vi.mocked(isCookieSessionConfigInvalidated).mockReturnValue(false)\n    } else {\n      mockedClient.getConfig.mockResolvedValue({ serverUrl: \"http://127.0.0.1:8000\", authMode: \"single-user\", apiKey: \"reentered-key\" })\n    }\n    let resolveProbe: (value: unknown) => void = () => {}\n    mockedApiSend.mockImplementation(() => new Promise((resolve) => { resolveProbe = resolve }) as never)\n    const reconnect = useConnectionStore.getState().checkOnce()\n    await vi.waitFor(() => expect(mockedApiSend).toHaveBeenCalledTimes(1))\n    expect(useConnectionStore.getState().state.isConnected).toBe(false)\n    resolveProbe({ ok: true, status: 200, data: {} })\n    await reconnect\n    expect(useConnectionStore.getState().state.isConnected).toBe(true)\n    expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({\n      path: kind === \"cookie-session\" ? \"/api/v1/auth/sessions\" : \"/api/v1/health/live\",\n      noAuth: false\n    }))\n  })\n\n  it(\"discards a pre-logout health result without releasing the reconnect check guard\", async () => {\n    const resolvers: Array<(value: unknown) => void> = []\n    mockedApiSend.mockImplementation(() => new Promise((resolve) => { resolvers.push(resolve) }) as never)\n    const oldCheck = useConnectionStore.getState().checkOnce({ force: true })\n    await vi.waitFor(() => expect(resolvers).toHaveLength(1))\n    window.dispatchEvent(new CustomEvent(\"tldw:auth-principal-changed\", { detail: { kind: \"logout\" } }))\n    const reconnect = useConnectionStore.getState().checkOnce({ force: true })\n    await vi.waitFor(() => expect(resolvers).toHaveLength(2))\n\n    resolvers[0]({ ok: true, status: 200, data: {} })\n    await oldCheck\n    expect(useConnectionStore.getState().state).toMatchObject({ isConnected: false, isChecking: true })\n    await useConnectionStore.getState().checkOnce({ force: true })\n    expect(resolvers).toHaveLength(2)\n    expect(mockedClient.ragHealth).not.toHaveBeenCalled()\n\n    resolvers[1]({ ok: true, status: 200, data: {} })\n    await reconnect\n    expect(useConnectionStore.getState().state.isConnected).toBe(true)\n  })\n\n  it(\"discards a pre-logout knowledge result without restoring private readiness\", async () => {\n    setConnectionState({ knowledgeStatus: \"unknown\", knowledgeLastCheckedAt: null })\n    mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: {} })\n    let resolveRag: (value: unknown) => void = () => {}\n    mockedClient.ragHealth.mockImplementationOnce(() => new Promise((resolve) => { resolveRag = resolve }) as never)\n    const oldCheck = useConnectionStore.getState().checkOnce({ force: true })\n    await vi.waitFor(() => expect(mockedClient.ragHealth).toHaveBeenCalledTimes(1))\n    window.dispatchEvent(new CustomEvent(\"tldw:auth-principal-changed\", { detail: { kind: \"logout\" } }))\n    resolveRag({ status: \"healthy\" })\n    await oldCheck\n    expect(useConnectionStore.getState().state).toMatchObject({ isConnected: false, knowledgeStatus: \"unknown\" })\n  })\n\n  it(\"releases the in-flight guard when a step before the health check throws (H7 deadlock)\", async () => {\n    // A first-run flag in storage makes checkOnce run its first-run-sync set(...)\n    // BEFORE it flips isChecking, so a throw there leaves isChecking false and the\n    // synchronous in-flight guard as the only thing that could block a retry.\n    setConnectionState({\n      phase: ConnectionPhase.CONNECTED,\n      serverUrl: \"http://127.0.0.1:8000\",\n      isConnected: true,\n      isChecking: false,\n      hasCompletedFirstRun: false,\n      userPersona: null,\n      knowledgeStatus: \"ready\",\n      knowledgeLastCheckedAt: FIXED_NOW_MS,\n      lastCheckedAt: FIXED_NOW_MS - 60_000\n    })\n    localStorage.setItem(\"__tldw_first_run_complete\", \"true\")\n    mockedApiSend.mockResolvedValue({\n      ok: true,\n      status: 200,\n      data: { status: \"alive\" }\n    } as never)\n\n    // Throw from a store subscriber to simulate a pre-`try` step failing.\n    const unsubscribe = useConnectionStore.subscribe(() => {\n      throw new Error(\"pre-check boom\")\n    })\n    await expect(\n      useConnectionStore.getState().checkOnce({ force: true })\n    ).rejects.toThrow(\"pre-check boom\")\n    unsubscribe()\n\n    // If the guard had leaked, this second checkOnce would bail before issuing a\n    // health request; it must run and reach apiSend instead.\n    mockedApiSend.mockClear()\n    await useConnectionStore.getState().checkOnce({ force: true })\n    expect(mockedApiSend).toHaveBeenCalled()\n  })\n})\n",
+    "usedDeprecatedRules": []
+  },
+  {
+    "filePath": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/SetupDiagnostics.tsx",
+    "messages": [],
+    "suppressedMessages": [],
+    "errorCount": 0,
+    "fatalErrorCount": 0,
+    "warningCount": 0,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "usedDeprecatedRules": []
+  }
+]

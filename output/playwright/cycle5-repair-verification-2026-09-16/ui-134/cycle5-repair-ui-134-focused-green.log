@@ -1,0 +1,69 @@
+$ vitest run src/store/__tests__/connection.readiness-refresh.test.ts "--maxWorkers=1" --no-file-parallelism
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:13679) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/store/__tests__/connection.readiness-refresh.test.ts (14 tests | 2 failed) 2212ms
+     ✓ rotates successive expired pairs and projects connected from the actual readiness GET 120ms
+     ✓ terminal refresh401 invalidates the pair and later readiness checks do not poll it  1016ms
+     ✓ rejects a delayed readiness refresh after target changes without writing rotated authority 2ms
+     ✓ rejects a delayed readiness refresh after owner changes without writing rotated authority 1ms
+     ✓ rejects a delayed readiness refresh after A-B-A changes without writing rotated authority 1ms
+     ✓ shares one canonical refresh with a concurrent scoped request 53ms
+     ✓ does not refresh a late401 from an account that has been replaced 1ms
+     ✓ keeps the current pair after a retryable refresh503 and does not replay the GET  1011ms
+     ✓ keeps the valid bearer readiness transport without refresh 1ms
+     × keeps the single-user readiness transport without refresh 3ms
+     × keeps the hosted cookies readiness transport without refresh 1ms
+     ✓ retains credentials without refreshing for non-auth failure 403 1ms
+     ✓ retains credentials without refreshing for non-auth failure 0 0ms
+     ✓ does not add refresh or replay to an ordinary direct mutation 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/store/__tests__/connection.readiness-refresh.test.ts > connection readiness through actual apiSend and canonical refresh > keeps the single-user readiness transport without refresh
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/store/__tests__/connection.readiness-refresh.test.ts:155:61
+    153|     vi.stubGlobal("fetch", fetchSpy)
+    154|     await useConnectionStore.getState().checkOnce({ force: true })
+    155|     expect(useConnectionStore.getState().state.isConnected).toBe(true)
+       |                                                             ^
+    156|     expect(fetchSpy).toHaveBeenCalledTimes(1)
+    157|     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/store/__tests__/connection.readiness-refresh.test.ts > connection readiness through actual apiSend and canonical refresh > keeps the hosted cookies readiness transport without refresh
+AssertionError: expected undefined to be 'same-origin' // Object.is equality
+
+- Expected: 
+"same-origin"
+
++ Received: 
+undefined
+
+ ❯ src/store/__tests__/connection.readiness-refresh.test.ts:159:62
+    157|     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined
+    158|     if (mode === "single-user") expect(new Headers(init?.headers).get(…
+    159|     if (mode === "hosted cookies") expect(init?.credentials).toBe("sam…
+       |                                                              ^
+    160|   })
+    161| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 12 passed (14)
+   Start at  06:30:12
+   Duration  2.72s (transform 235ms, setup 77ms, import 135ms, tests 2.21s, environment 209ms)
+
+error: script "test" exited with code 1

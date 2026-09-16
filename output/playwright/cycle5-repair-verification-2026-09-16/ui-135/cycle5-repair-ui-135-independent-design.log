@@ -1,0 +1,13 @@
+$ vitest ../packages/ui/src/components/Option/KnowledgeQA/__tests__/SetupDiagnostics.design-system.test.tsx "--maxWorkers=1" --no-file-parallelism
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:25484) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/KnowledgeQA/__tests__/SetupDiagnostics.design-system.test.tsx (2 tests) 24ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  06:43:10
+   Duration  566ms (transform 57ms, setup 97ms, import 77ms, tests 24ms, environment 258ms)
+
