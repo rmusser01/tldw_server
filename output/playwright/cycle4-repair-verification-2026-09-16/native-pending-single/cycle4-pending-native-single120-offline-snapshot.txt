@@ -1,0 +1,25 @@
+### Page
+- Page URL: http://127.0.0.1:18482/prompts
+- Console: 10 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f13e1]:
+  - main [ref=f13e4]:
+    - alert [ref=f13e5]:
+      - generic [ref=f13e6]:
+        - generic [ref=f13e7]:
+          - generic [ref=f13e8]: Unavailable
+          - generic [ref=f13e9]:
+            - heading "Backend readiness check failed" [level=2] [ref=f13e10]
+            - generic [ref=f13e11]: The WebUI could not confirm that the tldw server is ready. You can retry the health check, inspect diagnostics, or update server settings before continuing.
+        - group [ref=f13e12]:
+          - generic "Diagnostics" [ref=f13e13] [cursor=pointer]
+        - generic [ref=f13e14]:
+          - button "Retry" [ref=f13e15] [cursor=pointer]
+          - button "Health & diagnostics" [ref=f13e16] [cursor=pointer]
+          - button "Server settings" [ref=f13e17] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f13e23] [cursor=pointer]
+  - alert [ref=f13e27]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T06-44-04-381Z.log#L26-L65

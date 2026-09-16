@@ -1,0 +1,12 @@
+### Result
+{"url":"http://127.0.0.1:18402/api/v1/chat/completions","status":502,"request":{"messages":[{"role":"user","content":"Preserve this blue test image through a failed turn. WILLOW IMAGE 0652."}],"model":"gemma3:1b","stream":true,"temperature":0.7,"top_p":1,"frequency_penalty":0,"presence_penalty":0,"save_to_db":true,"metadata":{"tldw_client_message_id":"pa_1c0a-f142-148-a10e"},"conversation_id":"0a114e79-e70b-4c36-a7f7-528f3110000b","api_provider":"ollama"},"response":"{\"detail\":{\"error_code\":\"provider_unavailable\",\"message\":\"The chat service provider is currently unavailable.\"}}","pageUrl":"http://127.0.0.1:18482/chat"}
+### Ran Playwright code
+```js
+await (async(page)=>{await page.getByRole("textbox",{name:"Type a message... (/ commands, @ mentions)",exact:true}).fill("Preserve this blue test image through a failed turn. WILLOW IMAGE 0652.");const pending=page.waitForResponse(r=>r.request().method()==="POST"&&r.url().includes("/chat/completions"),{timeout:25000});await page.getByRole("button",{name:"Send message",exact:true}).click();const r=await pending;return {url:r.url(),status:r.status(),request:r.request().postDataJSON(),response:await r.text(),pageUrl:page.url()};})(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18482/chat
+- Page Title: Preserve this blue test image through a failed turn. WILLOW IMAGE 0652. | tldw
+- Console: 11 errors, 1 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T06-44-04-381Z.log#L70-L74

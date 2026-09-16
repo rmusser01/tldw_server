@@ -1,0 +1,6 @@
+### Ran Playwright code
+```js
+await (async(page)=>{await page.getByRole("menuitem",{name:"gemma3:1b Add to favorites",exact:true}).click();const fileChooser=page.waitForEvent("filechooser");await page.getByRole("button",{name:"Attach image",exact:true}).click();await(await fileChooser).setFiles("/private/tmp/cycle4-uat118-native-fixtures/blue.png");await page.getByRole("textbox",{name:"Type a message... (/ commands, @ mentions)",exact:true}).fill("Preserve this blue test image through a failed turn. WILLOW IMAGE 0652.");return {page:await page.locator("body").innerText(),images:await page.getByRole("img").evaluateAll(nodes=>nodes.map(n=>({alt:n.alt,srcPrefix:n.src.slice(0,45)})))};})(page);
+```
+### Modal state
+- [File chooser]: can be handled by upload

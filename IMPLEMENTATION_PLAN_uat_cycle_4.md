@@ -173,3 +173,9 @@ Follow-up independent review is clear for111 and120. Root repeated136 tests/4 su
 ## Ownership and sequencing
 
 Initial independent units: Task1 Chat acknowledgement, Task2 model selection, Task3 summarization; controller owns evidence/dev checks and Task8 Quick Ingest only. Task4 waits for Task1's backend file. Task5 waits for Task1; Task6 waits for Task2's AnalysisModal. Task7 and presentation units can run with those once a slot is free. No concurrent writers to the same file, no worker-owned broad staging/commits; controller integrates after review. Native inference is serialized and runtimes remain unchanged until a coordinated rebuild.
+
+## Additional send-boundary repair — TASK13260.62 / UAT122
+
+Native image118 verification found the composer/local transcript retaining an image while actual transport and canonical persistence drop it for supportsMultimodal=false. Root recorded the exact request and canonical IDs. Chat author owns read-only minimal design initially; source edits wait until both Next runtimes are paused. Actual formatter/model/action tests must cover unsupported handling, supported MIME preservation, image-only input and Retry. Full fresh cycle5 stays pending.
+
+119/120 native checks pass with the explicit offline-readiness-gate adaptation.111/121/actual new117 negative+reload pass. Separate direct-route/prior-mode observations are being classified before the next source window.

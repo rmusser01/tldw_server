@@ -1,0 +1,16 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Send message' }).click();
+```
+### Open tabs
+- 0: [127.0.0.1](chrome-error://chromewebdata/)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: [127.0.0.1](chrome-error://chromewebdata/)
+- 3: [127.0.0.1](chrome-error://chromewebdata/)
+- 4: [127.0.0.1](chrome-error://chromewebdata/)
+- 5: (current) [Cycle4 Cedar Guide Chat (20260916_065053) | tldw](http://127.0.0.1:18381/chat?mode=character&characterId=4&chatId=416f935c-4848-4725-9d3f-29cd6348bf34)
+### Page
+- Page URL: http://127.0.0.1:18381/chat?mode=character&characterId=4&chatId=416f935c-4848-4725-9d3f-29cd6348bf34
+- Page Title: Cycle4 Cedar Guide Chat (20260916_065053) | tldw
+### Snapshot
+- [Snapshot](../../../../../private/tmp/.playwright-cli/page-2026-09-16T06-50-54-350Z.yml)

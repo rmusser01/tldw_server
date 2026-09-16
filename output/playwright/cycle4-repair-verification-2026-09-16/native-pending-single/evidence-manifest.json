@@ -1,0 +1,116 @@
+{
+  "unit": "native-pending-single",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-pending-native-single-summary.md",
+      "bytes": 1139,
+      "sha256": "1f3f925c551e5c7b9015efd4d3a4206554866efa1308040ab18771b97f7ab8e4"
+    },
+    {
+      "file": "cycle4-pending-native-single118-canonical-no-image.json",
+      "bytes": 1578,
+      "sha256": "bc0a7b79b774b89ebe9fc31cc3ad9e230068902bc399c36a210337aa8044ac27"
+    },
+    {
+      "file": "cycle4-pending-native-single118-chat-snapshot.txt",
+      "bytes": 9840,
+      "sha256": "5af7066e2cbb5f74fa317d2bf390cb11dc126659e25f386e57c41e7566e88bca"
+    },
+    {
+      "file": "cycle4-pending-native-single118-failed-snapshot.txt",
+      "bytes": 11627,
+      "sha256": "107d4b2cc727f197ebdfc26aa28bec0fd4d2d21530f33ee359132d1cd8f6c17e"
+    },
+    {
+      "file": "cycle4-pending-native-single118-failed-ui.json",
+      "bytes": 949,
+      "sha256": "8e30d6dfd9c7c881cefc11bba6fad8da3f477233b3d731f5143a7ccd2df31f28"
+    },
+    {
+      "file": "cycle4-pending-native-single118-first-failure.json",
+      "bytes": 1493,
+      "sha256": "3651005d266ae8ef331c4c99b19e828f9ec51e090274208be7c3ce6557bd3d44"
+    },
+    {
+      "file": "cycle4-pending-native-single118-new-chat.json",
+      "bytes": 1655,
+      "sha256": "88e1aa54c43e09ad84891375a479b56d0326a1bede9f3f8ae02162499544cf74"
+    },
+    {
+      "file": "cycle4-pending-native-single118-upload.json",
+      "bytes": 763,
+      "sha256": "ff1ccbc0556064092b60eedb0832690d188c00aaa9c8ab22a3875636bb886016"
+    },
+    {
+      "file": "cycle4-pending-native-single119-dark.json",
+      "bytes": 1291,
+      "sha256": "991c04c1a177f9dd12023d552a3b1057cdd7354f1bee34b15a5007656a7cd609"
+    },
+    {
+      "file": "cycle4-pending-native-single119-dark.png",
+      "bytes": 178402,
+      "sha256": "06310643ea335e5f8aa869e9605e486393405015a62d8fa72703d1e7b8333e8a"
+    },
+    {
+      "file": "cycle4-pending-native-single119-light.json",
+      "bytes": 1435,
+      "sha256": "c1af8a6bbcaede787f1fde202259d8933a7cd9a050e56c2738cde51561c2fa0e"
+    },
+    {
+      "file": "cycle4-pending-native-single119-light.png",
+      "bytes": 186595,
+      "sha256": "7e3fba2d1f29a371445446d257ae7817ac800230d28d58d07f86b97c4aeb6db7"
+    },
+    {
+      "file": "cycle4-pending-native-single119-mobile.json",
+      "bytes": 1243,
+      "sha256": "71d4513e69bf89261e1e4c475b50ca0a02d2af6815dd1b55ce96040af4669e7f"
+    },
+    {
+      "file": "cycle4-pending-native-single119-mobile.png",
+      "bytes": 21855,
+      "sha256": "93525eeeff1ed7bfc739c00f19482759f15701ecd8b275fa5df9a41e100f6c85"
+    },
+    {
+      "file": "cycle4-pending-native-single120-edit.json",
+      "bytes": 895,
+      "sha256": "0859f9e238821efaae94c84ac8cdbc5fb4f7052f5b011868af347bd8d2c273f2"
+    },
+    {
+      "file": "cycle4-pending-native-single120-offline-reload.json",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "cycle4-pending-native-single120-offline-save.json",
+      "bytes": 2785,
+      "sha256": "1d724c4adb0a99b0b718774e62203dcea56b74287ddb14da5d258c84c1bb3eb7"
+    },
+    {
+      "file": "cycle4-pending-native-single120-offline-snapshot.txt",
+      "bytes": 1104,
+      "sha256": "7284b70de8e7131056531c84605cb384403a6633cd678e2f654409f3dab9998e"
+    },
+    {
+      "file": "cycle4-pending-native-single120-recovered.json",
+      "bytes": 2271,
+      "sha256": "b082fdc52c63bce199154a60bd5bacf21a1e89cdc1dccb24f3afe76975ea45af"
+    },
+    {
+      "file": "cycle4-pending-native-single120-recovered.png",
+      "bytes": 112193,
+      "sha256": "5f35b00baca39bbb4695708b305a85f6072b41bed63648524aa8a059e78bd289"
+    },
+    {
+      "file": "cycle4-pending-native-single120-restored-pending.json",
+      "bytes": 841,
+      "sha256": "c6ffd140a71ca1003a96e05bba964a05c3bb4b93643ced818544afd7dbe8b23a"
+    },
+    {
+      "file": "cycle4-pending-native-single120-restored-pending.png",
+      "bytes": 106922,
+      "sha256": "e437b936d506c7389f700367821e6ef7b6db70f9ea890c4cf326dd0342d33344"
+    }
+  ]
+}

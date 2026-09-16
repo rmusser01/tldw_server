@@ -1,0 +1,10 @@
+### Result
+{"url":"http://127.0.0.1:18482/prompts","row":"\t\n\t\nCycle4 Prompt sync recovery 0527\n\t\nSYSTEM\nReply with one concise sentence. Retain WILLOW. Verified offline recovery revision 0647.\n\t\n\t\n1h ago\nLast used: Unknown\n\t\nPending\n#2\n\t"}
+### Ran Playwright code
+```js
+await (async(page)=>{await page.getByRole("button",{name:"Retry",exact:true}).click();const row=page.getByRole("row").filter({hasText:"Cycle4 Prompt sync recovery 0527"});await row.waitFor({timeout:20000});await row.getByText("Pending",{exact:true}).waitFor({timeout:10000});await page.screenshot({path:"/private/tmp/cycle4-pending-native-single120-restored-pending.png"});return {url:page.url(),row:await row.innerText()};})(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18482/prompts
+- Page Title: Prompts | tldw
+- Console: 10 errors, 0 warnings

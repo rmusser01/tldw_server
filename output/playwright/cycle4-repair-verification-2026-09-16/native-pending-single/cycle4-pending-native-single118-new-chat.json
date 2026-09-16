@@ -1,0 +1,12 @@
+### Result
+{"url":"http://127.0.0.1:18482/prompts","page":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nPrompts\n\nCreate reusable prompts for recurring tasks, workflows, and team conventions.\n\nPROMPTS\nWORKSPACES\nCustom\nCopilot\nStudio\nTrash\nCOLLECTIONS\nAll Prompts\n1\nFavorites\n0\nRecently Used\n0\nMost Used\n0\nUntagged\n1\nTYPE\nAll\n1\nSystem\n1\nQuick\nMixed\nRecipes\nSystem recipes\nUser recipes\nSYNC STATUS\nAll\n1\nLocal\nSynced\n1\nPending\nConflict\nFILTER PRESETS\nSave current filters\nAll collections\nNew collection\nNew prompt\nExport\nJSON\nImport\nMerge\nShortcuts\n/\nAll\nAll usage\nAdd tags\nMatch any\nMatch all\nTable\nGallery\nComfortable\nCompact\nDense\nSave filters\n0 prompts selected\n\t\t\nTitle\n\tPrompt\tTags\t\nUpdated\n\tSync\tActions\n\n\t\n\t\nCycle4 Prompt sync recovery 0527\n\t\nSYSTEM\nReply with one concise sentence. Retain WILLOW. Verified offline recovery revision 0647.\n\t\n\t\n1h ago\nLast used: Unknown\n\t\nSynced\n#3\n\t\n1-1 of 1 prompts\n1\n20 / page\n\nPrompts | tldw","inputs":[{"accept":"application/json","multiple":false}]}
+### Ran Playwright code
+```js
+await (async(page)=>{await page.getByRole("button",{name:"New Chat",exact:true}).click();return {url:page.url(),page:await page.locator("body").innerText(),inputs:await page.locator("input[type=file]").evaluateAll(nodes=>nodes.map(n=>({accept:n.accept,multiple:n.multiple}))) };})(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18482/chat
+- Page Title: Chat | tldw
+- Console: 10 errors, 0 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T06-44-04-381Z.log#L66-L68

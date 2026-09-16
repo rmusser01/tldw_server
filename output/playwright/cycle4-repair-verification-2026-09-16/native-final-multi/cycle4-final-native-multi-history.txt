@@ -1,0 +1,327 @@
+### Open tabs
+- 0: [127.0.0.1](chrome-error://chromewebdata/)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: [127.0.0.1](chrome-error://chromewebdata/)
+- 3: [127.0.0.1](chrome-error://chromewebdata/)
+- 4: [127.0.0.1](chrome-error://chromewebdata/)
+- 5: (current) [Cycle4 Cedar Guide Chat (20260916_053938) | tldw](http://127.0.0.1:18381/chat?chatId=c244a779-afcd-4f3d-8d89-a63065971a9b)
+### Page
+- Page URL: http://127.0.0.1:18381/chat?chatId=c244a779-afcd-4f3d-8d89-a63065971a9b
+- Page Title: Cycle4 Cedar Guide Chat (20260916_053938) | tldw
+### Snapshot
+```yaml
+- generic [ref=f17e11]:
+  - generic [ref=f17e14]:
+    - link "Skip to main content" [ref=f17e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f17e16]:
+      - generic [ref=f17e497]:
+        - heading "Chats" [level=2] [ref=f17e498]
+        - generic [ref=f17e499]:
+          - button "New Chat" [ref=f17e500] [cursor=pointer]
+          - button "Select chats" [ref=f17e619] [cursor=pointer]
+          - button "Collapse sidebar" [ref=f17e502] [cursor=pointer]
+      - generic [ref=f17e20]:
+        - button "Shortcuts" [expanded] [ref=f17e505] [cursor=pointer]
+        - generic [ref=f17e509]:
+          - button "Quick Ingest" [ref=f17e510] [cursor=pointer]
+          - button "Chat" [ref=f17e515] [cursor=pointer]
+          - button "Prompts" [ref=f17e519] [cursor=pointer]
+          - button "Characters" [ref=f17e524] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f17e530] [cursor=pointer]
+          - button "World Books" [ref=f17e535] [cursor=pointer]
+          - button "Notes" [ref=f17e539] [cursor=pointer]
+          - button "Knowledge QA" [ref=f17e544] [cursor=pointer]
+          - button "Media" [ref=f17e553] [cursor=pointer]
+          - button "Document Workspace" [ref=f17e557] [cursor=pointer]
+          - button "Research Workspace" [ref=f17e564] [cursor=pointer]
+          - button "Kanban" [ref=f17e571] [cursor=pointer]
+          - button "Watchlists" [ref=f17e574] [cursor=pointer]
+        - button "Recent conversations" [expanded] [active] [ref=f17e581] [cursor=pointer]
+        - generic [ref=f17e623]:
+          - textbox "Search chats..." [ref=f17e630]
+          - generic [ref=f17e632]:
+            - generic [ref=f17e633]: Chat view
+            - radiogroup "Chat view" [ref=f17e634]:
+              - generic [ref=f17e635]:
+                - generic [ref=f17e636] [cursor=pointer]:
+                  - radio "Server (9)" [checked]
+                  - generic "Server (9)" [ref=f17e637]
+                - generic [ref=f17e638] [cursor=pointer]:
+                  - radio "Folders"
+                  - generic "Folders" [ref=f17e639]
+          - generic [ref=f17e641]:
+            - generic [ref=f17e642]:
+              - generic [ref=f17e643]: Chat type filter
+              - generic [ref=f17e644] [cursor=pointer]:
+                - generic [ref=f17e645]:
+                  - generic "All Chats" [ref=f17e646]
+                  - combobox "Chat type filter" [ref=f17e647]
+                - img "down" [ref=f17e649]
+            - generic [ref=f17e652]:
+              - generic [ref=f17e653]:
+                - 'button "Cycle4 fixed Retry108 control 20260916_0449: reply exactly AMBER RESTORED. in-progress Updated 1 hour ago Server" [ref=f17e654] [cursor=pointer]':
+                  - 'generic "Cycle4 fixed Retry108 control 20260916_0449: reply exactly AMBER RESTORED." [ref=f17e655]'
+                  - generic [ref=f17e656]:
+                    - generic [ref=f17e657]: in-progress
+                    - generic "9/15/2026, 10:39:56 PM" [ref=f17e658]: Updated 1 hour ago
+                  - generic [ref=f17e659]: Server
+                - generic [ref=f17e661]:
+                  - button "Pin" [ref=f17e662] [cursor=pointer]
+                  - 'button "More actions: Cycle4 fixed Retry108 control 20260916_0449: reply exactly AMBER RESTORED." [ref=f17e665] [cursor=pointer]'
+              - generic [ref=f17e670]:
+                - 'button "Cycle4 correlated Retry108 20260916_0526: reply exactly CEDAR RECOVERED. in-progress Updated 1 hour ago Server" [ref=f17e671] [cursor=pointer]':
+                  - 'generic "Cycle4 correlated Retry108 20260916_0526: reply exactly CEDAR RECOVERED." [ref=f17e672]'
+                  - generic [ref=f17e673]:
+                    - generic [ref=f17e674]: in-progress
+                    - generic "9/15/2026, 10:39:56 PM" [ref=f17e675]: Updated 1 hour ago
+                  - generic [ref=f17e676]: Server
+                - generic [ref=f17e678]:
+                  - button "Pin" [ref=f17e679] [cursor=pointer]
+                  - 'button "More actions: Cycle4 correlated Retry108 20260916_0526: reply exactly CEDAR RECOVERED." [ref=f17e682] [cursor=pointer]'
+              - generic [ref=f17e687]:
+                - button "Cycle4 Cedar Guide Chat (20260916_053938) in-progress Updated 1 hour ago Cycle4 Cedar Guide Chat (20260916_053938) Server" [ref=f17e688] [cursor=pointer]:
+                  - generic "Cycle4 Cedar Guide Chat (20260916_053938)" [ref=f17e689]
+                  - generic [ref=f17e690]:
+                    - generic [ref=f17e691]: in-progress
+                    - generic "9/15/2026, 10:39:56 PM" [ref=f17e692]: Updated 1 hour ago
+                    - generic "Cycle4 Cedar Guide Chat (20260916_053938)" [ref=f17e693]
+                  - generic [ref=f17e694]: Server
+                - generic [ref=f17e696]:
+                  - button "Pin" [ref=f17e697] [cursor=pointer]
+                  - 'button "More actions: Cycle4 Cedar Guide Chat (20260916_053938)" [ref=f17e700] [cursor=pointer]'
+              - generic [ref=f17e705]:
+                - button "What is the private planning date for Project Indigo? in-progress Updated 2 hours ago Server" [ref=f17e706] [cursor=pointer]:
+                  - generic "What is the private planning date for Project Indigo?" [ref=f17e707]
+                  - generic [ref=f17e708]:
+                    - generic [ref=f17e709]: in-progress
+                    - generic "9/15/2026, 9:13:00 PM" [ref=f17e710]: Updated 2 hours ago
+                  - generic [ref=f17e711]: Server
+                - generic [ref=f17e713]:
+                  - button "Pin" [ref=f17e714] [cursor=pointer]
+                  - 'button "More actions: What is the private planning date for Project Indigo?" [ref=f17e717] [cursor=pointer]'
+              - generic [ref=f17e722]:
+                - 'button "Cycle4 Retry control 108: reply exactly AMBER RETRY. in-progress Updated 2 hours ago Server" [ref=f17e723] [cursor=pointer]':
+                  - 'generic "Cycle4 Retry control 108: reply exactly AMBER RETRY." [ref=f17e724]'
+                  - generic [ref=f17e725]:
+                    - generic [ref=f17e726]: in-progress
+                    - generic "9/15/2026, 9:13:00 PM" [ref=f17e727]: Updated 2 hours ago
+                  - generic [ref=f17e728]: Server
+                - generic [ref=f17e730]:
+                  - button "Pin" [ref=f17e731] [cursor=pointer]
+                  - 'button "More actions: Cycle4 Retry control 108: reply exactly AMBER RETRY." [ref=f17e734] [cursor=pointer]'
+              - generic [ref=f17e739]:
+                - button "Cycle4 Cedar Guide Chat (20260916_041255) in-progress Updated 2 hours ago Cycle4 Cedar Guide Chat (20260916_041255) Server" [ref=f17e740] [cursor=pointer]:
+                  - generic "Cycle4 Cedar Guide Chat (20260916_041255)" [ref=f17e741]
+                  - generic [ref=f17e742]:
+                    - generic [ref=f17e743]: in-progress
+                    - generic "9/15/2026, 9:13:00 PM" [ref=f17e744]: Updated 2 hours ago
+                    - generic "Cycle4 Cedar Guide Chat (20260916_041255)" [ref=f17e745]
+                  - generic [ref=f17e746]: Server
+                - generic [ref=f17e748]:
+                  - button "Pin" [ref=f17e749] [cursor=pointer]
+                  - 'button "More actions: Cycle4 Cedar Guide Chat (20260916_041255)" [ref=f17e752] [cursor=pointer]'
+              - generic [ref=f17e757]:
+                - button "Cycle4 Cedar Guide Chat (20260916_010755) in-progress Updated 5 hours ago Cycle4 Cedar Guide Chat (20260916_010755) Server" [ref=f17e758] [cursor=pointer]:
+                  - generic "Cycle4 Cedar Guide Chat (20260916_010755)" [ref=f17e759]
+                  - generic [ref=f17e760]:
+                    - generic [ref=f17e761]: in-progress
+                    - generic "9/15/2026, 6:31:51 PM" [ref=f17e762]: Updated 5 hours ago
+                    - generic "Cycle4 Cedar Guide Chat (20260916_010755)" [ref=f17e763]
+                  - generic [ref=f17e764]: Server
+                - generic [ref=f17e766]:
+                  - button "Pin" [ref=f17e767] [cursor=pointer]
+                  - 'button "More actions: Cycle4 Cedar Guide Chat (20260916_010755)" [ref=f17e770] [cursor=pointer]'
+              - generic [ref=f17e775]:
+                - 'button "Remember this public cycle4 phrase: CEDAR-41. Reply with only CEDAR-41. in-progress Updated 5 hours ago Server" [ref=f17e776] [cursor=pointer]':
+                  - 'generic "Remember this public cycle4 phrase: CEDAR-41. Reply with only CEDAR-41." [ref=f17e777]'
+                  - generic [ref=f17e778]:
+                    - generic [ref=f17e779]: in-progress
+                    - generic "9/15/2026, 5:59:11 PM" [ref=f17e780]: Updated 5 hours ago
+                  - generic [ref=f17e781]: Server
+                - generic [ref=f17e783]:
+                  - button "Pin" [ref=f17e784] [cursor=pointer]
+                  - 'button "More actions: Remember this public cycle4 phrase: CEDAR-41. Reply with only CEDAR-41." [ref=f17e787] [cursor=pointer]'
+              - generic [ref=f17e792]:
+                - button "When does Project Cedar open and who coordinates the workshop? Cite the source. in-progress Updated 5 hours ago When does Project Cedar open and who coordinates the workshop? Cite the source. Server" [ref=f17e793] [cursor=pointer]:
+                  - generic "When does Project Cedar open and who coordinates the workshop? Cite the source." [ref=f17e794]
+                  - generic [ref=f17e795]:
+                    - generic [ref=f17e796]: in-progress
+                    - generic "9/15/2026, 5:59:11 PM" [ref=f17e797]: Updated 5 hours ago
+                    - generic "When does Project Cedar open and who coordinates the workshop? Cite the source." [ref=f17e798]
+                  - generic [ref=f17e799]: Server
+                - generic [ref=f17e801]:
+                  - button "Pin" [ref=f17e802] [cursor=pointer]
+                  - 'button "More actions: When does Project Cedar open and who coordinates the workshop? Cite the source." [ref=f17e805] [cursor=pointer]'
+      - generic [ref=f17e585]:
+        - button "Settings" [ref=f17e586] [cursor=pointer]
+        - generic [ref=f17e592]:
+          - generic [ref=f17e594]:
+            - generic [ref=f17e595]: Mode
+            - group "Mode" [ref=f17e596]:
+              - button "Casual" [pressed] [ref=f17e597] [cursor=pointer]
+              - button "Pro" [ref=f17e598] [cursor=pointer]
+          - generic [ref=f17e599]:
+            - button "Open Notes Dock" [ref=f17e600] [cursor=pointer]
+            - button "Open Quick Chat Helper (sidebar)" [ref=f17e605] [cursor=pointer]
+    - main [ref=f17e95]:
+      - generic [ref=f17e96]:
+        - generic [ref=f17e99]:
+          - generic [ref=f17e100]:
+            - button "Collapse sidebar" [ref=f17e608] [cursor=pointer]
+            - generic [ref=f17e103]:
+              - img "tldw Assistant" [ref=f17e104]
+              - generic [ref=f17e105]: tldw Assistant
+              - button "Companion Home" [ref=f17e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f17e110] [cursor=pointer]
+            - button "Cycle4 Cedar Guide Chat (20260916_053938)" [ref=f17e114] [cursor=pointer]
+            - generic [ref=f17e115]:
+              - generic "Saved chat. History is persisted." [ref=f17e116]: Saved
+              - generic "Character mode is active." [ref=f17e117]: "Character: Cycle4 Cedar Guide"
+          - generic [ref=f17e123]:
+            - button "Search - Open command palette" [ref=f17e124] [cursor=pointer]:
+              - generic [ref=f17e128]: Search
+              - generic [ref=f17e129]: ⌘K
+            - button "New saved chat" [ref=f17e130] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f17e134] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f17e135] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f17e136] [cursor=pointer]
+            - button "Open settings" [ref=f17e143] [cursor=pointer]
+            - generic [ref=f17e155]:
+              - button "Notifications, 0 unread" [ref=f17e481] [cursor=pointer]
+              - status [ref=f17e159]: Notifications are active
+            - button "Switch to light theme" [ref=f17e160] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f17e167] [cursor=pointer]:
+              - generic [ref=f17e168]: "?"
+        - generic [ref=f17e169]:
+          - heading "Chat" [level=1] [ref=f17e170]
+          - generic [ref=f17e173]:
+            - paragraph [ref=f17e174]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f17e175]:
+              - main [ref=f17e176]:
+                - generic [ref=f17e177]:
+                  - generic [ref=f17e179]:
+                    - generic [ref=f17e180]:
+                      - generic [ref=f17e181]:
+                        - text: Character Chat
+                        - generic [ref=f17e182]: Cycle4 Cedar Guide
+                      - generic [ref=f17e183]: Conversation timeline
+                    - generic [ref=f17e184]:
+                      - button "Switch to light theme" [ref=f17e185] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f17e192] [cursor=pointer]:
+                        - generic [ref=f17e198]: Focus
+                      - button "Shortcuts" [ref=f17e199] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f17e203]
+                  - log "Chat messages" [ref=f17e216]:
+                    - generic [ref=f17e218]:
+                      - article "Assistant message 1 of 3" [ref=f17e219]:
+                        - generic [ref=f17e225]:
+                          - generic [ref=f17e227]:
+                            - generic [ref=f17e228]: Cycle4 Cedar Guide
+                            - generic [ref=f17e229]: • 10:39 PM
+                            - generic [ref=f17e230]: greeting
+                          - paragraph [ref=f17e810]: "CEDAR GUIDE: Welcome to the public workshop."
+                          - generic [ref=f17e233]:
+                            - generic [ref=f17e234]:
+                              - generic [ref=f17e235]: Was this helpful?
+                              - generic [ref=f17e236]:
+                                - button "Helpful" [ref=f17e237] [cursor=pointer]
+                                - button "Not helpful" [ref=f17e240] [cursor=pointer]
+                                - button "More feedback" [ref=f17e243] [cursor=pointer]
+                            - button "More actions" [ref=f17e249] [cursor=pointer]: •••
+                      - article "User message 2 of 3" [ref=f17e250]:
+                        - generic [ref=f17e253]:
+                          - generic [ref=f17e255]:
+                            - generic [ref=f17e256]: You
+                            - generic [ref=f17e257]: • 10:39 PM
+                          - paragraph [ref=f17e259]: "Cycle4 reasoning117 20260916_0539: carefully reason through a three-step plan for Project Cedar before giving a final answer."
+                          - button "More actions" [ref=f17e262] [cursor=pointer]: •••
+                      - article "Assistant message 3 of 3" [ref=f17e266]:
+                        - generic [ref=f17e272]:
+                          - generic [ref=f17e274]:
+                            - generic [ref=f17e275]: Cycle4 Cedar Guide
+                            - generic [ref=f17e276]: • 10:39 PM
+                          - generic [ref=f17e277]:
+                            - button "collapsed Model’s reasoning (optional)" [ref=f17e280] [cursor=pointer]:
+                              - img "collapsed" [ref=f17e282]
+                              - generic [ref=f17e285]: Model’s reasoning (optional)
+                            - paragraph [ref=f17e811]: "CEDAR GUIDE: First, finalize all technical infrastructure. Second, complete security audits. Third, proceed with the launch on 24 January 2027 under Priya Shah's coordination."
+                          - generic [ref=f17e289]:
+                            - generic [ref=f17e290]:
+                              - generic [ref=f17e291]: Was this helpful?
+                              - generic [ref=f17e292]:
+                                - button "Helpful" [ref=f17e293] [cursor=pointer]
+                                - button "Not helpful" [ref=f17e296] [cursor=pointer]
+                                - button "More feedback" [ref=f17e299] [cursor=pointer]
+                            - button "More actions" [ref=f17e305] [cursor=pointer]: •••
+                  - generic [ref=f17e306]:
+                    - generic [ref=f17e307]: Composer
+                    - generic [ref=f17e318]:
+                      - button [aria-hidden] [ref=f17e319]
+                      - button [aria-hidden] [ref=f17e320]
+                      - generic [ref=f17e321]:
+                        - generic [ref=f17e323]:
+                          - button "Hide composer options" [expanded] [ref=f17e324] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [ref=f17e329]
+                          - generic [ref=f17e330]:
+                            - button "Improve prompt" [ref=f17e333] [cursor=pointer]
+                            - generic [ref=f17e338]:
+                              - button "Send message" [ref=f17e489] [cursor=pointer]:
+                                - generic [ref=f17e340]: Send
+                              - button "Open message delivery options" [ref=f17e342] [cursor=pointer]
+                        - generic [ref=f17e347]:
+                          - generic [ref=f17e349]:
+                            - group "Mode and context controls" [ref=f17e350]:
+                              - button "Modes" [ref=f17e351] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f17e358] [cursor=pointer]':
+                                - generic [ref=f17e359]:
+                                  - generic [ref=f17e360]: MCP
+                                  - generic [ref=f17e361]: None
+                              - button "Search & Context" [ref=f17e364] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f17e369] [cursor=pointer]:
+                                - generic [ref=f17e372]: Prompt
+                              - button "Cycle4 Cedar Guide" [ref=f17e373] [cursor=pointer]
+                              - button "Role-play setup" [ref=f17e378] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f17e385] [cursor=pointer]
+                            - group "Run input controls" [ref=f17e391]:
+                              - button "OpenUI" [ref=f17e392] [cursor=pointer]
+                              - button "Start dictation" [ref=f17e493] [cursor=pointer]
+                              - generic [ref=f17e402]:
+                                - button "Attach image" [ref=f17e404] [cursor=pointer]
+                                - button "More attachments" [ref=f17e408] [cursor=pointer]
+                              - button "More tools" [ref=f17e411] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f17e414] [cursor=pointer]:
+                                - generic [ref=f17e418]: Chat Settings
+                          - generic "Active context" [ref=f17e419]:
+                            - button "LLaMa.cpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f17e494] [cursor=pointer]:
+                              - generic "Provider status" [ref=f17e426]: Healthy
+                            - button "Character Cycle4 Cedar Guide" [ref=f17e427] [cursor=pointer]:
+                              - generic [ref=f17e428]: Character
+                              - generic [ref=f17e429]: Cycle4 Cedar Guide
+                            - 'generic "Character context: Included" [ref=f17e430]':
+                              - generic [ref=f17e431]: Character context
+                              - generic [ref=f17e432]: Included
+                            - button "Chat 3 messages" [ref=f17e433] [cursor=pointer]:
+                              - generic [ref=f17e434]: Chat
+                              - generic [ref=f17e435]: 3 messages
+                            - button "Configure context window size" [ref=f17e437] [cursor=pointer]:
+                              - generic [ref=f17e438]: 1,115 + ~0 = 1,115 tokens
+                            - button "Saved" [ref=f17e440] [cursor=pointer]
+                            - button "Advanced controls" [ref=f17e442] [cursor=pointer]
+                        - status [ref=f17e446]:
+                          - generic [ref=f17e447]: Add expression images for Cycle4 Cedar Guide.
+                          - generic [ref=f17e448]:
+                            - link "Edit expressions" [ref=f17e449] [cursor=pointer]:
+                              - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=4
+                            - button "Dismiss expression image setup" [ref=f17e450] [cursor=pointer]: Dismiss
+              - generic [ref=f17e460]:
+                - button "Restore context sidechannel" [ref=f17e461] [cursor=pointer]:
+                  - generic [ref=f17e465]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f17e466]:
+                - button "Restore runtime sidechannel" [ref=f17e467] [cursor=pointer]:
+                  - generic [ref=f17e468]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f17e477] [cursor=pointer]
+  - alert [ref=f17e10]
+```
