@@ -2,6 +2,8 @@
 
 ## Run status
 
+- **20:32 UTC repair checkpoint:** UAT103 is independently reviewed and committed `20942cd30f`; root215/14 tests pass and full compiler retains90 existing signatures, zero added/removed. Native diagnostic-to-next-turn acceptance remains pending. UAT158 is committed `6dead52401`. UAT160's scoped wrapping repair passes independent review,15/2 tests and actual390px/desktop acceptance; both complete warning sentences are readable. UAT157 and159 remain under repair. No full UAT restart.
+
 - **20:27 UTC targeted follow-up: 160 unique findings.** UAT158's deprecated admin List rendering passes independent30/5 tests and native populated-list/console acceptance. New159 maps the avoidable blank-key persona request to reopened TASK12918; anonymous identity scope denial is not quota exhaustion. New160/TASK13260.97 records clipped long asset metadata/warnings at390px. UAT103's independent214/14 run passed, but review/compiler checks found two corrections still required before its commit. UAT157 remains queued behind that shared-file review. No full UAT restart.
 
 - **20:12 UTC console reconciliation: 158 unique findings.** New158 tracks the deprecated AntD List console error on the actual Llama.cpp administration route; rendering-only repair is in progress under13260.96. Inventory is **140 verified, 13 awaiting acceptance, 1 blocked check, 4 unresolved defects** (013/103/157/158). The first-run persona read also returned429 before credentials were entered; an isolated unauthenticated read reproduces `rate_limited`, policy `character_chat.default`, retry_after1. Setup and authenticated Chat succeeded. Retain this as a pre-auth observation pending classification, not an inferred authentication bypass or a proven rate-limit regression. Expected controlled-outage502, pre-key configuration warnings and development Fast Refresh messages are retained separately.
@@ -78,6 +80,7 @@
 
 ## UAT-160 — P3: Narrow Llama.cpp asset tags clip metadata and warnings
 
+- Targeted repair accepted: after wrapping, narrow list client/scroll widths are306/306, desktop908/908. Full metadata/warnings remain readable. Independent review,15/2 tests and lint0/0 pass. [Retained evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup160/README.md).
 - Actual390×844 admin route: GGUF list width308/clientWidth306, scrollWidth483. Long model metadata and two warning sentences extend beyond the card and are visibly clipped. Profile/runtime actions remain reachable. Introduction point is not established.
 - TASK13260.97: wrap long asset metadata/warnings within their available width and retain complete text, grouping and actions. Before evidence: [native screenshot and geometry](../../output/playwright/cycle5-repair-verification-2026-09-16/followup158/README.md).
 

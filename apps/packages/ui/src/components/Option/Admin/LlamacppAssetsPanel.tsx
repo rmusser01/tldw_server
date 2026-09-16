@@ -466,7 +466,7 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
                 <ul
                   role="list"
                   aria-label={group.label}
-                  className="m-0 list-none divide-y divide-border rounded-lg border border-border p-0"
+                  className="m-0 list-none divide-y divide-border rounded-lg border border-border p-0 [&_.ant-space-item]:max-w-full [&_.ant-tag]:max-w-full [&_.ant-tag]:whitespace-normal [&_.ant-tag]:break-words"
                 >
                   {group.items.map((asset) => {
                     const size = formatBytes(asset.size_bytes)

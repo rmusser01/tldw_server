@@ -1,0 +1,6 @@
+### Result
+{"scrollWidth":908,"clientWidth":908,"text":"gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_Mmodels_dir15.6 GB26BQ4_K_Mgemma 4 26B A4B it ultra uncensored heretic Q4 K Munknowngguf:15e7b0bd6a1b2521b61d0c19/Users/macbook-dev/Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.ggufProjector candidates: mmproj:069da3dc868890ece93c3888Asset capability is unknown until inspected or selected in a profile.mmproj pairing is inferred; verify the projector before launching vision profiles."}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole('list', {name:'GGUF models',exact:true}).scrollIntoViewIfNeeded(); await page.screenshot({path:'.tmp/uat160-asset-wrap-20260916/admin-desktop-after.png'}); return await page.getByRole('list',{name:'GGUF models',exact:true}).evaluate(el=>({scrollWidth:el.scrollWidth,clientWidth:el.clientWidth,text:el.textContent})); })(page);
+```

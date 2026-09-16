@@ -99,8 +99,12 @@
     {
       "path": "uat103-review-system-delete-current.log",
       "sha256": "79b0f78b105d02e8f8019e74f16e8e7b94753b836686b7c91b22bb47d5326240"
+    },
+    {
+      "path": "uat103-review-system-delete-final.log",
+      "sha256": "250b553d55f6cf7e161bba88067237b6b6327cbae2f76bdbc1281912c5cfd6f9"
     }
   ],
   "exactCredentialScan": "pass",
-  "normalization": "Trailing whitespace in copied logs only"
+  "normalization": "Trailing whitespace in retained text receipts only"
 }
