@@ -24,6 +24,35 @@ const link = (ownerKey: string, extra = {}) => linkServerChatMirror({ chatId: "c
 
 describe("owned server Chat mirror", () => {
   beforeEach(() => { state.histories.clear(); state.messages.clear() })
+  it("links an unanswered user by exact client correlation while retaining equal-text drafts", async () => {
+    state.histories.set("alice", history("alice", "A"))
+    state.messages.set("local-q", { ...row("local-q", "alice", "Repeat"), images: [""] })
+    state.messages.set("draft", row("draft", "alice", "Repeat"))
+    const remote = [{ ...incoming("question", "Repeat"), metadataExtra: { client_message_id: "local-q" } }]
+    const current = ["local-q", "draft"].map(id => ({ ...incoming(id, "Repeat"), serverMessageId: undefined, images: [""] }))
+    expect(reconcileServerChatMessages(current, remote).map(item => [item.id, item.serverMessageId])).toEqual([["local-q", "question"], ["draft", undefined]])
+    await reconcileServerChatMirror({ historyId: "alice", chatId: "chat-1", ownerKey: "A", messages: remote })
+    expect([...state.messages.values()].map(item => [item.id, item.serverMessageId])).toEqual([["local-q", "question"], ["draft", undefined]])
+  })
+
+  it("links an image-only unanswered user without treating another image as identity", async () => {
+    state.histories.set("alice", history("alice", "A"))
+    const image = "data:image/png;base64,owned"
+    state.messages.set("image-user", { ...row("image-user", "alice", ""), images: [image] })
+    await reconcileServerChatMirror({ historyId: "alice", chatId: "chat-1", ownerKey: "A", messages: [{ ...incoming("saved-image", ""), images: [image], metadataExtra: { client_message_id: "image-user" } }] })
+    expect([...state.messages.values()]).toMatchObject([{ id: "image-user", content: "", images: [image], serverMessageId: "saved-image" }])
+  })
+
+  it.each(["missing", "other-id", "edited-content", "changed-image", "wrong-role", "duplicate-claim", "foreign-history", "already-acknowledged"])("preserves unmatched correlation work: %s", async kind => {
+    state.histories.set("alice", history("alice", "A"))
+    state.messages.set("local-q", { ...row("local-q", kind === "foreign-history" ? "bob" : "alice", kind === "edited-content" ? "Edited" : "Repeat", kind === "already-acknowledged" ? "different-server" : undefined),
+      images: kind === "changed-image" ? ["data:image/png;base64,other"] : [], role: kind === "wrong-role" ? "assistant" : "user" })
+    const remote = [{ ...incoming("question", "Repeat"), metadataExtra: kind === "missing" ? {} : { client_message_id: kind === "other-id" ? "other" : "local-q" } }]
+    if (kind === "duplicate-claim") remote.push({ ...remote[0], id: "question-2", serverMessageId: "question-2" })
+    await reconcileServerChatMirror({ historyId: "alice", chatId: "chat-1", ownerKey: "A", messages: remote })
+    expect(state.messages.get("local-q")?.serverMessageId).toBe(kind === "already-acknowledged" ? "different-server" : undefined)
+  })
+
   it.each([{ images: [] }, { images: [""] }])("recovers an anchored legacy user with images $images and keeps equal-text drafts", async ({ images }) => {
     state.histories.set("alice", history("alice", "A"))
     state.messages.set("local-q", { ...row("local-q", "alice", "Repeat"), images })

@@ -1,0 +1,12 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:19722) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx (12 tests) 18ms
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  22:18:41
+   Duration  660ms (transform 266ms, setup 63ms, import 296ms, tests 18ms, environment 200ms)
+

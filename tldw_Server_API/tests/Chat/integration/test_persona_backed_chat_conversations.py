@@ -298,6 +298,96 @@ def test_actual_provider_failure_then_retry_preserves_canonical_user(
     assert "tldw_retry_failed_turn" not in json.dumps(provider_call.call_args.kwargs["messages_payload"])
 
 
+@pytest.mark.asyncio
+async def test_client_correlation_failure_rolls_back_the_owned_user(persona_chat_db, monkeypatch):
+    conversation_id = persona_chat_db.add_conversation({"title": "Atomic correlation", "client_id": "1"})
+    monkeypatch.setattr(persona_chat_db, "add_message_metadata", lambda *_args, **_kwargs: False)
+    message_id = await chat_endpoint_module._save_message_turn_to_db(
+        persona_chat_db, conversation_id,
+        {"role": "user", "content": "Question", "client_message_id": "local-user"},
+        use_transaction=True,
+    )
+    assert message_id is None
+    assert persona_chat_db.get_messages_for_conversation(conversation_id) == []
+
+
+@pytest.mark.parametrize("metadata_kind", ["missing", "null", "invalid-json"])
+def test_failed_retry_handles_legacy_metadata_reads(persona_chat_client, persona_chat_db, metadata_kind):
+    client, headers, _provider = persona_chat_client
+    conversation_id = persona_chat_db.add_conversation({"title": "Legacy retry", "client_id": "1"})
+    body = _chat_completion_body(conversation_id)
+    message_id = persona_chat_db.add_message({"conversation_id": conversation_id, "sender": "user", "content": body["messages"][-1]["content"]})
+    if metadata_kind != "missing":
+        persona_chat_db.add_message_metadata(message_id, extra=None)
+        if metadata_kind == "invalid-json":
+            with persona_chat_db.transaction() as conn:
+                conn.execute("UPDATE message_metadata SET extra_json = ? WHERE message_id = ?", ("{invalid", message_id))
+    body["metadata"] = {"tldw_client_message_id": "local-user", "tldw_retry_failed_turn": True}
+    response = client.post("/api/v1/chat/completions", json=body, headers=headers)
+    assert response.status_code == 200
+    users = [row for row in persona_chat_db.get_messages_for_conversation(conversation_id) if row["sender"] == "user"]
+    assert [row["id"] for row in users] == [message_id]
+    assert response.json()["tldw_user_message_id"] == message_id
+
+
+@pytest.mark.asyncio
+async def test_client_correlation_does_not_change_empty_content_placeholder(persona_chat_db):
+    conversation_id = persona_chat_db.add_conversation({"title": "Empty correlated turn", "client_id": "1"})
+    message_id = await chat_endpoint_module._save_message_turn_to_db(
+        persona_chat_db, conversation_id,
+        {"role": "user", "content": None, "client_message_id": "local-empty"},
+        use_transaction=True,
+    )
+    saved = persona_chat_db.get_message_by_id(message_id)
+    assert saved["content"] == "<Message processing failed - no valid content>"
+    metadata = persona_chat_db.get_message_metadata(message_id)["extra"]
+    assert metadata["client_message_id"] == "local-empty"
+    assert "content_placeholder_reason" not in metadata
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_failed_provider_persists_client_correlation_before_any_response(persona_chat_client, persona_chat_db, stream):
+    client, headers, provider_call = persona_chat_client
+    conversation_id = persona_chat_db.add_conversation({"title": "Failed correlated turn", "client_id": "1"})
+    provider_call.side_effect = HTTPException(status_code=502, detail="Provider unavailable")
+    body = {**_chat_completion_body(conversation_id), "stream": stream,
+            "metadata": {"tldw_client_message_id": "pa_local-user"}}
+    body["messages"][-1]["content"] = "Question for {{char}}"
+    response = client.post("/api/v1/chat/completions", json=body, headers=headers)
+    assert response.status_code == 502
+    users = [row for row in persona_chat_db.get_messages_for_conversation(conversation_id) if row["sender"] == "user"]
+    assert len(users) == 1
+    saved_metadata = persona_chat_db.get_message_metadata(users[0]["id"])
+    assert saved_metadata["extra"]["client_message_id"] == "pa_local-user"
+    listing = client.get(f"/api/v1/chats/{conversation_id}/messages?include_metadata=true", headers=headers)
+    assert listing.status_code == 200
+    listed_user = next(row for row in listing.json()["messages"] if row["id"] == users[0]["id"])
+    assert listed_user["metadata_extra"]["client_message_id"] == "pa_local-user"
+    assert listed_user["content"] != "Question for {{char}}"
+    raw_listing = client.get(f"/api/v1/chats/{conversation_id}/messages?include_metadata=true&render_placeholders=false", headers=headers)
+    assert raw_listing.status_code == 200
+    raw_user = next(row for row in raw_listing.json()["messages"] if row["id"] == users[0]["id"])
+    assert raw_user["content"] == "Question for {{char}}"
+    assert raw_user["metadata_extra"]["client_message_id"] == "pa_local-user"
+    assert "pa_local-user" not in json.dumps(provider_call.call_args.kwargs["messages_payload"])
+    assert "metadata" not in provider_call.call_args.kwargs
+
+
+def test_failed_retry_refuses_extra_unmatched_users_without_partial_writes(persona_chat_client, persona_chat_db):
+    client, headers, provider_call = persona_chat_client
+    conversation_id = persona_chat_db.add_conversation({"title": "Ambiguous retry", "client_id": "1"})
+    body = _chat_completion_body(conversation_id)
+    question = body["messages"][-1]["content"]
+    persona_chat_db.add_message({"conversation_id": conversation_id, "sender": "user", "content": question})
+    before = persona_chat_db.get_messages_for_conversation(conversation_id)
+    body["messages"] = [body["messages"][-1], body["messages"][-1]]
+    body["metadata"] = {"tldw_retry_failed_turn": True}
+    response = client.post("/api/v1/chat/completions", json=body, headers=headers)
+    assert response.status_code == 409
+    assert persona_chat_db.get_messages_for_conversation(conversation_id) == before
+    provider_call.assert_not_called()
+
+
 def test_failed_turn_retry_rejects_conflicting_unanswered_tail(persona_chat_client, persona_chat_db):
     client, headers, provider_call = persona_chat_client
     conversation_id = persona_chat_db.add_conversation({"title": "Other pending turn", "client_id": "1"})

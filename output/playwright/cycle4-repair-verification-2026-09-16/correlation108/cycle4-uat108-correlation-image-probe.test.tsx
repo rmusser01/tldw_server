@@ -107,8 +107,7 @@ vi.mock("@/utils/update-page-title", () => ({
   updatePageTitle: mocks.updatePageTitle
 }))
 
-import { mapServerChatMessagesToPlaygroundMessages, useServerChatLoader } from "@/hooks/chat/useServerChatLoader"
-import { reconcileServerChatMessages } from "@/db/dexie/server-chat-mirror"
+import { useServerChatLoader } from "@/hooks/chat/useServerChatLoader"
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void
@@ -154,21 +153,6 @@ describe("useServerChatLoader scoped local history", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(200) })
     expect(mocks.listChatMessages.mock.calls[0][1].render_placeholders).toBe(kind === "character" ? "true" : "false")
     expect(mocks.setMessages.mock.calls[0][0][0].message).toBe(kind === "character" ? "Ask Cedar" : "Ask {{char}}")
-  })
-
-  it.each(["", "Question with an image"])("preserves an unacknowledged attachment when the actual mapper lacks image bytes: %s", content => {
-    const local = { id: "local-image", role: "user" as const, isBot: false, name: "You", message: content,
-      images: ["data:image/png;base64,aW1hZ2U="], sources: [] }
-    // The existing standard listing/client shape carries no attachment bytes.
-    const mapped = mapServerChatMessagesToPlaygroundMessages({
-      serverMessages: [{ id: "canonical-image", role: "user", content: content || "<Image attachment x1>",
-        created_at: "2026-09-16T00:00:00Z", version: 1, metadata_extra: { client_message_id: local.id } }],
-      assistantName: "Assistant", characterId: null
-    })
-    const merged = reconcileServerChatMessages([local], mapped)
-    expect(merged.find(row => row.id === local.id)).toEqual(local)
-    expect(merged.find(row => row.id === local.id)?.serverMessageId).toBeUndefined()
-    expect(merged.find(row => row.serverMessageId === "canonical-image")?.id).not.toBe(local.id)
   })
 
   it("reconciles a nonempty local mirror using acknowledged server identity", async () => {
@@ -287,3 +271,14 @@ describe("useServerChatLoader scoped local history", () => {
     expect(notification.error).not.toHaveBeenCalled()
   })
 })
+
+import { mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader"
+import { reconcileServerChatMessages } from "@/db/dexie/server-chat-mirror"
+
+it.each(["Question", ""])("private actual canonical image user is correlated: %s", text => {
+ const local={id:"local-image-user",isBot:false,role:"user",name:"You",message:text,images:["data:image/png;base64,aGVsbG8="],sources:[]};
+ const remote=mapServerChatMessagesToPlaygroundMessages({assistantName:"Assistant",characterId:null,serverMessages:[{id:"canonical-image-user",role:"user",content:text||"<Image attachment x1>",created_at:"2026-09-16T04:49:00Z",has_image:true,metadata_extra:{client_message_id:local.id}} as unknown as ServerChatMessage]});
+ const result=reconcileServerChatMessages([local],remote);
+ expect(result.filter(m=>m.role==="user")).toHaveLength(1);
+ expect(result[0].images).toEqual(local.images);
+});

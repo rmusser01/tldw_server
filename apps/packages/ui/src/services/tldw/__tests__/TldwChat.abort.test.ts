@@ -60,6 +60,18 @@ describe("TldwChatService abort lifecycle", () => {
     }
   })
 
+  it("carries the current local user correlation as app metadata on both transports", async () => {
+    mocks.createChatCompletion.mockResolvedValue({ json: async () => ({ choices: [{ message: { content: "answer" } }] }) })
+    mocks.streamChatCompletion.mockImplementation(async function* () { yield chunk("answer") })
+    const service = new TldwChatService()
+    const messages = [{ role: "user" as const, content: "Question" }]
+    await service.sendMessage(messages, { model: "m", clientMessageId: "local-user" })
+    for await (const _token of service.streamMessage(messages, { model: "m", clientMessageId: "local-user", retryFailedTurn: true })) { /* consume */ }
+    expect(mocks.createChatCompletion.mock.calls[0][0].metadata).toEqual({ tldw_client_message_id: "local-user" })
+    expect(mocks.streamChatCompletion.mock.calls[0][0].metadata).toEqual({ tldw_client_message_id: "local-user", tldw_retry_failed_turn: true })
+    expect(mocks.createChatCompletion.mock.calls[0][0].messages).toEqual(messages)
+  })
+
   it("passes the captured request scope to both completion transports", async () => {
     mocks.createChatCompletion.mockResolvedValue({
       json: async () => ({ choices: [{ message: { content: "answer" } }] })

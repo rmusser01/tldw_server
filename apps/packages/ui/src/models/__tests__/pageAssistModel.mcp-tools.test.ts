@@ -79,12 +79,12 @@ describe("pageAssistModel MCP tools", () => {
 
   it("forwards failed-turn retry intent through the real model without changing messages", async () => {
     vi.mocked(tldwChat.streamMessage).mockImplementation(async function* () { yield "Recovered" })
-    const chat = await pageAssistModel({ model: "tool-model", conversationId: "saved", saveToDb: true, retryFailedTurn: true })
+    const chat = await pageAssistModel({ model: "tool-model", conversationId: "saved", saveToDb: true, retryFailedTurn: true, clientMessageId: "local-user" })
     for await (const _token of await chat.stream([])) { /* consume */ }
-    expect(vi.mocked(tldwChat.streamMessage).mock.calls.at(-1)?.[1]).toMatchObject({ retryFailedTurn: true, conversationId: "saved" })
+    expect(vi.mocked(tldwChat.streamMessage).mock.calls.at(-1)?.[1]).toMatchObject({ retryFailedTurn: true, clientMessageId: "local-user", conversationId: "saved" })
     vi.mocked(tldwChat.sendMessage).mockResolvedValue("Recovered")
     await chat.invoke([])
-    expect(vi.mocked(tldwChat.sendMessage).mock.calls.at(-1)?.[1]).toMatchObject({ retryFailedTurn: true, conversationId: "saved" })
+    expect(vi.mocked(tldwChat.sendMessage).mock.calls.at(-1)?.[1]).toMatchObject({ retryFailedTurn: true, clientMessageId: "local-user", conversationId: "saved" })
   })
 
   it("keeps temporary conversations unpersisted even with a stale server id", async () => {

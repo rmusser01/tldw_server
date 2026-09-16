@@ -3118,6 +3118,13 @@ async def _save_message_turn_to_db(
             serialized_extra = {}
         serialized_extra["content_placeholder_reason"] = placeholder_reason
 
+    # This application-only correlation is written with the user, even if the provider fails.
+    client_message_id = message_obj.get("client_message_id")
+    if role == "user" and isinstance(client_message_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", client_message_id):
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra["client_message_id"] = client_message_id
+
     if sender_meta:
         if serialized_extra is None:
             serialized_extra = {}

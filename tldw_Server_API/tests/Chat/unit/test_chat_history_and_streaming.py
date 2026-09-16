@@ -416,6 +416,60 @@ async def test_explicit_failed_retry_uses_actual_tail_even_outside_context_windo
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("marker", ["client-user", "", "x" * 129, {"unsafe": "object"}])
+async def test_client_correlation_is_bounded_and_only_attached_to_final_persisted_user(marker):
+    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+
+    class SavedDB(DummyChatDB):
+        def get_conversation_by_id(self, _id):
+            return {"id": "conv", "character_id": 1, "client_id": "client"}
+
+    request = ChatCompletionRequest(model="test", save_to_db=True, conversation_id="conv",
+        messages=[{"role": "user", "content": "Earlier"}, {"role": "user", "content": "Current"}],
+        metadata={"tldw_client_message_id": marker})
+    save = AsyncMock(return_value="saved-user")
+    result = await chat_service.build_context_and_messages(chat_db=SavedDB([]), request_data=request,
+        loop=asyncio.get_running_loop(), metrics=MagicMock(), default_save_to_db=False,
+        final_conversation_id="conv", save_message_fn=save)
+    stored = [call.args[2] for call in save.await_args_list]
+    assert "client_message_id" not in stored[0]
+    assert stored[1].get("client_message_id") == (marker if marker == "client-user" else None)
+    assert all("client_message_id" not in message for message in result[4])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extra", [None, {}, {"client_message_id": "same"}, {"client_message_id": "different"}])
+async def test_retry_client_identity_respects_saved_correlation_and_legacy_metadata(extra):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+
+    class SavedDB(DummyChatDB):
+        def get_conversation_by_id(self, _id):
+            return {"id": "conv", "character_id": 1, "client_id": "client"}
+        def get_message_metadata(self, _id):
+            return {"extra": extra}
+
+    request = ChatCompletionRequest(model="test", save_to_db=True, conversation_id="conv",
+        messages=[{"role": "user", "content": "Question"}],
+        metadata={"tldw_client_message_id": "same", "tldw_retry_failed_turn": True})
+    save = AsyncMock()
+    state = {}
+    call = chat_service.build_context_and_messages(chat_db=SavedDB([
+        {"id": "user", "sender": "user", "content": "Question", "timestamp": 1}]), request_data=request,
+        loop=asyncio.get_running_loop(), metrics=MagicMock(), default_save_to_db=False,
+        final_conversation_id="conv", save_message_fn=save, runtime_state=state)
+    if extra == {"client_message_id": "different"}:
+        with pytest.raises(HTTPException) as error:
+            await call
+        assert error.value.status_code == 409
+    else:
+        await call
+        assert state["user_message_id"] == "user"
+    save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["matching-image", "changed-image", "answered", "legacy-error", "not-persisted", "ordinary-repeat"])
 async def test_failed_retry_identity_conflict_and_compatibility_controls(kind):
     from fastapi import HTTPException

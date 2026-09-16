@@ -11,9 +11,10 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ChatTldw } from "@/models/ChatTldw"
 import { useChatActions } from "../useChatActions"
+import { useServerChatLoader } from "../useServerChatLoader"
 import { usePlaygroundPersistence } from "@/components/Option/Playground/hooks/usePlaygroundPersistence"
 import { useStoreMessageOption } from "@/store/option"
-import { reconcileServerChatMessages } from "@/db/dexie/server-chat-mirror"
+import { reconcileServerChatMessages, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue"
 
 const mocks = vi.hoisted(() => ({
@@ -32,9 +33,12 @@ const mocks = vi.hoisted(() => ({
   getActorSettings: vi.fn(),
   notifyError: vi.fn(),
   rows: [] as Array<Record<string, unknown>>,
+  mirrorHistories: new Map<string, Record<string, unknown>>(),
+  withLoader: false,
+  selectionRevision: 0,
   serverRows: new Map<
     string,
-    Array<{ id?: string; role: string; content: string }>
+    Array<{ id?: string; role: string; content: string; metadata_extra?: Record<string, unknown> }>
   >(),
   watches: new Set<{ tldwConfig: (change: { newValue: unknown }) => void }>(),
   config: {
@@ -97,6 +101,26 @@ vi.mock("@/utils/actor", () => ({
 vi.mock("@/services/actor-settings", () => ({
   getActorSettingsForChat: mocks.getActorSettings
 }))
+vi.mock("@/db/dexie/schema", () => ({ db: {
+  chatHistories: { get: async (id: string) => mocks.mirrorHistories.get(id) },
+  messages: {
+    get: async (id: string) => mocks.rows.find(row => row.id === id),
+    where: (field: string) => ({ equals: (value: unknown) => ({ toArray: async () => mocks.rows.filter(row => row[field] === value) }) }),
+    add: async (row: Record<string, unknown>) => { mocks.rows.push(row); return row.id },
+    put: async (row: Record<string, unknown>) => {
+      const index = mocks.rows.findIndex(item => item.id === row.id)
+      if (index < 0) mocks.rows.push(row)
+      else mocks.rows[index] = row
+      return row.id
+    }
+  }
+} }))
+vi.mock("@/hooks/useSelectedAssistant", () => ({
+  getSelectedAssistantOperationRevision: () => mocks.selectionRevision,
+  useSelectedAssistant: () => [null, setLoaderSelection]
+}))
+function setLoaderSelection() { mocks.selectionRevision++ }
+
 vi.mock("@/db/dexie/helpers", () => ({
   acknowledgeSavedUserMessage: async (historyId: string, id: string, serverMessageId: string) => {
     const row = mocks.rows.find(row => row.history_id === historyId && row.id === id && row.role === "user")
@@ -114,7 +138,11 @@ vi.mock("@/db/dexie/helpers", () => ({
   removeMessageByIndex: vi.fn(),
   removeMessageById: mocks.removeMessageById,
   formatToChatHistory: (items: unknown) => items,
-  formatToMessage: (items: unknown) => items,
+  formatToMessage: (items: Array<Record<string, unknown>>) => mocks.withLoader ? items.map(row => ({
+    ...row, id: row.id, serverMessageId: row.serverMessageId, message: row.content,
+    isBot: row.role !== "user", name: row.name || "You", sources: row.sources || [],
+    parentMessageId: row.parent_message_id
+  })) : items,
   getSessionFiles: async () => [],
   getPromptById: async () => null,
   updateLastUsedModel: vi.fn(),
@@ -272,7 +300,14 @@ const NotificationHost = ({ children }: React.PropsWithChildren) => {
   )
 }
 
-const renderWorkspace = (realNotifications = false) =>
+const loaderTranslate = ((_key: string, options?: { defaultValue?: string }) => options?.defaultValue || _key) as Parameters<typeof useServerChatLoader>[0]["t"]
+const loaderNotification = { error: mocks.notifyError }
+const ServerLoaderHost = ({ children }: React.PropsWithChildren) => {
+  useServerChatLoader({ ensureServerChatHistoryId: mocks.ensureHistory, notification: loaderNotification, t: loaderTranslate })
+  return <>{children}</>
+}
+
+const renderWorkspace = (realNotifications = false, withLoader = false) =>
   renderHook(
     ({ ready }) => {
       const notificationApi = React.useContext(NotificationContext)
@@ -325,7 +360,7 @@ const renderWorkspace = (realNotifications = false) =>
     },
     {
       initialProps: { ready: true },
-      wrapper: realNotifications ? NotificationHost : undefined
+      wrapper: withLoader ? ServerLoaderHost : realNotifications ? NotificationHost : undefined
     }
   )
 
@@ -562,6 +597,9 @@ describe("saved normal Chat pipeline with autosave", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.rows.length = 0
+    mocks.mirrorHistories.clear()
+    mocks.withLoader = false
+    mocks.selectionRevision = 0
     mocks.serverRows.clear()
     mocks.watches.clear()
     mocks.config = {
@@ -602,11 +640,12 @@ describe("saved normal Chat pipeline with autosave", () => {
     mocks.saveMessage.mockImplementation(async (row) => {
       mocks.rows.push(row)
     })
-    mocks.ensureHistory.mockImplementation(async () => {
+    mocks.ensureHistory.mockImplementation(async (chatId, title, _signal, snapshot) => {
       const localId = useStoreMessageOption.getState().historyId || "local-1"
       useStoreMessageOption
         .getState()
         .setHistoryId(localId, { preserveServerChatId: true })
+      if (snapshot) mocks.mirrorHistories.set(localId, { id: localId, title, server_chat_id: chatId, server_scope_key: serverChatMirrorOwnerKey(snapshot) })
       return localId
     })
     mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => {
@@ -633,6 +672,66 @@ describe("saved normal Chat pipeline with autosave", () => {
         }
       }
     })
+  })
+
+  it("hydrates a failed saved turn before Retry without duplicating the canonical user", async () => {
+    mocks.withLoader = true
+    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
+    const projected: unknown[][] = []
+    mocks.pageAssistModel.mockImplementation(async ({ conversationId, clientMessageId, retryFailedTurn }) =>
+      new ChatTldw({ model: "test", saveToDb: true, conversationId, clientMessageId, retryFailedTurn }))
+    mocks.streamMessage.mockImplementation(async function* (messages, options, onChunk) {
+      projected.push(messages)
+      if (projected.length === 1) {
+        mocks.serverRows.get(options.conversationId)!.push({ id: "saved-failed-user", role: "user", content: "Retry question", metadata_extra: { client_message_id: options.clientMessageId } })
+        throw new Error("Provider failed before response metadata")
+      }
+      mocks.serverRows.get(options.conversationId)!.push({ id: "saved-answer", role: "assistant", content: "Recovered final answer" })
+      onChunk({ tldw_user_message_id: "saved-failed-user", tldw_message_id: "saved-answer" })
+      yield "Recovered final answer"
+    })
+    let view = renderWorkspace(false, true)
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Retry question", image: "" }) })
+    await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
+    expect(view.result.current.state.messages.filter(row => !row.isBot)).toHaveLength(1)
+    expect(view.result.current.state.messages.find(row => !row.isBot)?.serverMessageId).toBe("saved-failed-user")
+    expect(mocks.rows.filter(row => row.role === "user")).toHaveLength(1)
+    await act(async () => { await view.result.current.actions.regenerateLastMessage() })
+    expect(JSON.stringify(projected[1]).match(/Retry question/g)).toHaveLength(1)
+    expect(view.result.current.state.messages.at(-1)?.message).toBe("Recovered final answer")
+    const localId = view.result.current.state.messages.find(row => !row.isBot)?.id
+    view.unmount()
+    act(() => useStoreMessageOption.setState({ serverChatLoadState: "idle", serverChatMetaLoaded: false }))
+    view = renderWorkspace(false, true)
+    await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
+    expect(view.result.current.state.messages.filter(row => !row.isBot).map(row => row.id)).toEqual([localId])
+    expect(view.result.current.state.messages.filter(row => row.serverMessageId === "saved-answer")).toMatchObject([{ message: "Recovered final answer" }])
+    view.unmount()
+  })
+
+  it.each(["B", "A"])("does not apply delayed failed-user correlation after A to B to %s", async destination => {
+    mocks.withLoader = true
+    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
+    const response = deferred<Array<{ id: string; role: string; content: string; metadata_extra: Record<string, unknown> }>>()
+    mocks.listChatMessages.mockReturnValueOnce(response.promise)
+    mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => ({
+      saveToDb: true, conversationId, stream: async function* () { yield await Promise.reject(new Error("Provider failed")) }
+    }))
+    const view = renderWorkspace(false, true)
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Alice pending question", image: "" }) })
+    const original = view.result.current.state.messages.find(row => !row.isBot)!
+    await waitFor(() => expect(mocks.listChatMessages).toHaveBeenCalled())
+    const draft = { id: "new-owner-draft", isBot: false, name: "You", message: "New owner work", sources: [] }
+    await act(async () => {
+      replaceAuthority("synthetic-b")
+      if (destination === "A") replaceAuthority("synthetic-a")
+      useStoreMessageOption.setState({ serverChatId: null, historyId: "new-owned-history", messages: [draft], history: [{ role: "user", content: draft.message }] })
+      response.resolve([{ id: "late-canonical-user", role: "user", content: original.message, metadata_extra: { client_message_id: original.id } }])
+      await response.promise
+    })
+    expect(view.result.current.state.messages).toEqual([draft])
+    expect(mocks.rows.find(row => row.id === original.id)?.serverMessageId).toBeUndefined()
+    view.unmount()
   })
 
   it("successful regeneration does not re-ACK the already acknowledged user", async () => {

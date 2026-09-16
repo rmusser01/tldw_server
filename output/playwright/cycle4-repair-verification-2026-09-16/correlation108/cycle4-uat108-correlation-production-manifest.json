@@ -1,0 +1,66 @@
+{
+  "task": "TASK-13260.49",
+  "sourceBaseline": "7dcee3d72c",
+  "frozenAt": "2026-09-16T05:21:13.630Z",
+  "checkpointHead": "b4c72cb814723ccf72f02bf98162e79738c8dda7",
+  "production": 8,
+  "tests": 7,
+  "entries": [
+    {
+      "path": "apps/packages/ui/src/db/dexie/server-chat-mirror.ts",
+      "kind": "production",
+      "bytes": 10545,
+      "sha256": "efab5d47793f2dd335a8e28b17361a549e0bf73ccbe20c3576384c1a6215fc1b",
+      "baselineSha256": "3953c0031b421ca1d3a3c679c213ebf98216bdc780dd9d98e8af9397aa0b1008"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "kind": "production",
+      "bytes": 39135,
+      "sha256": "441b5f15c5736dad0905016a865c32eb97762586ad0e28cbd6e7d60d78a47b11",
+      "baselineSha256": "c295d2263768e5bb004c32d295f77f6c2953d40a290aeef509008a242e4bf2a9"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useServerChatLoader.ts",
+      "kind": "production",
+      "bytes": 42203,
+      "sha256": "f489f166016fdc7a2d2b48ef774d9dda0bc322333e5b1ca9c32ea240ba2d3a43",
+      "baselineSha256": "ece2dbf6112363b3cc4cd3ed4f42d4b64505ce332b5e57a8e648b90580eac859"
+    },
+    {
+      "path": "apps/packages/ui/src/models/ChatTldw.ts",
+      "kind": "production",
+      "bytes": 16830,
+      "sha256": "2e08a6fac6a4450773a0d5a5923e1ff78d829141ebe38d53ff668b00cddc824c",
+      "baselineSha256": "8c73793e1cd63f9e10873d290d6bee05a4c3fe77a5a07bf5bfab30f0b6f31deb"
+    },
+    {
+      "path": "apps/packages/ui/src/models/index.ts",
+      "kind": "production",
+      "bytes": 9590,
+      "sha256": "4f51bdce95aede962517237862fd71ee7efab609076c111a31990befe2ef16c6",
+      "baselineSha256": "40668c49c2d4142541aa3f4e3924d8610480fa44e4a524ed5b5786808ed9b1e1"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/TldwChat.ts",
+      "kind": "production",
+      "bytes": 25395,
+      "sha256": "0e2df34c47ef1994724a768bea3aa567d8aab4327eebae772157c06ac87e3445",
+      "baselineSha256": "2aeba02eb736de1f5850762cba1806c5d11d641f3e8923b75147937467370767"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Chat/chat_service.py",
+      "kind": "production",
+      "bytes": 311112,
+      "sha256": "c39bf5beb6cd7b0195b9344c80b3f79942899b0c0c0566e38e3e9370b8e8d298",
+      "baselineSha256": "beda4eddd3875a04b9aedeae745ebba7f060c1198c7e0377949c740c39fcbbcc"
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/chat.py",
+      "kind": "production",
+      "bytes": 364742,
+      "sha256": "11b172a39bc1d38a1d697e29e50c773ac7d7dad0789469603e6da530af2fdf7c",
+      "baselineSha256": "db6cb6aa68752aa8fa8eb3eac42da468fec69eecdd9df0fe4af7f4dbbd9a7409"
+    }
+  ]
+}

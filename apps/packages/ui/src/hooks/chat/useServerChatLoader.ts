@@ -997,6 +997,7 @@ export const useServerChatLoader = ({
                 {
                   include_deleted: "false",
                   include_metadata: "true",
+                  render_placeholders: assistantKind === "character" || characterId != null ? "true" : "false",
                   limit,
                   offset
                 },

@@ -1,0 +1,22 @@
+{
+  "baseline": "7dcee3d72c",
+  "paths": [
+    "apps/packages/ui/src/db/dexie/server-chat-mirror.ts",
+    "apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+    "apps/packages/ui/src/hooks/chat/useServerChatLoader.ts",
+    "apps/packages/ui/src/models/ChatTldw.ts",
+    "apps/packages/ui/src/models/index.ts",
+    "apps/packages/ui/src/services/tldw/TldwChat.ts",
+    "apps/packages/ui/src/db/dexie/__tests__/server-chat-mirror.test.ts",
+    "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+    "apps/packages/ui/src/hooks/__tests__/useServerChatLoader.scope.test.tsx",
+    "apps/packages/ui/src/models/__tests__/pageAssistModel.mcp-tools.test.ts",
+    "apps/packages/ui/src/services/tldw/__tests__/TldwChat.abort.test.ts"
+  ],
+  "currentErrors": 0,
+  "currentWarnings": 22,
+  "baselineErrors": 0,
+  "baselineWarnings": 22,
+  "added": [],
+  "removed": []
+}

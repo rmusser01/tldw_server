@@ -4262,6 +4262,9 @@ async def build_context_and_messages(
         request_messages.append(msg_dict)
 
     metadata = getattr(request_data, "metadata", None)
+    client_message_id = metadata.get("tldw_client_message_id") if isinstance(metadata, dict) else None
+    if not isinstance(client_message_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", client_message_id):
+        client_message_id = None
     explicit_failed_retry = isinstance(metadata, dict) and metadata.get("tldw_retry_failed_turn") is True
     retry_user_message_id: str | None = None
     if explicit_failed_retry and should_persist and not conversation_created and request_messages:
@@ -4392,6 +4395,15 @@ async def build_context_and_messages(
                             conv_id,
                         )
 
+    if retry_user_message_id and any(message.get("role") == "user" for message in request_messages[overlap_cut:-1]):
+        raise HTTPException(status_code=409, detail="This retry contains extra unsaved user messages. Resolve the local conversation before retrying.")
+    if retry_user_message_id and client_message_id:
+        saved_metadata = await loop.run_in_executor(None, chat_db.get_message_metadata, retry_user_message_id)
+        saved_extra = (saved_metadata or {}).get("extra")
+        saved_client_id = saved_extra.get("client_message_id") if isinstance(saved_extra, dict) else None
+        if saved_client_id and saved_client_id != client_message_id:
+            raise HTTPException(status_code=409, detail="The failed turn identity changed. Reload the conversation before retrying.")
+
     persisted_user_message_id: str | None = retry_user_message_id
     current_turn: list[dict[str, Any]] = []
     for index, msg_dict in enumerate(request_messages[overlap_cut:], start=overlap_cut):
@@ -4402,6 +4414,8 @@ async def build_context_and_messages(
             msg_for_db["name"] = sanitize_sender_name(character_card.get("name", "Assistant"))
         reused_retry = retry_user_message_id is not None and index == len(request_messages) - 1
         if should_persist and not reused_retry:
+            if role == "user" and index == len(request_messages) - 1 and client_message_id:
+                msg_for_db["client_message_id"] = client_message_id
             saved_message_id = await save_message_fn(chat_db, conv_id, msg_for_db, use_transaction=True)
             if role == "user":
                 persisted_user_message_id = str(saved_message_id) if saved_message_id else None

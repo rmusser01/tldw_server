@@ -42,8 +42,30 @@ export const linkServerChatMirror = async ({
 
 const canonicalId = (message: ChatMessage) => message.serverMessageId?.trim() || null
 
+/** A request's local user ID is an identity anchor even when the provider failed before any ACK. */
+const recoverCorrelatedUsers = (current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] => {
+  const claims = new Map<string, ChatMessage[]>()
+  for (const remote of incoming) {
+    const clientId = remote.metadataExtra?.client_message_id
+    if (remote.isBot || (remote.role && remote.role !== "user") || !canonicalId(remote) ||
+      typeof clientId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(clientId)) continue
+    claims.set(clientId, [...(claims.get(clientId) || []), remote])
+  }
+  return current.map(local => {
+    const matches = local.id ? claims.get(local.id) : undefined
+    if (matches?.length !== 1 || local.isBot || (local.role && local.role !== "user") || canonicalId(local)) return local
+    const remote = matches[0]
+    const serverId = canonicalId(remote)!
+    if (current.some(message => canonicalId(message) === serverId || message.id === serverId) ||
+      current.filter(message => message.id === local.id).length !== 1 || local.message !== remote.message ||
+      JSON.stringify((local.images || []).filter(Boolean)) !== JSON.stringify((remote.images || []).filter(Boolean))) return local
+    return { ...local, serverMessageId: serverId }
+  })
+}
+
 /** Recover only a local user paired to an acknowledged saved reply. Text alone is never identity. */
 const recoverAnchoredUsers = (current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] => {
+  current = recoverCorrelatedUsers(current, incoming)
   const claims = new Map<string, string[]>()
   for (let index = 1; index < incoming.length; index++) {
     const reply = incoming[index]
