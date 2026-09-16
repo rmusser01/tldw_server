@@ -1,0 +1,66 @@
+{
+  "unit": "prompt-sync120-fixture",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-uat120-native-storage-green.log",
+      "bytes": 535,
+      "sha256": "a6f784b2ba6e8e0969f61fa325e169aed07e782e92a599284ab27705cf97040e"
+    },
+    {
+      "file": "cycle4-uat120-native-storage-red.log",
+      "bytes": 1969,
+      "sha256": "2a39070fcffe3091ef50379b3759eae18bbf1f4dcc821c089e61847b7af557e4"
+    },
+    {
+      "file": "cycle4-uat120-native-storage-related.log",
+      "bytes": 1598,
+      "sha256": "b60fafc2e83c6fca4f70be37bcdd9db5548784f55ff5468ea1d5dfd88b213149"
+    },
+    {
+      "file": "cycle4-uat120-storage-root-review.md",
+      "bytes": 530,
+      "sha256": "2c729d6852109f5e5b4118892ffdfed656d81ff0a4178b013611cc22c4a08705"
+    },
+    {
+      "file": "cycle4-uat120-storage-root-ui.log",
+      "bytes": 535,
+      "sha256": "1f9d17f8bdb6528480d8e35d51288fdcddbc83dcf1367474d103d0b93cf43cd4"
+    },
+    {
+      "file": "cycle4-uat120-storage-root-web.log",
+      "bytes": 552,
+      "sha256": "fbc3f223569a930edeb2d73883be4485ce9b1389641803912552e7a162f25f98"
+    },
+    {
+      "file": "cycle4-uat120-storage-test-followup.md",
+      "bytes": 2986,
+      "sha256": "a915be9939a189991cce25d8a0dcfde22d10ddd41c3479060d6242447aabf77c"
+    },
+    {
+      "file": "cycle4-uat120-storage-test-freeze.json",
+      "bytes": 561,
+      "sha256": "2cf85d63c3b75b65cb96542f5cdebd0b84797b591b6be7225da60319e4870a0f"
+    },
+    {
+      "file": "cycle4-uat120-storage-test-lint-baseline.log",
+      "bytes": 261,
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "file": "cycle4-uat120-storage-test-lint.log",
+      "bytes": 261,
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "file": "cycle4-uat120-web-storage-green.log",
+      "bytes": 552,
+      "sha256": "6dee44ac3f63893e084ccc2f60f94664f4883da4bc7d530181ccd45a55291de5"
+    },
+    {
+      "file": "cycle4-uat120-web-storage-related.log",
+      "bytes": 1676,
+      "sha256": "9f57342da10262cb5258789d5fe76c738673c78a7ca9da9c8f0a88b1a5efcad1"
+    }
+  ]
+}

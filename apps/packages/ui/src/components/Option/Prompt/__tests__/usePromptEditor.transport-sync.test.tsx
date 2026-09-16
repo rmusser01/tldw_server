@@ -93,6 +93,24 @@ function mountEditor() {
   return { ...rendered, queryClient }
 }
 
+function createStorageArea(initial: Record<string, unknown> = {}) {
+  const values = structuredClone(initial)
+  return {
+    get: async (
+      keys: string | string[] | null = null,
+      callback?: (result: Record<string, unknown>) => void
+    ) => {
+      const requested = keys === null ? Object.keys(values) : typeof keys === "string" ? [keys] : keys
+      const result = structuredClone(Object.fromEntries(
+        requested.filter(key => key in values).map(key => [key, values[key]])
+      ))
+      callback?.(result)
+      return result
+    },
+    set: async (items: Record<string, unknown>) => { Object.assign(values, structuredClone(items)) }
+  }
+}
+
 beforeEach(async () => {
   rows.clear()
   rows.set(original.id, structuredClone(original))
@@ -102,13 +120,13 @@ beforeEach(async () => {
   vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "")
   vi.stubEnv("NEXT_PUBLIC_TLDW_API_KEY", "")
   vi.stubEnv("VITE_TLDW_API_KEY", "")
-  // The production helper also mirrors local saves to Firefox storage.
-  let firefoxRows = [structuredClone(original)]
-  vi.stubGlobal("chrome", { storage: { local: {
-    get: (_key: string, callback: (value: { prompts: Prompt[] }) => void) =>
-      callback({ prompts: structuredClone(firefoxRows) }),
-    set: async (value: { prompts: Prompt[] }) => { firefoxRows = structuredClone(value.prompts) }
-  } } })
+  // Native Plasmo reads credentials from local and settings from sync; the
+  // Firefox prompt mirror uses the callback API on the same local area.
+  vi.stubGlobal("chrome", { storage: {
+    local: createStorageArea({ prompts: [original] }),
+    sync: createStorageArea(),
+    session: createStorageArea()
+  } })
   await createSafeStorage({ area: "local" }).set("tldwConfig", {
     serverUrl: "https://prompt.test", authMode: "single-user", apiKey: "test-prompt-key",
     credentialSource: "manual", apiKeyPersistence: "device", apiKeyServerOrigin: "https://prompt.test"

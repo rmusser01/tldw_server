@@ -1,0 +1,24 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:72180) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:72181) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Prompt/__tests__/SyncStatusBadge.test.tsx (12 tests) 133ms
+(node:72191) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/prompt-sync.uncertainty.test.ts (62 tests) 64ms
+ ✓ src/components/Option/Prompt/__tests__/usePromptEditor.transport-sync.test.tsx (1 test) 271ms
+(node:72194) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/prompt-sync.auto-sync.test.ts (49 tests) 28ms
+(node:72196) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Prompt/__tests__/usePromptEditor.save-state.test.tsx (6 tests) 17ms
+
+ Test Files  5 passed (5)
+      Tests  130 passed (130)
+   Start at  23:35:57
+   Duration  2.19s (transform 345ms, setup 425ms, import 1.22s, tests 513ms, environment 1.49s)
+

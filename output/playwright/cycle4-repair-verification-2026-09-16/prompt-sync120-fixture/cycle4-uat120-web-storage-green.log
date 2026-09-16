@@ -1,0 +1,12 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:71942) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/Prompt/__tests__/usePromptEditor.transport-sync.test.tsx (1 test) 243ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  23:35:29
+   Duration  1.46s (transform 182ms, setup 114ms, import 689ms, tests 243ms, environment 322ms)
+

@@ -1,0 +1,33 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:70409) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Option/Prompt/__tests__/usePromptEditor.transport-sync.test.tsx (1 test | 1 failed) 3ms
+   × persists and reloads Pending after an actual normalized fetch failure, then adopts only the acknowledged version 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Prompt/__tests__/usePromptEditor.transport-sync.test.tsx > persists and reloads Pending after an actual normalized fetch failure, then adopts only the acknowledged version
+TypeError: Cannot read properties of undefined (reading 'set')
+ ❯ g.rawSetMany ../../node_modules/.bun/@plasmohq+storage@1.15.0+f4eacebf2041cd4f/node_modules/@plasmohq/storage/dist/index.js:1:2407
+ ❯ g.rawSet ../../node_modules/.bun/@plasmohq+storage@1.15.0+f4eacebf2041cd4f/node_modules/@plasmohq/storage/dist/index.js:1:2232
+ ❯ g.set ../../node_modules/.bun/@plasmohq+storage@1.15.0+f4eacebf2041cd4f/node_modules/@plasmohq/storage/dist/index.js:1:4378
+ ❯ setSetting src/services/settings/registry.ts:163:17
+    161|   const storage = getStorageForSetting(setting)
+    162|   const normalized = normalizeSettingValue(setting, value)
+    163|   await storage.set(setting.key, normalized)
+       |                 ^
+    164|   writeLocalStorageValue(setting, normalized)
+    165| }
+ ❯ Module.setPromptStudioDefaults src/services/prompt-studio-settings.ts:51:9
+ ❯ src/components/Option/Prompt/__tests__/usePromptEditor.transport-sync.test.tsx:116:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  23:32:11
+   Duration  1.27s (transform 186ms, setup 107ms, import 732ms, tests 3ms, environment 335ms)
+
