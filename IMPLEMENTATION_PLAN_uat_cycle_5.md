@@ -69,6 +69,8 @@ Assignments are dispatched explicitly only after Stage1 closes. No worker broad 
 
 - 150 is reviewed/committed and actual repeated authenticated reads pass in both modes.147 remains open after another real restart deadlock reveals reciprocal Media sequence maintenance of foreign ChaCha tables. Retain the valid ChaCha ownership fix; restrict Media maintenance to owned pairs with positive inventory/advancement and negative foreign-sequence/lock controls. Current gate136verified/11implemented-pending/2blocked/1unresolved across150unique findings; no PostgreSQL browser workflow has run.
 
+- At17:11UTC, reciprocal147 is independently reviewed and committed473e17be93. Author/independent137 tests across5 files each pass with0skips; canonical39-pair inventory and scoped Ruff/Bandit are clean. Three consecutive normal startups per PostgreSQL mode pass Media initialization, structured connection/write health and repeated authenticated Characters/Chats/Notes reads. Exact020 pre-provider warning acceptance also passes in the fresh r3 single browser. Current gate138verified/10implemented-pending/2blocked/0unresolved across150findings. Full fresh UAT remains blocked by the remaining acceptance gaps; r3 runtimes stay available for targeted work.
+
 - Stop/restart only identified owned runtimes when source changes require it. Preserve the prior no-restart setup evidence and all profile data.
 - Serialize real model inference. Do not change product while collecting native acceptance.
 - Reconcile Backlog criteria from evidence; retain unresolved coverage limits rather than closing them as native passes.
