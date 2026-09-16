@@ -125,17 +125,17 @@ export function CompanionHomeShell({
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-sm font-medium text-text">
-                Configure an LLM provider to start chatting
+                Chat model setup
               </p>
               <p className="mt-1 text-xs text-text-muted">
-                Connect a local model server or a hosted provider in Model Settings.
+                Review chat model readiness and server setup guidance.
               </p>
             </div>
             <Link
               to="/settings/model"
               className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
             >
-              Open Model Settings
+              Review model setup
             </Link>
           </div>
         </div>

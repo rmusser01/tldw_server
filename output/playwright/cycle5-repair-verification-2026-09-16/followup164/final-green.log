@@ -1,0 +1,29 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:68626) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:68625) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:68629) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:68627) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:68624) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:68628) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/Models/__tests__/modelsDisplayUtils.test.ts (6 tests) 8ms
+ ✓ ../packages/ui/src/components/Option/Onboarding/__tests__/MultiUserExitPanel.test.tsx (1 test) 90ms
+ ✓ ../packages/ui/src/components/Option/CompanionHome/__tests__/CompanionHomeShell.providers.test.tsx (3 tests) 158ms
+ ✓ ../packages/ui/src/components/Option/Models/__tests__/AvailableModelsList.test.tsx (3 tests) 258ms
+stderr | ../packages/ui/src/components/Option/CompanionHome/__tests__/CompanionHomeShell.test.tsx > CompanionHomeShell > renders functional quick actions for the options surface
+react-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: 'NO_I18NEXT_INSTANCE' }
+
+ ✓ ../packages/ui/src/components/Option/CompanionHome/__tests__/CompanionHomeShell.test.tsx (6 tests) 157ms
+ ✓ ../packages/ui/src/components/Option/Models/__tests__/ModelsBody.test.tsx (12 tests) 1153ms
+
+ Test Files  6 passed (6)
+      Tests  31 passed (31)
+   Start at  15:09:14
+   Duration  2.30s (transform 1.06s, setup 650ms, import 2.76s, tests 1.82s, environment 1.61s)

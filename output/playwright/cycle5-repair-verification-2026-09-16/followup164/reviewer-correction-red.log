@@ -1,0 +1,512 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:69115) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/components/Option/Models/__tests__/ModelsBody.test.tsx (12 tests | 2 failed | 10 skipped) 437ms
+     ↓ puts defaults and provider readiness before the full catalog
+     ↓ uses server model configuration fields when provider-key details are empty
+     ↓ does not show configured key counts when provider-key lookup fails
+     × guides single-user users directly to operator documentation regardless of setup-route state 277ms
+     × guides multi-user users directly to operator documentation regardless of setup-route state 159ms
+     ↓ keeps metadata 401 distinct from no-ready-model guidance
+     ↓ keeps metadata 503 distinct from no-ready-model guidance
+     ↓ waits for metadata before presenting an empty discovery result as setup guidance
+     ↓ keeps failed Refresh in recovery and lets Retry recover to successful empty guidance
+     ↓ refreshes an empty catalog without reporting a credential failure and shows newly ready models
+     ↓ sanitizes refresh failure notifications before showing them
+     ↓ sanitizes OpenAI OAuth action failure notifications
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Option/Models/__tests__/ModelsBody.test.tsx > ModelsBody > guides single-user users directly to operator documentation regardless of setup-route state
+TestingLibraryElementError: Unable to find an accessible element with the role "link" and name "Provider setup guide"
+
+Here are the accessible roles:
+
+  button:
+
+  Name "Refresh":
+  [36m<button[39m
+    [33mclass[39m=[32m"inline-flex items-center rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text shadow-sm hover:bg-surface2 focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2 disabled:opacity-60"[39m
+  [36m/>[39m
+
+  Name "Connect OpenAI":
+  [36m<button[39m
+    [33mclass[39m=[32m"inline-flex items-center rounded-md border border-border bg-surface2 px-3 py-2 text-xs font-medium text-text hover:bg-surface3 disabled:opacity-60"[39m
+  [36m/>[39m
+
+  Name "Check status":
+  [36m<button[39m
+    [33mclass[39m=[32m"inline-flex items-center rounded-md border border-border bg-surface2 px-3 py-2 text-xs font-medium text-text hover:bg-surface3 disabled:opacity-60"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"text-xs text-text-subtle"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"mt-1 text-xs text-text-subtle"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"mt-1 text-xs text-text-subtle"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"mb-3 mt-1 text-xs text-text-subtle"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  link:
+
+  Name "Open server setup":
+  [36m<a[39m
+    [33mclass[39m=[32m"mt-2 inline-block text-primary hover:underline"[39m
+    [33mhref[39m=[32m"/setup"[39m
+  [36m/>[39m
+
+  Name "Configure server":
+  [36m<a[39m
+    [33mclass[39m=[32m"text-primary hover:underline"[39m
+    [33mhref[39m=[32m"/settings/tldw"[39m
+  [36m/>[39m
+
+  Name "Manage provider keys":
+  [36m<a[39m
+    [33mclass[39m=[32m"text-primary hover:underline"[39m
+    [33mhref[39m=[32m"/settings/provider-keys"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  heading:
+
+  Name "Model catalog reference":
+  [36m<h2[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-text"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"mb-6"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"-ml-4 -mt-2 flex flex-wrap items-center justify-between sm:flex-nowrap"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ml-4 mt-2 flex flex-wrap items-center gap-3"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"inline-flex items-center rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text shadow-sm hover:bg-surface2 focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2 disabled:opacity-60"[39m
+              [36m>[39m
+                [0mRefresh[0m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mt-4 rounded-2xl border border-border/70 bg-surface p-4"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-3"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-sm font-semibold text-text"[39m
+              [36m>[39m
+                [0mSet your defaults[0m
+              [36m</div>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-xs text-text-subtle"[39m
+              [36m>[39m
+                [0mPick a default provider and model for new chats.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"text-xs text-text-subtle"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"font-medium text-text"[39m
+              [36m>[39m
+                [0mNo chat models are ready on this server.[0m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"mt-1"[39m
+              [36m>[39m
+                [0mConfigure a chat provider through server setup, or ask your administrator, then refresh.[0m
+              [36m</div>[39m
+              [36m<a[39m
+                [33mclass[39m=[32m"mt-2 inline-block text-primary hover:underline"[39m
+                [33mhref[39m=[32m"/setup"[39m
+              [36m>[39m
+                [0mOpen server setup[0m
+              [36m</a>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mt-4 rounded-2xl border border-border/70 bg-surface p-4"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex flex-wrap items-start justify-between gap-3"[39m
+            [36m>[39m
+              [36m<div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"text-sm font-semibold text-text"[39m
+                [36m>[39m
+                  [0mProvider readiness[0m
+                [36m</div>[39m
+                [36m<p[39m
+                  [33mclass[39m=[32m"mt-1 text-xs text-text-subtle"[39m
+                [36m>[39m
+                  [0mReview usable providers and saved defaults before browsing the full catalog.[0m
+                [36m</p>[39m
+              [36m</div>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"inline-flex items-center rounded-full border border-border/80 bg-surface2 px-2.5 py-1 text-[11px] font-medium text-text-subtle"[39m
+              [36m>[39m
+                [0m0 usable[0m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"rounded-md border border-border/70 bg-surface2 p-3"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"text-[11px] font-medium uppercase tracking-wide text-text-subtle"[39m
+                [36m>[39m
+                  [0mDefault provider[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"mt-1 text-sm font-medium text-text"[39m
+                [36m>[39m
+                  [0mOllama[0m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"rounded-md border border-border/70 bg-surface2 p-3"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"text-[11px] font-medium uppercase tracking-wide text-text-subtle"[39m
+                [36m>[39m
+                  [0mDefault model[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"mt-1 text-sm font-medium text-text"[39m
+                [36m>[39m
+                  [0mlocal-a[0m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"rounded-md border border-border/70 bg-surface2 p-3"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"text-[11px] font-medium uppercase tracking-wide text-text-subtle"[39m
+                [36m>[39m
+                  [0mConfigured providers[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"mt-1 text-sm font-medium text-text"[39m
+                [36m>[39m
+                  [0m0 configured[0m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"rounded-md border border-border/70 bg-surface2 p-3"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"text-[11px] font-medium uppercase tracking-wide text-text-subtle"[39m
+                [36m>[39m
+                  [0mUsable providers[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"mt-1 text-sm font-medium text-text"[39m
+                [36m>[39m
+                  [0m0 usable[0m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mt-4 flex flex-wrap gap-2 text-xs"[39m
+            [36m>[39m
+              [36m<a[39m
+                [33mclass[39m=[32m"text-primary hover:underline"[39m
+                [33mhref[39m=[32m"/settings/tldw"[39m
+              [36m>[39m
+                [0mConfigure server[0m
+              [36m</a>[39m
+              [36m<a[39m
+                [33mclass[39m=[32m"text-primary hover:underline"[39m
+                [33mhref[39m=[32m"/settings/provider-keys"[39m
+              [36m>[39m
+                [0mManage provider keys[0m
+             ...
+ ❯ Object.getElementError ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ ../packages/ui/src/components/Option/Models/__tests__/ModelsBody.test.tsx:233:28
+    231|
+    232|       expect(await screen.findByText("No chat models are ready on this…
+    233|       const guide = screen.getByRole("link", { name: "Provider setup g…
+       |                            ^
+    234|       expect(guide).toHaveAttribute("href", "https://github.com/rmusse…
+    235|       expect(guide).toHaveAttribute("target", "_blank")
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  ../packages/ui/src/components/Option/Models/__tests__/ModelsBody.test.tsx > ModelsBody > guides multi-user users directly to operator documentation regardless of setup-route state
+TestingLibraryElementError: Unable to find an accessible element with the role "link" and name "Provider setup guide"
+
+Here are the accessible roles:
+
+  button:
+
+  Name "Refresh":
+  [36m<button[39m
+    [33mclass[39m=[32m"inline-flex items-center rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text shadow-sm hover:bg-surface2 focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2 disabled:opacity-60"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"text-xs text-text-subtle"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"mt-1 text-xs text-text-subtle"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"mt-1 text-xs text-text-subtle"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"mb-3 mt-1 text-xs text-text-subtle"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  link:
+
+  Name "Open server setup":
+  [36m<a[39m
+    [33mclass[39m=[32m"mt-2 inline-block text-primary hover:underline"[39m
+    [33mhref[39m=[32m"/setup"[39m
+  [36m/>[39m
+
+  Name "Configure server":
+  [36m<a[39m
+    [33mclass[39m=[32m"text-primary hover:underline"[39m
+    [33mhref[39m=[32m"/settings/tldw"[39m
+  [36m/>[39m
+
+  Name "Manage provider keys":
+  [36m<a[39m
+    [33mclass[39m=[32m"text-primary hover:underline"[39m
+    [33mhref[39m=[32m"/settings/provider-keys"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  heading:
+
+  Name "Model catalog reference":
+  [36m<h2[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-text"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"mb-6"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"-ml-4 -mt-2 flex flex-wrap items-center justify-between sm:flex-nowrap"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ml-4 mt-2 flex flex-wrap items-center gap-3"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"inline-flex items-center rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text shadow-sm hover:bg-surface2 focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2 disabled:opacity-60"[39m
+              [36m>[39m
+                [0mRefresh[0m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mt-4 rounded-2xl border border-border/70 bg-surface p-4"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-3"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-sm font-semibold text-text"[39m
+              [36m>[39m
+                [0mSet your defaults[0m
+              [36m</div>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-xs text-text-subtle"[39m
+              [36m>[39m
+                [0mPick a default provider and model for new chats.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"text-xs text-text-subtle"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"font-medium text-text"[39m
+              [36m>[39m
+                [0mNo chat models are ready on this server.[0m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"mt-1"[39m
+              [36m>[39m
+                [0mConfigure a chat provider through server setup, or ask your administrator, then refresh.[0m
+              [36m</div>[39m
+              [36m<a[39m
+                [33mclass[39m=[32m"mt-2 inline-block text-primary hover:underline"[39m
+                [33mhref[39m=[32m"/setup"[39m
+              [36m>[39m
+                [0mOpen server setup[0m
+              [36m</a>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mt-4 rounded-2xl border border-border/70 bg-surface p-4"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex flex-wrap items-start justify-between gap-3"[39m
+            [36m>[39m
+              [36m<div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"text-sm font-semibold text-text"[39m
+                [36m>[39m
+                  [0mProvider readiness[0m
+                [36m</div>[39m
+                [36m<p[39m
+                  [33mclass[39m=[32m"mt-1 text-xs text-text-subtle"[39m
+                [36m>[39m
+                  [0mReview usable providers and saved defaults before browsing the full catalog.[0m
+                [36m</p>[39m
+              [36m</div>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"inline-flex items-center rounded-full border border-border/80 bg-surface2 px-2.5 py-1 text-[11px] font-medium text-text-subtle"[39m
+              [36m>[39m
+                [0m0 usable[0m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"rounded-md border border-border/70 bg-surface2 p-3"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"text-[11px] font-medium uppercase tracking-wide text-text-subtle"[39m
+                [36m>[39m
+                  [0mDefault provider[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"mt-1 text-sm font-medium text-text"[39m
+                [36m>[39m
+                  [0mOllama[0m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"rounded-md border border-border/70 bg-surface2 p-3"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"text-[11px] font-medium uppercase tracking-wide text-text-subtle"[39m
+                [36m>[39m
+                  [0mDefault model[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"mt-1 text-sm font-medium text-text"[39m
+                [36m>[39m
+                  [0mlocal-a[0m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"rounded-md border border-border/70 bg-surface2 p-3"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"text-[11px] font-medium uppercase tracking-wide text-text-subtle"[39m
+                [36m>[39m
+                  [0mConfigured providers[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"mt-1 text-sm font-medium text-text"[39m
+                [36m>[39m
+                  [0mAccount keys unavailable[0m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"rounded-md border border-border/70 bg-surface2 p-3"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"text-[11px] font-medium uppercase tracking-wide text-text-subtle"[39m
+                [36m>[39m
+                  [0mUsable providers[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"mt-1 text-sm font-medium text-text"[39m
+                [36m>[39m
+                  [0m0 usable[0m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mt-4 flex flex-wrap gap-2 text-xs"[39m
+            [36m>[39m
+              [36m<a[39m
+                [33mclass[39m=[32m"text-primary hover:underline"[39m
+                [33mhref[39m=[32m"/settings/tldw"[39m
+              [36m>[39m
+                [0mConfigure server[0m
+              [36m</a>[39m
+              [36m<a[39m
+                [33mclass[39m=[32m"text-primary hover:underline"[39m
+                [33mhref[39m=[32m"/settings/provider-keys"[39m
+              [36m>[39m
+                [0mManage provider keys[0m
+ ...
+ ❯ Object.getElementError ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ ../packages/ui/src/components/Option/Models/__tests__/ModelsBody.test.tsx:233:28
+    231|
+    232|       expect(await screen.findByText("No chat models are ready on this…
+    233|       const guide = screen.getByRole("link", { name: "Provider setup g…
+       |                            ^
+    234|       expect(guide).toHaveAttribute("href", "https://github.com/rmusse…
+    235|       expect(guide).toHaveAttribute("target", "_blank")
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 10 skipped (12)
+   Start at  15:10:43
+   Duration  1.69s (transform 277ms, setup 108ms, import 787ms, tests 437ms, environment 259ms)

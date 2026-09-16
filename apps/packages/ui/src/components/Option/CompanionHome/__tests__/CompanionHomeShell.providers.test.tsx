@@ -44,7 +44,7 @@ it("does not claim providers are missing while discovery is pending", async () =
   renderHome()
   try {
     expect(
-      screen.queryByText(/Configure an LLM provider/)
+      screen.queryByRole("link", { name: "Review model setup" })
     ).not.toBeInTheDocument()
   } finally {
     resolve([{ id: "local-model" }])
@@ -56,17 +56,18 @@ it("does not claim providers are missing when discovery fails", async () => {
   renderHome()
   await waitFor(() => expect(fetchModels).toHaveBeenCalled())
   expect(
-    screen.queryByText(/Configure an LLM provider/)
+    screen.queryByRole("link", { name: "Review model setup" })
   ).not.toBeInTheDocument()
 })
 
-it("offers local or hosted setup only after confirming no models", async () => {
+it("links empty discovery to readiness and setup guidance without promising a provider editor", async () => {
   fetchModels.mockResolvedValue([])
   renderHome()
   expect(
-    await screen.findByText(/Configure an LLM provider/)
-  ).toBeInTheDocument()
+    await screen.findByRole("link", { name: "Review model setup" })
+  ).toHaveAttribute("href", "/settings/model")
   expect(
-    screen.getByText(/local model server or a hosted provider/i)
+    screen.getByText(/readiness and server setup guidance/i)
   ).toBeInTheDocument()
+  expect(screen.queryByText(/Connect a local model server or a hosted provider in Model Settings/)).not.toBeInTheDocument()
 })
