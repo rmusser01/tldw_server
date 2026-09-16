@@ -1,0 +1,23 @@
+{
+  "mode": "controller",
+  "retainedAt": "2026-09-16T08:12:48.732Z",
+  "knownCredentialMatches": 0,
+  "jwtOrPrivateKeyPatternMatches": 0,
+  "files": [
+    {
+      "file": "cycle5-controller-model-capabilities.json",
+      "bytes": 300,
+      "sha256": "9bc19811ab8de3b85c4197189989003f755cac93537fc418acbaf6c3f174db43"
+    },
+    {
+      "file": "cycle5-controller-running-summary.md",
+      "bytes": 2723,
+      "sha256": "7edeba5a15d73e9c2cfe2062b117c35dbddf043a3923db02d6c3206ee424eb64"
+    },
+    {
+      "file": "cycle5-controller-source-isolation.json",
+      "bytes": 3137,
+      "sha256": "ef44fe5a438f1b0cd9ea9fa4ae5de1c5cd999f30bf270437984455d6db058b28"
+    }
+  ]
+}

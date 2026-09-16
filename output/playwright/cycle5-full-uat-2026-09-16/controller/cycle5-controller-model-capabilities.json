@@ -1,0 +1,19 @@
+{
+  "checkedAt": "2026-09-16T08:11:44.437Z",
+  "status": 200,
+  "capabilities": {
+    "vision": false,
+    "video": false,
+    "audio": false
+  },
+  "vision": null,
+  "audio": null,
+  "keys": [
+    "modalities"
+  ],
+  "modalities": {
+    "vision": false,
+    "video": false,
+    "audio": false
+  }
+}

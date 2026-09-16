@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 06:03'
+updated_date: '2026-09-16 08:10'
 labels:
   - uat
   - testing
@@ -152,12 +152,14 @@ Independent retained-evidence audit confirmed179 hashes and105/060/109/116 nativ
 Targeted follow-up on4bd4e2dfda: ordinary text108 failed send/correlation/Retry/canonical reload now passes; optional Note save retains canonical provenance but Open conversation fails twice, reopening111/task51. Prompt102 contextual failure feedback passes, exposing new119 transparent full editor and120 stale Synced after normalized transport failure. Settings058 title survives real completed Chat, disconnect and reconnect; stream observer limitation recorded. Character117 produced valid finalanswer only; actual request omits visible token limit, new121/task61. New118 attachment boundary task58 remains under repair. Source119 reviewed/committed a8e5430d76; native theme checks pending. Both Next frontends stopped during remaining parallel repairs. Combined verified203 evidence hashes with zero missing/mismatched files or JWT/private-key pattern matches. No cycle5 full fresh run begun.
 
 Follow-up checkpoint: ordinary text Retry108 and Settings title/disconnect/reconnect058 pass native checks on4bd4e2dfda; Prompt failure-feedback102 passes with separate119 background and120 status findings. Reopened111 reviewed repair committed142cc2f1cc;120 reviewed repair committed28dc9ddffa;119 committeda8e5430d76. Root independently repeated136 tests/4 across111 and120; targeted native acceptance remains pending. Character121 captures four supported current-chat settings and is under final review; image recovery118 remains in implementation. Both Next frontends stopped; no cycle5 profiles started. Branch codex/fresh-install-uat-fixes includes all current origin/dev59049e094e, while the initial32-commit baseline gap and later six-commit merge remain recorded accurately.
+
+2026-09-16T08:10Z: all final124/125 repairs independently reviewed and natively verified onab527eb3b4, evidencecommita325e01010. Combined2604frontendtests/97files pass,90existingcompilerdiagnosticsunchanged, priorbackend456pass/2skips andBandit0unchanged. Freshfetch07:55 confirmsorigin/dev59049e included0missing; original32commitbehind baseline remainsdisclosed. Cycle5 fullfreshsingle/multi started07:59 with separateemptyconfig/data/browser andexistingdependencies. Singlewizard/firstordinaryChatwithoutAPIrestart/twoturncanonicalreload/ChatNoteactualbacklink nowPASSbounded. MultiadminCLIthenAliceBobcreatedthroughUI; provideroperatorINIadaptationexplicit. SeparateAliceexpirycontextparked08:08:59 afterreal1800slogin; returnafter08:39:10. Full12rowmatricesinprogress, nofullsignoff.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Cycle 3 execution ended with 32 open findings: 14 P2 and 18 P3 (reopened055 and056–086). Single-user, Bob/admin and main multi-user evidence is retained. Final review precedes repairs under13260.13–.27. Wikipedia search/Chat and deliberate Cedar card/study remain explicitly blocked; multi-user mixed-deck076 is not claimed passing. No product repairs occurred during the frozen run.
+Fresh cycle5 UAT is in progress on reviewed product ab527eb3b4 with current dev59049e included. All preceding findings have reviewed repairs with targeted evidence or explicit native coverage limits. Full single/multi workflow acceptance is pending; existing dependency reuse, unavailable vision and hidden-tab tooling limits remain disclosed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
