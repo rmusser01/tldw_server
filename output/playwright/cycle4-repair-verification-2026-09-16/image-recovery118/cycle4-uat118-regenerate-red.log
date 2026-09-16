@@ -1,0 +1,84 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:63138) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts (7 tests | 2 failed | 3 skipped) 6ms
+     ↓ removes the latest assistant turn and resubmits the previous user turn
+     × retains exact Retry input and admits only nonempty text or an image: '  Preserve spaces  ' / '' 5ms
+     × retains exact Retry input and admits only nonempty text or an image: '' / 'data:image/png;base64,aW1hZ2U=' 0ms
+     ✓ retains exact Retry input and admits only nonempty text or an image: '   ' / '' 0ms
+     ✓ retains exact Retry input and admits only nonempty text or an image: '' / '' 0ms
+     ↓ bails safely when setHistory is not callable
+     ↓ allows pre-submit hooks to override regenerate payload
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts > createRegenerateLastMessage > retains exact Retry input and admits only nonempty text or an image: '  Preserve spaces  ' / ''
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Received: 
+
+  1st vi.fn() call:
+
+  [
+-   ObjectContaining {
++   {
++     "controller": AbortController {},
+      "image": "",
++     "isRegenerate": true,
++     "memory": [],
++     "message": "Preserve spaces",
++     "messageType": undefined,
++     "messages": [
++       {
++         "images": [],
++         "isBot": false,
+          "message": "  Preserve spaces  ",
++         "name": "You",
++         "sources": [],
++       },
++     ],
++     "regenerateFromMessage": {
++       "isBot": true,
++       "message": "Hi there",
++       "name": "Assistant",
++       "sources": [],
++     },
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts:78:36
+     76|       history: [{ role: "user", content, image }], messages,
+     77|       setHistory: vi.fn(), setMessages: vi.fn(), onSubmit })()
+     78|     if (expected) expect(onSubmit).toHaveBeenCalledWith(expect.objectC…
+       |                                    ^
+     79|     else expect(onSubmit).not.toHaveBeenCalled()
+     80|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts > createRegenerateLastMessage > retains exact Retry input and admits only nonempty text or an image: '' / 'data:image/png;base64,aW1hZ2U='
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Number of calls: 0
+
+ ❯ src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts:78:36
+     76|       history: [{ role: "user", content, image }], messages,
+     77|       setHistory: vi.fn(), setMessages: vi.fn(), onSubmit })()
+     78|     if (expected) expect(onSubmit).toHaveBeenCalledWith(expect.objectC…
+       |                                    ^
+     79|     else expect(onSubmit).not.toHaveBeenCalled()
+     80|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed | 3 skipped (7)
+   Start at  23:16:28
+   Duration  1.00s (transform 451ms, setup 82ms, import 575ms, tests 6ms, environment 242ms)
+

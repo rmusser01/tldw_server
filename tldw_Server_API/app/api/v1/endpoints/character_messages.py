@@ -4,6 +4,7 @@ API endpoints for message management within character chat sessions.
 Provides CRUD operations for messages in conversations.
 """
 
+import io
 import uuid
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -11,6 +12,7 @@ from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response, status
 from loguru import logger
+from PIL import Image
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
@@ -47,16 +49,17 @@ from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
     materialize_roleplay_behavior_settings,
 )
-from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
-    validate_chat_settings_storage,
-)
 
 # Rate limiting
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import get_character_rate_limiter
+from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    validate_chat_settings_storage,
+)
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
     build_character_system_prompt,
 )
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.chacha.message_store import MAX_CHAT_ATTACHMENT_READ_BYTES
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -154,6 +157,35 @@ def _convert_db_message_to_response(msg_data: dict[str, Any]) -> MessageResponse
         has_image=bool(msg_data.get('image_data')),
         version=msg_data.get('version', 1)
     )
+
+
+def _complete_message_images(message: dict[str, Any]) -> list[str]:
+    """Expand every stored attachment, or fail the entire opt-in read."""
+    import base64
+
+    images = message.get("images") or []
+    if not images and (message.get("image_data") is not None or message.get("image_mime_type") is not None):
+        images = [message]
+    result = []
+    for image in images:
+        data = image.get("image_data")
+        if isinstance(data, memoryview):
+            data = data.tobytes()
+        mime = image.get("image_mime_type")
+        detected_mime = _detect_image_mime_type(data) if isinstance(data, bytes) and data else None
+        if not detected_mime or not isinstance(mime, str) or detected_mime != mime:
+            raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete or invalid. Reload after repairing the source message.")
+        if len(data) > int(settings.get("MAX_MESSAGE_IMAGE_BYTES", 5 * 1024 * 1024)):
+            raise HTTPException(status_code=413, detail="A saved chat attachment exceeds the image read limit.")
+        try:
+            with Image.open(io.BytesIO(data)) as decoded:
+                decoded.verify()
+            with Image.open(io.BytesIO(data)) as decoded:
+                decoded.load()
+        except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
+            raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete or invalid.") from exc
+        result.append(f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}")
+    return result
 
 
 def _message_sync_http_error(exc: Exception) -> HTTPException:
@@ -551,6 +583,7 @@ async def get_chat_messages(
     include_deleted: bool = Query(False, description="Include deleted messages"),
     include_character_context: bool = Query(False, description="Include character context for chat completions"),
     format_for_completions: bool = Query(False, description="Format messages for use with chat/completions endpoint"),
+    include_images: bool = Query(False, description="Include complete ordered image data URLs in standard responses"),
     include_tool_calls: bool = Query(False, description="Include tool_calls metadata per message when available (standard format only)"),
     include_metadata: bool = Query(False, description="Include stored message metadata.extra JSON where available"),
     render_placeholders: bool = Query(
@@ -596,7 +629,39 @@ async def get_chat_messages(
         conversation = _verify_conversation_access(db, chat_id, current_user.id, scope)
 
         # Get messages (honor include_deleted and DB pagination)
-        messages = db.get_messages_for_conversation(chat_id, limit=limit, offset=offset, include_deleted=include_deleted)
+        expand_images = include_images is True and not format_for_completions
+        try:
+            messages = db.get_messages_for_conversation(
+                chat_id, limit=limit, offset=offset, include_deleted=include_deleted,
+                **({"strict_images": True, "image_byte_limit": MAX_CHAT_ATTACHMENT_READ_BYTES} if expand_images else {}),
+            )
+        except InputError as exc:
+            if not expand_images:
+                raise
+            raise HTTPException(status_code=413, detail="Chat attachments exceed the image read limit.") from exc
+        except CharactersRAGDBError as exc:
+            if not expand_images:
+                raise
+            raise HTTPException(status_code=503, detail="Saved chat attachments could not be read completely. Retry loading the conversation.") from exc
+        attachment_urls = {}
+        if expand_images:
+            decoded_total = 0
+            for message in messages:
+                images = message.get("images") or ([message] if message.get("image_data") is not None or message.get("image_mime_type") is not None else [])
+                for image in images:
+                    data = image.get("image_data")
+                    if not isinstance(data, (bytes, memoryview)) or not data:
+                        raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete or invalid.")
+                    decoded_total += len(data)
+                    if decoded_total > MAX_CHAT_ATTACHMENT_READ_BYTES:
+                        raise HTTPException(status_code=413, detail="Chat attachments exceed the image read limit.")
+            encoded_total = 0
+            for message in messages:
+                urls = _complete_message_images(message)
+                encoded_total += sum(len(url) for url in urls)
+                if encoded_total > (MAX_CHAT_ATTACHMENT_READ_BYTES * 4 // 3) + 1024 * len(messages):
+                    raise HTTPException(status_code=413, detail="Chat attachments exceed the image read limit.")
+                attachment_urls[message["id"]] = urls
 
         if not messages:
             messages = []
@@ -792,6 +857,8 @@ async def get_chat_messages(
                 if render_placeholders:
                     msg_copy["content"] = _replace_text(msg_copy.get("content"))
                 resp = _convert_db_message_to_response(msg_copy)
+                if expand_images:
+                    resp = resp.model_copy(update={"images": attachment_urls[resp.id]})
                 # Fetch metadata once if either flag is set (avoid duplicate queries)
                 if include_tool_calls or include_metadata:
                     try:
@@ -862,6 +929,8 @@ async def get_chat_messages(
             if render_placeholders:
                 msg_copy["content"] = _replace_text_std(msg_copy.get("content"))
             resp = _convert_db_message_to_response(msg_copy)
+            if expand_images:
+                resp = resp.model_copy(update={"images": attachment_urls[resp.id]})
             # Fetch metadata once if either flag is set (avoid duplicate queries)
             if include_tool_calls or include_metadata:
                 try:

@@ -53,6 +53,24 @@ describe("TldwApiClient captured request scope", () => {
     mocks.bgStream.mockReset()
   })
 
+  it.each([undefined, [], ["data:image/png;base64,aW1hZ2U="]].map(images => ({ images })))("preserves optional complete attachment lists from the actual domain adapter: $images", ({ images }) => {
+    mocks.bgRequest.mockResolvedValue({ messages: [{ id: "owned-user", sender: "user", content: "Question", timestamp: "2026-09-16T00:00:00Z", ...(images === undefined ? {} : { images }) }] })
+    return new TldwApiClient().listChatMessages("owned", { include_images: true }, { requestScope }).then(rows => {
+      expect(rows[0].images).toEqual(images)
+      expect(mocks.bgRequest.mock.calls[0][0]).toMatchObject({ headers: { "X-TLDW-Expected-User-ID": "42" }, servicePromptConfig: expectedScopeFields.servicePromptConfig })
+    })
+  })
+
+  it.each([null, "image", ["data:image/png;base64,aW1hZ2U=", null], ["https://other/image"], ["data:image/png;base64,invalid!"]].map(images => ({ images })))("rejects incomplete or malformed attachment arrays without a subset: $images", ({ images }) => {
+    mocks.bgRequest.mockResolvedValue({ messages: [{ id: "owned-user", sender: "user", content: "Question", images }] })
+    return expect(new TldwApiClient().listChatMessages("owned", { include_images: true }, { requestScope })).rejects.toThrow(/image|attachment/i)
+  })
+
+  it.each([{}, { images: [] }])("rejects an opt-in response that claims an image but omits its complete bytes: %s", async fields => {
+    mocks.bgRequest.mockResolvedValue({ messages: [{ id: "owned-user", sender: "user", content: "Question", has_image: true, ...fields }] })
+    await expect(new TldwApiClient().listChatMessages("owned", { include_images: true }, { requestScope })).rejects.toThrow(/image|attachment/i)
+  })
+
   it.each([true, false])("keeps captured character recovery scope optional without changing content (scoped: %s)", async scoped => {
     const body = { assistant_content: "<think>Partial reasoning</think>", assistant_message_id: "acknowledged", mood_label: "calm" }
     mocks.bgRequest.mockResolvedValue({ assistant_message_id: "acknowledged" })

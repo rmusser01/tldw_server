@@ -1,0 +1,17 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:64988) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx (10 tests) 2877ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting true)  621ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting false)  613ms
+(node:65083) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts (30 tests) 5ms
+
+ Test Files  2 passed (2)
+      Tests  40 passed (40)
+   Start at  23:22:08
+   Duration  4.71s (transform 608ms, setup 178ms, import 845ms, tests 2.88s, environment 624ms)
+

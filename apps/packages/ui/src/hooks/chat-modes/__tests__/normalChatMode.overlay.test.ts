@@ -130,6 +130,18 @@ describe("normalChatMode overlay prompt ordering", () => {
     )
   })
 
+  it.each([
+    ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="],
+    ["data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD=", "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD="],
+    ["legacy,raw-payload", "data:image/jpeg;base64,raw-payload"],
+    ["raw-payload", "data:image/jpeg;base64,raw-payload"],
+    ["", ""]
+  ])("preserves supported data URL MIME and the raw JPEG fallback: %s", async (image, expected) => {
+    mocks.runChatPipeline.mockResolvedValue({ status: "submitted" })
+    await normalChatMode("Question", image, false, [], [], new AbortController().signal, { webSearch: false } as never)
+    expect(mocks.runChatPipeline.mock.calls[0][2]).toBe(expected)
+  })
+
   it("keeps base prompt first, overlay second, actor after overlay, and web search last", async () => {
     const prompt = (await normalChatMode(
       "Where should I go?",

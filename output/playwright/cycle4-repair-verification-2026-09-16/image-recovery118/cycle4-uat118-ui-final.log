@@ -1,0 +1,196 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:66362) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 0 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 1 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > hydrates a failed saved turn before Retry without duplicating the canonical user
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > hydrates a failed saved turn before Retry without duplicating the canonical user
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply delayed failed-user correlation after A to B to B
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply delayed failed-user correlation after A to B to A
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > successful regeneration does not re-ACK the already acknowledged user
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > successful regeneration does not re-ACK the already acknowledged user
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > persists a real acknowledged reasoning-only stream as one recoverable saved pair
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to B
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to A
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cannot autosave a second conversation while the completed first pair is waiting for local persistence
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps temporary inference unsaved and promotes its existing pair only once
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > returns a recoverable creation failure and retries without a duplicate pair
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > rechecks the current conversation after promotion finishes during send initialization
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cancels a waiting follow-up without cancelling the owning promotion
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cleans up a failed promotion so retry saves the original pair before the next turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 0 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 1 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after ambiguous commit acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after new history on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after A to B to A on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old stream completes
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old local persistence completes
+Using normalChatMode
+
+ ✓ src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx (57 tests) 5991ms
+     ✓ hydrates a failed saved turn before Retry without duplicating the canonical user  418ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false  415ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false  419ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true  621ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true  625ms
+(node:66517) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx (10 tests) 2878ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting true)  622ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting false)  613ms
+(node:66532) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx (12 tests) 21ms
+(node:66534) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts (34 tests) 11ms
+(node:66539) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts > normalChatMode overlay prompt ordering > preserves supported data URL MIME and the raw JPEG fallback: data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts > normalChatMode overlay prompt ordering > preserves supported data URL MIME and the raw JPEG fallback: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD=
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts > normalChatMode overlay prompt ordering > preserves supported data URL MIME and the raw JPEG fallback: legacy,raw-payload
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts > normalChatMode overlay prompt ordering > preserves supported data URL MIME and the raw JPEG fallback: raw-payload
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts > normalChatMode overlay prompt ordering > preserves supported data URL MIME and the raw JPEG fallback: 
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts > normalChatMode overlay prompt ordering > keeps base prompt first, overlay second, actor after overlay, and web search last
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts > normalChatMode overlay prompt ordering > keeps generic systemPromptAppendix appended to the active base prompt
+Using normalChatMode
+
+stdout | src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts > normalChatMode overlay prompt ordering > does not classify a no-web-search manual stop as scope invalidation
+Using normalChatMode
+
+ ✓ src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts (8 tests) 5ms
+(node:66541) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts (30 tests) 6ms
+(node:66542) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.images.test.ts (9 tests) 4ms
+(node:66545) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts (7 tests) 4ms
+
+ Test Files  8 passed (8)
+      Tests  167 passed (167)
+   Start at  23:26:02
+   Duration  14.15s (transform 948ms, setup 418ms, import 2.33s, tests 8.92s, environment 1.78s)
+

@@ -1,0 +1,114 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:59512) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts (34 tests | 2 failed | 32 skipped) 5ms
+     ↓ preserves optional complete attachment lists from the actual domain adapter: undefined
+     ↓ preserves optional complete attachment lists from the actual domain adapter: []
+     ↓ preserves optional complete attachment lists from the actual domain adapter: [ 'data:image/png;base64,aW1hZ2U=' ]
+     ↓ rejects incomplete or malformed attachment arrays without a subset: null
+     ↓ rejects incomplete or malformed attachment arrays without a subset: 'image'
+     ↓ rejects incomplete or malformed attachment arrays without a subset: [ …(2) ]
+     ↓ rejects incomplete or malformed attachment arrays without a subset: [ 'https://other/image' ]
+     ↓ rejects incomplete or malformed attachment arrays without a subset: [ 'data:image/png;base64,invalid!' ]
+     × rejects an opt-in response that claims an image but omits its complete bytes: {} 4ms
+     × rejects an opt-in response that claims an image but omits its complete bytes: { images: [] } 1ms
+     ↓ keeps captured character recovery scope optional without changing content (scoped: true)
+     ↓ keeps captured character recovery scope optional without changing content (scoped: false)
+     ↓ binds the QA fetchWithAuth request without changing its body
+     ↓ binds the QA listCharacters request without changing its body
+     ↓ binds the QA searchCharacters request without changing its body
+     ↓ binds the QA getChat request without changing its body
+     ↓ binds the QA updateChat request without changing its body
+     ↓ binds the QA deleteChat request without changing its body
+     ↓ binds the QA createConversationShareLink request without changing its body
+     ↓ binds the QA revokeConversationShareLink request without changing its body
+     ↓ binds the QA exportChatbook request without changing its body
+     ↓ binds the QA downloadChatbookExport request without changing its body
+     ↓ binds the QA createNote request without changing its body
+     ↓ binds the QA ragSourceHealth request without changing its body
+     ↓ binds QA streaming scope outside the inference body
+     ↓ binds non-streaming chat without serializing the scope
+     ↓ binds streaming chat without serializing the scope
+     ↓ does not replay scoped RAG POSTs and keeps scope out of JSON
+     ↓ preserves structured scope errors in the exported base RAG method
+     ↓ binds web search and keeps request scope out of JSON
+     ↓ binds mirrored chat messages to the captured account and signal
+     ↓ binds chat-session creation to the captured account and signal
+     ↓ reads fresh promotion messages with captured scope without joining cached or pending reads
+     ↓ serializes raw recovery listing as explicit false while keeping the captured owner
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts > TldwApiClient captured request scope > rejects an opt-in response that claims an image but omits its complete bytes: {}
+AssertionError: promise resolved "[ { id: 'owned-user', …(7) } ]" instead of rejecting
+
+- Expected: 
+Error {
+  "message": "rejected promise",
+}
+
++ Received: 
+[
+  {
+    "content": "Question",
+    "created_at": "",
+    "id": "owned-user",
+    "metadata_extra": undefined,
+    "pinned": undefined,
+    "role": "user",
+    "sender": "user",
+    "version": undefined,
+  },
+]
+
+ ❯ src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts:71:107
+     69|   it.each([{}, { images: [] }])("rejects an opt-in response that claim…
+     70|     mocks.bgRequest.mockResolvedValue({ messages: [{ id: "owned-user",…
+     71|     await expect(new TldwApiClient().listChatMessages("owned", { inclu…
+       |                                                                                                           ^
+     72|   })
+     73| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts > TldwApiClient captured request scope > rejects an opt-in response that claims an image but omits its complete bytes: { images: [] }
+AssertionError: promise resolved "[ { id: 'owned-user', …(8) } ]" instead of rejecting
+
+- Expected: 
+Error {
+  "message": "rejected promise",
+}
+
++ Received: 
+[
+  {
+    "content": "Question",
+    "created_at": "",
+    "id": "owned-user",
+    "images": [],
+    "metadata_extra": undefined,
+    "pinned": undefined,
+    "role": "user",
+    "sender": "user",
+    "version": undefined,
+  },
+]
+
+ ❯ src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts:71:107
+     69|   it.each([{}, { images: [] }])("rejects an opt-in response that claim…
+     70|     mocks.bgRequest.mockResolvedValue({ messages: [{ id: "owned-user",…
+     71|     await expect(new TldwApiClient().listChatMessages("owned", { inclu…
+       |                                                                                                           ^
+     72|   })
+     73| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 32 skipped (34)
+   Start at  23:07:23
+   Duration  1.01s (transform 484ms, setup 94ms, import 587ms, tests 5ms, environment 228ms)
+

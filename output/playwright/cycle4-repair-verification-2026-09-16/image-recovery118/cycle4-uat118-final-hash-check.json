@@ -1,0 +1,75 @@
+{
+  "checkedAt": "2026-09-16T06:34:32.684753+00:00",
+  "sourceTestFiles": 17,
+  "allMatch": true,
+  "checks": [
+    {
+      "path": "tldw_Server_API/app/api/v1/schemas/chat_session_schemas.py",
+      "matches": true
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/character_messages.py",
+      "matches": true
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/chat.py",
+      "matches": true
+    },
+    {
+      "path": "tldw_Server_API/app/core/Chat/chat_service.py",
+      "matches": true
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/message_store.py",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useServerChatLoader.ts",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/normalChatMode.ts",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/handlers/messageHandlers.ts",
+      "matches": true
+    },
+    {
+      "path": "tldw_Server_API/tests/Chat/integration/test_chat_image_recovery.py",
+      "matches": true
+    },
+    {
+      "path": "tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/__tests__/useServerChatLoader.images.test.ts",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts",
+      "matches": true
+    }
+  ]
+}

@@ -85,13 +85,12 @@ export const createRegenerateLastMessage = ({
     })()
 
     const userContent =
-      (historyUser?.entry?.content ?? messageUser?.message ?? "").trim()
-    if (!userContent) {
-      return
-    }
-
+      historyUser?.entry?.content ?? messageUser?.message ?? ""
     const userImage =
       historyUser?.entry?.image || messageUser?.images?.[0] || ""
+    if (!userContent.trim() && !userImage) {
+      return
+    }
     const userMessageType =
       historyUser?.entry?.messageType || messageUser?.messageType
 

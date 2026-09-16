@@ -1,0 +1,23 @@
+{
+  "frozenAt": "2026-09-16T06:26:58.001485+00:00",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/message_store.py",
+      "sha256": "9becacada29e66d0b4dce80f2ecaf2bf99af30e076767c50bc1d1668fe7962b3",
+      "matchesFinal": true,
+      "unchangedSinceInitial": true
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/character_messages.py",
+      "sha256": "a43cd7606709d3ef1cbd886771fe871726551a036938a66182b50325a857850c",
+      "matchesFinal": true,
+      "unchangedSinceInitial": false
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/schemas/chat_session_schemas.py",
+      "sha256": "9f2ef04c2d1a6159fdd934fb7d68cc92b014679e37bc8a0843f3494b50c996b0",
+      "matchesFinal": true,
+      "unchangedSinceInitial": true
+    }
+  ]
+}

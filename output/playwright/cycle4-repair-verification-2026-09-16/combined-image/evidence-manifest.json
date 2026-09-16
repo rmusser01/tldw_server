@@ -1,0 +1,51 @@
+{
+  "unit": "combined-image",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-image-combined-backend.log",
+      "bytes": 10280,
+      "sha256": "26fb9eb6108678ebc7037edcb8773053e8d8689839072c0fee838a7d5eff9341"
+    },
+    {
+      "file": "cycle4-image-combined-bandit.json",
+      "bytes": 3324,
+      "sha256": "e0f3898cc04fa1c5358a18abf43ac44f0b27b5fd80ed8cb5b621d25e5075d52c"
+    },
+    {
+      "file": "cycle4-image-combined-bandit.log",
+      "bytes": 1972,
+      "sha256": "eab8e9a6d061a9628f3e6fd9ede9f711c8e26c540b641ca73fe442a69e367fb0"
+    },
+    {
+      "file": "cycle4-image-combined-command.json",
+      "bytes": 10128,
+      "sha256": "71e92e87d05ddedf713eedcf13f617d7afb0e7f11c38ac3b31cc13af8a98a693"
+    },
+    {
+      "file": "cycle4-image-combined-run.mjs",
+      "bytes": 1319,
+      "sha256": "4f4e729a8ac94e5395b54c30078c019ec5492c5b377fc3dd3751334ca0b07319"
+    },
+    {
+      "file": "cycle4-image-combined-typecheck-comparison.json",
+      "bytes": 373,
+      "sha256": "32dc40abe52505946b355b41cfcd5570858d8b79a909160745d1073f5fc5aabb"
+    },
+    {
+      "file": "cycle4-image-combined-typecheck.log",
+      "bytes": 24428,
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e"
+    },
+    {
+      "file": "cycle4-image-combined-ui.log",
+      "bytes": 75633,
+      "sha256": "24655e2e1b116d67b15437adae365395d7d219cf14bbfc41ffa2cb20f1063599"
+    },
+    {
+      "file": "cycle4-image-docker-availability.json",
+      "bytes": 478,
+      "sha256": "2461e13baf0a4133de0dcb5e63e39bf4528adcb1878df300264a2ce39c87e538"
+    }
+  ]
+}

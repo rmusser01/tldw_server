@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ChatTldw } from "@/models/ChatTldw"
+import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
 import { useChatActions } from "../useChatActions"
 import { useServerChatLoader } from "../useServerChatLoader"
 import { usePlaygroundPersistence } from "@/components/Option/Playground/hooks/usePlaygroundPersistence"
@@ -18,6 +19,7 @@ import { reconcileServerChatMessages, serverChatMirrorOwnerKey } from "@/db/dexi
 import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue"
 
 const mocks = vi.hoisted(() => ({
+  bgRequest: vi.fn(),
   removeMessageById: vi.fn(),
   deleteMessage: vi.fn(),
   createChat: vi.fn(),
@@ -38,7 +40,7 @@ const mocks = vi.hoisted(() => ({
   selectionRevision: 0,
   serverRows: new Map<
     string,
-    Array<{ id?: string; role: string; content: string; metadata_extra?: Record<string, unknown> }>
+    Array<{ id?: string; role: string; content: string; metadata_extra?: Record<string, unknown>; images?: string[]; version?: number }>
   >(),
   watches: new Set<{ tldwConfig: (change: { newValue: unknown }) => void }>(),
   config: {
@@ -47,6 +49,8 @@ const mocks = vi.hoisted(() => ({
     apiKey: "synthetic-a"
   }
 }))
+
+vi.mock("@/services/background-proxy", () => ({ bgRequest: (...args: unknown[]) => mocks.bgRequest(...args), bgStream: vi.fn(), bgUpload: vi.fn() }))
 
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
@@ -88,13 +92,15 @@ vi.mock("@/services/title", () => ({
 vi.mock("@/services/tldw-server", () => ({
   systemPromptForNonRagOption: async () => ""
 }))
-vi.mock("@/utils/human-message", () => ({
-  humanMessageFormatter: async ({
-    content
-  }: {
-    content: Array<{ text: string }>
-  }) => ({ role: "user", content: content[0].text })
-}))
+// Keep OCR outside this pipeline test; use the real multimodal message class.
+vi.mock("@/utils/human-message", async () => {
+  const { HumanMessage } = await vi.importActual<typeof import("@/types/messages")>("@/types/messages")
+  return { humanMessageFormatter: async ({ content }: { content: import("@/types/messages").MessageContentPart[] }) =>
+    content.some(part => part.type === "image_url")
+      ? new HumanMessage({ content })
+      : { role: "user", content: content[0].type === "text" ? content[0].text : "" }
+  }
+})
 vi.mock("@/utils/actor", () => ({
   maybeInjectActorMessage: async (history: unknown[]) => history
 }))
@@ -706,6 +712,98 @@ describe("saved normal Chat pipeline with autosave", () => {
     await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
     expect(view.result.current.state.messages.filter(row => !row.isBot).map(row => row.id)).toEqual([localId])
     expect(view.result.current.state.messages.filter(row => row.serverMessageId === "saved-answer")).toMatchObject([{ message: "Recovered final answer" }])
+    view.unmount()
+  })
+
+  it("rejects a multi-attachment user before changing the active draft or local mirror", async () => {
+    mocks.withLoader = true
+    seedLocalDraft()
+    const original = useStoreMessageOption.getState()
+    const messages = original.messages
+    const history = original.history
+    mocks.serverRows.set("chat-multi-image", [{ id: "multi-image-user", role: "user", content: "Two images", images: ["data:image/png;base64,aW1hZ2U=", "data:image/png;base64,b3RoZXI="] }])
+    useStoreMessageOption.setState({ serverChatId: "chat-multi-image", serverChatMetaLoaded: false })
+    const view = renderWorkspace(false, true)
+    await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("failed"))
+    expect(view.result.current.state.serverChatLoadError).toMatch(/multiple.*image|one image/i)
+    expect(view.result.current.state.messages).toEqual(messages)
+    expect(view.result.current.state.history).toEqual(history)
+    expect(mocks.ensureHistory).not.toHaveBeenCalled()
+    expect(mocks.saveMessage).not.toHaveBeenCalled()
+    expect(mocks.rows).toEqual([])
+    view.unmount()
+  })
+
+  it.each([false, true].flatMap(prior => ["Image question", ""].map(text => ({ prior, text }))))("recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: $text / prior $prior", async ({ text, prior }) => {
+    mocks.withLoader = true
+    const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="
+    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
+    const projected: Array<Array<{ role: string; content: unknown }>> = []
+    mocks.listChatMessages.mockImplementation((id, params, options) => chatRagMethods.listChatMessages.call(
+      { getChatMessagesCacheKey: (key: string, query: string) => key + query } as never, id, params, options))
+    mocks.bgRequest.mockImplementation(async request => {
+      const url = new URL(request.path, "https://chat.test")
+      expect(url.searchParams.get("include_images")).toBe("true")
+      expect(request.servicePromptConfig).toMatchObject({ serverUrl: "https://chat.test", authMode: "single-user" })
+      const rows = mocks.serverRows.get(url.pathname.split("/")[4]) || []
+      const offset = Number(url.searchParams.get("offset"))
+      const limit = Number(url.searchParams.get("limit"))
+      return { messages: rows.slice(offset, offset + limit).map(row => ({ ...row, sender: row.role, timestamp: "2026-09-16T00:00:00Z" })) }
+    })
+    mocks.pageAssistModel.mockImplementation(async ({ conversationId, clientMessageId, retryFailedTurn }) =>
+      new ChatTldw({ model: "test", supportsMultimodal: true, saveToDb: true, conversationId, clientMessageId, retryFailedTurn }))
+    mocks.streamMessage.mockImplementation(async function* (messages, options, onChunk) {
+      projected.push(messages)
+      if (prior && projected.length === 1) {
+        mocks.serverRows.get(options.conversationId)!.push(
+          { id: "prior-image-user", role: "user", content: "Prior image", images: [image], version: 1, metadata_extra: { client_message_id: options.clientMessageId } },
+          { id: "prior-image-answer", role: "assistant", content: "Prior answer", images: [], version: 1 })
+        onChunk({ tldw_user_message_id: "prior-image-user", tldw_message_id: "prior-image-answer" })
+        yield "Prior answer"
+        return
+      }
+      if (projected.length === (prior ? 2 : 1)) {
+        mocks.serverRows.get(options.conversationId)!.push({ id: "image-user", role: "user", content: text || "<Image attachment x1>", images: [image], version: 1,
+          metadata_extra: { client_message_id: options.clientMessageId, ...(!text ? { content_placeholder_reason: "image_attachment" } : {}) } })
+        throw new Error("Provider failed before response metadata")
+      }
+      mocks.serverRows.get(options.conversationId)!.push({ id: "image-answer", role: "assistant", content: "Recovered image answer", images: [], version: 1 })
+      onChunk({ tldw_user_message_id: "image-user", tldw_message_id: "image-answer" })
+      yield "Recovered image answer"
+    })
+    let view = renderWorkspace(false, true)
+    if (prior) {
+      await act(async () => { await view.result.current.actions.onSubmit({ message: "Prior image", image }) })
+      await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
+    }
+    await act(async () => { await view.result.current.actions.onSubmit({ message: text, image }) })
+    if (prior) {
+      // Existing loaded chats fetch new canonical rows on the next normal reload.
+      view.unmount()
+      act(() => useStoreMessageOption.setState({ serverChatLoadState: "idle", serverChatMetaLoaded: false }))
+      view = renderWorkspace(false, true)
+    }
+    await waitFor(() => {
+      expect(view.result.current.state.serverChatLoadError).toBeNull()
+      expect(view.result.current.state.serverChatLoadState).toBe("loaded")
+    })
+    expect(view.result.current.state.messages.filter(row => row.serverMessageId === "image-user")).toMatchObject([{ message: text, images: [image], serverMessageId: "image-user" }])
+    expect(mocks.rows.filter(row => row.role === "user")).toHaveLength(prior ? 2 : 1)
+    await act(async () => { await view.result.current.actions.regenerateLastMessage() })
+    expect(projected).toHaveLength(prior ? 3 : 2)
+    const retryUsers = projected.at(-1)!.filter(row => row.role === "user")
+    expect(retryUsers).toHaveLength(prior ? 2 : 1)
+    for (const user of retryUsers) {
+      expect(user.content).toEqual(expect.arrayContaining([{ type: "image_url", image_url: { url: image } }]))
+    }
+    if (prior) expect(retryUsers[0].content).toEqual([{ type: "image_url", image_url: { url: image } }, { type: "text", text: "Prior image" }])
+    const localId = view.result.current.state.messages.find(row => row.serverMessageId === "image-user")?.id
+    view.unmount()
+    act(() => useStoreMessageOption.setState({ serverChatLoadState: "idle", serverChatMetaLoaded: false }))
+    view = renderWorkspace(false, true)
+    await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
+    expect(view.result.current.state.messages.filter(row => row.serverMessageId === "image-user")).toMatchObject([{ id: localId, serverMessageId: "image-user", message: text, images: [image] }])
+    expect(view.result.current.state.messages.filter(row => row.serverMessageId === "image-answer")).toMatchObject([{ message: "Recovered image answer" }])
     view.unmount()
   })
 

@@ -1,0 +1,6 @@
+{
+  "command": "docker info --format ServerVersion",
+  "processId": 66965,
+  "observation": "No output after110 seconds. SIGTERM was ignored; verified same docker info process after172 seconds, then sent SIGKILL only to the read-only task-owned CLI client. No Docker server or container stop command was issued.",
+  "postgresOutcome": "Repository fixture result still pending; this does not establish a PostgreSQL pass or prove an existing PostgreSQL service is unavailable."
+}

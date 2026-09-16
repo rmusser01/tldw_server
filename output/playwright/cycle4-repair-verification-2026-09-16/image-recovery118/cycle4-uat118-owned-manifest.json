@@ -1,0 +1,80 @@
+{
+  "frozenAt": "2026-09-16T06:26:58.001485+00:00",
+  "baseRef": "045a953883b5f1809c61d7c171eda83e05450a9b",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/api/v1/schemas/chat_session_schemas.py",
+      "sha256": "9f2ef04c2d1a6159fdd934fb7d68cc92b014679e37bc8a0843f3494b50c996b0"
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/character_messages.py",
+      "sha256": "a43cd7606709d3ef1cbd886771fe871726551a036938a66182b50325a857850c"
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/chat.py",
+      "sha256": "db01e193a4dcbbc1dc760bc4bc0d756733969755001265301b3cb6bd8d057a6f"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Chat/chat_service.py",
+      "sha256": "bc0edc774bb37caf2966b06b8a623445912f9ce0683871c18c56ca80e045067a"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/message_store.py",
+      "sha256": "9becacada29e66d0b4dce80f2ecaf2bf99af30e076767c50bc1d1668fe7962b3"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "sha256": "bc7329209881624fa92f68ee8be5e37d3d29157a7882824862177e289ab14aa7"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "sha256": "62e82d6cf682d5aff270a38b70763632bfeb5b40c021871d4512405e19d56447"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useServerChatLoader.ts",
+      "sha256": "f6f2459688cf61b52bb807506491a0058f1efa89d78f822de707b0d1a75b9e4c"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/normalChatMode.ts",
+      "sha256": "7ae55e4b06b4b814ff0b28643b11aea2684bbf3026763b70608e49745a396a63"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/handlers/messageHandlers.ts",
+      "sha256": "69c237e5445f27ba50ad49c661a7ffce741e78f5343a8d76718f867bd37cb19f"
+    },
+    {
+      "path": "tldw_Server_API/tests/Chat/integration/test_chat_image_recovery.py",
+      "sha256": "35acc722af8b1e736d41c9b7b6cc62b542e88f6586b4903b1b087ebbc13b5899"
+    },
+    {
+      "path": "tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py",
+      "sha256": "83e36d620da8afc6023bd04b9ac04982c0d2c200b781deb7942d2510aa2ee12f"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts",
+      "sha256": "a7fd95f11c8cc1775864d1640e36fa59ccc3d372642dc6916abf7de9e446e1bf"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/__tests__/useServerChatLoader.images.test.ts",
+      "sha256": "3571fb36b12faafec4ceb87e594d686c21f5c0498bce284c5f261582d8c397b0"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "sha256": "efec61aa3ad32ac55327caf8479c38e2f373c533da1d9e57ca3c94fdf8484784"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts",
+      "sha256": "8750a405ae93a5193d807dd1b443377942ba8280a79db727ff94527f9cafe654"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts",
+      "sha256": "702fd4a582b38c1f4cef3411f170e85cec025f09e30ccc587d8aae91d303f8f3"
+    },
+    {
+      "path": "backlog/tasks/task-13260.58 - Restore-safe-correlation-of-failed-Chat-turns-with-image-attachments.md",
+      "sha256": "38026c534e99f47c09b38956135d51ad0b501dc4a21bd9adb5552124ebfddf05",
+      "kind": "task record"
+    }
+  ],
+  "taskRecordUpdatedAt": "2026-09-16T06:34:32.684534+00:00"
+}

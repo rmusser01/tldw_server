@@ -3966,6 +3966,52 @@ def _is_saved_chat_error_envelope(message: dict[str, Any]) -> bool:
     )
 
 
+def _retry_content_components(content: Any) -> tuple[str, tuple[tuple[str, bytes], ...]]:
+    """Compare representable stored text and ordered images, never partial input."""
+    from tldw_Server_API.app.core.Utils.image_validation import validate_image_url
+
+    if isinstance(content, str):
+        return content, ()
+    if not isinstance(content, list):
+        raise HTTPException(status_code=409, detail="The failed image turn cannot be matched safely.")
+    text = ""
+    text_count = 0
+    images = []
+    for part in content:
+        if not isinstance(part, dict):
+            raise HTTPException(status_code=409, detail="The failed image turn cannot be matched safely.")
+        if part.get("type") == "text" and set(part) <= {"type", "text"} and isinstance(part.get("text"), str):
+            text_count += 1
+            text = part["text"]
+            if text_count > 1:
+                raise HTTPException(status_code=409, detail="Retry does not support multiple text segments in one image turn.")
+        elif part.get("type") == "image_url" and set(part) <= {"type", "image_url"}:
+            image = part.get("image_url")
+            if not isinstance(image, dict) or set(image) - {"url", "detail"} or image.get("detail", "auto") != "auto":
+                raise HTTPException(status_code=409, detail="Retry cannot discard image detail or unsupported image options.")
+            url = image.get("url")
+            if not isinstance(url, str) or not url.startswith("data:image/"):
+                raise HTTPException(status_code=409, detail="Retry requires a saved inline image.")
+            valid, mime, data = validate_image_url(url)
+            if not valid or not data or not mime:
+                raise HTTPException(status_code=409, detail="A failed-turn image is invalid or unavailable.")
+            images.append((mime, data))
+        else:
+            raise HTTPException(status_code=409, detail="Retry cannot discard unsupported message content.")
+    return text, tuple(images)
+
+
+def _saved_image_text(row: dict[str, Any], extra: Any) -> str:
+    """Only unedited server-generated image placeholders represent empty text."""
+    text = row.get("content") or ""
+    images = row.get("images") or ([row] if row.get("image_data") else [])
+    if (str(row.get("sender", "")).lower() == "user" and row.get("version") == 1
+            and isinstance(extra, dict) and extra.get("content_placeholder_reason") == "image_attachment"
+            and images and text == f"<Image attachment x{len(images)}>"):
+        return ""
+    return text
+
+
 async def build_context_and_messages(
     chat_db: Any,
     request_data: Any,
@@ -4094,6 +4140,9 @@ async def build_context_and_messages(
                 detail="conversation_id is required for continuation and must reference an existing conversation.",
             )
 
+    request_metadata = getattr(request_data, "metadata", None)
+    explicit_failed_retry = isinstance(request_metadata, dict) and request_metadata.get("tldw_retry_failed_turn") is True
+
     # History loading (configurable limit/order; filter missing roles, normalize assistant names)
     requested_history_limit = getattr(request_data, "history_message_limit", None)
     if requested_history_limit is None:
@@ -4116,6 +4165,7 @@ async def build_context_and_messages(
 
     historical_msgs: list[dict[str, Any]] = []
     historical_ids: list[str | None] = []
+    retry_history_content: dict[int, Any] = {}
     if conv_id and (not conversation_created):
         raw_hist: list[dict[str, Any]] = []
         if continuation_spec:
@@ -4135,11 +4185,9 @@ async def build_context_and_messages(
         elif history_limit > 0:
             raw_hist = await loop.run_in_executor(
                 None,
-                chat_db.get_messages_for_conversation,
-                conv_id,
-                history_limit,
-                0,
-                db_order,
+                partial(chat_db.get_messages_for_conversation,
+                    conv_id, history_limit, 0, db_order,
+                    **({"strict_images": True} if explicit_failed_retry else {})),
             )
         for db_msg in raw_hist:
             sender_val = str(db_msg.get("sender", "") or "")
@@ -4170,8 +4218,11 @@ async def build_context_and_messages(
             if not should_persist_message_role(role):
                 continue
             char_name_hist = character_card.get("name", "Char") if character_card else "Char"
-            text_content = db_msg.get("content", "")
-            if text_content and role != "tool":
+            text_content = _saved_image_text(db_msg, metadata.get("extra") if isinstance(metadata, dict) else None)
+            raw_user_text = text_content
+            # Normal/persona Retry compares and sends the literal saved user input.
+            preserve_literal_retry = explicit_failed_retry and role == "user" and (is_owned_neutral_conversation or is_existing_persona_conversation)
+            if text_content and role != "tool" and not preserve_literal_retry:
                 text_content = replace_placeholders(text_content, char_name_hist, "User")
             msg_parts = []
             if text_content:
@@ -4190,14 +4241,21 @@ async def build_context_and_messages(
                     if isinstance(img_bytes, memoryview):
                         img_bytes = img_bytes.tobytes()
                     if not img_bytes:
+                        if explicit_failed_retry:
+                            raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete. Reload after repairing the source message.")
                         continue
                     img_mime = image_entry.get("image_mime_type") or db_msg.get("image_mime_type") or "image/png"
                     b64_img = await loop.run_in_executor(None, base64.b64encode, img_bytes)
-                    msg_parts.append({
+                    image_part = {
                         "type": "image_url",
                         "image_url": {"url": f"data:{img_mime};base64,{b64_img.decode('utf-8')}"}
-                    })
+                    }
+                    if explicit_failed_retry:
+                        _retry_content_components([image_part])
+                    msg_parts.append(image_part)
                 except _CHAT_NONCRITICAL_EXCEPTIONS as e:
+                    if explicit_failed_retry:
+                        raise HTTPException(status_code=409, detail="A saved chat attachment could not be read completely.") from e
                     logger.warning(
                         "Error encoding DB image for history msg_id={} error={}",
                         db_msg.get("id"),
@@ -4230,6 +4288,8 @@ async def build_context_and_messages(
                         db_msg.get("id"),
                     )
                     continue
+                if explicit_failed_retry and role == "user":
+                    retry_history_content[id(hist_entry)] = ([{"type": "text", "text": raw_user_text}] if raw_user_text else []) + [part for part in msg_parts if part.get("type") == "image_url"]
                 historical_msgs.append(hist_entry)
                 historical_ids.append(db_msg.get("id"))
         logger.info(f"Loaded {len(historical_msgs)} historical messages for conv_id '{conv_id}'.")
@@ -4270,7 +4330,8 @@ async def build_context_and_messages(
     if explicit_failed_retry and should_persist and not conversation_created and request_messages:
         # Read the actual tail independently of the requested context window.
         # Retry is an explicit operation; equal text on an ordinary send is new.
-        tail_rows = await loop.run_in_executor(None, chat_db.get_messages_for_conversation, conv_id, 2, 0, "DESC")
+        tail_rows = await loop.run_in_executor(None, partial(chat_db.get_messages_for_conversation, conv_id, 2, 0, "DESC", strict_images=True))
+        tail_metadata = {row["id"]: await loop.run_in_executor(None, chat_db.get_message_metadata, row["id"]) for row in tail_rows}
         requested_user = request_messages[-1]
         if requested_user.get("role") != "user":
             raise HTTPException(status_code=409, detail="The failed turn changed. Reload the conversation before retrying.")
@@ -4278,28 +4339,21 @@ async def build_context_and_messages(
         def matches_saved_user(row: dict[str, Any]) -> bool:
             if str(row.get("sender", "")).lower() != "user":
                 return False
-            parts = [{"type": "text", "text": row["content"]}] if row.get("content") else []
+            stored_metadata = tail_metadata.get(row["id"]) or {}
+            text = _saved_image_text(row, stored_metadata.get("extra"))
+            parts = [{"type": "text", "text": text}] if text else []
             images = row.get("images") or []
             if not images and row.get("image_data"):
                 images = [row]
             for image in images:
                 data = image.get("image_data")
                 if not data:
-                    continue
+                    raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete.")
                 mime = image.get("image_mime_type") or "image/png"
                 parts.append({"type": "image_url", "image_url": {
                     "url": f"data:{mime};base64,{base64.b64encode(data).decode('utf-8')}"
                 }})
-            content = requested_user.get("content")
-            requested_parts = [{"type": "text", "text": content}] if isinstance(content, str) else content
-            if isinstance(requested_parts, list):
-                requested_parts = [
-                    {**part, "image_url": {key: value for key, value in part["image_url"].items()
-                                         if key != "detail" or value != "auto"}}
-                    if part.get("type") == "image_url" and isinstance(part.get("image_url"), dict) else part
-                    for part in requested_parts
-                ]
-            return requested_parts == parts
+            return _retry_content_components(requested_user.get("content")) == _retry_content_components(parts)
 
         if tail_rows:
             tail = tail_rows[0]
@@ -4330,7 +4384,7 @@ async def build_context_and_messages(
         def _msg_sig(msg: dict[str, Any]) -> str:
             payload = {
                 "role": msg.get("role"),
-                "content": _normalize_content(msg.get("content")),
+                "content": (_retry_content_components(retry_history_content.get(id(msg), msg.get("content"))) if explicit_failed_retry and msg.get("role") == "user" else _normalize_content(msg.get("content"))),
                 "tool_calls": msg.get("tool_calls"),
                 "function_call": msg.get("function_call"),
                 "tool_call_id": msg.get("tool_call_id"),

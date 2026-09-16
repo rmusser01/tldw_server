@@ -1,0 +1,256 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=666820893
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 80 items
+
+tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py . [  1%]
+.....                                                                    [  7%]
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py ..... [ 13%]
+F..........FFF.F...............F.F..F......F..F....F..F.                 [ 83%]
+tldw_Server_API/tests/Chat/integration/test_chat_image_recovery.py ..... [ 90%]
+........                                                                 [100%]2026-09-15 22:55:58.985 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-15 22:55:58.986 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 22:55:58.991 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 22:55:58.996 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 22:55:59.001 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 22:55:59.006 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 22:55:59.008 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 22:55:59.011 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-15 22:55:59.011 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-15 22:55:59.012 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-15 22:55:59.012 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-15 22:55:59.024 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-15 22:55:59.025 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-15 22:55:59.025 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-15 22:55:59.026 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.database:close:1665 - Database pool closed
+2026-09-15 22:55:59.026 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:shutdown:885 - Shutting down MCP Server
+2026-09-15 22:55:59.026 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:shutdown_all:530 - Shutting down all modules
+2026-09-15 22:55:59.027 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:shutdown_all:559 - All modules shut down
+2026-09-15 22:55:59.028 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-33c720a7
+2026-09-15 22:55:59.031 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-33c720a7/1/workflows/workflows_scheduler.db
+2026-09-15 22:55:59.031 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-15 22:55:59.032 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:59.032 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+
+
+=================================== FAILURES ===================================
+___ test_failed_retry_identity_conflict_and_compatibility_controls[answered] ___
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:507: in test_failed_retry_identity_conflict_and_compatibility_controls
+    await call
+tldw_Server_API/app/core/Chat/chat_service.py:4185: in build_context_and_messages
+    raw_hist = await loop.run_in_executor(
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: DummyChatDB.get_messages_for_conversation() got an unexpected keyword argument 'strict_images'
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 22:55:25.312 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 22:55:25.431 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:25.431 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 22:55:25.432 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:25.432 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_failed_retry_identity_conflict_and_compatibility_controls[legacy-error] _
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:511: in test_failed_retry_identity_conflict_and_compatibility_controls
+    await call
+tldw_Server_API/app/core/Chat/chat_service.py:4185: in build_context_and_messages
+    raw_hist = await loop.run_in_executor(
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: DummyChatDB.get_messages_for_conversation() got an unexpected keyword argument 'strict_images'
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 22:55:25.491 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 22:55:25.532 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:25.532 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 22:55:25.533 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:25.533 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_explicit_failed_retry_uses_actual_tail_even_outside_context_window[20-desc] _
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:409: in test_explicit_failed_retry_uses_actual_tail_even_outside_context_window
+    result = await chat_service.build_context_and_messages(
+tldw_Server_API/app/core/Chat/chat_service.py:4185: in build_context_and_messages
+    raw_hist = await loop.run_in_executor(
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: DummyChatDB.get_messages_for_conversation() got an unexpected keyword argument 'strict_images'
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 22:55:25.536 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 22:55:25.866 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:25.866 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 22:55:25.867 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:25.867 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_failed_retry_identity_conflict_and_compatibility_controls[changed-image] _
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:507: in test_failed_retry_identity_conflict_and_compatibility_controls
+    await call
+tldw_Server_API/app/core/Chat/chat_service.py:4185: in build_context_and_messages
+    raw_hist = await loop.run_in_executor(
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: DummyChatDB.get_messages_for_conversation() got an unexpected keyword argument 'strict_images'
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 22:55:25.870 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 22:55:25.908 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:25.909 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 22:55:25.909 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:25.910 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_retry_client_identity_respects_saved_correlation_and_legacy_metadata[None] _
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:467: in test_retry_client_identity_respects_saved_correlation_and_legacy_metadata
+    await call
+tldw_Server_API/app/core/Chat/chat_service.py:4185: in build_context_and_messages
+    raw_hist = await loop.run_in_executor(
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: DummyChatDB.get_messages_for_conversation() got an unexpected keyword argument 'strict_images'
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 22:55:25.918 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 22:55:25.956 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:25.956 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 22:55:25.957 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:25.957 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_explicit_failed_retry_uses_actual_tail_even_outside_context_window[20-asc] _
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:409: in test_explicit_failed_retry_uses_actual_tail_even_outside_context_window
+    result = await chat_service.build_context_and_messages(
+tldw_Server_API/app/core/Chat/chat_service.py:4185: in build_context_and_messages
+    raw_hist = await loop.run_in_executor(
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: DummyChatDB.get_messages_for_conversation() got an unexpected keyword argument 'strict_images'
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 22:55:26.044 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 22:55:26.081 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:26.082 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 22:55:26.082 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:26.082 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_failed_retry_identity_conflict_and_compatibility_controls[matching-image] _
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:511: in test_failed_retry_identity_conflict_and_compatibility_controls
+    await call
+tldw_Server_API/app/core/Chat/chat_service.py:4185: in build_context_and_messages
+    raw_hist = await loop.run_in_executor(
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: DummyChatDB.get_messages_for_conversation() got an unexpected keyword argument 'strict_images'
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 22:55:26.092 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 22:55:26.132 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:26.132 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 22:55:26.132 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:26.133 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_explicit_failed_retry_uses_actual_tail_even_outside_context_window[1-asc] _
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:409: in test_explicit_failed_retry_uses_actual_tail_even_outside_context_window
+    result = await chat_service.build_context_and_messages(
+tldw_Server_API/app/core/Chat/chat_service.py:4185: in build_context_and_messages
+    raw_hist = await loop.run_in_executor(
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: DummyChatDB.get_messages_for_conversation() got an unexpected keyword argument 'strict_images'
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 22:55:26.148 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 22:55:26.185 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:26.186 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 22:55:26.186 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:26.186 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_retry_client_identity_respects_saved_correlation_and_legacy_metadata[extra3] _
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:464: in test_retry_client_identity_respects_saved_correlation_and_legacy_metadata
+    await call
+tldw_Server_API/app/core/Chat/chat_service.py:4185: in build_context_and_messages
+    raw_hist = await loop.run_in_executor(
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: DummyChatDB.get_messages_for_conversation() got an unexpected keyword argument 'strict_images'
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 22:55:26.228 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 22:55:26.272 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:26.272 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 22:55:26.273 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:26.273 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_retry_client_identity_respects_saved_correlation_and_legacy_metadata[extra2] _
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:467: in test_retry_client_identity_respects_saved_correlation_and_legacy_metadata
+    await call
+tldw_Server_API/app/core/Chat/chat_service.py:4185: in build_context_and_messages
+    raw_hist = await loop.run_in_executor(
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: DummyChatDB.get_messages_for_conversation() got an unexpected keyword argument 'strict_images'
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 22:55:26.295 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 22:55:26.338 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:26.339 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 22:55:26.339 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:26.340 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_failed_retry_identity_conflict_and_compatibility_controls[not-persisted] _
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:511: in test_failed_retry_identity_conflict_and_compatibility_controls
+    await call
+tldw_Server_API/app/core/Chat/chat_service.py:4185: in build_context_and_messages
+    raw_hist = await loop.run_in_executor(
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: DummyChatDB.get_messages_for_conversation() got an unexpected keyword argument 'strict_images'
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 22:55:27.221 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 22:55:27.559 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:27.560 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 22:55:27.560 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:27.561 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_retry_client_identity_respects_saved_correlation_and_legacy_metadata[extra1] _
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:467: in test_retry_client_identity_respects_saved_correlation_and_legacy_metadata
+    await call
+tldw_Server_API/app/core/Chat/chat_service.py:4185: in build_context_and_messages
+    raw_hist = await loop.run_in_executor(
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: DummyChatDB.get_messages_for_conversation() got an unexpected keyword argument 'strict_images'
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 22:55:27.575 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 22:55:27.615 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:27.615 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 22:55:27.616 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 22:55:27.616 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+=========================== short test summary info ============================
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_failed_retry_identity_conflict_and_compatibility_controls[answered]
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_failed_retry_identity_conflict_and_compatibility_controls[legacy-error]
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_explicit_failed_retry_uses_actual_tail_even_outside_context_window[20-desc]
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_failed_retry_identity_conflict_and_compatibility_controls[changed-image]
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_retry_client_identity_respects_saved_correlation_and_legacy_metadata[None]
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_explicit_failed_retry_uses_actual_tail_even_outside_context_window[20-asc]
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_failed_retry_identity_conflict_and_compatibility_controls[matching-image]
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_explicit_failed_retry_uses_actual_tail_even_outside_context_window[1-asc]
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_retry_client_identity_respects_saved_correlation_and_legacy_metadata[extra3]
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_retry_client_identity_respects_saved_correlation_and_legacy_metadata[extra2]
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_failed_retry_identity_conflict_and_compatibility_controls[not-persisted]
+FAILED tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py::test_retry_client_identity_respects_saved_correlation_and_legacy_metadata[extra1]
+================== 12 failed, 68 passed, 6 warnings in 45.42s ==================
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/pathlib.py:96: PytestWarning: (rm_rf) error removing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-d38b9f78-9fb2-40a4-97d2-49515c8a80df/test_kokoro_constructor_direct3
+<class 'OSError'>: [Errno 66] Directory not empty: 'test_kokoro_constructor_direct3'
+  warnings.warn(
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/pathlib.py:96: PytestWarning: (rm_rf) error removing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-d38b9f78-9fb2-40a4-97d2-49515c8a80df
+<class 'OSError'>: [Errno 66] Directory not empty: '/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-d38b9f78-9fb2-40a4-97d2-49515c8a80df'
+  warnings.warn(

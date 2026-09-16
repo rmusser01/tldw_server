@@ -1,10 +1,13 @@
 import asyncio
+import base64
+import io
 import json
 from contextlib import asynccontextmanager, nullcontext
 from typing import Any, Dict, Optional, List
 
 import pytest
 from loguru import logger
+from PIL import Image
 from unittest.mock import AsyncMock, MagicMock
 
 pytestmark = pytest.mark.unit
@@ -28,7 +31,7 @@ class DummyChatDB:
         self._records = records
         self.client_id = "client"
 
-    def get_messages_for_conversation(self, conversation_id: str, limit: int, offset: int, order: str):
+    def get_messages_for_conversation(self, conversation_id: str, limit: int, offset: int, order: str, *, strict_images: bool = False):
         assert conversation_id == "conv"
         assert offset == 0
         assert order in ("ASC", "DESC")
@@ -483,9 +486,14 @@ async def test_failed_retry_identity_conflict_and_compatibility_controls(kind):
     records = [{"id": "failed-user", "sender": "user", "content": "Question", "timestamp": 1}]
     content = "Question"
     if "image" in kind:
-        records[0]["images"] = [{"image_data": b"image", "image_mime_type": "image/png"}]
+        buffer = io.BytesIO()
+        Image.new("RGB", (2, 2), "red").save(buffer, format="PNG")
+        records[0]["images"] = [{"image_data": buffer.getvalue(), "image_mime_type": "image/png"}]
+        if kind == "changed-image":
+            buffer = io.BytesIO()
+            Image.new("RGB", (2, 2), "blue").save(buffer, format="PNG")
         content = [{"type": "text", "text": "Question"}, {"type": "image_url", "image_url": {
-            "url": "data:image/png;base64," + ("aW1hZ2U=" if kind == "matching-image" else "b3RoZXI=")
+            "url": "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
         }}]
     if kind in {"answered", "legacy-error"}:
         records.append({"id": "assistant", "sender": "assistant", "timestamp": 2,

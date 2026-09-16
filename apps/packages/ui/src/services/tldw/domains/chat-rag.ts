@@ -34,6 +34,17 @@ import { isRequestConfigScopeChangedError } from '../service-prompt-scope-error'
 
 const CHAT_MESSAGES_CACHE_TTL_MS = 60 * 1000
 
+const readCompleteMessageImages = (value: unknown): string[] => {
+  if (!Array.isArray(value) || value.some(image => {
+    if (typeof image !== "string") return true
+    const match = /^data:image\/(?:png|jpeg|webp|gif|bmp|x-icon);base64,(.+)$/.exec(image)
+    if (!match) return true
+    const encoded = match[1]
+    return encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)
+  })) throw new Error("A saved chat attachment is incomplete or invalid. Reload the conversation before retrying.")
+  return value as string[]
+}
+
 const isSavedDegradedCharacterPersistError = (error: unknown): boolean => {
   const candidate = error as
     | {
@@ -1143,6 +1154,10 @@ export const chatRagMethods = {
       }
 
       const normalized = list.map((m) => {
+        if ([true, "true"].includes(params?.include_images) && m.has_image === true &&
+            (!Array.isArray(m.images) || m.images.length === 0)) {
+          throw new Error("The server did not return the complete saved chat attachments. Reload after updating the server.")
+        }
         const senderCandidate =
           typeof m.sender === "string"
             ? m.sender
@@ -1216,6 +1231,7 @@ export const chatRagMethods = {
               ? senderCandidate
               : undefined,
           content: String(m.content ?? ""),
+          ...(Object.prototype.hasOwnProperty.call(m, "images") ? { images: readCompleteMessageImages(m.images) } : {}),
           created_at,
           version:
             typeof m.version === "number"

@@ -1,0 +1,3 @@
+# Canonical contract refresh
+
+The repository generator wrapper initially failed importing tldw_profile_core because it overrides PYTHONPATH with only the repository root. Existing local runtime/test setup already includes packages/tldw_profile_core/src and apps/mcp-unified/src. Ran the same canonical exporter with these source paths, followed by the installed openapi-typescript binary. No dependencies or generator code changed. Export:2097 paths,3208 schemas, fingerprint8125d545411ea5149e3f29b92a61b7fe9909982c6636ad29ae247423a22ffcba. Independent exporter --check passed. Full generated files remain gitignored; tracked fingerprint is included with UAT118.

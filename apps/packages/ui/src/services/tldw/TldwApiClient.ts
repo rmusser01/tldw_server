@@ -1224,6 +1224,7 @@ export type ConversationState =
   | "non-viable"
 
 export interface ServerChatMessage {
+  images?: string[]
   id: string
   role: "system" | "user" | "assistant"
   sender?: string

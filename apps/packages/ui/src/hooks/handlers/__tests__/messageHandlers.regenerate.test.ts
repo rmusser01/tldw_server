@@ -63,6 +63,22 @@ describe("createRegenerateLastMessage", () => {
     )
   })
 
+  it.each([
+    { content: "  Preserve spaces  ", image: "", expected: true },
+    { content: "", image: "data:image/png;base64,aW1hZ2U=", expected: true },
+    { content: "   ", image: "", expected: false },
+    { content: "", image: "", expected: false }
+  ])("retains exact Retry input and admits only nonempty text or an image: $content / $image", async ({ content, image, expected }) => {
+    const messages = buildMessages()
+    messages[0] = { ...messages[0], message: content, images: image ? [image] : [] }
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    await createRegenerateLastMessage({ validateBeforeSubmitFn: () => true,
+      history: [{ role: "user", content, image }], messages,
+      setHistory: vi.fn(), setMessages: vi.fn(), onSubmit })()
+    if (expected) expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ message: content, image }))
+    else expect(onSubmit).not.toHaveBeenCalled()
+  })
+
   it("bails safely when setHistory is not callable", async () => {
     const consoleErrorSpy = vi
       .spyOn(console, "error")

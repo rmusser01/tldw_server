@@ -76,6 +76,7 @@ type FetchServerChatMessagesPage = (
 
 const SERVER_CHAT_MESSAGES_FETCH_LIMIT = 200
 const SERVER_CHAT_MESSAGES_FETCH_MAX_PAGES = 100
+const SERVER_CHAT_IMAGES_MAX_ENCODED_CHARS = 64 * 1024 * 1024
 
 const toServerMessageId = (message: Message): string | null => {
   if (typeof message.serverMessageId !== "string") return null
@@ -177,15 +178,22 @@ export const fetchAllServerChatMessages = async (
   )
   const messages: ServerChatMessage[] = []
   let offset = 0
+  let imageCharacters = 0
 
   for (let page = 0; page < maxPages; page += 1) {
+    options?.signal?.throwIfAborted()
     const batch = await fetchPage({
       limit,
       offset,
       signal: options?.signal
     })
+    options?.signal?.throwIfAborted()
     if (!Array.isArray(batch) || batch.length === 0) {
       break
+    }
+    imageCharacters += batch.reduce((total, message) => total + (message.images || []).reduce((size, image) => size + image.length, 0), 0)
+    if (imageCharacters > SERVER_CHAT_IMAGES_MAX_ENCODED_CHARS) {
+      throw new Error("Saved chat attachments exceed the image history limit. Local work has been retained.")
     }
     messages.push(...batch)
     offset += batch.length
@@ -435,9 +443,11 @@ export const mapServerChatMessagesToPlaygroundMessages = ({
           : m.role === "system"
             ? "System"
             : "You",
-      message: mirroredImageEvent ? "" : m.content,
+      message: mirroredImageEvent || (m.role === "user" && m.version === 1 &&
+        metadataExtra?.content_placeholder_reason === "image_attachment" && m.images?.length &&
+        m.content === `<Image attachment x${m.images.length}>`) ? "" : m.content,
       sources: [],
-      images: mirroredImageDataUrl ? [mirroredImageDataUrl] : [],
+      images: mirroredImageDataUrl ? [mirroredImageDataUrl] : m.images || [],
       generationInfo,
       id: String(m.id),
       serverMessageId: String(m.id),
@@ -997,6 +1007,7 @@ export const useServerChatLoader = ({
                 {
                   include_deleted: "false",
                   include_metadata: "true",
+                  include_images: "true",
                   render_placeholders: assistantKind === "character" || characterId != null ? "true" : "false",
                   limit,
                   offset
@@ -1008,6 +1019,9 @@ export const useServerChatLoader = ({
             }
           )
 
+          if (list.some(message => message.role === "user" && (message.images?.length ?? 0) > 1)) {
+            throw new Error("This conversation has multiple images in one user message. Chat currently supports one image per turn. Your local work has been kept; open a new conversation to continue.")
+          }
           const mappedMessages = mapServerChatMessagesToPlaygroundMessages({
             serverMessages: list,
             assistantName,
@@ -1019,7 +1033,7 @@ export const useServerChatLoader = ({
           const active = streamingRef.current || processingRef.current
           if (!active) {
             const merged = reconcileServerChatMessages(messagesRef.current, mappedMessages)
-            setHistory(merged.map(message => ({ role: message.role, content: message.message, messageType: message.messageType })))
+            setHistory(merged.map(message => ({ role: message.role, content: message.message, image: message.images?.[0], messageType: message.messageType })))
             setMessages(merged)
           }
           const shouldApplyDeferredAssistantPresentation =
@@ -1089,7 +1103,7 @@ export const useServerChatLoader = ({
                   const id = message.serverMessageId ? mirror.localIds.get(message.serverMessageId) : undefined
                   return id && message.id !== id ? { ...message, id } : message
                 })
-                setHistory(merged.map(message => ({ role: message.role, content: message.message, messageType: message.messageType })))
+                setHistory(merged.map(message => ({ role: message.role, content: message.message, image: message.images?.[0], messageType: message.messageType })))
                 setMessages(merged)
               }
             } catch {

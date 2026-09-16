@@ -3148,6 +3148,9 @@ async def _save_message_turn_to_db(
 
     if not text_parts and normalized_images:
         text_parts = [f"<Image attachment x{len(normalized_images)}>"]
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra["content_placeholder_reason"] = "image_attachment"
 
     # Store sender role in DB; preserve display name in metadata.
     sender = role or "assistant"
