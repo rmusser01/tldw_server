@@ -344,3 +344,29 @@ and do not introduce production fault flags, automatic injection or reboot.
 Host reboot, missing-agent, early kernel boot hangs and other deferred fault
 classes remain separate. Record actual host results in the prepared-host evidence
 document; this design extension is not itself proof of real VM acceptance.
+
+## 2026-09-15 Advertised Workspace Mismatch Extension
+
+TASK-13243.7 isolates the existing runner workspace-metadata admission guard.
+Reuse the same disposable image-store, offline installer, isolated helper and
+evidence workflow, now with four profiles and eight required positive/negative
+cases. No production admission or VM lifecycle change is intended.
+
+The test-only Go overlay alters only the initial handshake's advertised root to
+`/workspace-mismatch/<fresh nonce>`. The actual `/workspace` mount, guest protocol
+and `exec`/`output_cap_v1` capabilities remain unchanged. The host must observe
+that exact root from the real helper create reply for the attempted VM, then
+require only `vz_linux_guest_agent_workspace_mismatch`, no exec dispatch, no
+reusable VM state, and healthy replacement execution plus same-session reuse.
+Public reconciliation, session APIs and helper inventory establish cleanup;
+do not reach into private orchestrator state or bypass admission.
+
+The negative control changes only the challenge to advertise the supported root.
+Acceptance requires supported metadata and actual completed, exit-zero,
+exact-output execution before the intended rejection assertion fails. A skip,
+readiness failure, capability fault, foreign VM, or uncertain cleanup is not
+acceptance. Existing source-hash and helper/disk cleanup gates remain mandatory.
+
+This proves advertised metadata admission, not mount isolation or path-escape
+resistance. Missing-agent, early boot-hang and host-reboot live evidence remain
+separate; no reboot, source-bundle mutation or scheduled fault injection is added.

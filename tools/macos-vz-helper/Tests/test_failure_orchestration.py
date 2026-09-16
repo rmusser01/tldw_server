@@ -1,4 +1,4 @@
-"""Portable behavioral tests for fault preparation and six-case orchestration."""
+"""Portable behavioral tests for fault preparation and eight-case orchestration."""
 
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ def test_write_json_persists_readable_receipt(drill: ModuleType, tmp_path: Path)
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("profile", ["mismatch", "readiness", "protocol"])
+@pytest.mark.parametrize("profile", ["mismatch", "readiness", "protocol", "workspace"])
 @pytest.mark.parametrize("build_fails", [False, True])
 def test_build_agent_uses_overlay_and_retains_build_evidence(
     drill: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str, build_fails: bool
@@ -171,6 +171,15 @@ def test_build_agent_uses_overlay_and_retains_build_evidence(
         assert (
             overlay.replace(injection, b"").replace(
                 b"ProtocolVersion: testProtocolVersion,", b"ProtocolVersion: ProtocolVersion,"
+            )
+            == production
+        )
+    elif profile == "workspace":
+        injection = (drill.FIXTURES / "workspace-mismatch.go.txt").read_bytes()
+        assert overlay.count(injection) == 1
+        assert (
+            overlay.replace(injection, b"").replace(
+                b"WorkspaceRoot:   testWorkspaceRoot,", b"WorkspaceRoot:   c.cfg.WorkspaceRoot,"
             )
             == production
         )
@@ -326,6 +335,10 @@ def test_install_agent_preserves_primary_error_when_cleanup_also_fails(
         ("protocol", True, None),
         ("protocol", True, "report"),
         ("protocol", True, "proof"),
+        ("workspace", False, None),
+        ("workspace", True, None),
+        ("workspace", True, "report"),
+        ("workspace", True, "proof"),
         ("readiness", True, "report"),
         ("readiness", True, "proof"),
         ("readiness", False, "vms"),
@@ -362,6 +375,13 @@ def test_run_case_parses_reports_and_combines_acceptance_gates(
             "Protocol mismatch was not rejected",
             "TLDW_SANDBOX_VZ_LINUX_PROTOCOL_BASE_IMAGE",
             "TLDW_SANDBOX_VZ_LINUX_PROTOCOL_DRILL",
+        ),
+        "workspace": (
+            "test_vz_linux_workspace_host_gated.py",
+            "test_vz_linux_workspace_mismatch_then_healthy_session_reuse",
+            "Workspace mismatch was not rejected",
+            "TLDW_SANDBOX_VZ_LINUX_WORKSPACE_BASE_IMAGE",
+            "TLDW_SANDBOX_VZ_LINUX_WORKSPACE_DRILL",
         ),
     }[profile]
     dirty_keys = ("PYTEST_ADDOPTS", "PYTEST_PLUGINS", "TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC")
@@ -449,7 +469,7 @@ class HelperStatus:
 
 @pytest.mark.unit
 @pytest.mark.parametrize("failure", [None, "rejected", "raised"])
-def test_exercise_isolates_six_cases_and_unwinds_failed_runs(
+def test_exercise_isolates_eight_cases_and_unwinds_failed_runs(
     drill: ModuleType,
     materializer: ModuleType,
     source_bundle: Path,
@@ -529,14 +549,18 @@ def test_exercise_isolates_six_cases_and_unwinds_failed_runs(
             drill.exercise(materializer, ctl, source_bundle, tmp_path / "helper", evidence, receipt, factory)
     else:
         drill.exercise(materializer, ctl, source_bundle, tmp_path / "helper", evidence, receipt, factory)
-    expected = [(profile, negative) for profile in ("mismatch", "readiness", "protocol") for negative in (False, True)]
+    expected = [
+        (profile, negative)
+        for profile in ("mismatch", "readiness", "protocol", "workspace")
+        for negative in (False, True)
+    ]
     assert [(profile, negative) for profile, negative, _, _ in seen] == (expected[:2] if failure else expected)
     run_paths = [path for _, _, healthy, fault in seen for path in (healthy, fault)]
     assert len(set(run_paths)) == 2 * len(seen)
     assert all(path.is_relative_to(evidence / "image-store/runs") for path in run_paths)
-    assert builder.call_count == 3
-    assert [call.args[0] for call in builder.call_args_list] == ["mismatch", "readiness", "protocol"]
-    assert installer.call_count == (1 if failure else 3)
+    assert builder.call_count == 4
+    assert [call.args[0] for call in builder.call_args_list] == ["mismatch", "readiness", "protocol", "workspace"]
+    assert installer.call_count == (1 if failure else 4)
     expected_cases = {
         "mismatch-positive": {"ok": True},
         "mismatch-negative": {"ok": failure != "rejected"},
@@ -544,6 +568,8 @@ def test_exercise_isolates_six_cases_and_unwinds_failed_runs(
         "readiness-negative": {"ok": True},
         "protocol-positive": {"ok": True},
         "protocol-negative": {"ok": True},
+        "workspace-positive": {"ok": True},
+        "workspace-negative": {"ok": True},
     }
     if failure:
         expected_cases = {name: result for name, result in expected_cases.items() if name.startswith("mismatch")}
@@ -559,7 +585,7 @@ def test_exercise_isolates_six_cases_and_unwinds_failed_runs(
     assert not Path(receipt["lifecycle"]["runtime_dir"]).exists()
     assert receipt["errors"] == []
     tracked_disks = disk_probe.call_args.args[0]
-    assert len(tracked_disks) == (6 if failure else 18)
+    assert len(tracked_disks) == (6 if failure else 24)
     assert {path / "rootfs.img" for path in run_paths}.issubset(set(tracked_disks))
     if failure:
         helper.terminate_vm.assert_called_once_with("leftover")

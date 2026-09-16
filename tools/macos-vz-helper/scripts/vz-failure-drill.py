@@ -61,6 +61,13 @@ TESTS = {
         "TLDW_SANDBOX_VZ_LINUX_PROTOCOL_BASE_IMAGE",
         "TLDW_SANDBOX_VZ_LINUX_PROTOCOL_DRILL",
     ),
+    "workspace": (
+        "test_vz_linux_workspace_host_gated.py",
+        "test_vz_linux_workspace_mismatch_then_healthy_session_reuse",
+        "Workspace mismatch was not rejected",
+        "TLDW_SANDBOX_VZ_LINUX_WORKSPACE_BASE_IMAGE",
+        "TLDW_SANDBOX_VZ_LINUX_WORKSPACE_DRILL",
+    ),
 }
 
 
@@ -216,6 +223,7 @@ def negative_execution(packet: Path, profile: str) -> dict[str, Any]:
         "mismatch": "guest-mismatch.json",
         "readiness": "guest-readiness.json",
         "protocol": "guest-protocol.json",
+        "workspace": "guest-workspace.json",
     }[profile]
     paths = [p for p in (packet / "pytest").glob("*/" + filename) if not p.parent.is_symlink() and not p.is_symlink()]
     if len(paths) != 1:
@@ -242,6 +250,17 @@ def negative_execution(packet: Path, profile: str) -> dict[str, Any]:
         elif profile == "protocol":
             proof = data["protocol_proof"]
             ok = ok and proof["vm_id"] == vm_id and proof["protocol_version"] == "1"
+        elif profile == "workspace":
+            guest = created[0]["guest_agent"]
+            ok = (
+                ok
+                and isinstance(guest, dict)
+                and guest.get("workspace_root") == "/workspace"
+                and guest.get("capabilities_known") is True
+                and isinstance(guest.get("capabilities"), list)
+                and "exec" in guest["capabilities"]
+                and "output_cap_v1" in guest["capabilities"]
+            )
         return {"ok": ok, "receipt": str(paths[0]), "vm_id": vm_id, "run": run}
     except (OSError, ValueError, TypeError, KeyError) as exc:
         return {"ok": False, "error": str(exc)}
@@ -458,6 +477,10 @@ def build_agent(profile: str, packet: Path) -> Path:
         anchor = "\tif err := writeJSONLine(conn, HandshakeRequest{\n\t\tProtocolVersion: ProtocolVersion,"
         replacement = anchor.replace("ProtocolVersion: ProtocolVersion,", "ProtocolVersion: testProtocolVersion,")
         source = replace_once(source, anchor, (FIXTURES / "protocol-mismatch.go.txt").read_text() + replacement)
+    elif profile == "workspace":
+        anchor = "\tif err := writeJSONLine(conn, HandshakeRequest{"
+        source = replace_once(source, anchor, (FIXTURES / "workspace-mismatch.go.txt").read_text() + anchor)
+        source = replace_once(source, "WorkspaceRoot:   c.cfg.WorkspaceRoot,", "WorkspaceRoot:   testWorkspaceRoot,")
     else:
         raise ValueError(f"unknown guest fault profile: {profile}")
     overlay_source = packet / "vsock_client.go"
