@@ -1,0 +1,2 @@
+fae250e03181e7d5d9abaf7a236faa9f7f2e6693145703c32557703abde9e284  apps/packages/ui/src/components/Layouts/SettingsOptionLayout.tsx
+4aae0c79221d873e67aa7621d7abf4817e4b4f09569b0166494533e1629535d0  apps/packages/ui/src/components/Layouts/__tests__/settings-layout-sidebar-capability.test.tsx

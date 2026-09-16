@@ -1,0 +1,37 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:14815) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+UAT155_BASELINE_LOADED sha256=7202f11585da5d61a17f864139eb9adb27c051b97924aea33838b26935855f8f source=2d5ad06c86cf279fe0fcc6445009813d97ab1c1b
+ ❯ src/components/Layouts/__tests__/settings-layout-sidebar-capability.test.tsx (4 tests | 1 failed) 255ms
+     × disables the WebUI action despite the real browser shim advertising support 124ms
+     ✓ keeps the Chrome extension action enabled and opens the active tab sidebar 52ms
+     ✓ keeps the Firefox extension action enabled and opens its sidebar 40ms
+     ✓ keeps an unsupported extension action disabled without changing preferences 38ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Layouts/__tests__/settings-layout-sidebar-capability.test.tsx > settings sidebar capability > disables the WebUI action despite the real browser shim advertising support
+Error: expect(element).toBeDisabled()
+
+Received element is not disabled:
+  <button
+  class="text-xs border rounded px-2 py-1 text-text  disabled:opacity-50 disabled:cursor-not-allowed"
+  title="Switch to Sidebar"
+/>
+ ❯ src/components/Layouts/__tests__/settings-layout-sidebar-capability.test.tsx:93:26
+     91|     });
+     92|
+     93|     expect(switchButton).toBeDisabled();
+       |                          ^
+     94|     await user.click(switchButton);
+     95|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  12:18:05
+   Duration  1.20s (transform 101ms, setup 76ms, import 552ms, tests 255ms, environment 225ms)

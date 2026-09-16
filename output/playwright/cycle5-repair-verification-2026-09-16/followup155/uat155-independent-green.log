@@ -1,0 +1,24 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:14194) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Layouts/__tests__/settings-layout-labels.test.tsx (4 tests) 720ms
+     ✓ renders provider keys as user-facing navigation text  323ms
+(node:14223) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Layouts/__tests__/settings-layout-focus-order.test.tsx (8 tests) 297ms
+(node:14252) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Layouts/__tests__/settings-layout-sidebar-capability.test.tsx (4 tests) 258ms
+(node:14275) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Layouts/__tests__/settings-layout-filter.test.tsx (3 tests) 175ms
+(node:14301) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Layouts/__tests__/settings-layout-exit-navigation.test.tsx (5 tests) 158ms
+
+ Test Files  5 passed (5)
+      Tests  24 passed (24)
+   Start at  12:17:18
+   Duration  5.95s (transform 162ms, setup 311ms, import 2.41s, tests 1.61s, environment 1.17s)

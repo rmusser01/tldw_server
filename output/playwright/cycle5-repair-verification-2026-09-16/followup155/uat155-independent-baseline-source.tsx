@@ -105,7 +105,7 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
   );
   const { capabilities, loading: capabilitiesLoading } =
     useServerCapabilities();
-  const sidepanelSupported = !isNextWebAppRuntime() && isSidepanelSupported();
+  const sidepanelSupported = isSidepanelSupported();
   const settingsNavGroups = React.useMemo(
     () => getSettingsNavGroups(capabilitiesLoading ? undefined : capabilities),
     [capabilities, capabilitiesLoading],
