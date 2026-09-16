@@ -1,0 +1,595 @@
+2026-09-16 09:25:02.952 | INFO     | tldw_Server_API.app.core.config:_flush_startup_logs:238 - Early loading environment variables from: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Config_Files/.env
+2026-09-16 09:25:02.952 | DEBUG    | tldw_Server_API.app.core.config:_flush_startup_logs:238 - Attempting to load OpenAI TTS mappings from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/openai_tts_mappings.json
+2026-09-16 09:25:03.061 | DEBUG    | tldw_Server_API.app.core.Metrics.telemetry:<module>:164 - Prometheus exporter not available: No module named 'opentelemetry.exporter.prometheus'
+2026-09-16 09:25:03.092 | DEBUG    | tldw_Server_API.app.core.Metrics.telemetry:<module>:179 - FastAPI instrumentation not available: No module named 'opentelemetry.instrumentation'
+2026-09-16 09:25:03.092 | DEBUG    | tldw_Server_API.app.core.Metrics.telemetry:<module>:184 - HTTPX instrumentation not available: No module named 'opentelemetry.instrumentation'
+2026-09-16 09:25:03.092 | DEBUG    | tldw_Server_API.app.core.Metrics.telemetry:<module>:189 - SQLAlchemy instrumentation not available: No module named 'opentelemetry.instrumentation'
+2026-09-16 09:25:03.092 | DEBUG    | tldw_Server_API.app.core.Metrics.telemetry:<module>:194 - Psycopg2 instrumentation not available: No module named 'opentelemetry.instrumentation'
+2026-09-16 09:25:03.092 | DEBUG    | tldw_Server_API.app.core.Metrics.telemetry:<module>:199 - aiohttp instrumentation not available: No module named 'opentelemetry.instrumentation'
+2026-09-16 09:25:03.254 | WARNING  | tldw_Server_API.app.core.Metrics.telemetry:_create_metric_reader:719 - Prometheus metric exporter not available
+2026-09-16 09:25:03.254 | INFO     | tldw_Server_API.app.core.Metrics.telemetry:_initialize:562 - Telemetry initialized for service: tldw_server
+2026-09-16 09:25:03.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: http_requests_total
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: http_request_duration_seconds
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: db_connections_active
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: db_queries_total
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: db_query_duration_seconds
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: privilege_snapshots_table_bytes
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: privilege_snapshots_table_rows
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: privilege_cache_hits_total
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: privilege_cache_misses_total
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: privilege_cache_invalidations_total
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: privilege_cache_generation
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: privilege_cache_entries
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_requests_total
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_tokens_used_total
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_request_duration_seconds
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_cost_dollars
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_cost_dollars_by_user
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: stt_final_latency_seconds
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: tts_ttfb_seconds
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: voice_to_voice_seconds
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_chat_latency_seconds
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stream_underruns_total
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stream_errors_total
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_requests_total
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_streaming_sessions_started_total
+2026-09-16 09:25:03.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_streaming_sessions_ended_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_errors_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_run_writes_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_redaction_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_latency_seconds
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_queue_wait_seconds
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_streaming_token_latency_seconds
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_transcript_read_path_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_cost_dollars_by_operation
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_tokens_used_total_by_user
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_tokens_used_total_by_operation
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: infra_redis_connection_attempts_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: infra_redis_connection_duration_seconds
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: infra_redis_connection_errors_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: infra_redis_fallback_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_queries_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: slides_generation_latency_seconds
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: slides_generation_errors_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: slides_export_latency_seconds
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: slides_export_errors_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: app_exception_events_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: app_warning_events_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_sessions_created_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_runs_started_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_runs_completed_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_run_duration_seconds
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_log_truncations_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_queue_full_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_queue_ttl_expired_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_queue_wait_seconds
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_ws_connections_opened_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_ws_heartbeats_sent_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_ws_disconnects_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_ws_queue_drops_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_upload_bytes_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_upload_files_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_janitor_runs_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_janitor_removed_runs_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_janitor_removed_files_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_janitor_removed_bytes_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_janitor_duration_ms
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_reconcile_runs_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_reconcile_corrected_users_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_reconcile_corrected_bytes_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_reconcile_duration_ms
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_maintenance_cycles_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_maintenance_cycle_duration_ms
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_retrieval_latency_seconds
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_documents_retrieved
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_cache_hits_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_cache_misses_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_retrieval_precision
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_retrieval_recall
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_retrieval_mrr
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_retrieval_ndcg
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_retrieval_f1
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_reranker_llm_timeouts_total
+2026-09-16 09:25:03.256 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_reranker_llm_exceptions_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_adaptive_retries_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_hard_citation_coverage
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_nli_unsupported_ratio
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: template_render_success_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: template_render_failure_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: template_render_timeout_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: template_output_truncated_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: template_render_duration_seconds
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_command_invoked_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_command_errors_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_conversation_search_requests_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_conversation_search_duration_seconds
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_dictionary_validate_requests_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_dictionary_validate_errors_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_dictionary_validate_warnings_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_dictionary_validate_duration_seconds
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_unsupported_claims_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_adaptive_fix_success_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_postcheck_duration_seconds
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_adaptive_rerun_performed_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_adaptive_rerun_adopted_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_adaptive_rerun_duration_seconds
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_reranker_llm_budget_exhausted_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_reranker_llm_docs_scored_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_phase_duration_seconds
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_reranking_duration_seconds
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_rewrite_cache_hits_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_rewrite_cache_misses_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_rewrite_cache_puts_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_batch_query_reuse_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_phase_budget_exhausted_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_total_claims_checked_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_eval_faithfulness_score
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_eval_coverage_score
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_eval_last_run_timestamp
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_generation_gated_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_policy_filtered_chunks_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_sanitized_docs_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_ocr_dropped_docs_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_injection_chunks_downweighted_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_numeric_mismatches_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_missing_hard_citations_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: embeddings_generated_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: hyde_questions_generated_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: hyde_generation_failures_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: hyde_vectors_written_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: uploads_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: upload_bytes_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: ingestion_requests_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: ingestion_processing_seconds
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: ingestion_validation_failures_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: ingestion_chunks_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: ingestion_embeddings_enqueue_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: embedding_generation_duration_seconds
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: quiz_generation_requests_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: quiz_generation_outcomes_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: quiz_generation_duration_seconds
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: system_cpu_usage_percent
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: system_memory_usage_bytes
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: system_disk_usage_bytes
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: errors_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: scrape_fetch_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: scrape_fetch_latency_seconds
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: scrape_playwright_fallback_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: scrape_blocked_by_robots_total
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: scrape_content_length_bytes
+2026-09-16 09:25:03.257 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: extraction_strategy_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: extraction_strategy_duration_seconds
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: extraction_content_length_bytes
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: security_ssrf_block_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: security_headers_responses_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: byok_resolution_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: byok_missing_credentials_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: user_storage_used_mb
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: user_storage_quota_mb
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: circuit_breaker_state
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: circuit_breaker_failures_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: circuit_breaker_successes_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: circuit_breaker_rejections_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: circuit_breaker_trips_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: circuit_breaker_timeouts_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: prompt_studio_queue_depth
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: prompt_studio_processing
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: prompt_studio_leases_active
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: prompt_studio_leases_expiring_soon
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: prompt_studio_leases_stale_processing
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: agentic_tool_calls_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: agentic_tool_duration_seconds
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: agentic_cache_hits_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: agentic_span_length_chars
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: span_bytes_read_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_falsification_triggered_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_status_changes_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_anti_context_docs
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_processing_duration_seconds
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_wasted_falsification_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_claims_processed_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_adjudication_scores
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_timeout_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_budget_exhausted_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: http_client_requests_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: http_client_request_duration_seconds
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: http_client_retries_total
+2026-09-16 09:25:03.258 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: http_client_egress_denials_total
+2026-09-16 09:25:03.259 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-16 09:25:03.259 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Config_Files/.env
+2026-09-16 09:25:03.260 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 09:25:03.260 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Config_Files/.env
+2026-09-16 09:25:03.260 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Config_Files/config.txt
+2026-09-16 09:25:03.262 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-16 09:25:03.272 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Databases/user_databases
+2026-09-16 09:25:03.400 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:932 - Using configured JWT secret key
+2026-09-16 09:25:03.400 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: multi_user, profile=multi-user-postgres
+2026-09-16 09:25:03.416 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:1131 - Logging configured (Loguru + stdlib interception)
+2026-09-16 09:25:03.503 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:2079 - RGSimpleMiddleware enabled (RG_ENABLED)
+2026-09-16 09:25:03.504 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.csrf_protection:add_csrf_protection:532 - CSRF Protection enabled
+2026-09-16 09:25:03.509 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:2824 - Docs mounted at /docs-static from /Users/macbook-dev/Documents/GitHub/tldw_server2/Docs
+2026-09-16 09:25:03.798 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:<module>:532 - Using cachetools.LRUCache for audit service instances (maxsize=20).
+2026-09-16 09:25:03.821 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:<module>:354 - Using LRUCache for ChaChaNotes DB instances (maxsize=20).
+2026-09-16 09:25:03.942 | WARNING  | trace= span= tp= req= job= ps=: | pydantic._internal._fields:collect_model_fields:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "ResponseFormatJsonSchemaSpec" shadows an attribute in parent "BaseModel"
+  warnings.warn(
+2026-09-16 09:25:03.974 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.prompt_template_manager:<module>:201 - Prompt templates directory: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/prompt_templates
+2026-09-16 09:25:03.974 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.prompt_template_manager:<module>:202 - Available templates found: []
+2026-09-16 09:25:04.104 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.DB_Deps:<module>:57 - Using LRUCache for user DB instances (maxsize=100).
+2026-09-16 09:25:04.261 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: authnz-debug
+2026-09-16 09:25:04.617 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create:exponential_backoff:1166 - ExponentialBackoff decorator configured with max_retries=3, base_delay=1s.
+2026-09-16 09:25:06.081 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.config_manager:load_config:175 - Configuration file not found: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Config_Files/evaluations_config.yaml
+2026-09-16 09:25:06.142 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: simpleqa
+2026-09-16 09:25:06.142 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: simpleqa_verified
+2026-09-16 09:25:06.142 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: bullshit_benchmark
+2026-09-16 09:25:06.142 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: mmlu_pro
+2026-09-16 09:25:06.143 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: gpqa_diamond
+2026-09-16 09:25:06.143 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: simple_bench
+2026-09-16 09:25:06.143 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: aider_polyglot
+2026-09-16 09:25:06.143 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: bfcl
+2026-09-16 09:25:06.143 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: mask
+2026-09-16 09:25:06.143 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: vending_bench
+2026-09-16 09:25:06.143 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: swe_bench
+2026-09-16 09:25:07.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: slack
+2026-09-16 09:25:07.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: discord
+2026-09-16 09:25:07.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: telegram
+2026-09-16 09:25:07.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: meetings
+2026-09-16 09:25:08.233 | WARNING  | trace= span= tp= req= job= ps=: | pydantic._internal._fields:collect_model_fields:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "register" in "CharacterExemplarLabels" shadows an attribute in parent "BaseModel"
+  warnings.warn(
+2026-09-16 09:25:08.358 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: audiobooks
+2026-09-16 09:25:08.591 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: connectors
+2026-09-16 09:25:08.661 | WARNING  | trace= span= tp= req= job= ps=: | fastapi.params:__init__:520 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/notes_graph_suggestions.py:20: FastAPIDeprecationWarning: `example` has been deprecated, please use `examples` instead
+  from tldw_Server_API.app.api.v1.endpoints.notes_graph import _normalize_note_id
+2026-09-16 09:25:10.528 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: personalization
+2026-09-16 09:25:10.581 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: companion
+2026-09-16 09:25:10.901 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: integrations
+2026-09-16 09:25:11.203 | WARNING  | trace= span= tp= req= job= ps=: | pydantic._internal._fields:collect_model_fields:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "_NarrativeDialogueOutput" shadows an attribute in parent "_StrictModel"
+  warnings.warn(
+2026-09-16 09:25:11.204 | WARNING  | trace= span= tp= req= job= ps=: | pydantic._internal._fields:collect_model_fields:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "_ChoiceSetOutput" shadows an attribute in parent "_StrictModel"
+  warnings.warn(
+2026-09-16 09:25:11.205 | WARNING  | trace= span= tp= req= job= ps=: | pydantic._internal._fields:collect_model_fields:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "_SceneUpdateOutput" shadows an attribute in parent "_StrictModel"
+  warnings.warn(
+2026-09-16 09:25:11.595 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.endpoints.admin:_mount_admin_webhook_routes:135 - Canonical admin webhook mode is off; historical webhook CRUD, test, delivery, and incident-notify routes are disabled. Explicitly select temporary compatibility or migration before use.
+2026-09-16 09:25:11.760 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: guardian
+2026-09-16 09:25:11.760 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: guardian
+2026-09-16 09:25:11.760 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: self-monitoring
+2026-09-16 09:25:11.760 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: sandbox
+2026-09-16 09:25:11.761 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: benchmarks
+2026-09-16 09:25:12.358 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:2908 - Registered 145 routers from router groups
+2026-09-16 09:25:12.358 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:2910 - Auth router consolidated: endpoints/auth.py
+2026-09-16 09:25:12.365 | INFO     | trace= span= tp= req= job= ps=: | uvicorn.server:serve:71 - Started server process [29242]
+2026-09-16 09:25:12.366 | INFO     | trace= span= tp= req= job= ps=: | uvicorn.server:startup:97 - Waiting for application startup.
+2026-09-16 09:25:12.366 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.csrf_protection:__init__:281 - CSRF Protection Middleware initialized (enabled=True)
+2026-09-16 09:25:12.371 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.startup_preflight:run_preflight_checks:202 - Preflight [ffmpeg_available]: ok - found at /opt/homebrew/bin/ffmpeg
+2026-09-16 09:25:12.371 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.startup_preflight:run_preflight_checks:202 - Preflight [disk_space]: ok - 75189 MB free
+2026-09-16 09:25:12.371 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.startup_preflight:run_preflight_checks:202 - Preflight [database_directories]: ok - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Databases
+2026-09-16 09:25:12.371 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.startup_preflight:run_preflight_checks:202 - Preflight [python_dependencies]: ok
+2026-09-16 09:25:12.371 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.startup_preflight:run_preflight_checks:202 - Preflight [database_connectivity]: ok - Postgres TCP reachable at 127.0.0.1:55475 (auth not verified)
+2026-09-16 09:25:12.371 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_preflight_reporting:run_startup_preflight_checks:17 - Preflight: 5 checks, 0 warnings, 0 failures
+2026-09-16 09:25:12.373 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.config:get_config:589 - MCP configuration loaded successfully
+2026-09-16 09:25:12.373 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.config:validate_config:672 - Configuration validation passed
+2026-09-16 09:25:12.373 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_acp_validation:validate_startup_acp_configuration:30 - App Startup: ACP runner configuration validated
+2026-09-16 09:25:12.374 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 09:25:12.374 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:79 - Initializing Database object for path: :memory: [Client ID: content_backend_validator]
+2026-09-16 09:25:12.581 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_content_backend_validation:validate_startup_content_backend:13 - App Startup: PostgreSQL content backend validated
+2026-09-16 09:25:12.583 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_claims_prompt_validation:validate_startup_claims_prompt_validation:31 - App Startup: Claims prompt validation completed (mode=warning, strict=False)
+2026-09-16 09:25:12.584 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.metrics:__init__:255 - Evaluation metrics initialized
+2026-09-16 09:25:12.584 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.connection_pool:_initialize_pool:184 - Initializing connection pool: size=10, max_overflow=20
+2026-09-16 09:25:12.587 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.connection_pool:_initialize_pool:198 - Connection pool initialized with 10 connections
+2026-09-16 09:25:12.587 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.connection_pool:_start_maintenance:404 - Started connection pool maintenance
+2026-09-16 09:25:12.587 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.connection_pool:__init__:624 - Initialized Evaluations connection manager for /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Databases/user_databases/1/evaluations/evaluations.db
+2026-09-16 09:25:12.588 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.db_adapter:get_database_adapter:446 - Initialized sqlite database adapter
+2026-09-16 09:25:12.589 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_evaluations_warmup:warm_lazy_evaluations_managers:23 - App Startup: Warmed lazy Evaluations managers (fail-fast enabled)
+2026-09-16 09:25:12.589 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_telemetry:initialize_startup_telemetry:16 - App Startup: Initializing telemetry and metrics...
+2026-09-16 09:25:12.597 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Metrics.telemetry:_create_metric_reader:719 - Prometheus metric exporter not available
+2026-09-16 09:25:12.597 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Metrics.telemetry:_initialize:562 - Telemetry initialized for service: tldw_server
+2026-09-16 09:25:12.597 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_telemetry:initialize_startup_telemetry:21 - App Startup: OpenTelemetry initialized for service: tldw_server
+2026-09-16 09:25:12.600 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_validation:run_startup_validations:31 - First-time setup is enabled. The setup API is local-only and blocks proxied requests. If running behind a reverse proxy, ensure /setup and /api/v1/setup are not publicly exposed, or set TLDW_SETUP_ALLOW_REMOTE=1 temporarily on trusted networks.
+2026-09-16 09:25:12.601 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_core_initialization:initialize_startup_core_components:36 - App Startup: Initializing authentication services...
+2026-09-16 09:25:12.601 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.database:initialize:887 - Initializing PostgreSQL connection pool...
+2026-09-16 09:25:12.644 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.database:initialize:917 - PostgreSQL connected: PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2) on aarch6...
+2026-09-16 09:25:12.647 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.database:_create_postgresql_schema:1091 - Ensuring PostgreSQL schema...
+2026-09-16 09:25:12.662 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.database:_create_postgresql_schema:1102 - PostgreSQL schema ensured successfully
+2026-09-16 09:25:12.743 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.database:initialize:949 - Database pool initialized successfully
+2026-09-16 09:25:12.743 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:init_auth_services:45 - App Startup: Database pool initialized
+2026-09-16 09:25:12.748 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_user_timestamp_timezones_pg:3512 - Ensured PostgreSQL users timestamp columns use TIMESTAMPTZ
+2026-09-16 09:25:12.748 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:_ensure_pg_extras:161 - App Startup: Ensured PG users timestamp time zones
+2026-09-16 09:25:12.843 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_mcp_prompt_read_permission_pg:3422 - Ensured PostgreSQL MCP prompts.read permission and default grants
+2026-09-16 09:25:12.843 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_authnz_core_tables_pg:3572 - Ensured PostgreSQL AuthNZ core tables (audit_logs, sessions, registration_codes, RBAC, orgs/teams)
+2026-09-16 09:25:12.843 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:_ensure_pg_extras:161 - App Startup: Ensured PG AuthNZ core tables
+2026-09-16 09:25:12.880 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_admin_webhook_canonical_tables_pg:3327 - Ensured PostgreSQL canonical admin webhook tables
+2026-09-16 09:25:12.880 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:_ensure_pg_extras:161 - App Startup: Ensured PG canonical admin webhook tables
+2026-09-16 09:25:12.894 | INFO     | trace= span= tp= req= job= ps=: | sqlglot.parser:_parse_bracket:6963 - Applying array index offset (-1)
+2026-09-16 09:25:12.910 | INFO     | trace= span= tp= req= job= ps=: | sqlglot.parser:_parse_bracket:6963 - Applying array index offset (-1)
+2026-09-16 09:25:12.935 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_sharing_tables_pg:3593 - Ensured PostgreSQL sharing tables (idempotent)
+2026-09-16 09:25:12.935 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:_ensure_pg_extras:161 - App Startup: Ensured PG sharing tables
+2026-09-16 09:25:12.942 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_notification_permissions_pg:3495 - Ensured PostgreSQL notification permissions and legacy role memberships
+2026-09-16 09:25:12.942 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:_ensure_pg_extras:161 - App Startup: Ensured PG notification permissions
+2026-09-16 09:25:13.018 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_mcp_prompt_read_permission_pg:3422 - Ensured PostgreSQL MCP prompts.read permission and default grants
+2026-09-16 09:25:13.018 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_authnz_core_tables_pg:3572 - Ensured PostgreSQL AuthNZ core tables (audit_logs, sessions, registration_codes, RBAC, orgs/teams)
+2026-09-16 09:25:13.033 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_generated_files_table_pg:4117 - Ensured PostgreSQL generated_files table (idempotent)
+2026-09-16 09:25:13.033 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:_ensure_pg_extras:161 - App Startup: Ensured PG generated_files table
+2026-09-16 09:25:13.112 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_mcp_prompt_read_permission_pg:3422 - Ensured PostgreSQL MCP prompts.read permission and default grants
+2026-09-16 09:25:13.112 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_authnz_core_tables_pg:3572 - Ensured PostgreSQL AuthNZ core tables (audit_logs, sessions, registration_codes, RBAC, orgs/teams)
+2026-09-16 09:25:13.121 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_tool_catalogs_tables_pg:2480 - Ensured PostgreSQL tool catalogs tables (idempotent)
+2026-09-16 09:25:13.121 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:_ensure_pg_extras:161 - App Startup: Ensured PG tool catalogs tables
+2026-09-16 09:25:13.125 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_privilege_snapshots_table_pg:3370 - Ensured PostgreSQL privilege_snapshots table (idempotent)
+2026-09-16 09:25:13.125 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:_ensure_pg_extras:161 - App Startup: Ensured PG privilege_snapshots table
+2026-09-16 09:25:13.182 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_mcp_prompt_read_permission_pg:3422 - Ensured PostgreSQL MCP prompts.read permission and default grants
+2026-09-16 09:25:13.182 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_authnz_core_tables_pg:3572 - Ensured PostgreSQL AuthNZ core tables (audit_logs, sessions, registration_codes, RBAC, orgs/teams)
+2026-09-16 09:25:13.208 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_api_keys_tables_pg:3879 - Ensured PostgreSQL api_keys tables (idempotent)
+2026-09-16 09:25:13.208 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:_ensure_pg_extras:161 - App Startup: Ensured PG api_keys tables
+2026-09-16 09:25:13.241 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_usage_tables_pg:4095 - Ensured PostgreSQL usage tables (usage_log, usage_daily, llm_usage_log, llm_usage_daily)
+2026-09-16 09:25:13.241 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:_ensure_pg_extras:161 - App Startup: Ensured PG usage tables
+2026-09-16 09:25:13.242 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_virtual_key_counters_pg:4183 - Ensured PostgreSQL virtual-key counters tables (vk_jwt_counters, vk_api_key_counters)
+2026-09-16 09:25:13.242 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:_ensure_pg_extras:161 - App Startup: Ensured PG virtual-key counters tables
+2026-09-16 09:25:13.249 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_llm_provider_overrides_pg:4073 - Ensured PostgreSQL llm_provider_overrides table (idempotent)
+2026-09-16 09:25:13.250 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:_ensure_pg_extras:161 - App Startup: Ensured PG llm_provider_overrides table
+2026-09-16 09:25:13.250 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:init_auth_services:74 - App Startup: Ensured single-user RBAC seed (baseline roles/permissions)
+2026-09-16 09:25:13.251 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth:init_auth_services:87 - App Startup: Loaded LLM provider overrides
+2026-09-16 09:25:13.262 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Resource_Governance.policy_loader:load_once:134 - ResourceGovernor policy loaded: version=1, policies=43, path=/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/resource_governor_policies.yaml
+2026-09-16 09:25:13.263 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_resource_governor:init_resource_governor:106 - ResourceGovernor initialized (memory backend)
+2026-09-16 09:25:13.275 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_resource_governor:_audit_route_map_coverage:227 - RG route_map missing coverage for 427 routes; sample: /api/v1/consent/preferences (tags=['consent', 'consent']), /api/v1/consent/preferences/{purpose} (tags=['consent', 'consent']), /api/v1/visual-identities/capabilities (tags=['visual-identities']), /api/v1/visual-identities/expression-slots (tags=['visual-identities']), /api/v1/visual-identities/packs (tags=['visual-identities']), /api/v1/visual-identities/packs/{pack_id} (tags=['visual-identities']), /api/v1/visual-identities/packs/{pack_id}/assets (tags=['visual-identities']), /api/v1/visual-identities/packs/{pack_id}/assets/from-generated-file (tags=['visual-identities']), /api/v1/visual-identities/packs/{pack_id}/assets/{asset_id}/content (tags=['visual-identities']), /api/v1/visual-identities/packs/{pack_id}/assets/{asset_id}/preview (tags=['visual-identities'])
+2026-09-16 09:25:13.387 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.session_manager:initialize:181 - SessionManager initialized with encryption enabled
+2026-09-16 09:25:13.388 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_auth_runtime:initialize_auth_runtime_services:35 - App Startup: Session manager initialized
+2026-09-16 09:25:13.437 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.PrivilegeMaps.startup:validate_privilege_metadata_on_startup:31 - Privilege catalog validated (version=1.0.0, scopes=112, mapped_routes=318)
+2026-09-16 09:25:13.443 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Persona.archetype_loader:load_archetypes_from_directory:83 - Loaded 6 archetype(s) from /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/persona_archetypes
+2026-09-16 09:25:13.444 | INFO     | trace= span= tp= req= job= ps=: | mcp_unified.federation.catalog_loader:load_mcp_catalog:80 - Loaded 5 MCP catalog entry/entries from /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/mcp_server_catalog.yaml
+2026-09-16 09:25:13.444 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_core_initialization:initialize_startup_core_components:61 - App Startup: Initializing Chat module components...
+2026-09-16 09:25:13.445 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Local_LLM.LLM_Inference_Manager:__init__:39 - Ollama handler initialized.
+2026-09-16 09:25:13.446 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Local_LLM.LLM_Inference_Manager:__init__:56 - HuggingFace handler initialized. Models directory: models/huggingface_models
+2026-09-16 09:25:13.446 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Local_LLM.Llamafile_Handler:_setup_signal_handlers:850 - Registered atexit synchronous cleanup for LlamafileHandler.
+2026-09-16 09:25:13.446 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Local_LLM.LLM_Inference_Manager:__init__:69 - Llamafile handler initialized. Executable dir: models/llamafile_exec, Models dir: models/llamafile_models
+2026-09-16 09:25:13.446 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_heavy_init:_init_local_llm_manager:124 - App Startup: Local LLM inference manager initialized
+2026-09-16 09:25:13.447 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:__init__:77 - Module registry initialized
+2026-09-16 09:25:13.447 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.monitoring.metrics:__init__:105 - Metrics collector initialized (Prometheus: True)
+2026-09-16 09:25:13.447 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.auth.jwt_manager:__init__:79 - JWT Manager initialized with secure configuration
+2026-09-16 09:25:13.448 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.protocol:__init__:471 - MCP Protocol handler initialized
+2026-09-16 09:25:13.448 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:__init__:386 - MCP Server created
+2026-09-16 09:25:13.448 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_heavy_init:_init_mcp_server:165 - App Startup: Initializing MCP Unified server...
+2026-09-16 09:25:13.448 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:initialize:718 - Initializing MCP Server
+2026-09-16 09:25:13.448 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.config:validate_config:672 - Configuration validation passed
+2026-09-16 09:25:13.448 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:start_health_monitoring:116 - Health monitoring started
+2026-09-16 09:25:13.448 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.monitoring.metrics:start_collection:713 - Metrics collection started
+2026-09-16 09:25:13.453 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1004 - Loaded 20 MCP modules from /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Config_Files/mcp_modules.yaml
+2026-09-16 09:25:13.454 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: media
+2026-09-16 09:25:13.454 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: Media v1.0.0
+2026-09-16 09:25:13.454 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: Media
+2026-09-16 09:25:13.454 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:79 - Initializing Database object for path: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Databases/user_databases/1/Media_DB_v2.db [Client ID: mcp_media_Media]
+2026-09-16 09:25:13.539 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.implementations.media_module:on_initialize:125 - Media module initialized with database: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Databases/user_databases/1/Media_DB_v2.db
+2026-09-16 09:25:13.543 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.backends.postgresql_backend:execute:1086 - PostgreSQL query execution failed
+2026-09-16 09:25:13.543 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.runtime.execution_ops:execute_query:239 - Backend query failed: PostgreSQL query execution failed
+2026-09-16 09:25:13.544 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:health_check:505 - MCP module health check failed
+2026-09-16 09:25:13.544 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:412 - MCP module initialization failed
+2026-09-16 09:25:13.544 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:209 - Module initialization failed: media (Exception)
+2026-09-16 09:25:13.544 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:174 - Failed to initialize module media (Exception)
+2026-09-16 09:25:13.544 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: media (tldw_Server_API.app.core.MCP_unified.modules.implementations.media_module:MediaModule)
+2026-09-16 09:25:13.544 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: template
+2026-09-16 09:25:13.544 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: Template v1.0.0
+2026-09-16 09:25:13.544 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: Template
+2026-09-16 09:25:13.544 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.implementations.template_module:on_initialize:19 - Initializing module: Template
+2026-09-16 09:25:13.544 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:405 - Module initialized successfully: Template
+2026-09-16 09:25:13.544 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:201 - Module template initialized successfully
+2026-09-16 09:25:13.544 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: template (tldw_Server_API.app.core.MCP_unified.modules.implementations.template_module:TemplateModule)
+2026-09-16 09:25:13.545 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: mcp_discovery
+2026-09-16 09:25:13.545 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: MCP Discovery v1.0.0
+2026-09-16 09:25:13.545 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: MCP Discovery
+2026-09-16 09:25:13.545 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.implementations.mcp_discovery_module:on_initialize:27 - Initializing MCP discovery module: MCP Discovery
+2026-09-16 09:25:13.545 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:405 - Module initialized successfully: MCP Discovery
+2026-09-16 09:25:13.545 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:201 - Module mcp_discovery initialized successfully
+2026-09-16 09:25:13.545 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: mcp_discovery (tldw_Server_API.app.core.MCP_unified.modules.implementations.mcp_discovery_module:MCPDiscoveryModule)
+2026-09-16 09:25:13.548 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: governance
+2026-09-16 09:25:13.548 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: Governance v1.0.0
+2026-09-16 09:25:13.548 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: Governance
+2026-09-16 09:25:13.550 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.implementations.governance_module:on_initialize:33 - Initializing Governance module: Governance
+2026-09-16 09:25:13.551 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:405 - Module initialized successfully: Governance
+2026-09-16 09:25:13.551 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:201 - Module governance initialized successfully
+2026-09-16 09:25:13.551 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: governance (tldw_Server_API.app.core.MCP_unified.modules.implementations.governance_module:GovernanceModule)
+2026-09-16 09:25:13.551 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1229 - Skipping disabled module: external_federation
+2026-09-16 09:25:13.551 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: notes
+2026-09-16 09:25:13.552 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: Notes v1.0.0
+2026-09-16 09:25:13.552 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: Notes
+2026-09-16 09:25:13.552 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.implementations.notes_module:on_initialize:128 - Initializing Notes module: Notes
+2026-09-16 09:25:13.552 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:405 - Module initialized successfully: Notes
+2026-09-16 09:25:13.552 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:201 - Module notes initialized successfully
+2026-09-16 09:25:13.552 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: notes (tldw_Server_API.app.core.MCP_unified.modules.implementations.notes_module:NotesModule)
+2026-09-16 09:25:13.553 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: prompts
+2026-09-16 09:25:13.553 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: Prompts v1.0.0
+2026-09-16 09:25:13.553 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: Prompts
+2026-09-16 09:25:13.553 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.implementations.prompts_module:on_initialize:51 - Initializing Prompts module: Prompts
+2026-09-16 09:25:13.553 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:405 - Module initialized successfully: Prompts
+2026-09-16 09:25:13.553 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:201 - Module prompts initialized successfully
+2026-09-16 09:25:13.553 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: prompts (tldw_Server_API.app.core.MCP_unified.modules.implementations.prompts_module:PromptsModule)
+2026-09-16 09:25:13.553 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: skills
+2026-09-16 09:25:13.554 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: Skills v0.1.0
+2026-09-16 09:25:13.554 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: Skills
+2026-09-16 09:25:13.554 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:405 - Module initialized successfully: Skills
+2026-09-16 09:25:13.554 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:201 - Module skills initialized successfully
+2026-09-16 09:25:13.554 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: skills (tldw_Server_API.app.core.MCP_unified.modules.implementations.skills_module:SkillsModule)
+2026-09-16 09:25:13.555 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: cooking
+2026-09-16 09:25:13.555 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: Cooking v1.0.0
+2026-09-16 09:25:13.555 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: Cooking
+2026-09-16 09:25:13.555 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:405 - Module initialized successfully: Cooking
+2026-09-16 09:25:13.555 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:201 - Module cooking initialized successfully
+2026-09-16 09:25:13.555 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: cooking (tldw_Server_API.app.core.MCP_unified.modules.implementations.cooking_module:CookingModule)
+2026-09-16 09:25:13.555 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1229 - Skipping disabled module: persona_visuals
+2026-09-16 09:25:13.555 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1229 - Skipping disabled module: filesystem
+2026-09-16 09:25:13.555 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1229 - Skipping disabled module: codegraph
+2026-09-16 09:25:13.555 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: knowledge
+2026-09-16 09:25:13.555 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: Knowledge v1.0.0
+2026-09-16 09:25:13.555 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: Knowledge
+2026-09-16 09:25:13.556 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.implementations.knowledge_module:on_initialize:36 - Initializing Knowledge module: Knowledge
+2026-09-16 09:25:13.556 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:405 - Module initialized successfully: Knowledge
+2026-09-16 09:25:13.556 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:201 - Module knowledge initialized successfully
+2026-09-16 09:25:13.556 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: knowledge (tldw_Server_API.app.core.MCP_unified.modules.implementations.knowledge_module:KnowledgeModule)
+2026-09-16 09:25:13.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: docs
+2026-09-16 09:25:13.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: Docs Corpus v0.1.0
+2026-09-16 09:25:13.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: Docs Corpus
+2026-09-16 09:25:13.576 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.implementations.docs_module:on_initialize:32 - Initialized Docs MCP module with db_path=/private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Databases/mcp_docs.db
+2026-09-16 09:25:13.576 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:405 - Module initialized successfully: Docs Corpus
+2026-09-16 09:25:13.576 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:201 - Module docs initialized successfully
+2026-09-16 09:25:13.576 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: docs (tldw_Server_API.app.core.MCP_unified.modules.implementations.docs_module:DocsModule)
+2026-09-16 09:25:13.577 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: rag
+2026-09-16 09:25:13.577 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: RAG v1.0.0
+2026-09-16 09:25:13.577 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: RAG
+2026-09-16 09:25:13.577 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:405 - Module initialized successfully: RAG
+2026-09-16 09:25:13.577 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:201 - Module rag initialized successfully
+2026-09-16 09:25:13.577 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: rag (tldw_Server_API.app.core.MCP_unified.modules.implementations.rag_module:RagModule)
+2026-09-16 09:25:13.577 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1229 - Skipping disabled module: run_command
+2026-09-16 09:25:13.578 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: kanban
+2026-09-16 09:25:13.578 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: Kanban v1.0.0
+2026-09-16 09:25:13.578 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: Kanban
+2026-09-16 09:25:13.578 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.implementations.kanban_module:on_initialize:86 - Initializing Kanban module: Kanban
+2026-09-16 09:25:13.578 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:405 - Module initialized successfully: Kanban
+2026-09-16 09:25:13.580 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:201 - Module kanban initialized successfully
+2026-09-16 09:25:13.580 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: kanban (tldw_Server_API.app.core.MCP_unified.modules.implementations.kanban_module:KanbanModule)
+2026-09-16 09:25:13.581 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: quizzes
+2026-09-16 09:25:13.581 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: Quizzes v1.0.0
+2026-09-16 09:25:13.581 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: Quizzes
+2026-09-16 09:25:13.582 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.implementations.quizzes_module:on_initialize:46 - Initializing Quizzes module: Quizzes
+2026-09-16 09:25:13.582 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:405 - Module initialized successfully: Quizzes
+2026-09-16 09:25:13.582 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:201 - Module quizzes initialized successfully
+2026-09-16 09:25:13.582 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: quizzes (tldw_Server_API.app.core.MCP_unified.modules.implementations.quizzes_module:QuizzesModule)
+2026-09-16 09:25:13.583 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: flashcards
+2026-09-16 09:25:13.583 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: Flashcards v1.0.0
+2026-09-16 09:25:13.583 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: Flashcards
+2026-09-16 09:25:13.584 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.implementations.flashcards_module:on_initialize:49 - Initializing Flashcards module: Flashcards
+2026-09-16 09:25:13.584 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:405 - Module initialized successfully: Flashcards
+2026-09-16 09:25:13.585 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:201 - Module flashcards initialized successfully
+2026-09-16 09:25:13.585 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: flashcards (tldw_Server_API.app.core.MCP_unified.modules.implementations.flashcards_module:FlashcardsModule)
+2026-09-16 09:25:13.585 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:register_module:156 - Registering module: slides
+2026-09-16 09:25:13.585 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:__init__:371 - Module created: Slides v1.0.0
+2026-09-16 09:25:13.586 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:390 - Initializing module: Slides
+2026-09-16 09:25:13.586 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.implementations.slides_module:on_initialize:63 - Initializing Slides module: Slides
+2026-09-16 09:25:13.586 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:initialize:405 - Module initialized successfully: Slides
+2026-09-16 09:25:13.587 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.registry:_initialize_module:201 - Module slides initialized successfully
+2026-09-16 09:25:13.587 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_register_default_modules:1260 - Registered MCP module: slides (tldw_Server_API.app.core.MCP_unified.modules.implementations.slides_module:SlidesModule)
+2026-09-16 09:25:13.598 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.backends.postgresql_backend:execute:1086 - PostgreSQL query execution failed
+2026-09-16 09:25:13.598 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.runtime.execution_ops:execute_query:239 - Backend query failed: PostgreSQL query execution failed
+2026-09-16 09:25:13.598 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.modules.base:health_check:505 - MCP module health check failed
+2026-09-16 09:25:13.625 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:initialize:755 - MCP Server initialized successfully
+2026-09-16 09:25:13.626 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_heavy_init:_init_mcp_server:167 - App Startup: MCP Unified server initialized successfully
+2026-09-16 09:25:13.630 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_heavy_init:_init_provider_manager:194 - App Startup: Provider manager initialized with 124 providers
+2026-09-16 09:25:13.630 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_heavy_init:_init_request_queue:236 - App Startup: Request queue disabled (QUEUED_EXECUTION is off)
+2026-09-16 09:25:13.630 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_heavy_init:_init_rate_limiter:251 - App Startup: Rate limiter skipped (RG enabled)
+2026-09-16 09:25:13.631 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Loading TTS configuration from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/TTS/tts_providers_config.yaml
+2026-09-16 09:25:13.631 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - TTS config file not found at /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/TTS/tts_providers_config.yaml, using defaults
+2026-09-16 09:25:13.631 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.TTS.tts_config:_warn_legacy_tts_setting_keys:307 - [TTS-Settings] 'default_tts_provider' is deprecated; use 'default_provider'. Legacy aliases are scheduled for removal after 2026-06-30.
+2026-09-16 09:25:13.631 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.TTS.tts_config:_warn_legacy_tts_setting_keys:307 - [TTS-Settings] 'default_tts_voice' is deprecated; use 'default_voice'. Legacy aliases are scheduled for removal after 2026-06-30.
+2026-09-16 09:25:13.631 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.TTS.tts_config:_warn_legacy_tts_setting_keys:307 - [TTS-Settings] 'default_tts_speed' is deprecated; use 'default_speed'. Legacy aliases are scheduled for removal after 2026-06-30.
+2026-09-16 09:25:13.631 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.TTS.tts_config:_warn_legacy_tts_setting_keys:307 - [TTS-Settings] 'local_tts_device' is deprecated; use 'local_device'. Legacy aliases are scheduled for removal after 2026-06-30.
+2026-09-16 09:25:13.632 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.TTS.tts_config:reload:281 - TTS configuration loaded with 10 providers
+2026-09-16 09:25:13.632 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.TTS.adapter_registry:get_tts_factory:1599 - TTS Adapter Factory initialized
+2026-09-16 09:25:13.632 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.TTS.circuit_breaker:get_circuit_manager:553 - Circuit breaker manager initialized
+2026-09-16 09:25:13.634 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1863 - Metric tts_ttfb_seconds already registered with incompatible definition: existing type=histogram, labels=['provider', 'voice', 'format']; candidate type=histogram, labels=['provider', 'voice', 'format']
+2026-09-16 09:25:13.634 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1863 - Metric voice_to_voice_seconds already registered with incompatible definition: existing type=histogram, labels=['provider', 'route']; candidate type=histogram, labels=['provider', 'route']
+2026-09-16 09:25:13.634 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.TTS.tts_service_v2:get_tts_service_v2:4289 - Enhanced TTS Service (V2) initialized
+2026-09-16 09:25:13.634 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.TTS.voice_manager:start_background_tasks:1562 - Voice manager background tasks started
+2026-09-16 09:25:13.635 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.TTS.voice_manager:init_voice_manager:1615 - Voice manager initialized
+2026-09-16 09:25:13.635 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_heavy_init:_init_tts_service:289 - App Startup: TTS service initialized successfully
+2026-09-16 09:25:13.635 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:79 - Initializing Database object for path: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Databases/user_databases/1/Media_DB_v2.db [Client ID: system]
+2026-09-16 09:25:13.708 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chunking.template_initialization:_append_template:90 - Loaded template: transcript_dialogue from pkg:transcript_dialogue.json
+2026-09-16 09:25:13.708 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chunking.template_initialization:_append_template:90 - Loaded template: legal_document from pkg:legal_document.json
+2026-09-16 09:25:13.708 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chunking.template_initialization:_append_template:90 - Loaded template: chat_conversation from pkg:chat_conversation.json
+2026-09-16 09:25:13.708 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chunking.template_initialization:_append_template:90 - Loaded template: code_documentation from pkg:code_documentation.json
+2026-09-16 09:25:13.709 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chunking.template_initialization:_append_template:90 - Loaded template: book_chapters from pkg:book_chapters.json
+2026-09-16 09:25:13.709 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chunking.template_initialization:_append_template:90 - Loaded template: academic_paper from pkg:academic_paper.json
+2026-09-16 09:25:13.715 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_template_ops:create_chunking_template:97 - Created chunking template 'transcript_dialogue' with UUID 57be3e33-b63d-4c3c-9a41-fbdbd2f0cf9b
+2026-09-16 09:25:13.715 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.api:seed_builtin_templates:1065 - Seeded built-in template: transcript_dialogue
+2026-09-16 09:25:13.722 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_template_ops:create_chunking_template:97 - Created chunking template 'legal_document' with UUID b8216eca-4471-46e3-91c7-1e13f58f28cd
+2026-09-16 09:25:13.722 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.api:seed_builtin_templates:1065 - Seeded built-in template: legal_document
+2026-09-16 09:25:13.727 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_template_ops:create_chunking_template:97 - Created chunking template 'chat_conversation' with UUID 0e120f1b-26de-45fb-8109-c4e9d60df7ad
+2026-09-16 09:25:13.728 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.api:seed_builtin_templates:1065 - Seeded built-in template: chat_conversation
+2026-09-16 09:25:13.734 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_template_ops:create_chunking_template:97 - Created chunking template 'code_documentation' with UUID 4c3de3fe-ecdc-45ab-8a49-72922ad611f7
+2026-09-16 09:25:13.734 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.api:seed_builtin_templates:1065 - Seeded built-in template: code_documentation
+2026-09-16 09:25:13.738 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_template_ops:create_chunking_template:97 - Created chunking template 'book_chapters' with UUID ba4feac3-65c8-4302-815d-33cf2eb22b0f
+2026-09-16 09:25:13.738 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.api:seed_builtin_templates:1065 - Seeded built-in template: book_chapters
+2026-09-16 09:25:13.742 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_template_ops:create_chunking_template:97 - Created chunking template 'academic_paper' with UUID c80e9203-0a73-4d6f-be09-5f10cc62f176
+2026-09-16 09:25:13.742 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.media_db.api:seed_builtin_templates:1065 - Seeded built-in template: academic_paper
+2026-09-16 09:25:13.742 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chunking.template_initialization:initialize_chunking_templates:268 - Successfully seeded 6 built-in templates into database
+2026-09-16 09:25:13.742 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chunking.template_initialization:ensure_templates_initialized:346 - Initialized 6 chunking templates on startup
+2026-09-16 09:25:13.742 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_heavy_init:_init_chunking_templates:308 - App Startup: Chunking templates initialized successfully
+2026-09-16 09:25:13.745 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_context_integrity:produce_context_integrity_startup_warnings:444 - Context integrity startup finding: degraded_integrity manifest:none
+2026-09-16 09:25:13.753 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.core_jobs_worker:run_chatbooks_core_jobs_worker:81 - Starting Core Jobs worker for Chatbooks domain
+2026-09-16 09:25:13.758 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Jobs.migrations:ensure_jobs_tables:1505 - Ensured Jobs schema at /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Databases/jobs.db
+2026-09-16 09:25:13.770 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Jobs.migrations:ensure_jobs_tables:1505 - Ensured Jobs schema at /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Databases/jobs.db
+2026-09-16 09:25:13.770 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Sharing.shared_workspace_clone_jobs_worker:run_shared_workspace_clone_jobs_worker:1580 - Shared Workspace clone Jobs worker starting
+2026-09-16 09:25:13.778 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Jobs.migrations:ensure_jobs_tables:1505 - Ensured Jobs schema at /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Databases/jobs.db
+2026-09-16 09:25:13.778 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_content_jobs_pollers:_build_standalone_html_generation_runtime:1520 - Standalone HTML generation remains closed; error_type=DigestKeyConfigError
+2026-09-16 09:25:13.781 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Jobs.migrations:ensure_jobs_tables:1505 - Ensured Jobs schema at /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Databases/jobs.db
+2026-09-16 09:25:13.781 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.media_ingest_jobs_worker:run_media_ingest_jobs_worker:728 - Starting Media Ingest Jobs worker (queue=default)
+2026-09-16 09:25:13.786 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Jobs.migrations:ensure_jobs_tables:1505 - Ensured Jobs schema at /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Databases/jobs.db
+2026-09-16 09:25:13.787 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.jobs_notifications_service:run_forever:254 - Starting Jobs Notifications bridge service
+2026-09-16 09:25:13.821 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.backends.postgresql_backend:execute:1086 - PostgreSQL query execution failed
+2026-09-16 09:25:13.822 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.storage_cleanup_service:start:384 - StorageCleanupService started (interval: Nones)
+2026-09-16 09:25:13.822 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.storage_cleanup_service:run_storage_cleanup_loop:312 - Starting storage cleanup worker (every 3600s, trash retention: 30d, batch: 100)
+2026-09-16 09:25:13.822 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.storage_quota_service:initialize:66 - StorageQuotaService initialized
+2026-09-16 09:25:13.823 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.llm_usage_aggregator:_aggregator_loop:90 - Starting LLM usage aggregator task (interval: 60 min)
+2026-09-16 09:25:13.828 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Jobs.migrations:ensure_jobs_tables:1505 - Ensured Jobs schema at /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Databases/jobs.db
+2026-09-16 09:25:13.829 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.asyncio:start:37 - Scheduler started
+2026-09-16 09:25:13.846 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.backends.postgresql_backend:execute:1086 - PostgreSQL query execution failed
+2026-09-16 09:25:13.846 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.lifecycle_worker_engine:_start_one:120 - Lifecycle worker reading_digest_sched_task startup skipped after failure: PostgreSQL query execution failed
+2026-09-16 09:25:13.846 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_infra_services:_maybe_ensure_pg_rls:128 - PG RLS auto-ensure disabled (set RAG_ENSURE_PG_RLS=true to enable)
+2026-09-16 09:25:13.847 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_startup_banner:48 - ============================================================
+2026-09-16 09:25:13.847 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_startup_banner:49 - 🚀 TLDW Server Started Successfully
+2026-09-16 09:25:13.848 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_startup_banner:50 - ============================================================
+2026-09-16 09:25:13.848 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_startup_banner:62 - 🔐 Authentication Mode: MULTI USER
+2026-09-16 09:25:13.848 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_startup_banner:67 - JWT Bearer tokens required for authentication
+2026-09-16 09:25:13.848 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_startup_banner:72 - ============================================================
+2026-09-16 09:25:13.848 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_startup_banner:74 - 📍 API Documentation: http://127.0.0.1:8000/docs
+2026-09-16 09:25:13.848 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_startup_banner:75 - 🧭 Quickstart: http://127.0.0.1:8000/api/v1/config/quickstart
+2026-09-16 09:25:13.848 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_startup_banner:76 - 🛠 Setup UI: http://127.0.0.1:8000/setup (if required)
+2026-09-16 09:25:13.848 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_startup_banner:77 - ============================================================
+2026-09-16 09:25:13.848 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_preflight_environment_report:119 - Preflight Environment Report ─────────────────────────────────────────
+2026-09-16 09:25:13.848 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_preflight_environment_report:120 - • Mode: multi_user | Production: False
+2026-09-16 09:25:13.848 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_preflight_environment_report:121 - • Database: engine=postgresql
+2026-09-16 09:25:13.848 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_preflight_environment_report:128 - • Database check: OK
+2026-09-16 09:25:13.849 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_preflight_environment_report:129 - • Redis: enabled=False
+2026-09-16 09:25:13.849 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_preflight_environment_report:130 - • CSRF: enabled=True
+2026-09-16 09:25:13.849 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_preflight_environment_report:134 - • CORS: allowed_origins=1 | allow_credentials=False
+2026-09-16 09:25:13.849 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_preflight_environment_report:135 - • CORS effective settings: disable=False (source=config) | allow_credentials=False (source=config) | origins=1 (source=env)
+2026-09-16 09:25:13.849 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_preflight_environment_report:141 - • CORS config file: path=/private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-r2-multi-20260916/Config_Files/config.txt | loaded=True
+2026-09-16 09:25:13.849 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_preflight_environment_report:147 - • CORS origins preview: http://127.0.0.1:18583
+2026-09-16 09:25:13.849 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_preflight_environment_report:148 - • Global rate limiter: False
+2026-09-16 09:25:13.849 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_preflight_environment_report:149 - • Providers configured: 124
+2026-09-16 09:25:13.849 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_preflight_environment_report:150 - • OpenTelemetry available: True
+2026-09-16 09:25:13.849 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_environment_reporting:_log_preflight_environment_report:151 - ──────────────────────────────────────────────────────────────────────
+2026-09-16 09:25:13.849 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:lifespan:1295 - App Startup: Audit service available via dependency injection
+2026-09-16 09:25:13.849 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:validate_config:6014 - Config validation passed — no issues found
+2026-09-16 09:25:13.852 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:_register_session_cleanup:153 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-16 09:25:13.852 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:_register_api_key_cleanup:167 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-16 09:25:13.852 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:_register_audit_log_cleanup:182 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-16 09:25:13.852 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:_register_expired_registration_cleanup:258 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-16 09:25:13.852 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:_register_byok_oauth_state_cleanup:273 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-16 09:25:13.852 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:_register_auth_failure_monitor:285 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-16 09:25:13.852 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:_register_api_usage_monitor:297 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-16 09:25:13.852 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:_register_evaluations_idempotency_cleanup:310 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-16 09:25:13.853 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:_register_usage_log_cleanup:198 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-16 09:25:13.853 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:_register_llm_usage_log_cleanup:210 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-16 09:25:13.853 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:_register_usage_daily_cleanup:222 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-16 09:25:13.853 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:_register_llm_usage_daily_cleanup:234 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-16 09:25:13.853 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:_register_privilege_snapshot_retention:246 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-16 09:25:13.853 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.base:start:210 - Added job "Clean up expired sessions" to job store "default"
+2026-09-16 09:25:13.853 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.base:start:210 - Added job "Clean up expired API keys" to job store "default"
+2026-09-16 09:25:13.853 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.base:start:210 - Added job "Prune old audit logs" to job store "default"
+2026-09-16 09:25:13.853 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.base:start:210 - Added job "Clean up expired registration codes" to job store "default"
+2026-09-16 09:25:13.853 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.base:start:210 - Added job "Clean up BYOK OAuth state records" to job store "default"
+2026-09-16 09:25:13.853 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.base:start:210 - Added job "Monitor authentication failures" to job store "default"
+2026-09-16 09:25:13.854 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.base:start:210 - Added job "Monitor API key usage" to job store "default"
+2026-09-16 09:25:13.854 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.base:start:210 - Added job "Cleanup Evaluations idempotency keys" to job store "default"
+2026-09-16 09:25:13.854 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.base:start:210 - Added job "Prune old usage logs" to job store "default"
+2026-09-16 09:25:13.854 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.base:start:210 - Added job "Prune old LLM usage logs" to job store "default"
+2026-09-16 09:25:13.855 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.base:start:210 - Added job "Prune old usage_daily rows" to job store "default"
+2026-09-16 09:25:13.855 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.base:start:210 - Added job "Prune old llm_usage_daily rows" to job store "default"
+2026-09-16 09:25:13.855 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.base:start:210 - Added job "Prune privilege snapshots per retention policy" to job store "default"
+2026-09-16 09:25:13.855 | INFO     | trace= span= tp= req= job= ps=: | apscheduler.schedulers.asyncio:start:37 - Scheduler started
+2026-09-16 09:25:13.855 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:start:121 - AuthNZ scheduler started with all jobs registered
+2026-09-16 09:25:13.855 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.scheduler:start_authnz_scheduler:794 - AuthNZ scheduled jobs started
+2026-09-16 09:25:13.935 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_mcp_prompt_read_permission_pg:3422 - Ensured PostgreSQL MCP prompts.read permission and default grants
+2026-09-16 09:25:13.935 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_authnz_core_tables_pg:3572 - Ensured PostgreSQL AuthNZ core tables (audit_logs, sessions, registration_codes, RBAC, orgs/teams)
+2026-09-16 09:25:13.948 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.pg_migrations_extra:ensure_admin_monitoring_tables_pg:4160 - Ensured PostgreSQL admin monitoring tables (idempotent)
+2026-09-16 09:25:13.948 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced:_embeddings_router_lifespan:1334 - Starting embeddings service v5 enhanced (with circuit breaker)
+2026-09-16 09:25:13.948 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced:_embeddings_router_lifespan:1394 - Embeddings service started successfully
+2026-09-16 09:25:13.949 | INFO     | trace= span= tp= req= job= ps=: | uvicorn.server:startup:97 - Application startup complete.
+2026-09-16 09:25:13.949 | INFO     | trace= span= tp= req= job= ps=: | uvicorn.server:startup:181 - Uvicorn running on http://127.0.0.1:18503 (Press CTRL+C to quit)
+2026-09-16 09:25:19.203 | INFO     | trace= span= tp= req=b568b935-bbc2-4ef4-a9e2-54ad8e959164 job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /health -> 200 in 4ms
+2026-09-16 09:25:19.204 | INFO     | trace= span= tp= req=b568b935-bbc2-4ef4-a9e2-54ad8e959164 job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:56598 - "GET /health HTTP/1.1" 200

@@ -1,0 +1,7 @@
+[
+  "ERROR:  deadlock detected at character 46",
+  "ERROR:  current transaction is aborted, commands ignored until end of transaction block",
+  "ERROR:  syntax error at or near \"OR\" at character 8",
+  "ERROR:  column \"deleted\" of relation \"outputs\" already exists",
+  "ERROR:  column \"metadata_json\" of relation \"output_templates\" already exists"
+]

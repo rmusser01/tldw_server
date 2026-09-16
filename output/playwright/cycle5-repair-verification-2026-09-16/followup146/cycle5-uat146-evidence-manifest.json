@@ -1,0 +1,44 @@
+{
+  "createdAt": "2026-09-16T16:25:12.110Z",
+  "secretScan": {
+    "fixturePasswordMatches": 0
+  },
+  "files": [
+    {
+      "path": "/private/tmp/cycle5-uat146-implementation.md",
+      "sha256": "c04489b7ead9cbda77f4742a9fdfc65fe0abdf9908e824442f1bb225e751fd49"
+    },
+    {
+      "path": "/private/tmp/cycle5-uat146-code-freeze.json",
+      "sha256": "1bb027673a3b1081c3400955c5d076371b95ede6b4d32f69951625c1ab410ef0"
+    },
+    {
+      "path": "/private/tmp/cycle5-uat146-owned-manifest.json",
+      "sha256": "ee917a4cacd9ae2d1209dce773eee78964fd4b9f5d30d630bb448fbb854309e0"
+    },
+    {
+      "path": "/private/tmp/cycle5-postgres-146-red-confirmed.redacted.log",
+      "sha256": "fb702099f066c1e82740fb2724e3e93c7936c6b0fcd601826974793014df5c84"
+    },
+    {
+      "path": "/private/tmp/cycle5-postgres-146-green.redacted.log",
+      "sha256": "7555e179f4f6369f28a4449977ddd20ab048ca21bc51392540064eb574a8305d"
+    },
+    {
+      "path": "/private/tmp/cycle5-uat146-ruff-initial.json",
+      "sha256": "b13b039e74cba43210a94c1df52feb22208599789faef96bed02ade74ee9a2ff"
+    },
+    {
+      "path": "/private/tmp/cycle5-uat146-ruff-final.json",
+      "sha256": "b13b039e74cba43210a94c1df52feb22208599789faef96bed02ade74ee9a2ff"
+    },
+    {
+      "path": "/private/tmp/cycle5-uat146-bandit-baseline.json",
+      "sha256": "a0960cd8cf30d9e0160eeb54e33437494481845005ae6b10f1a7c0b408818cfe"
+    },
+    {
+      "path": "/private/tmp/cycle5-uat146-bandit-final.json",
+      "sha256": "535432b4c23149b9156e43baf0ed7a3940933a20a8107f98cc8f41a9e36aec2b"
+    }
+  ]
+}

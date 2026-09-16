@@ -1,0 +1,231 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=2746114816
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 13 items
+
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py F [  7%]
+FFFFFFFFFFFF                                                             [100%]
+
+=================================== FAILURES ===================================
+_ test_current_required_policy_failure_rejects_startup[unreadable-sync_log-sync_scope_org] _
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:124: in test_current_required_policy_failure_rejects_startup
+    factory.validate_postgres_content_backend(
+tldw_Server_API/app/core/DB_Management/media_db/runtime/factory.py:175: in validate_postgres_content_backend
+    raise RuntimeError(
+E   RuntimeError: PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls
+
+During handling of the above exception, another exception occurred:
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:123: in test_current_required_policy_failure_rejects_startup
+    with pytest.raises(RuntimeError, match=f"policy '{policy}' on table '{table}' is missing or could not be inspected"):
+E   AssertionError: Regex pattern did not match.
+E    Regex: "policy 'sync_scope_org' on table 'sync_log' is missing or could not be inspected"
+E    Input: "PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls"
+_ test_current_required_policy_failure_rejects_startup[missing-sync_log-sync_scope_personal] _
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:124: in test_current_required_policy_failure_rejects_startup
+    factory.validate_postgres_content_backend(
+tldw_Server_API/app/core/DB_Management/media_db/runtime/factory.py:175: in validate_postgres_content_backend
+    raise RuntimeError(
+E   RuntimeError: PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls
+
+During handling of the above exception, another exception occurred:
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:123: in test_current_required_policy_failure_rejects_startup
+    with pytest.raises(RuntimeError, match=f"policy '{policy}' on table '{table}' is missing or could not be inspected"):
+E   AssertionError: Regex pattern did not match.
+E    Regex: "policy 'sync_scope_personal' on table 'sync_log' is missing or could not be inspected"
+E    Input: "PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls"
+_ test_current_required_policy_failure_rejects_startup[unreadable-sync_log-sync_scope_admin] _
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:124: in test_current_required_policy_failure_rejects_startup
+    factory.validate_postgres_content_backend(
+tldw_Server_API/app/core/DB_Management/media_db/runtime/factory.py:175: in validate_postgres_content_backend
+    raise RuntimeError(
+E   RuntimeError: PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls
+
+During handling of the above exception, another exception occurred:
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:123: in test_current_required_policy_failure_rejects_startup
+    with pytest.raises(RuntimeError, match=f"policy '{policy}' on table '{table}' is missing or could not be inspected"):
+E   AssertionError: Regex pattern did not match.
+E    Regex: "policy 'sync_scope_admin' on table 'sync_log' is missing or could not be inspected"
+E    Input: "PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls"
+_ test_current_required_policy_failure_rejects_startup[missing-sync_log-sync_scope_team] _
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:124: in test_current_required_policy_failure_rejects_startup
+    factory.validate_postgres_content_backend(
+tldw_Server_API/app/core/DB_Management/media_db/runtime/factory.py:175: in validate_postgres_content_backend
+    raise RuntimeError(
+E   RuntimeError: PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls
+
+During handling of the above exception, another exception occurred:
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:123: in test_current_required_policy_failure_rejects_startup
+    with pytest.raises(RuntimeError, match=f"policy '{policy}' on table '{table}' is missing or could not be inspected"):
+E   AssertionError: Regex pattern did not match.
+E    Regex: "policy 'sync_scope_team' on table 'sync_log' is missing or could not be inspected"
+E    Input: "PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls"
+_ test_current_required_policy_failure_rejects_startup[missing-media-media_visibility_access] _
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:124: in test_current_required_policy_failure_rejects_startup
+    factory.validate_postgres_content_backend(
+tldw_Server_API/app/core/DB_Management/media_db/runtime/factory.py:175: in validate_postgres_content_backend
+    raise RuntimeError(
+E   RuntimeError: PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls
+
+During handling of the above exception, another exception occurred:
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:123: in test_current_required_policy_failure_rejects_startup
+    with pytest.raises(RuntimeError, match=f"policy '{policy}' on table '{table}' is missing or could not be inspected"):
+E   AssertionError: Regex pattern did not match.
+E    Regex: "policy 'media_visibility_access' on table 'media' is missing or could not be inspected"
+E    Input: "PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls"
+____________ test_normal_startup_validates_fresh_postgres_policies _____________
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:74: in test_normal_startup_validates_fresh_postgres_policies
+    assert returncode == 0, failure_message
+E   AssertionError: Normal startup policy validation failed; obsolete_media_policy=True (diagnostics withheld)
+E   assert 1 == 0
+_ test_current_required_policy_failure_rejects_startup[unreadable-media-media_visibility_access] _
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:124: in test_current_required_policy_failure_rejects_startup
+    factory.validate_postgres_content_backend(
+tldw_Server_API/app/core/DB_Management/media_db/runtime/factory.py:175: in validate_postgres_content_backend
+    raise RuntimeError(
+E   RuntimeError: PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls
+
+During handling of the above exception, another exception occurred:
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:123: in test_current_required_policy_failure_rejects_startup
+    with pytest.raises(RuntimeError, match=f"policy '{policy}' on table '{table}' is missing or could not be inspected"):
+E   AssertionError: Regex pattern did not match.
+E    Regex: "policy 'media_visibility_access' on table 'media' is missing or could not be inspected"
+E    Input: "PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls"
+_ test_current_required_policy_failure_rejects_startup[unreadable-sync_log-sync_scope_team] _
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:124: in test_current_required_policy_failure_rejects_startup
+    factory.validate_postgres_content_backend(
+tldw_Server_API/app/core/DB_Management/media_db/runtime/factory.py:175: in validate_postgres_content_backend
+    raise RuntimeError(
+E   RuntimeError: PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls
+
+During handling of the above exception, another exception occurred:
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:123: in test_current_required_policy_failure_rejects_startup
+    with pytest.raises(RuntimeError, match=f"policy '{policy}' on table '{table}' is missing or could not be inspected"):
+E   AssertionError: Regex pattern did not match.
+E    Regex: "policy 'sync_scope_team' on table 'sync_log' is missing or could not be inspected"
+E    Input: "PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls"
+_ test_current_required_policy_failure_rejects_startup[missing-operationownedclonekeywords-owned_clone_pending_keyword_access] _
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:124: in test_current_required_policy_failure_rejects_startup
+    factory.validate_postgres_content_backend(
+tldw_Server_API/app/core/DB_Management/media_db/runtime/factory.py:175: in validate_postgres_content_backend
+    raise RuntimeError(
+E   RuntimeError: PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls
+
+During handling of the above exception, another exception occurred:
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:123: in test_current_required_policy_failure_rejects_startup
+    with pytest.raises(RuntimeError, match=f"policy '{policy}' on table '{table}' is missing or could not be inspected"):
+E   AssertionError: Regex pattern did not match.
+E    Regex: "policy 'owned_clone_pending_keyword_access' on table 'operationownedclonekeywords' is missing or could not be inspected"
+E    Input: "PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls"
+_ test_current_required_policy_failure_rejects_startup[missing-sync_log-sync_scope_org] _
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:124: in test_current_required_policy_failure_rejects_startup
+    factory.validate_postgres_content_backend(
+tldw_Server_API/app/core/DB_Management/media_db/runtime/factory.py:175: in validate_postgres_content_backend
+    raise RuntimeError(
+E   RuntimeError: PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls
+
+During handling of the above exception, another exception occurred:
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:123: in test_current_required_policy_failure_rejects_startup
+    with pytest.raises(RuntimeError, match=f"policy '{policy}' on table '{table}' is missing or could not be inspected"):
+E   AssertionError: Regex pattern did not match.
+E    Regex: "policy 'sync_scope_org' on table 'sync_log' is missing or could not be inspected"
+E    Input: "PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls"
+_ test_current_required_policy_failure_rejects_startup[missing-sync_log-sync_scope_admin] _
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:124: in test_current_required_policy_failure_rejects_startup
+    factory.validate_postgres_content_backend(
+tldw_Server_API/app/core/DB_Management/media_db/runtime/factory.py:175: in validate_postgres_content_backend
+    raise RuntimeError(
+E   RuntimeError: PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls
+
+During handling of the above exception, another exception occurred:
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:123: in test_current_required_policy_failure_rejects_startup
+    with pytest.raises(RuntimeError, match=f"policy '{policy}' on table '{table}' is missing or could not be inspected"):
+E   AssertionError: Regex pattern did not match.
+E    Regex: "policy 'sync_scope_admin' on table 'sync_log' is missing or could not be inspected"
+E    Input: "PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls"
+_ test_current_required_policy_failure_rejects_startup[unreadable-operationownedclonekeywords-owned_clone_pending_keyword_access] _
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:124: in test_current_required_policy_failure_rejects_startup
+    factory.validate_postgres_content_backend(
+tldw_Server_API/app/core/DB_Management/media_db/runtime/factory.py:175: in validate_postgres_content_backend
+    raise RuntimeError(
+E   RuntimeError: PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls
+
+During handling of the above exception, another exception occurred:
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:123: in test_current_required_policy_failure_rejects_startup
+    with pytest.raises(RuntimeError, match=f"policy '{policy}' on table '{table}' is missing or could not be inspected"):
+E   AssertionError: Regex pattern did not match.
+E    Regex: "policy 'owned_clone_pending_keyword_access' on table 'operationownedclonekeywords' is missing or could not be inspected"
+E    Input: "PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls"
+_ test_current_required_policy_failure_rejects_startup[unreadable-sync_log-sync_scope_personal] _2026-09-16 09:22:09.050 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-16 09:22:09.050 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 09:22:09.054 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 09:22:09.059 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 09:22:09.059 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 09:22:09.063 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 09:22:09.067 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-16 09:22:09.069 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-16 09:22:09.071 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-16 09:22:09.071 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-16 09:22:09.071 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:<module>:532 - Using cachetools.LRUCache for audit service instances (maxsize=20).
+2026-09-16 09:22:09.072 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-16 09:22:09.072 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-16 09:22:09.084 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-16 09:22:09.084 | WARNING  | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-16 09:22:09.084 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-16 09:22:09.084 | INFO     | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-16 09:22:09.195 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 09:22:09.201 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 09:22:09.284 | INFO     | tldw_Server_API.app.core.Chat.prompt_template_manager:<module>:201 - Prompt templates directory: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/prompt_templates
+2026-09-16 09:22:09.285 | INFO     | tldw_Server_API.app.core.Chat.prompt_template_manager:<module>:202 - Available templates found: []
+2026-09-16 09:22:09.367 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlist_run
+2026-09-16 09:22:09.367 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_enrich_output
+2026-09-16 09:22:09.367 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_deliver_briefing
+2026-09-16 09:22:09.368 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: acp_run
+2026-09-16 09:22:09.368 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: workflow_run
+2026-09-16 09:22:09.369 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-7cc70ea0
+2026-09-16 09:22:09.369 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-7cc70ea0/1/workflows/workflows_scheduler.db
+2026-09-16 09:22:09.370 | INFO     | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-7cc70ea0/1/workflows/workflows_scheduler.db
+2026-09-16 09:22:09.370 | INFO     | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-16 09:22:09.370 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 09:22:09.370 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-16 09:22:09.377 | INFO     | tldw_Server_API.app.api.v1.API_Deps.DB_Deps:<module>:57 - Using LRUCache for user DB instances (maxsize=100).
+2026-09-16 09:22:09.514 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_cache_get_total
+2026-09-16 09:22:09.514 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_cache_put_total
+2026-09-16 09:22:09.514 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_process_total
+2026-09-16 09:22:09.514 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_frontmatter_duration_seconds
+2026-09-16 09:22:09.514 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_header_extract_seconds
+2026-09-16 09:22:09.514 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_chunking_duration_seconds
+2026-09-16 09:22:09.514 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_normalization_seconds
+2026-09-16 09:22:09.514 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_last_chunk_count
+2026-09-16 09:22:09.514 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_output_bytes
+2026-09-16 09:22:09.514 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_input_bytes
+2026-09-16 09:22:09.515 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_process_total_seconds
+2026-09-16 09:22:09.515 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 09:22:09.517 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:124: in test_current_required_policy_failure_rejects_startup
+    factory.validate_postgres_content_backend(
+tldw_Server_API/app/core/DB_Management/media_db/runtime/factory.py:175: in validate_postgres_content_backend
+    raise RuntimeError(
+E   RuntimeError: PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls
+
+During handling of the above exception, another exception occurred:
+tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py:123: in test_current_required_policy_failure_rejects_startup
+    with pytest.raises(RuntimeError, match=f"policy '{policy}' on table '{table}' is missing or could not be inspected"):
+E   AssertionError: Regex pattern did not match.
+E    Regex: "policy 'sync_scope_personal' on table 'sync_log' is missing or could not be inspected"
+E    Input: "PostgreSQL content RLS validation failed: policy 'media_scope_admin' on table 'media' is missing or could not be inspected. Apply policies via pg_rls_policies.ensure_* helpers or run: python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls"
+======================== 13 failed, 4 warnings in 4.08s ========================
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/pathlib.py:96: PytestWarning: (rm_rf) error removing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-83f8dc3f-1af0-4957-a4ea-22ac2632978e/test_kokoro_constructor_direct3
+<class 'OSError'>: [Errno 66] Directory not empty: 'test_kokoro_constructor_direct3'
+  warnings.warn(
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/pathlib.py:96: PytestWarning: (rm_rf) error removing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-83f8dc3f-1af0-4957-a4ea-22ac2632978e
+<class 'OSError'>: [Errno 66] Directory not empty: '/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-83f8dc3f-1af0-4957-a4ea-22ac2632978e'
+  warnings.warn(
